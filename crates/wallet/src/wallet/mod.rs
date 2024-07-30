@@ -2320,7 +2320,7 @@ impl Wallet {
     /// [`SyncRequest`] collects all revealed script pubkeys from the wallet keychain needed to
     /// start a blockchain sync with a spk based blockchain client.
     pub fn start_sync_with_revealed_spks(&self) -> SyncRequest {
-        SyncRequest::from_chain_tip(self.chain.tip())
+        SyncRequest::new(self.chain.tip())
             .populate_with_revealed_spks(&self.indexed_graph.index, ..)
     }
 

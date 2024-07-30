@@ -61,7 +61,11 @@ pub trait EsploraExt {
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
     /// [`full_scan`]: EsploraExt::full_scan
-    fn sync(&self, request: SyncRequest, parallel_requests: usize) -> Result<SyncResult, Error>;
+    fn sync<I>(
+        &self,
+        request: SyncRequest<I>,
+        parallel_requests: usize,
+    ) -> Result<SyncResult, Error>;
 }
 
 impl EsploraExt for esplora_client::BlockingClient {
@@ -91,19 +95,95 @@ impl EsploraExt for esplora_client::BlockingClient {
         })
     }
 
-    fn sync(&self, request: SyncRequest, parallel_requests: usize) -> Result<SyncResult, Error> {
+    fn sync<I>(
+        &self,
+        mut request: SyncRequest<I>,
+        parallel_requests: usize,
+    ) -> Result<SyncResult, Error> {
         let latest_blocks = fetch_latest_blocks(self)?;
-        let graph_update = sync_for_index_and_graph_blocking(
-            self,
-            request.spks,
-            request.txids,
-            request.outpoints,
-            parallel_requests,
-        )?;
+        let graph_update = {
+            let (mut tx_graph, _) = full_scan_for_index_and_graph_blocking(
+                self,
+                {
+                    let mut keychains = BTreeMap::new();
+                    keychains.insert(
+                        (),
+                        request
+                            .iter_spks()
+                            .enumerate()
+                            .map(|(i, spk)| (i as u32, spk)),
+                    );
+                    keychains
+                },
+                usize::MAX,
+                parallel_requests,
+            )?;
+
+            let mut txids = request.iter_txids();
+            loop {
+                let handles = txids
+                    .by_ref()
+                    .take(parallel_requests)
+                    .filter(|&txid| tx_graph.get_tx(txid).is_none())
+                    .map(|txid| {
+                        std::thread::spawn({
+                            let client = self.clone();
+                            move || {
+                                client
+                                    .get_tx_status(&txid)
+                                    .map_err(Box::new)
+                                    .map(|s| (txid, s))
+                            }
+                        })
+                    })
+                    .collect::<Vec<JoinHandle<Result<(Txid, TxStatus), Error>>>>();
+
+                if handles.is_empty() {
+                    break;
+                }
+
+                for handle in handles {
+                    let (txid, status) = handle.join().expect("thread must not panic")?;
+                    if let Some(anchor) = anchor_from_status(&status) {
+                        let _ = tx_graph.insert_anchor(txid, anchor);
+                    }
+                }
+            }
+
+            drop(txids);
+
+            for op in request.iter_outpoints() {
+                if tx_graph.get_tx(op.txid).is_none() {
+                    if let Some(tx) = self.get_tx(&op.txid)? {
+                        let _ = tx_graph.insert_tx(tx);
+                    }
+                    let status = self.get_tx_status(&op.txid)?;
+                    if let Some(anchor) = anchor_from_status(&status) {
+                        let _ = tx_graph.insert_anchor(op.txid, anchor);
+                    }
+                }
+
+                if let Some(op_status) = self.get_output_status(&op.txid, op.vout as _)? {
+                    if let Some(txid) = op_status.txid {
+                        if tx_graph.get_tx(txid).is_none() {
+                            if let Some(tx) = self.get_tx(&txid)? {
+                                let _ = tx_graph.insert_tx(tx);
+                            }
+                            let status = self.get_tx_status(&txid)?;
+                            if let Some(anchor) = anchor_from_status(&status) {
+                                let _ = tx_graph.insert_anchor(txid, anchor);
+                            }
+                        }
+                    }
+                }
+            }
+
+            tx_graph
+        };
         let chain_update = chain_update(
             self,
             &latest_blocks,
-            &request.chain_tip,
+            &request.chain_tip(),
             graph_update.all_anchors(),
         )?;
         Ok(SyncResult {
@@ -307,90 +387,6 @@ fn full_scan_for_index_and_graph_blocking<K: Ord + Clone>(
     }
 
     Ok((tx_graph, last_active_indices))
-}
-
-fn sync_for_index_and_graph_blocking(
-    client: &esplora_client::BlockingClient,
-    misc_spks: impl IntoIterator<Item = ScriptBuf>,
-    txids: impl IntoIterator<Item = Txid>,
-    outpoints: impl IntoIterator<Item = OutPoint>,
-    parallel_requests: usize,
-) -> Result<TxGraph<ConfirmationBlockTime>, Error> {
-    let (mut tx_graph, _) = full_scan_for_index_and_graph_blocking(
-        client,
-        {
-            let mut keychains = BTreeMap::new();
-            keychains.insert(
-                (),
-                misc_spks
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, spk)| (i as u32, spk)),
-            );
-            keychains
-        },
-        usize::MAX,
-        parallel_requests,
-    )?;
-
-    let mut txids = txids.into_iter();
-    loop {
-        let handles = txids
-            .by_ref()
-            .take(parallel_requests)
-            .filter(|&txid| tx_graph.get_tx(txid).is_none())
-            .map(|txid| {
-                std::thread::spawn({
-                    let client = client.clone();
-                    move || {
-                        client
-                            .get_tx_status(&txid)
-                            .map_err(Box::new)
-                            .map(|s| (txid, s))
-                    }
-                })
-            })
-            .collect::<Vec<JoinHandle<Result<(Txid, TxStatus), Error>>>>();
-
-        if handles.is_empty() {
-            break;
-        }
-
-        for handle in handles {
-            let (txid, status) = handle.join().expect("thread must not panic")?;
-            if let Some(anchor) = anchor_from_status(&status) {
-                let _ = tx_graph.insert_anchor(txid, anchor);
-            }
-        }
-    }
-
-    for op in outpoints {
-        if tx_graph.get_tx(op.txid).is_none() {
-            if let Some(tx) = client.get_tx(&op.txid)? {
-                let _ = tx_graph.insert_tx(tx);
-            }
-            let status = client.get_tx_status(&op.txid)?;
-            if let Some(anchor) = anchor_from_status(&status) {
-                let _ = tx_graph.insert_anchor(op.txid, anchor);
-            }
-        }
-
-        if let Some(op_status) = client.get_output_status(&op.txid, op.vout as _)? {
-            if let Some(txid) = op_status.txid {
-                if tx_graph.get_tx(txid).is_none() {
-                    if let Some(tx) = client.get_tx(&txid)? {
-                        let _ = tx_graph.insert_tx(tx);
-                    }
-                    let status = client.get_tx_status(&txid)?;
-                    if let Some(anchor) = anchor_from_status(&status) {
-                        let _ = tx_graph.insert_anchor(txid, anchor);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(tx_graph)
 }
 
 #[cfg(test)]

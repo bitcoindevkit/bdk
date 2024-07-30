@@ -3,174 +3,151 @@
 use crate::{
     collections::BTreeMap, local_chain::CheckPoint, ConfirmationBlockTime, Indexed, TxGraph,
 };
-use alloc::boxed::Box;
+use alloc::{borrow::ToOwned, boxed::Box, collections::VecDeque};
 use bitcoin::{OutPoint, Script, ScriptBuf, Txid};
-use core::marker::PhantomData;
+use core::fmt::Debug;
 
 /// Data required to perform a spk-based blockchain client sync.
 ///
 /// A client sync fetches relevant chain data for a known list of scripts, transaction ids and
 /// outpoints. The sync process also updates the chain from the given [`CheckPoint`].
-pub struct SyncRequest {
+pub struct SyncRequest<I> {
     /// A checkpoint for the current chain [`LocalChain::tip`].
     /// The sync process will return a new chain update that extends this tip.
     ///
     /// [`LocalChain::tip`]: crate::local_chain::LocalChain::tip
-    pub chain_tip: CheckPoint,
+    chain_tip: CheckPoint,
     /// Transactions that spend from or to these indexed script pubkeys.
-    pub spks: Box<dyn ExactSizeIterator<Item = ScriptBuf> + Send>,
+    spks: VecDeque<(I, ScriptBuf)>,
     /// Transactions with these txids.
-    pub txids: Box<dyn ExactSizeIterator<Item = Txid> + Send>,
+    txids: VecDeque<Txid>,
     /// Transactions with these outpoints or spent from these outpoints.
-    pub outpoints: Box<dyn ExactSizeIterator<Item = OutPoint> + Send>,
+    outpoints: VecDeque<OutPoint>,
+    inspect: InspectFn<I>,
+    consumed: usize,
 }
 
-impl SyncRequest {
+type InspectFn<I> = Box<dyn FnMut(SyncItem<I>, usize, usize) + Send>;
+
+impl<I> SyncRequest<I> {
     /// Construct a new [`SyncRequest`] from a given `cp` tip.
-    pub fn from_chain_tip(cp: CheckPoint) -> Self {
+    pub fn new(cp: CheckPoint) -> Self {
         Self {
             chain_tip: cp,
-            spks: Box::new(core::iter::empty()),
-            txids: Box::new(core::iter::empty()),
-            outpoints: Box::new(core::iter::empty()),
+            spks: Default::default(),
+            txids: Default::default(),
+            outpoints: Default::default(),
+            consumed: Default::default(),
+            inspect: Box::new(|_, _, _| {}),
         }
+    }
+
+    /// Get the chain tip to update the chain against
+    pub fn chain_tip(&self) -> CheckPoint {
+        self.chain_tip.clone()
     }
 
     /// Set the [`Script`]s that will be synced against.
     ///
     /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn set_spks(
+    pub fn add_spks(
         mut self,
-        spks: impl IntoIterator<IntoIter = impl ExactSizeIterator<Item = ScriptBuf> + Send + 'static>,
+        spks: impl IntoIterator<Item = (I, impl ToOwned<Owned = ScriptBuf>)>,
     ) -> Self {
-        self.spks = Box::new(spks.into_iter());
+        self.spks
+            .extend(spks.into_iter().map(|(i, spk)| (i, spk.to_owned())));
         self
     }
 
-    /// Set the [`Txid`]s that will be synced against.
-    ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn set_txids(
-        mut self,
-        txids: impl IntoIterator<IntoIter = impl ExactSizeIterator<Item = Txid> + Send + 'static>,
-    ) -> Self {
-        self.txids = Box::new(txids.into_iter());
+    /// Add transactions to be synced. The sync backend will fetch the current status of the
+    /// corresponding transactions.
+    pub fn add_txids(mut self, txids: impl IntoIterator<Item = Txid>) -> Self {
+        self.txids.extend(txids);
         self
     }
 
-    /// Set the [`OutPoint`]s that will be synced against.
-    ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn set_outpoints(
-        mut self,
-        outpoints: impl IntoIterator<
-            IntoIter = impl ExactSizeIterator<Item = OutPoint> + Send + 'static,
-        >,
-    ) -> Self {
-        self.outpoints = Box::new(outpoints.into_iter());
+    /// Add the outpoints `OutPoints` to be synced. The sync backend will fetch any transactions
+    /// that spend from the outpoint.
+    pub fn add_outpoints(mut self, outpoints: impl IntoIterator<Item = OutPoint>) -> Self {
+        self.outpoints.extend(outpoints);
         self
     }
 
-    /// Chain on additional [`Script`]s that will be synced against.
-    ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn chain_spks(
-        mut self,
-        spks: impl IntoIterator<
-            IntoIter = impl ExactSizeIterator<Item = ScriptBuf> + Send + 'static,
-            Item = ScriptBuf,
-        >,
-    ) -> Self {
-        self.spks = Box::new(ExactSizeChain::new(self.spks, spks.into_iter()));
+    /// Sets the inspect callback for the `SyncRequest`. This will be called for any item pulled
+    /// from the sync.
+    pub fn inspect<F>(mut self, inspect: F) -> Self
+    where
+        for<'a> F: FnMut(SyncItem<'a, I>, usize, usize) + 'static + Send,
+    {
+        self.inspect = Box::new(inspect);
         self
     }
 
-    /// Chain on additional [`Txid`]s that will be synced against.
-    ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn chain_txids(
-        mut self,
-        txids: impl IntoIterator<
-            IntoIter = impl ExactSizeIterator<Item = Txid> + Send + 'static,
-            Item = Txid,
-        >,
-    ) -> Self {
-        self.txids = Box::new(ExactSizeChain::new(self.txids, txids.into_iter()));
-        self
+    /// How many items (spks, txids, and outpoints) are there remaining to be processed
+    pub fn remaining(&self) -> usize {
+        self.spks.len() + self.txids.len() + self.outpoints.len()
     }
 
-    /// Chain on additional [`OutPoint`]s that will be synced against.
+    /// Get the next script pubkey to be processed.
     ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn chain_outpoints(
-        mut self,
-        outpoints: impl IntoIterator<
-            IntoIter = impl ExactSizeIterator<Item = OutPoint> + Send + 'static,
-            Item = OutPoint,
-        >,
-    ) -> Self {
-        self.outpoints = Box::new(ExactSizeChain::new(self.outpoints, outpoints.into_iter()));
-        self
+    /// The sync backend should find all transactions spending to or from this script pubkey
+    pub fn next_spk(&mut self) -> Option<ScriptBuf> {
+        let (index, spk) = self.spks.pop_front()?;
+        self._call_inspect(SyncItem::Spk(index, spk.as_script()));
+        Some(spk)
     }
 
-    /// Add a closure that will be called for [`Script`]s previously added to this request.
-    ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn inspect_spks(
-        mut self,
-        mut inspect: impl FnMut(&Script) + Send + Sync + 'static,
-    ) -> Self {
-        self.spks = Box::new(self.spks.inspect(move |spk| inspect(spk)));
-        self
+    /// Iterate over the script pubkeys to be synced.
+    pub fn iter_spks(&mut self) -> impl Iterator<Item = ScriptBuf> + '_ {
+        core::iter::from_fn(|| self.next_spk())
     }
 
-    /// Add a closure that will be called for [`Txid`]s previously added to this request.
-    ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn inspect_txids(mut self, mut inspect: impl FnMut(&Txid) + Send + Sync + 'static) -> Self {
-        self.txids = Box::new(self.txids.inspect(move |txid| inspect(txid)));
-        self
+    /// Iterate over the transactions to be synced.
+    pub fn iter_txids(&mut self) -> impl Iterator<Item = Txid> + '_ {
+        core::iter::from_fn(|| self.next_txid())
     }
 
-    /// Add a closure that will be called for [`OutPoint`]s previously added to this request.
-    ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn inspect_outpoints(
-        mut self,
-        mut inspect: impl FnMut(&OutPoint) + Send + Sync + 'static,
-    ) -> Self {
-        self.outpoints = Box::new(self.outpoints.inspect(move |op| inspect(op)));
-        self
+    /// Iterate over the outpoints to be synced.
+    pub fn iter_outpoints(&mut self) -> impl Iterator<Item = OutPoint> + '_ {
+        core::iter::from_fn(|| self.next_outpoint())
     }
 
-    /// Populate the request with revealed script pubkeys from `index` with the given `spk_range`.
+    /// Get the next txid to be processed.
     ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[cfg(feature = "miniscript")]
-    #[must_use]
-    pub fn populate_with_revealed_spks<K: Clone + Ord + core::fmt::Debug + Send + Sync>(
-        self,
-        index: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
-        spk_range: impl core::ops::RangeBounds<K>,
-    ) -> Self {
-        use alloc::borrow::ToOwned;
-        use alloc::vec::Vec;
-        self.chain_spks(
-            index
-                .revealed_spks(spk_range)
-                .map(|(_, spk)| spk.to_owned())
-                .collect::<Vec<_>>(),
-        )
+    /// The sync backend should get the status of this transaction.
+    pub fn next_txid(&mut self) -> Option<Txid> {
+        let txid = self.txids.pop_front()?;
+        self._call_inspect(SyncItem::Txid(txid));
+        Some(txid)
     }
+
+    /// Get the next outpoint to be processed.
+    ///
+    /// The sync backend should get the status of any transactions spending from this outpoint.
+    pub fn next_outpoint(&mut self) -> Option<OutPoint> {
+        let op = self.outpoints.pop_front()?;
+        self._call_inspect(SyncItem::OutPoint(op));
+        Some(op)
+    }
+
+    fn _call_inspect(&mut self, item: SyncItem<I>) {
+        let remaining_items = self.remaining();
+        (self.inspect)(item, self.consumed, remaining_items);
+        self.consumed += 1;
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+/// An item reported to [`inspect`]
+///
+/// [`inspect`]: SyncRequest::inspect
+pub enum SyncItem<'a, I> {
+    /// Script pubkey sycn item
+    Spk(I, &'a Script),
+    /// Transaction id sync item
+    Txid(Txid),
+    /// Transaction outpoint sync item
+    OutPoint(OutPoint),
 }
 
 /// Data returned from a spk-based blockchain client sync.
@@ -227,30 +204,16 @@ impl<K: Ord + Clone> FullScanRequest<K> {
     {
         let mut req = Self::from_chain_tip(chain_tip);
         for (keychain, spks) in index.all_unbounded_spk_iters() {
-            req = req.set_spks_for_keychain(keychain, spks);
+            req = req.add_spks_for_keychain(keychain, spks);
         }
         req
-    }
-
-    /// Set the [`Script`]s for a given `keychain`.
-    ///
-    /// This consumes the [`FullScanRequest`] and returns the updated one.
-    #[must_use]
-    pub fn set_spks_for_keychain(
-        mut self,
-        keychain: K,
-        spks: impl IntoIterator<IntoIter = impl Iterator<Item = Indexed<ScriptBuf>> + Send + 'static>,
-    ) -> Self {
-        self.spks_by_keychain
-            .insert(keychain, Box::new(spks.into_iter()));
-        self
     }
 
     /// Chain on additional [`Script`]s that will be synced against.
     ///
     /// This consumes the [`FullScanRequest`] and returns the updated one.
     #[must_use]
-    pub fn chain_spks_for_keychain(
+    pub fn add_spks_for_keychain(
         mut self,
         keychain: K,
         spks: impl IntoIterator<IntoIter = impl Iterator<Item = Indexed<ScriptBuf>> + Send + 'static>,
@@ -274,7 +237,7 @@ impl<K: Ord + Clone> FullScanRequest<K> {
     ///
     /// This consumes the [`SyncRequest`] and returns the updated one.
     #[must_use]
-    pub fn inspect_spks_for_all_keychains(
+    pub fn inspect_spks(
         mut self,
         inspect: impl FnMut(K, u32, &Script) + Send + Sync + Clone + 'static,
     ) -> Self
@@ -286,28 +249,6 @@ impl<K: Ord + Clone> FullScanRequest<K> {
             self.spks_by_keychain.insert(
                 keychain.clone(),
                 Box::new(spks.inspect(move |(i, spk)| inspect(keychain.clone(), *i, spk))),
-            );
-        }
-        self
-    }
-
-    /// Add a closure that will be called for every [`Script`] previously added to a given
-    /// `keychain` in this request.
-    ///
-    /// This consumes the [`SyncRequest`] and returns the updated one.
-    #[must_use]
-    pub fn inspect_spks_for_keychain(
-        mut self,
-        keychain: K,
-        mut inspect: impl FnMut(u32, &Script) + Send + Sync + 'static,
-    ) -> Self
-    where
-        K: Send + 'static,
-    {
-        if let Some(spks) = self.spks_by_keychain.remove(&keychain) {
-            self.spks_by_keychain.insert(
-                keychain,
-                Box::new(spks.inspect(move |(i, spk)| inspect(*i, spk))),
             );
         }
         self
@@ -324,65 +265,4 @@ pub struct FullScanResult<K, A = ConfirmationBlockTime> {
     pub chain_update: CheckPoint,
     /// Last active indices for the corresponding keychains (`K`).
     pub last_active_indices: BTreeMap<K, u32>,
-}
-
-/// A version of [`core::iter::Chain`] which can combine two [`ExactSizeIterator`]s to form a new
-/// [`ExactSizeIterator`].
-///
-/// The danger of this is explained in [the `ExactSizeIterator` docs]
-/// (https://doc.rust-lang.org/core/iter/trait.ExactSizeIterator.html#when-shouldnt-an-adapter-be-exactsizeiterator).
-/// This does not apply here since it would be impossible to scan an item count that overflows
-/// `usize` anyway.
-struct ExactSizeChain<A, B, I> {
-    a: Option<A>,
-    b: Option<B>,
-    i: PhantomData<I>,
-}
-
-impl<A, B, I> ExactSizeChain<A, B, I> {
-    fn new(a: A, b: B) -> Self {
-        ExactSizeChain {
-            a: Some(a),
-            b: Some(b),
-            i: PhantomData,
-        }
-    }
-}
-
-impl<A, B, I> Iterator for ExactSizeChain<A, B, I>
-where
-    A: Iterator<Item = I>,
-    B: Iterator<Item = I>,
-{
-    type Item = I;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(a) = &mut self.a {
-            let item = a.next();
-            if item.is_some() {
-                return item;
-            }
-            self.a = None;
-        }
-        if let Some(b) = &mut self.b {
-            let item = b.next();
-            if item.is_some() {
-                return item;
-            }
-            self.b = None;
-        }
-        None
-    }
-}
-
-impl<A, B, I> ExactSizeIterator for ExactSizeChain<A, B, I>
-where
-    A: ExactSizeIterator<Item = I>,
-    B: ExactSizeIterator<Item = I>,
-{
-    fn len(&self) -> usize {
-        let a_len = self.a.as_ref().map(|a| a.len()).unwrap_or(0);
-        let b_len = self.b.as_ref().map(|a| a.len()).unwrap_or(0);
-        a_len + b_len
-    }
 }

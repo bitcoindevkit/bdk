@@ -151,8 +151,7 @@ impl CheckPoint {
 
     /// Iterate checkpoints over a height range.
     ///
-    /// Note that we always iterate checkpoints in reverse height order (iteration starts at tip
-    /// height).
+    /// Note that we always iterate checkpoints in reverse height order (iteration starts with highest).
     pub fn range<R>(&self, range: R) -> impl Iterator<Item = CheckPoint>
     where
         R: RangeBounds<u32>,

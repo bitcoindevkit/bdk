@@ -21,8 +21,8 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         Address::from_str("bcrt1qfjg5lv3dvc9az8patec8fjddrs4aqtauadnagr")?.assume_checked();
 
     let misc_spks = [
-        receive_address0.script_pubkey(),
-        receive_address1.script_pubkey(),
+        (0, receive_address0.script_pubkey()),
+        (1, receive_address1.script_pubkey()),
     ];
 
     let _block_hashes = env.mine_blocks(101, None)?;
@@ -55,7 +55,7 @@ pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let cp_tip = env.make_checkpoint_tip();
 
     let sync_update = {
-        let request = SyncRequest::from_chain_tip(cp_tip.clone()).set_spks(misc_spks);
+        let request = SyncRequest::new(cp_tip.clone()).add_spks(misc_spks);
         client.sync(request, 1).await?
     };
 

@@ -64,11 +64,13 @@ pub trait EsploraAsyncExt {
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
     /// [`full_scan`]: EsploraAsyncExt::full_scan
-    async fn sync(
+    async fn sync<I>(
         &self,
-        request: SyncRequest,
+        request: SyncRequest<I>,
         parallel_requests: usize,
-    ) -> Result<SyncResult, Error>;
+    ) -> Result<SyncResult, Error>
+    where
+        SyncRequest<I>: Send;
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -102,24 +104,87 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         })
     }
 
-    async fn sync(
+    async fn sync<I>(
         &self,
-        request: SyncRequest,
+        mut request: SyncRequest<I>,
         parallel_requests: usize,
-    ) -> Result<SyncResult, Error> {
+    ) -> Result<SyncResult, Error>
+    where
+        SyncRequest<I>: Send,
+    {
         let latest_blocks = fetch_latest_blocks(self).await?;
-        let graph_update = sync_for_index_and_graph(
-            self,
-            request.spks,
-            request.txids,
-            request.outpoints,
-            parallel_requests,
-        )
-        .await?;
+        let graph_update = {
+            let (mut tx_graph, _) = full_scan_for_index_and_graph(
+                self,
+                [(
+                    (),
+                    request
+                        .iter_spks()
+                        .enumerate()
+                        .map(|(i, spk)| (i as u32, spk)),
+                )]
+                .into(),
+                usize::MAX,
+                parallel_requests,
+            )
+            .await?;
+
+            let mut txids = request.iter_txids();
+            loop {
+                let handles = txids
+                    .by_ref()
+                    .take(parallel_requests)
+                    .filter(|&txid| tx_graph.get_tx(txid).is_none())
+                    .map(|txid| {
+                        let client = self.clone();
+                        async move { client.get_tx_status(&txid).await.map(|s| (txid, s)) }
+                    })
+                    .collect::<FuturesOrdered<_>>();
+
+                if handles.is_empty() {
+                    break;
+                }
+
+                for (txid, status) in handles.try_collect::<Vec<(Txid, TxStatus)>>().await? {
+                    if let Some(anchor) = anchor_from_status(&status) {
+                        let _ = tx_graph.insert_anchor(txid, anchor);
+                    }
+                }
+            }
+
+            drop(txids);
+
+            for op in request.iter_outpoints() {
+                if tx_graph.get_tx(op.txid).is_none() {
+                    if let Some(tx) = self.get_tx(&op.txid).await? {
+                        let _ = tx_graph.insert_tx(tx);
+                    }
+                    let status = self.get_tx_status(&op.txid).await?;
+                    if let Some(anchor) = anchor_from_status(&status) {
+                        let _ = tx_graph.insert_anchor(op.txid, anchor);
+                    }
+                }
+
+                if let Some(op_status) = self.get_output_status(&op.txid, op.vout as _).await? {
+                    if let Some(txid) = op_status.txid {
+                        if tx_graph.get_tx(txid).is_none() {
+                            if let Some(tx) = self.get_tx(&txid).await? {
+                                let _ = tx_graph.insert_tx(tx);
+                            }
+                            let status = self.get_tx_status(&txid).await?;
+                            if let Some(anchor) = anchor_from_status(&status) {
+                                let _ = tx_graph.insert_anchor(txid, anchor);
+                            }
+                        }
+                    }
+                }
+            }
+            tx_graph
+        };
         let chain_update = chain_update(
             self,
             &latest_blocks,
-            &request.chain_tip,
+            &request.chain_tip(),
             graph_update.all_anchors(),
         )
         .await?;
@@ -325,81 +390,6 @@ async fn full_scan_for_index_and_graph<K: Ord + Clone + Send>(
     }
 
     Ok((graph, last_active_indexes))
-}
-
-async fn sync_for_index_and_graph(
-    client: &esplora_client::AsyncClient,
-    misc_spks: impl IntoIterator<IntoIter = impl Iterator<Item = ScriptBuf> + Send> + Send,
-    txids: impl IntoIterator<IntoIter = impl Iterator<Item = Txid> + Send> + Send,
-    outpoints: impl IntoIterator<IntoIter = impl Iterator<Item = OutPoint> + Send> + Send,
-    parallel_requests: usize,
-) -> Result<TxGraph<ConfirmationBlockTime>, Error> {
-    let mut graph = full_scan_for_index_and_graph(
-        client,
-        [(
-            (),
-            misc_spks
-                .into_iter()
-                .enumerate()
-                .map(|(i, spk)| (i as u32, spk)),
-        )]
-        .into(),
-        usize::MAX,
-        parallel_requests,
-    )
-    .await
-    .map(|(g, _)| g)?;
-
-    let mut txids = txids.into_iter();
-    loop {
-        let handles = txids
-            .by_ref()
-            .take(parallel_requests)
-            .filter(|&txid| graph.get_tx(txid).is_none())
-            .map(|txid| {
-                let client = client.clone();
-                async move { client.get_tx_status(&txid).await.map(|s| (txid, s)) }
-            })
-            .collect::<FuturesOrdered<_>>();
-
-        if handles.is_empty() {
-            break;
-        }
-
-        for (txid, status) in handles.try_collect::<Vec<(Txid, TxStatus)>>().await? {
-            if let Some(anchor) = anchor_from_status(&status) {
-                let _ = graph.insert_anchor(txid, anchor);
-            }
-        }
-    }
-
-    for op in outpoints.into_iter() {
-        if graph.get_tx(op.txid).is_none() {
-            if let Some(tx) = client.get_tx(&op.txid).await? {
-                let _ = graph.insert_tx(tx);
-            }
-            let status = client.get_tx_status(&op.txid).await?;
-            if let Some(anchor) = anchor_from_status(&status) {
-                let _ = graph.insert_anchor(op.txid, anchor);
-            }
-        }
-
-        if let Some(op_status) = client.get_output_status(&op.txid, op.vout as _).await? {
-            if let Some(txid) = op_status.txid {
-                if graph.get_tx(txid).is_none() {
-                    if let Some(tx) = client.get_tx(&txid).await? {
-                        let _ = graph.insert_tx(tx);
-                    }
-                    let status = client.get_tx_status(&txid).await?;
-                    if let Some(anchor) = anchor_from_status(&status) {
-                        let _ = graph.insert_anchor(txid, anchor);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(graph)
 }
 
 #[cfg(test)]

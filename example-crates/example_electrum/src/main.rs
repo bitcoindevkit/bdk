@@ -221,7 +221,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             let chain_tip = chain.tip();
-            let mut request = SyncRequest::from_chain_tip(chain_tip.clone());
+            let mut request = SyncRequest::new(chain_tip.clone());
 
             if all_spks {
                 let all_spks = graph

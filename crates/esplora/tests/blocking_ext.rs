@@ -55,7 +55,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let cp_tip = env.make_checkpoint_tip();
 
     let sync_update = {
-        let request = SyncRequest::from_chain_tip(cp_tip.clone()).set_spks(misc_spks);
+        let request = SyncRequest::new(cp_tip.clone()).set_spks(misc_spks);
         client.sync(request, 1)?
     };
 

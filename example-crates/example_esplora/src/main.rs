@@ -233,7 +233,7 @@ fn main() -> anyhow::Result<()> {
 
             let local_tip = chain.lock().expect("mutex must not be poisoned").tip();
             // Spks, outpoints and txids we want updates on will be accumulated here.
-            let mut request = SyncRequest::from_chain_tip(local_tip.clone());
+            let mut request = SyncRequest::new(local_tip.clone());
 
             // Get a short lock on the structures to get spks, utxos, and txs that we are interested
             // in.
