@@ -84,7 +84,7 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// Typically, this is used in two situations:
     ///
     /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore all
-    /// your txouts.
+    ///    your txouts.
     /// 2. When getting new data from the chain, you usually scan it before incorporating it into your chain state.
     pub fn scan(&mut self, tx: &Transaction) -> BTreeSet<I> {
         let mut scanned_indices = BTreeSet::new();

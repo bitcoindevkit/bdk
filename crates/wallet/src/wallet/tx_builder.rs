@@ -575,7 +575,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     ///
     /// This will be used to:
     /// 1. Set the nLockTime for preventing fee sniping.
-    /// **Note**: This will be ignored if you manually specify a nlocktime using [`TxBuilder::nlocktime`].
+    ///    **Note**: This will be ignored if you manually specify a nlocktime using [`TxBuilder::nlocktime`].
     /// 2. Decide whether coinbase outputs are mature or not. If the coinbase outputs are not
     ///    mature at `current_height`, we ignore them in the coin selection.
     ///    If you want to create a transaction that spends immature coinbase inputs, manually
