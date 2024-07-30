@@ -107,7 +107,7 @@ impl<T> Persisted<T> {
         Ok(T::load(db, params)?.map(|inner| Self { inner }))
     }
 
-    /// Contruct a persisted `T` from an async `Db`.
+    /// Construct a persisted `T` from an async `Db`.
     pub async fn load_async<Db>(
         db: &mut Db,
         params: T::LoadParams,

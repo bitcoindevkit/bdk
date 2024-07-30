@@ -150,7 +150,7 @@ impl LoadParams {
     }
 
     /// Checks that `descriptor` of `keychain` matches this, and extracts private keys (if
-    /// avaliable).
+    /// available).
     pub fn descriptors<D>(mut self, descriptor: D, change_descriptor: D) -> Self
     where
         D: IntoWalletDescriptor + 'static,
