@@ -52,19 +52,18 @@ fn main() -> Result<(), anyhow::Error> {
     // already have.
     client.populate_tx_cache(wallet.tx_graph());
 
-    let request = wallet
-        .start_full_scan()
-        .inspect_spks_for_all_keychains({
-            let mut once = HashSet::<KeychainKind>::new();
-            move |k, spk_i, _| {
-                if once.insert(k) {
-                    print!("\nScanning keychain [{:?}]", k)
-                } else {
-                    print!(" {:<3}", spk_i)
-                }
+    let request = wallet.start_full_scan().inspect({
+        let mut stdout = std::io::stdout();
+        let mut once = HashSet::<KeychainKind>::new();
+        move |k, spk_i, _| {
+            if once.insert(k) {
+                print!("\nScanning keychain [{:?}]", k)
+            } else {
+                print!(" {:<3}", spk_i)
             }
-        })
-        .inspect_spks_for_all_keychains(|_, _, _| std::io::stdout().flush().expect("must flush"));
+            stdout.flush().expect("must flush");
+        }
+    });
 
     let mut update = client.full_scan(request, STOP_GAP, BATCH_SIZE, false)?;
 

@@ -55,7 +55,9 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let cp_tip = env.make_checkpoint_tip();
 
     let sync_update = {
-        let request = SyncRequest::from_chain_tip(cp_tip.clone()).set_spks(misc_spks);
+        let request = SyncRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks(misc_spks);
         client.sync(request, 1)?
     };
 
@@ -161,15 +163,17 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     // A scan with a stop_gap of 3 won't find the transaction, but a scan with a gap limit of 4
     // will.
     let full_scan_update = {
-        let request =
-            FullScanRequest::from_chain_tip(cp_tip.clone()).set_spks_for_keychain(0, spks.clone());
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 3, 1)?
     };
     assert!(full_scan_update.graph_update.full_txs().next().is_none());
     assert!(full_scan_update.last_active_indices.is_empty());
     let full_scan_update = {
-        let request =
-            FullScanRequest::from_chain_tip(cp_tip.clone()).set_spks_for_keychain(0, spks.clone());
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 4, 1)?
     };
     assert_eq!(
@@ -202,8 +206,9 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     // A scan with gap limit 5 won't find the second transaction, but a scan with gap limit 6 will.
     // The last active indice won't be updated in the first case but will in the second one.
     let full_scan_update = {
-        let request =
-            FullScanRequest::from_chain_tip(cp_tip.clone()).set_spks_for_keychain(0, spks.clone());
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 5, 1)?
     };
     let txs: HashSet<_> = full_scan_update
@@ -215,8 +220,9 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     assert!(txs.contains(&txid_4th_addr));
     assert_eq!(full_scan_update.last_active_indices[&0], 3);
     let full_scan_update = {
-        let request =
-            FullScanRequest::from_chain_tip(cp_tip.clone()).set_spks_for_keychain(0, spks.clone());
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 6, 1)?
     };
     let txs: HashSet<_> = full_scan_update

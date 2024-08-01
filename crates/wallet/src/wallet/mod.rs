@@ -29,7 +29,10 @@ use bdk_chain::{
     local_chain::{
         self, ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain,
     },
-    spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
+    spk_client::{
+        FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
+        SyncResult,
+    },
     tx_graph::{CanonicalTx, TxGraph, TxNode},
     BlockId, ChainPosition, ConfirmationBlockTime, ConfirmationTime, DescriptorExt, FullTxOut,
     Indexed, IndexedTxGraph, Merge,
@@ -151,7 +154,7 @@ impl From<FullScanResult<KeychainKind>> for Update {
         Self {
             last_active_indices: value.last_active_indices,
             graph: value.graph_update,
-            chain: Some(value.chain_update),
+            chain: value.chain_update,
         }
     }
 }
@@ -161,7 +164,7 @@ impl From<SyncResult> for Update {
         Self {
             last_active_indices: BTreeMap::new(),
             graph: value.graph_update,
-            chain: Some(value.chain_update),
+            chain: value.chain_update,
         }
     }
 }
@@ -2437,9 +2440,10 @@ impl Wallet {
     /// This is the first step when performing a spk-based wallet partial sync, the returned
     /// [`SyncRequest`] collects all revealed script pubkeys from the wallet keychain needed to
     /// start a blockchain sync with a spk based blockchain client.
-    pub fn start_sync_with_revealed_spks(&self) -> SyncRequest {
-        SyncRequest::from_chain_tip(self.chain.tip())
-            .populate_with_revealed_spks(&self.indexed_graph.index, ..)
+    pub fn start_sync_with_revealed_spks(&self) -> SyncRequestBuilder<(KeychainKind, u32)> {
+        SyncRequest::builder()
+            .chain_tip(self.chain.tip())
+            .revealed_spks_from_indexer(&self.indexed_graph.index, ..)
     }
 
     /// Create a [`FullScanRequest] for this wallet.
@@ -2450,8 +2454,10 @@ impl Wallet {
     ///
     /// This operation is generally only used when importing or restoring a previously used wallet
     /// in which the list of used scripts is not known.
-    pub fn start_full_scan(&self) -> FullScanRequest<KeychainKind> {
-        FullScanRequest::from_keychain_txout_index(self.chain.tip(), &self.indexed_graph.index)
+    pub fn start_full_scan(&self) -> FullScanRequestBuilder<KeychainKind> {
+        FullScanRequest::builder()
+            .chain_tip(self.chain.tip())
+            .spks_from_indexer(&self.indexed_graph.index)
     }
 }
 

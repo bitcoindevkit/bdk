@@ -47,14 +47,15 @@ fn main() -> Result<(), anyhow::Error> {
     print!("Syncing...");
     let client = esplora_client::Builder::new(ESPLORA_URL).build_blocking();
 
-    let request = wallet.start_full_scan().inspect_spks_for_all_keychains({
+    let request = wallet.start_full_scan().inspect({
+        let mut stdout = std::io::stdout();
         let mut once = BTreeSet::<KeychainKind>::new();
         move |keychain, spk_i, _| {
             if once.insert(keychain) {
                 print!("\nScanning keychain [{:?}] ", keychain);
             }
             print!(" {:<3}", spk_i);
-            std::io::stdout().flush().expect("must flush")
+            stdout.flush().expect("must flush")
         }
     });
 

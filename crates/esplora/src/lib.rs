@@ -1,22 +1,8 @@
 #![doc = include_str!("../README.md")]
-//! # Low-Level Methods
-//!
-//! [`EsploraExt::sync`] and [`EsploraExt::full_scan`] returns updates which are *complete* and can
-//! be used directly to determine confirmation statuses of each transaction. This is because a
-//! [`LocalChain`] update is contained in the returned update structures. However, sometimes the
-//! caller wishes to use a custom [`ChainOracle`] implementation (something other than
-//! [`LocalChain`]). The following methods ONLY returns an update [`TxGraph`]:
-//!
-//! * [`EsploraExt::fetch_txs_with_keychain_spks`]
-//! * [`EsploraExt::fetch_txs_with_spks`]
-//! * [`EsploraExt::fetch_txs_with_txids`]
-//! * [`EsploraExt::fetch_txs_with_outpoints`]
-//!
 //! # Stop Gap
 //!
-//! Methods [`EsploraExt::full_scan`] and [`EsploraExt::fetch_txs_with_keychain_spks`] takes in a
-//! `stop_gap` input which is defined as the maximum number of consecutive unused script pubkeys to
-//! scan transactions for before stopping.
+//! [`EsploraExt::full_scan`] takes in a `stop_gap` input which is defined as the maximum number of
+//! consecutive unused script pubkeys to scan transactions for before stopping.
 //!
 //! For example, with a `stop_gap` of 3, `full_scan` will keep scanning until it encounters 3
 //! consecutive script pubkeys with no associated transactions.

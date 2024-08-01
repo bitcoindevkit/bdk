@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::usize;
 
 use async_trait::async_trait;
 use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
@@ -33,9 +32,9 @@ pub trait EsploraAsyncExt {
     /// the maximum number of HTTP requests to make in parallel.
     ///
     /// Refer to [crate-level docs](crate) for more.
-    async fn full_scan<K: Ord + Clone + Send>(
+    async fn full_scan<K: Ord + Clone + Send, R: Into<FullScanRequest<K>> + Send>(
         &self,
-        request: FullScanRequest<K>,
+        request: R,
         stop_gap: usize,
         parallel_requests: usize,
     ) -> Result<FullScanResult<K>, Error>;
@@ -47,105 +46,52 @@ pub trait EsploraAsyncExt {
     /// in parallel.
     ///
     /// Refer to [crate-level docs](crate) for more.
-    async fn sync(
+    async fn sync<I: Send, R: Into<SyncRequest<I>> + Send>(
         &self,
-        request: SyncRequest,
+        request: R,
         parallel_requests: usize,
     ) -> Result<SyncResult, Error>;
-
-    /// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning
-    /// `keychain_spks` against Esplora.
-    ///
-    /// `keychain_spks` is an *unbounded* indexed-[`ScriptBuf`] iterator that represents scripts
-    /// derived from a keychain. The scanning logic stops after a `stop_gap` number of consecutive
-    /// scripts with no transaction history is reached. `parallel_requests` specifies the maximum
-    /// number of HTTP requests to make in parallel.
-    ///
-    /// A [`TxGraph`] (containing the fetched transactions and anchors) and the last active
-    /// keychain index (if any) is returned. The last active keychain index is the keychain's last
-    /// script pubkey that contains a non-empty transaction history.
-    ///
-    /// Refer to [crate-level docs](crate) for more.
-    async fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>> + Send>(
-        &self,
-        keychain_spks: I,
-        stop_gap: usize,
-        parallel_requests: usize,
-    ) -> Result<(TxGraph<ConfirmationBlockTime>, Option<u32>), Error>;
-
-    /// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning `spks`
-    /// against Esplora.
-    ///
-    /// Unlike with [`EsploraAsyncExt::fetch_txs_with_keychain_spks`], `spks` must be *bounded* as
-    /// all contained scripts will be scanned. `parallel_requests` specifies the maximum number of
-    /// HTTP requests to make in parallel.
-    ///
-    /// Refer to [crate-level docs](crate) for more.
-    async fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf> + Send>(
-        &self,
-        spks: I,
-        parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationBlockTime>, Error>
-    where
-        I::IntoIter: ExactSizeIterator + Send;
-
-    /// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning `txids`
-    /// against Esplora.
-    ///
-    /// `parallel_requests` specifies the maximum number of HTTP requests to make in parallel.
-    ///
-    /// Refer to [crate-level docs](crate) for more.
-    async fn fetch_txs_with_txids<I: IntoIterator<Item = Txid> + Send>(
-        &self,
-        txids: I,
-        parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationBlockTime>, Error>
-    where
-        I::IntoIter: ExactSizeIterator + Send;
-
-    /// Fetch transactions and [`ConfirmationBlockTime`]s that contain and spend the provided
-    /// `outpoints`.
-    ///
-    /// `parallel_requests` specifies the maximum number of HTTP requests to make in parallel.
-    ///
-    /// Refer to [crate-level docs](crate) for more.
-    async fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint> + Send>(
-        &self,
-        outpoints: I,
-        parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationBlockTime>, Error>
-    where
-        I::IntoIter: ExactSizeIterator + Send;
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 impl EsploraAsyncExt for esplora_client::AsyncClient {
-    async fn full_scan<K: Ord + Clone + Send>(
+    async fn full_scan<K: Ord + Clone + Send, R: Into<FullScanRequest<K>> + Send>(
         &self,
-        request: FullScanRequest<K>,
+        request: R,
         stop_gap: usize,
         parallel_requests: usize,
     ) -> Result<FullScanResult<K>, Error> {
-        let latest_blocks = fetch_latest_blocks(self).await?;
+        let mut request = request.into();
+        let keychains = request.keychains();
+
+        let chain_tip = request.chain_tip();
+        let latest_blocks = if chain_tip.is_some() {
+            Some(fetch_latest_blocks(self).await?)
+        } else {
+            None
+        };
+
         let mut graph_update = TxGraph::default();
         let mut last_active_indices = BTreeMap::<K, u32>::new();
-        for (keychain, keychain_spks) in request.spks_by_keychain {
-            let (tx_graph, last_active_index) = self
-                .fetch_txs_with_keychain_spks(keychain_spks, stop_gap, parallel_requests)
-                .await?;
+        for keychain in keychains {
+            let keychain_spks = request.iter_spks(keychain.clone());
+            let (tx_graph, last_active_index) =
+                fetch_txs_with_keychain_spks(self, keychain_spks, stop_gap, parallel_requests)
+                    .await?;
             let _ = graph_update.apply_update(tx_graph);
             if let Some(last_active_index) = last_active_index {
                 last_active_indices.insert(keychain, last_active_index);
             }
         }
-        let chain_update = chain_update(
-            self,
-            &latest_blocks,
-            &request.chain_tip,
-            graph_update.all_anchors(),
-        )
-        .await?;
+
+        let chain_update = match (chain_tip, latest_blocks) {
+            (Some(chain_tip), Some(latest_blocks)) => Some(
+                chain_update(self, &latest_blocks, &chain_tip, graph_update.all_anchors()).await?,
+            ),
+            _ => None,
+        };
+
         Ok(FullScanResult {
             chain_update,
             graph_update,
@@ -153,230 +99,41 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
         })
     }
 
-    async fn sync(
+    async fn sync<I: Send, R: Into<SyncRequest<I>> + Send>(
         &self,
-        request: SyncRequest,
+        request: R,
         parallel_requests: usize,
     ) -> Result<SyncResult, Error> {
-        let latest_blocks = fetch_latest_blocks(self).await?;
-        let mut graph_update = TxGraph::default();
+        let mut request = request.into();
+
+        let chain_tip = request.chain_tip();
+        let latest_blocks = if chain_tip.is_some() {
+            Some(fetch_latest_blocks(self).await?)
+        } else {
+            None
+        };
+
+        let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
+        let _ = graph_update
+            .apply_update(fetch_txs_with_spks(self, request.iter_spks(), parallel_requests).await?);
         let _ = graph_update.apply_update(
-            self.fetch_txs_with_spks(request.spks, parallel_requests)
-                .await?,
+            fetch_txs_with_txids(self, request.iter_txids(), parallel_requests).await?,
         );
         let _ = graph_update.apply_update(
-            self.fetch_txs_with_txids(request.txids, parallel_requests)
-                .await?,
+            fetch_txs_with_outpoints(self, request.iter_outpoints(), parallel_requests).await?,
         );
-        let _ = graph_update.apply_update(
-            self.fetch_txs_with_outpoints(request.outpoints, parallel_requests)
-                .await?,
-        );
-        let chain_update = chain_update(
-            self,
-            &latest_blocks,
-            &request.chain_tip,
-            graph_update.all_anchors(),
-        )
-        .await?;
+
+        let chain_update = match (chain_tip, latest_blocks) {
+            (Some(chain_tip), Some(latest_blocks)) => Some(
+                chain_update(self, &latest_blocks, &chain_tip, graph_update.all_anchors()).await?,
+            ),
+            _ => None,
+        };
+
         Ok(SyncResult {
             chain_update,
             graph_update,
         })
-    }
-
-    async fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>> + Send>(
-        &self,
-        mut keychain_spks: I,
-        stop_gap: usize,
-        parallel_requests: usize,
-    ) -> Result<(TxGraph<ConfirmationBlockTime>, Option<u32>), Error> {
-        type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
-
-        let mut tx_graph = TxGraph::default();
-        let mut last_index = Option::<u32>::None;
-        let mut last_active_index = Option::<u32>::None;
-
-        loop {
-            let handles = keychain_spks
-                .by_ref()
-                .take(parallel_requests)
-                .map(|(spk_index, spk)| {
-                    let client = self.clone();
-                    async move {
-                        let mut last_seen = None;
-                        let mut spk_txs = Vec::new();
-                        loop {
-                            let txs = client.scripthash_txs(&spk, last_seen).await?;
-                            let tx_count = txs.len();
-                            last_seen = txs.last().map(|tx| tx.txid);
-                            spk_txs.extend(txs);
-                            if tx_count < 25 {
-                                break Result::<_, Error>::Ok((spk_index, spk_txs));
-                            }
-                        }
-                    }
-                })
-                .collect::<FuturesOrdered<_>>();
-
-            if handles.is_empty() {
-                break;
-            }
-
-            for (index, txs) in handles.try_collect::<Vec<TxsOfSpkIndex>>().await? {
-                last_index = Some(index);
-                if !txs.is_empty() {
-                    last_active_index = Some(index);
-                }
-                for tx in txs {
-                    let _ = tx_graph.insert_tx(tx.to_tx());
-                    insert_anchor_from_status(&mut tx_graph, tx.txid, tx.status);
-                    insert_prevouts(&mut tx_graph, tx.vin);
-                }
-            }
-
-            let last_index = last_index.expect("Must be set since handles wasn't empty.");
-            let gap_limit_reached = if let Some(i) = last_active_index {
-                last_index >= i.saturating_add(stop_gap as u32)
-            } else {
-                last_index + 1 >= stop_gap as u32
-            };
-            if gap_limit_reached {
-                break;
-            }
-        }
-
-        Ok((tx_graph, last_active_index))
-    }
-
-    async fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf> + Send>(
-        &self,
-        spks: I,
-        parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationBlockTime>, Error>
-    where
-        I::IntoIter: ExactSizeIterator + Send,
-    {
-        self.fetch_txs_with_keychain_spks(
-            spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
-            usize::MAX,
-            parallel_requests,
-        )
-        .await
-        .map(|(tx_graph, _)| tx_graph)
-    }
-
-    async fn fetch_txs_with_txids<I: IntoIterator<Item = Txid> + Send>(
-        &self,
-        txids: I,
-        parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationBlockTime>, Error>
-    where
-        I::IntoIter: ExactSizeIterator + Send,
-    {
-        enum EsploraResp {
-            TxStatus(TxStatus),
-            Tx(Option<Tx>),
-        }
-
-        let mut tx_graph = TxGraph::default();
-        let mut txids = txids.into_iter();
-        loop {
-            let handles = txids
-                .by_ref()
-                .take(parallel_requests)
-                .map(|txid| {
-                    let client = self.clone();
-                    let tx_already_exists = tx_graph.get_tx(txid).is_some();
-                    async move {
-                        if tx_already_exists {
-                            client
-                                .get_tx_status(&txid)
-                                .await
-                                .map(|s| (txid, EsploraResp::TxStatus(s)))
-                        } else {
-                            client
-                                .get_tx_info(&txid)
-                                .await
-                                .map(|t| (txid, EsploraResp::Tx(t)))
-                        }
-                    }
-                })
-                .collect::<FuturesOrdered<_>>();
-
-            if handles.is_empty() {
-                break;
-            }
-
-            for (txid, resp) in handles.try_collect::<Vec<_>>().await? {
-                match resp {
-                    EsploraResp::TxStatus(status) => {
-                        insert_anchor_from_status(&mut tx_graph, txid, status);
-                    }
-                    EsploraResp::Tx(Some(tx_info)) => {
-                        let _ = tx_graph.insert_tx(tx_info.to_tx());
-                        insert_anchor_from_status(&mut tx_graph, txid, tx_info.status);
-                        insert_prevouts(&mut tx_graph, tx_info.vin);
-                    }
-                    _ => continue,
-                }
-            }
-        }
-        Ok(tx_graph)
-    }
-
-    async fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint> + Send>(
-        &self,
-        outpoints: I,
-        parallel_requests: usize,
-    ) -> Result<TxGraph<ConfirmationBlockTime>, Error>
-    where
-        I::IntoIter: ExactSizeIterator + Send,
-    {
-        let outpoints = outpoints.into_iter().collect::<Vec<_>>();
-
-        // make sure txs exists in graph and tx statuses are updated
-        // TODO: We should maintain a tx cache (like we do with Electrum).
-        let mut tx_graph = self
-            .fetch_txs_with_txids(outpoints.iter().map(|op| op.txid), parallel_requests)
-            .await?;
-
-        // get outpoint spend-statuses
-        let mut outpoints = outpoints.into_iter();
-        let mut missing_txs = Vec::<Txid>::with_capacity(outpoints.len());
-        loop {
-            let handles = outpoints
-                .by_ref()
-                .take(parallel_requests)
-                .map(|op| {
-                    let client = self.clone();
-                    async move { client.get_output_status(&op.txid, op.vout as _).await }
-                })
-                .collect::<FuturesOrdered<_>>();
-
-            if handles.is_empty() {
-                break;
-            }
-
-            for op_status in handles.try_collect::<Vec<_>>().await?.into_iter().flatten() {
-                let spend_txid = match op_status.txid {
-                    Some(txid) => txid,
-                    None => continue,
-                };
-                if tx_graph.get_tx(spend_txid).is_none() {
-                    missing_txs.push(spend_txid);
-                }
-                if let Some(spend_status) = op_status.status {
-                    insert_anchor_from_status(&mut tx_graph, spend_txid, spend_status);
-                }
-            }
-        }
-
-        let _ = tx_graph.apply_update(
-            self.fetch_txs_with_txids(missing_txs, parallel_requests)
-                .await?,
-        );
-        Ok(tx_graph)
     }
 }
 
@@ -478,6 +235,235 @@ async fn chain_update<A: Anchor>(
     }
 
     Ok(tip)
+}
+
+/// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning
+/// `keychain_spks` against Esplora.
+///
+/// `keychain_spks` is an *unbounded* indexed-[`ScriptBuf`] iterator that represents scripts
+/// derived from a keychain. The scanning logic stops after a `stop_gap` number of consecutive
+/// scripts with no transaction history is reached. `parallel_requests` specifies the maximum
+/// number of HTTP requests to make in parallel.
+///
+/// A [`TxGraph`] (containing the fetched transactions and anchors) and the last active
+/// keychain index (if any) is returned. The last active keychain index is the keychain's last
+/// script pubkey that contains a non-empty transaction history.
+///
+/// Refer to [crate-level docs](crate) for more.
+async fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>> + Send>(
+    client: &esplora_client::AsyncClient,
+    mut keychain_spks: I,
+    stop_gap: usize,
+    parallel_requests: usize,
+) -> Result<(TxGraph<ConfirmationBlockTime>, Option<u32>), Error> {
+    type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
+
+    let mut tx_graph = TxGraph::default();
+    let mut last_index = Option::<u32>::None;
+    let mut last_active_index = Option::<u32>::None;
+
+    loop {
+        let handles = keychain_spks
+            .by_ref()
+            .take(parallel_requests)
+            .map(|(spk_index, spk)| {
+                let client = client.clone();
+                async move {
+                    let mut last_seen = None;
+                    let mut spk_txs = Vec::new();
+                    loop {
+                        let txs = client.scripthash_txs(&spk, last_seen).await?;
+                        let tx_count = txs.len();
+                        last_seen = txs.last().map(|tx| tx.txid);
+                        spk_txs.extend(txs);
+                        if tx_count < 25 {
+                            break Result::<_, Error>::Ok((spk_index, spk_txs));
+                        }
+                    }
+                }
+            })
+            .collect::<FuturesOrdered<_>>();
+
+        if handles.is_empty() {
+            break;
+        }
+
+        for (index, txs) in handles.try_collect::<Vec<TxsOfSpkIndex>>().await? {
+            last_index = Some(index);
+            if !txs.is_empty() {
+                last_active_index = Some(index);
+            }
+            for tx in txs {
+                let _ = tx_graph.insert_tx(tx.to_tx());
+                insert_anchor_from_status(&mut tx_graph, tx.txid, tx.status);
+                insert_prevouts(&mut tx_graph, tx.vin);
+            }
+        }
+
+        let last_index = last_index.expect("Must be set since handles wasn't empty.");
+        let gap_limit_reached = if let Some(i) = last_active_index {
+            last_index >= i.saturating_add(stop_gap as u32)
+        } else {
+            last_index + 1 >= stop_gap as u32
+        };
+        if gap_limit_reached {
+            break;
+        }
+    }
+
+    Ok((tx_graph, last_active_index))
+}
+
+/// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning `spks`
+/// against Esplora.
+///
+/// Unlike with [`EsploraAsyncExt::fetch_txs_with_keychain_spks`], `spks` must be *bounded* as
+/// all contained scripts will be scanned. `parallel_requests` specifies the maximum number of
+/// HTTP requests to make in parallel.
+///
+/// Refer to [crate-level docs](crate) for more.
+async fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf> + Send>(
+    client: &esplora_client::AsyncClient,
+    spks: I,
+    parallel_requests: usize,
+) -> Result<TxGraph<ConfirmationBlockTime>, Error>
+where
+    I::IntoIter: Send,
+{
+    fetch_txs_with_keychain_spks(
+        client,
+        spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
+        usize::MAX,
+        parallel_requests,
+    )
+    .await
+    .map(|(tx_graph, _)| tx_graph)
+}
+
+/// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning `txids`
+/// against Esplora.
+///
+/// `parallel_requests` specifies the maximum number of HTTP requests to make in parallel.
+///
+/// Refer to [crate-level docs](crate) for more.
+async fn fetch_txs_with_txids<I: IntoIterator<Item = Txid> + Send>(
+    client: &esplora_client::AsyncClient,
+    txids: I,
+    parallel_requests: usize,
+) -> Result<TxGraph<ConfirmationBlockTime>, Error>
+where
+    I::IntoIter: Send,
+{
+    enum EsploraResp {
+        TxStatus(TxStatus),
+        Tx(Option<Tx>),
+    }
+
+    let mut tx_graph = TxGraph::default();
+    let mut txids = txids.into_iter();
+    loop {
+        let handles = txids
+            .by_ref()
+            .take(parallel_requests)
+            .map(|txid| {
+                let client = client.clone();
+                let tx_already_exists = tx_graph.get_tx(txid).is_some();
+                async move {
+                    if tx_already_exists {
+                        client
+                            .get_tx_status(&txid)
+                            .await
+                            .map(|s| (txid, EsploraResp::TxStatus(s)))
+                    } else {
+                        client
+                            .get_tx_info(&txid)
+                            .await
+                            .map(|t| (txid, EsploraResp::Tx(t)))
+                    }
+                }
+            })
+            .collect::<FuturesOrdered<_>>();
+
+        if handles.is_empty() {
+            break;
+        }
+
+        for (txid, resp) in handles.try_collect::<Vec<_>>().await? {
+            match resp {
+                EsploraResp::TxStatus(status) => {
+                    insert_anchor_from_status(&mut tx_graph, txid, status);
+                }
+                EsploraResp::Tx(Some(tx_info)) => {
+                    let _ = tx_graph.insert_tx(tx_info.to_tx());
+                    insert_anchor_from_status(&mut tx_graph, txid, tx_info.status);
+                    insert_prevouts(&mut tx_graph, tx_info.vin);
+                }
+                _ => continue,
+            }
+        }
+    }
+    Ok(tx_graph)
+}
+
+/// Fetch transactions and [`ConfirmationBlockTime`]s that contain and spend the provided
+/// `outpoints`.
+///
+/// `parallel_requests` specifies the maximum number of HTTP requests to make in parallel.
+///
+/// Refer to [crate-level docs](crate) for more.
+async fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint> + Send>(
+    client: &esplora_client::AsyncClient,
+    outpoints: I,
+    parallel_requests: usize,
+) -> Result<TxGraph<ConfirmationBlockTime>, Error>
+where
+    I::IntoIter: Send,
+{
+    let outpoints = outpoints.into_iter().collect::<Vec<_>>();
+
+    // make sure txs exists in graph and tx statuses are updated
+    // TODO: We should maintain a tx cache (like we do with Electrum).
+    let mut tx_graph = fetch_txs_with_txids(
+        client,
+        outpoints.iter().copied().map(|op| op.txid),
+        parallel_requests,
+    )
+    .await?;
+
+    // get outpoint spend-statuses
+    let mut outpoints = outpoints.into_iter();
+    let mut missing_txs = Vec::<Txid>::with_capacity(outpoints.len());
+    loop {
+        let handles = outpoints
+            .by_ref()
+            .take(parallel_requests)
+            .map(|op| {
+                let client = client.clone();
+                async move { client.get_output_status(&op.txid, op.vout as _).await }
+            })
+            .collect::<FuturesOrdered<_>>();
+
+        if handles.is_empty() {
+            break;
+        }
+
+        for op_status in handles.try_collect::<Vec<_>>().await?.into_iter().flatten() {
+            let spend_txid = match op_status.txid {
+                Some(txid) => txid,
+                None => continue,
+            };
+            if tx_graph.get_tx(spend_txid).is_none() {
+                missing_txs.push(spend_txid);
+            }
+            if let Some(spend_status) = op_status.status {
+                insert_anchor_from_status(&mut tx_graph, spend_txid, spend_status);
+            }
+        }
+    }
+
+    let _ =
+        tx_graph.apply_update(fetch_txs_with_txids(client, missing_txs, parallel_requests).await?);
+    Ok(tx_graph)
 }
 
 #[cfg(test)]

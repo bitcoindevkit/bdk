@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use bdk_chain::{
-    bitcoin::{Address, Network, Txid},
+    bitcoin::Network,
     collections::BTreeSet,
     indexed_tx_graph,
     spk_client::{FullScanRequest, SyncRequest},
@@ -139,8 +139,9 @@ fn main() -> anyhow::Result<()> {
                 let graph = &*graph.lock().unwrap();
                 let chain = &*chain.lock().unwrap();
 
-                FullScanRequest::from_chain_tip(chain.tip())
-                    .set_spks_for_keychain(
+                FullScanRequest::builder()
+                    .chain_tip(chain.tip())
+                    .spks_for_keychain(
                         Keychain::External,
                         graph
                             .index
@@ -148,7 +149,7 @@ fn main() -> anyhow::Result<()> {
                             .into_iter()
                             .flatten(),
                     )
-                    .set_spks_for_keychain(
+                    .spks_for_keychain(
                         Keychain::Internal,
                         graph
                             .index
@@ -156,7 +157,7 @@ fn main() -> anyhow::Result<()> {
                             .into_iter()
                             .flatten(),
                     )
-                    .inspect_spks_for_all_keychains({
+                    .inspect({
                         let mut once = BTreeSet::new();
                         move |k, spk_i, _| {
                             if once.insert(k) {
@@ -199,98 +200,54 @@ fn main() -> anyhow::Result<()> {
             }
 
             let chain_tip = chain.tip();
-            let mut request = SyncRequest::from_chain_tip(chain_tip.clone());
+            let mut request =
+                SyncRequest::builder()
+                    .chain_tip(chain_tip.clone())
+                    .inspect(|item, progress| {
+                        let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
+                        eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
+                    });
 
             if all_spks {
-                let all_spks = graph
-                    .index
-                    .revealed_spks(..)
-                    .map(|(index, spk)| (index, spk.to_owned()))
-                    .collect::<Vec<_>>();
-                request = request.chain_spks(all_spks.into_iter().map(|((k, spk_i), spk)| {
-                    eprint!("Scanning {}: {}", k, spk_i);
-                    spk
-                }));
+                request = request.spks_with_labels(
+                    graph
+                        .index
+                        .revealed_spks(..)
+                        .map(|(index, spk)| (index, spk.to_owned())),
+                );
             }
             if unused_spks {
-                let unused_spks = graph
-                    .index
-                    .unused_spks()
-                    .map(|(index, spk)| (index, spk.to_owned()))
-                    .collect::<Vec<_>>();
-                request =
-                    request.chain_spks(unused_spks.into_iter().map(move |((k, spk_i), spk)| {
-                        eprint!(
-                            "Checking if address {} {}:{} has been used",
-                            Address::from_script(&spk, network).unwrap(),
-                            k,
-                            spk_i,
-                        );
-                        spk
-                    }));
+                request = request.spks_with_labels(
+                    graph
+                        .index
+                        .unused_spks()
+                        .map(|(index, spk)| (index, spk.to_owned())),
+                );
             }
 
             if utxos {
                 let init_outpoints = graph.index.outpoints();
-
-                let utxos = graph
-                    .graph()
-                    .filter_chain_unspents(
-                        &*chain,
-                        chain_tip.block_id(),
-                        init_outpoints.iter().cloned(),
-                    )
-                    .map(|(_, utxo)| utxo)
-                    .collect::<Vec<_>>();
-                request = request.chain_outpoints(utxos.into_iter().map(|utxo| {
-                    eprint!(
-                        "Checking if outpoint {} (value: {}) has been spent",
-                        utxo.outpoint, utxo.txout.value
-                    );
-                    utxo.outpoint
-                }));
+                request = request.outpoints(
+                    graph
+                        .graph()
+                        .filter_chain_unspents(
+                            &*chain,
+                            chain_tip.block_id(),
+                            init_outpoints.iter().cloned(),
+                        )
+                        .map(|(_, utxo)| utxo.outpoint),
+                );
             };
 
             if unconfirmed {
-                let unconfirmed_txids = graph
-                    .graph()
-                    .list_canonical_txs(&*chain, chain_tip.block_id())
-                    .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
-                    .map(|canonical_tx| canonical_tx.tx_node.txid)
-                    .collect::<Vec<Txid>>();
-
-                request = request.chain_txids(
-                    unconfirmed_txids
-                        .into_iter()
-                        .inspect(|txid| eprint!("Checking if {} is confirmed yet", txid)),
+                request = request.txids(
+                    graph
+                        .graph()
+                        .list_canonical_txs(&*chain, chain_tip.block_id())
+                        .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
+                        .map(|canonical_tx| canonical_tx.tx_node.txid),
                 );
             }
-
-            let total_spks = request.spks.len();
-            let total_txids = request.txids.len();
-            let total_ops = request.outpoints.len();
-            request = request
-                .inspect_spks({
-                    let mut visited = 0;
-                    move |_| {
-                        visited += 1;
-                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_spks as f32)
-                    }
-                })
-                .inspect_txids({
-                    let mut visited = 0;
-                    move |_| {
-                        visited += 1;
-                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_txids as f32)
-                    }
-                })
-                .inspect_outpoints({
-                    let mut visited = 0;
-                    move |_| {
-                        visited += 1;
-                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_ops as f32)
-                    }
-                });
 
             let res = client
                 .sync(request, scan_options.batch_size, false)
@@ -313,7 +270,7 @@ fn main() -> anyhow::Result<()> {
         let mut chain = chain.lock().unwrap();
         let mut graph = graph.lock().unwrap();
 
-        let chain_changeset = chain.apply_update(chain_update)?;
+        let chain_changeset = chain.apply_update(chain_update.expect("request has chain tip"))?;
 
         let mut indexed_tx_graph_changeset =
             indexed_tx_graph::ChangeSet::<ConfirmationBlockTime, _>::default();

@@ -1,10 +1,11 @@
+use core::f32;
 use std::{
     collections::BTreeSet,
     io::{self, Write},
 };
 
 use bdk_chain::{
-    bitcoin::{Address, Network, Txid},
+    bitcoin::Network,
     spk_client::{FullScanRequest, SyncRequest},
     Merge,
 };
@@ -144,8 +145,10 @@ fn main() -> anyhow::Result<()> {
             let request = {
                 let chain_tip = chain.lock().expect("mutex must not be poisoned").tip();
                 let indexed_graph = &*graph.lock().expect("mutex must not be poisoned");
-                FullScanRequest::from_keychain_txout_index(chain_tip, &indexed_graph.index)
-                    .inspect_spks_for_all_keychains({
+                FullScanRequest::builder()
+                    .chain_tip(chain_tip)
+                    .spks_from_indexer(&indexed_graph.index)
+                    .inspect({
                         let mut once = BTreeSet::<Keychain>::new();
                         move |keychain, spk_i, _| {
                             if once.insert(keychain) {
@@ -156,6 +159,7 @@ fn main() -> anyhow::Result<()> {
                             let _ = io::stderr().flush();
                         }
                     })
+                    .build()
             };
 
             // The client scans keychain spks for transaction histories, stopping after `stop_gap`
@@ -176,14 +180,17 @@ fn main() -> anyhow::Result<()> {
             // deriviation indices. Usually before a scan you are on a fresh wallet with no
             // addresses derived so we need to derive up to last active addresses the scan found
             // before adding the transactions.
-            (chain.apply_update(update.chain_update)?, {
-                let index_changeset = graph
-                    .index
-                    .reveal_to_target_multi(&update.last_active_indices);
-                let mut indexed_tx_graph_changeset = graph.apply_update(update.graph_update);
-                indexed_tx_graph_changeset.merge(index_changeset.into());
-                indexed_tx_graph_changeset
-            })
+            (
+                chain.apply_update(update.chain_update.expect("request included chain tip"))?,
+                {
+                    let index_changeset = graph
+                        .index
+                        .reveal_to_target_multi(&update.last_active_indices);
+                    let mut indexed_tx_graph_changeset = graph.apply_update(update.graph_update);
+                    indexed_tx_graph_changeset.merge(index_changeset.into());
+                    indexed_tx_graph_changeset
+                },
+            )
         }
         EsploraCommands::Sync {
             mut unused_spks,
@@ -206,7 +213,15 @@ fn main() -> anyhow::Result<()> {
 
             let local_tip = chain.lock().expect("mutex must not be poisoned").tip();
             // Spks, outpoints and txids we want updates on will be accumulated here.
-            let mut request = SyncRequest::from_chain_tip(local_tip.clone());
+            let mut request =
+                SyncRequest::builder()
+                    .chain_tip(local_tip.clone())
+                    .inspect(|item, progress| {
+                        let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
+                        eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
+                        // Flush early to ensure we print at every iteration.
+                        let _ = io::stderr().flush();
+                    });
 
             // Get a short lock on the structures to get spks, utxos, and txs that we are interested
             // in.
@@ -215,108 +230,51 @@ fn main() -> anyhow::Result<()> {
                 let chain = chain.lock().unwrap();
 
                 if *all_spks {
-                    let all_spks = graph
-                        .index
-                        .revealed_spks(..)
-                        .map(|((k, i), spk)| (k, i, spk.to_owned()))
-                        .collect::<Vec<_>>();
-                    request = request.chain_spks(all_spks.into_iter().map(|(k, i, spk)| {
-                        eprint!("scanning {}:{}", k, i);
-                        // Flush early to ensure we print at every iteration.
-                        let _ = io::stderr().flush();
-                        spk
-                    }));
+                    request = request.spks_with_labels(
+                        graph
+                            .index
+                            .revealed_spks(..)
+                            .map(|(i, spk)| (i, spk.to_owned())),
+                    );
                 }
                 if unused_spks {
-                    let unused_spks = graph
-                        .index
-                        .unused_spks()
-                        .map(|(index, spk)| (index, spk.to_owned()))
-                        .collect::<Vec<_>>();
-                    request =
-                        request.chain_spks(unused_spks.into_iter().map(move |((k, i), spk)| {
-                            eprint!(
-                                "Checking if address {} {}:{} has been used",
-                                Address::from_script(&spk, network).unwrap(),
-                                k,
-                                i,
-                            );
-                            // Flush early to ensure we print at every iteration.
-                            let _ = io::stderr().flush();
-                            spk
-                        }));
+                    request = request.spks_with_labels(
+                        graph
+                            .index
+                            .unused_spks()
+                            .map(|(index, spk)| (index, spk.to_owned())),
+                    );
                 }
                 if utxos {
                     // We want to search for whether the UTXO is spent, and spent by which
                     // transaction. We provide the outpoint of the UTXO to
                     // `EsploraExt::update_tx_graph_without_keychain`.
                     let init_outpoints = graph.index.outpoints();
-                    let utxos = graph
-                        .graph()
-                        .filter_chain_unspents(
-                            &*chain,
-                            local_tip.block_id(),
-                            init_outpoints.iter().cloned(),
-                        )
-                        .map(|(_, utxo)| utxo)
-                        .collect::<Vec<_>>();
-                    request = request.chain_outpoints(
-                        utxos
-                            .into_iter()
-                            .inspect(|utxo| {
-                                eprint!(
-                                    "Checking if outpoint {} (value: {}) has been spent",
-                                    utxo.outpoint, utxo.txout.value
-                                );
-                                // Flush early to ensure we print at every iteration.
-                                let _ = io::stderr().flush();
-                            })
-                            .map(|utxo| utxo.outpoint),
+                    request = request.outpoints(
+                        graph
+                            .graph()
+                            .filter_chain_unspents(
+                                &*chain,
+                                local_tip.block_id(),
+                                init_outpoints.iter().cloned(),
+                            )
+                            .map(|(_, utxo)| utxo.outpoint),
                     );
                 };
                 if unconfirmed {
                     // We want to search for whether the unconfirmed transaction is now confirmed.
                     // We provide the unconfirmed txids to
                     // `EsploraExt::update_tx_graph_without_keychain`.
-                    let unconfirmed_txids = graph
-                        .graph()
-                        .list_canonical_txs(&*chain, local_tip.block_id())
-                        .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
-                        .map(|canonical_tx| canonical_tx.tx_node.txid)
-                        .collect::<Vec<Txid>>();
-                    request = request.chain_txids(unconfirmed_txids.into_iter().inspect(|txid| {
-                        eprint!("Checking if {} is confirmed yet", txid);
-                        // Flush early to ensure we print at every iteration.
-                        let _ = io::stderr().flush();
-                    }));
+                    request = request.txids(
+                        graph
+                            .graph()
+                            .list_canonical_txs(&*chain, local_tip.block_id())
+                            .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
+                            .map(|canonical_tx| canonical_tx.tx_node.txid),
+                    );
                 }
             }
 
-            let total_spks = request.spks.len();
-            let total_txids = request.txids.len();
-            let total_ops = request.outpoints.len();
-            request = request
-                .inspect_spks({
-                    let mut visited = 0;
-                    move |_| {
-                        visited += 1;
-                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_spks as f32)
-                    }
-                })
-                .inspect_txids({
-                    let mut visited = 0;
-                    move |_| {
-                        visited += 1;
-                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_txids as f32)
-                    }
-                })
-                .inspect_outpoints({
-                    let mut visited = 0;
-                    move |_| {
-                        visited += 1;
-                        eprintln!(" [ {:>6.2}% ]", (visited * 100) as f32 / total_ops as f32)
-                    }
-                });
             let mut update = client.sync(request, scan_options.parallel_requests)?;
 
             // Update last seen unconfirmed
@@ -324,7 +282,10 @@ fn main() -> anyhow::Result<()> {
             let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
             (
-                chain.lock().unwrap().apply_update(update.chain_update)?,
+                chain
+                    .lock()
+                    .unwrap()
+                    .apply_update(update.chain_update.expect("request has chain tip"))?,
                 graph.lock().unwrap().apply_update(update.graph_update),
             )
         }

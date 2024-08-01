@@ -126,17 +126,22 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// [`Wallet.calculate_fee_rate`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
     pub fn full_scan<K: Ord + Clone>(
         &self,
-        request: FullScanRequest<K>,
+        request: impl Into<FullScanRequest<K>>,
         stop_gap: usize,
         batch_size: usize,
         fetch_prev_txouts: bool,
     ) -> Result<FullScanResult<K>, Error> {
-        let (tip, latest_blocks) =
-            fetch_tip_and_latest_blocks(&self.inner, request.chain_tip.clone())?;
-        let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
-        let mut last_active_indices = BTreeMap::<K, u32>::new();
+        let mut request: FullScanRequest<K> = request.into();
 
-        for (keychain, spks) in request.spks_by_keychain {
+        let tip_and_latest_blocks = match request.chain_tip() {
+            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            None => None,
+        };
+
+        let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
+        let mut last_active_indices = BTreeMap::<K, u32>::default();
+        for keychain in request.keychains() {
+            let spks = request.iter_spks(keychain.clone());
             if let Some(last_active_index) =
                 self.populate_with_spks(&mut graph_update, spks, stop_gap, batch_size)?
             {
@@ -144,12 +149,19 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             }
         }
 
-        let chain_update = chain_update(tip, &latest_blocks, graph_update.all_anchors())?;
-
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
             self.fetch_prev_txout(&mut graph_update)?;
         }
+
+        let chain_update = match tip_and_latest_blocks {
+            Some((chain_tip, latest_blocks)) => Some(chain_update(
+                chain_tip,
+                &latest_blocks,
+                graph_update.all_anchors(),
+            )?),
+            _ => None,
+        };
 
         Ok(FullScanResult {
             graph_update,
@@ -180,35 +192,52 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// [`CalculateFeeError::MissingTxOut`]: bdk_chain::tx_graph::CalculateFeeError::MissingTxOut
     /// [`Wallet.calculate_fee`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee
     /// [`Wallet.calculate_fee_rate`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
-    pub fn sync(
+    pub fn sync<I: 'static>(
         &self,
-        request: SyncRequest,
+        request: impl Into<SyncRequest<I>>,
         batch_size: usize,
         fetch_prev_txouts: bool,
     ) -> Result<SyncResult, Error> {
-        let full_scan_req = FullScanRequest::from_chain_tip(request.chain_tip.clone())
-            .set_spks_for_keychain((), request.spks.enumerate().map(|(i, spk)| (i as u32, spk)));
-        let mut full_scan_res = self.full_scan(full_scan_req, usize::MAX, batch_size, false)?;
-        let (tip, latest_blocks) =
-            fetch_tip_and_latest_blocks(&self.inner, request.chain_tip.clone())?;
+        let mut request: SyncRequest<I> = request.into();
 
-        self.populate_with_txids(&mut full_scan_res.graph_update, request.txids)?;
-        self.populate_with_outpoints(&mut full_scan_res.graph_update, request.outpoints)?;
+        let tip_and_latest_blocks = match request.chain_tip() {
+            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            None => None,
+        };
 
-        let chain_update = chain_update(
-            tip,
-            &latest_blocks,
-            full_scan_res.graph_update.all_anchors(),
-        )?;
+        let full_scan_request = FullScanRequest::builder()
+            .spks_for_keychain(
+                (),
+                request
+                    .iter_spks()
+                    .enumerate()
+                    .map(|(i, spk)| (i as u32, spk))
+                    .collect::<Vec<_>>(),
+            )
+            .build();
+        let mut graph_update = self
+            .full_scan(full_scan_request, usize::MAX, batch_size, false)?
+            .graph_update;
+        self.populate_with_txids(&mut graph_update, request.iter_txids())?;
+        self.populate_with_outpoints(&mut graph_update, request.iter_outpoints())?;
 
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
-            self.fetch_prev_txout(&mut full_scan_res.graph_update)?;
+            self.fetch_prev_txout(&mut graph_update)?;
         }
 
+        let chain_update = match tip_and_latest_blocks {
+            Some((chain_tip, latest_blocks)) => Some(chain_update(
+                chain_tip,
+                &latest_blocks,
+                graph_update.all_anchors(),
+            )?),
+            None => None,
+        };
+
         Ok(SyncResult {
+            graph_update,
             chain_update,
-            graph_update: full_scan_res.graph_update,
         })
     }
 
