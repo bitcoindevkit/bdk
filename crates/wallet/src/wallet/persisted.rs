@@ -154,7 +154,7 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for LoadWithPersistError<E>
 pub enum CreateWithPersistError<E> {
     /// Error from persistence.
     Persist(E),
-    /// Occurs when the loaded changeset cannot contruct [`Wallet`].
+    /// Occurs when the loaded changeset cannot construct [`Wallet`].
     Descriptor(DescriptorError),
 }
 
