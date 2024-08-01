@@ -93,7 +93,6 @@ impl ChangeSet {
         Self::init_wallet_sqlite_tables(db_tx)?;
         use chain::rusqlite::OptionalExtension;
         use chain::Impl;
-        use miniscript::{Descriptor, DescriptorPublicKey};
 
         let mut changeset = Self::default();
 
