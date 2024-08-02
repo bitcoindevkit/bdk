@@ -110,14 +110,7 @@ impl<K: Clone + Ord + core::fmt::Debug + Send + Sync> SyncRequestBuilder<(K, u32
         indexer: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
         spk_range: impl core::ops::RangeBounds<K>,
     ) -> Self {
-        use crate::alloc::borrow::ToOwned;
-        use crate::alloc::vec::Vec;
-        self.spks_with_labels(
-            indexer
-                .revealed_spks(spk_range)
-                .map(|(i, spk)| (i, spk.to_owned()))
-                .collect::<Vec<_>>(),
-        )
+        self.spks_with_labels(indexer.revealed_spks(spk_range))
     }
 
     /// Add [`Script`]s that are revealed by the `indexer` but currently unused.
@@ -125,14 +118,7 @@ impl<K: Clone + Ord + core::fmt::Debug + Send + Sync> SyncRequestBuilder<(K, u32
         self,
         indexer: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
     ) -> Self {
-        use crate::alloc::borrow::ToOwned;
-        use crate::alloc::vec::Vec;
-        self.spks_with_labels(
-            indexer
-                .unused_spks()
-                .map(|(i, spk)| (i, spk.to_owned()))
-                .collect::<Vec<_>>(),
-        )
+        self.spks_with_labels(indexer.unused_spks())
     }
 }
 

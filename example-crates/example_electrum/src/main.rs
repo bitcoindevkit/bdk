@@ -231,22 +231,11 @@ fn main() -> anyhow::Result<()> {
                     });
 
             if all_spks {
-                request = request.spks_with_labels(
-                    graph
-                        .index
-                        .revealed_spks(..)
-                        .map(|(index, spk)| (index, spk.to_owned())),
-                );
+                request = request.spks_with_labels(graph.index.revealed_spks(..));
             }
             if unused_spks {
-                request = request.spks_with_labels(
-                    graph
-                        .index
-                        .unused_spks()
-                        .map(|(index, spk)| (index, spk.to_owned())),
-                );
+                request = request.spks_with_labels(graph.index.unused_spks());
             }
-
             if utxos {
                 let init_outpoints = graph.index.outpoints();
                 request = request.outpoints(
@@ -260,7 +249,6 @@ fn main() -> anyhow::Result<()> {
                         .map(|(_, utxo)| utxo.outpoint),
                 );
             };
-
             if unconfirmed {
                 request = request.txids(
                     graph
