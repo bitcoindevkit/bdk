@@ -57,10 +57,9 @@ fn main() -> Result<(), anyhow::Error> {
         let mut once = HashSet::<KeychainKind>::new();
         move |k, spk_i, _| {
             if once.insert(k) {
-                print!("\nScanning keychain [{:?}]", k)
-            } else {
-                print!(" {:<3}", spk_i)
+                print!("\nScanning keychain [{:?}]", k);
             }
+            print!(" {:<3}", spk_i);
             stdout.flush().expect("must flush");
         }
     });

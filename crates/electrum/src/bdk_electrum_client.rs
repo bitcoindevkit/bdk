@@ -205,19 +205,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             None => None,
         };
 
-        let full_scan_request = FullScanRequest::builder()
-            .spks_for_keychain(
-                (),
-                request
-                    .iter_spks()
-                    .enumerate()
-                    .map(|(i, spk)| (i as u32, spk))
-                    .collect::<Vec<_>>(),
-            )
-            .build();
-        let mut graph_update = self
-            .full_scan(full_scan_request, usize::MAX, batch_size, false)?
-            .graph_update;
+        let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
+        self.populate_with_spks(
+            &mut graph_update,
+            request
+                .iter_spks()
+                .enumerate()
+                .map(|(i, spk)| (i as u32, spk)),
+            usize::MAX,
+            batch_size,
+        )?;
         self.populate_with_txids(&mut graph_update, request.iter_txids())?;
         self.populate_with_outpoints(&mut graph_update, request.iter_outpoints())?;
 

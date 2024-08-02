@@ -230,20 +230,10 @@ fn main() -> anyhow::Result<()> {
                 let chain = chain.lock().unwrap();
 
                 if *all_spks {
-                    request = request.spks_with_labels(
-                        graph
-                            .index
-                            .revealed_spks(..)
-                            .map(|(i, spk)| (i, spk.to_owned())),
-                    );
+                    request = request.spks_with_labels(graph.index.revealed_spks(..));
                 }
                 if unused_spks {
-                    request = request.spks_with_labels(
-                        graph
-                            .index
-                            .unused_spks()
-                            .map(|(index, spk)| (index, spk.to_owned())),
-                    );
+                    request = request.spks_with_labels(graph.index.unused_spks());
                 }
                 if utxos {
                     // We want to search for whether the UTXO is spent, and spent by which
