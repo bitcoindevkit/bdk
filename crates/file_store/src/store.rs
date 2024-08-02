@@ -117,6 +117,19 @@ where
         }
     }
 
+    /// Iterates over the stored **versioned** changesets from first to last, changing the seek
+    /// position at each iteration.
+    ///
+    /// The iterator may fail to read an entry and therefore return an error. However, the first time
+    /// it returns an error will be the last. After doing so, the iterator will always yield `None`.
+    ///
+    /// **WARNING**: This method changes the write position in the underlying file. You should
+    /// always iterate over all entries until `None` is returned if you want your next write to go
+    /// at the end; otherwise, you will write over existing entries.
+    pub fn iter_versioned_changesets(&mut self) -> EntryIter<V> {
+        EntryIter::new(self.magic_len as u64, &mut self.db_file)
+    }
+
     /// Iterates over the stored changeset from first to last, changing the seek position at each
     /// iteration.
     ///
@@ -126,7 +139,7 @@ where
     /// **WARNING**: This method changes the write position in the underlying file. You should
     /// always iterate over all entries until `None` is returned if you want your next write to go
     /// at the end; otherwise, you will write over existing entries.
-    pub fn iter_changesets(&mut self) -> EntryIter<V> {
+    pub fn iter_changesets(&mut self) -> EntryIter<C> {
         EntryIter::new(self.magic_len as u64, &mut self.db_file)
     }
 
@@ -158,13 +171,13 @@ where
                 }),
             };
         // Prepare C changeset deserializer
-        let unversioned_parsed_changeset =
-            EntryIter::<C>::new(self.magic_len as u64, &mut self.db_file)
-                .try_fold(Option::<C>::None, changeset_aggregator);
+        let unversioned_parsed_changeset = self
+            .iter_changesets()
+            .try_fold(Option::<C>::None, changeset_aggregator);
 
         // But try first versioned V changeset deserializer and if it fails, proceed with C
         // unversioned deserializer
-        self.iter_changesets()
+        self.iter_versioned_changesets()
             .try_fold(Option::<C>::None, |acc, x| {
                 changeset_aggregator(acc, x.map(|v| v.into()))
             })
