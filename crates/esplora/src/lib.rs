@@ -17,7 +17,7 @@
 //! # Async
 //!
 //! Just like how [`EsploraExt`] extends the functionality of an
-//! [`esplora_client::BlockingClient`], [`EsploraExt`] is the async version which extends
+//! [`esplora_client::BlockingClient`], [`EsploraAsyncExt`] is the async version which extends
 //! [`esplora_client::AsyncClient`].
 //!
 //! [`TxGraph`]: bdk_chain::tx_graph::TxGraph
