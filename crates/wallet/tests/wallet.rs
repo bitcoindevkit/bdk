@@ -166,8 +166,16 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
 
     run(
         "store.db",
-        |path| Ok(bdk_file_store::Store::create_new(DB_MAGIC, path)?),
-        |path| Ok(bdk_file_store::Store::open(DB_MAGIC, path)?),
+        |path| {
+            Ok(
+                bdk_file_store::Store::<_, bdk_wallet::VersionedChangeSet>::create_new(
+                    DB_MAGIC, path,
+                )?,
+            )
+        },
+        |path| {
+            Ok(bdk_file_store::Store::<_, bdk_wallet::VersionedChangeSet>::open(DB_MAGIC, path)?)
+        },
     )?;
     run::<bdk_chain::rusqlite::Connection, _, _>(
         "store.sqlite",
@@ -253,8 +261,16 @@ fn wallet_load_checks() -> anyhow::Result<()> {
 
     run(
         "store.db",
-        |path| Ok(bdk_file_store::Store::create_new(DB_MAGIC, path)?),
-        |path| Ok(bdk_file_store::Store::open(DB_MAGIC, path)?),
+        |path| {
+            Ok(
+                bdk_file_store::Store::<_, bdk_wallet::VersionedChangeSet>::create_new(
+                    DB_MAGIC, path,
+                )?,
+            )
+        },
+        |path| {
+            Ok(bdk_file_store::Store::<_, bdk_wallet::VersionedChangeSet>::open(DB_MAGIC, path)?)
+        },
     )?;
     run(
         "store.sqlite",

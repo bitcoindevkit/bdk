@@ -88,7 +88,9 @@ impl chain::PersistWith<bdk_chain::rusqlite::Connection> for Wallet {
 }
 
 #[cfg(feature = "file_store")]
-impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
+impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet, crate::VersionedChangeSet>>
+    for Wallet
+{
     type CreateParams = crate::CreateParams;
     type LoadParams = crate::LoadParams;
     type CreateError = CreateWithPersistError<std::io::Error>;
@@ -97,7 +99,7 @@ impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
     type PersistError = std::io::Error;
 
     fn create(
-        db: &mut bdk_file_store::Store<crate::ChangeSet>,
+        db: &mut bdk_file_store::Store<crate::ChangeSet, crate::VersionedChangeSet>,
         params: Self::CreateParams,
     ) -> Result<Self, Self::CreateError> {
         let mut wallet =
@@ -110,7 +112,7 @@ impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
     }
 
     fn load(
-        db: &mut bdk_file_store::Store<crate::ChangeSet>,
+        db: &mut bdk_file_store::Store<crate::ChangeSet, crate::VersionedChangeSet>,
         params: Self::LoadParams,
     ) -> Result<Option<Self>, Self::LoadError> {
         let changeset = db
@@ -121,7 +123,7 @@ impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
     }
 
     fn persist(
-        db: &mut bdk_file_store::Store<crate::ChangeSet>,
+        db: &mut bdk_file_store::Store<crate::ChangeSet, crate::VersionedChangeSet>,
         changeset: &<Self as chain::Staged>::ChangeSet,
     ) -> Result<(), Self::PersistError> {
         db.append_changeset(changeset)

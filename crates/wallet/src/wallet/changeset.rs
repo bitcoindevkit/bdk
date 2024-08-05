@@ -207,3 +207,31 @@ impl From<keychain_txout::ChangeSet> for ChangeSet {
         }
     }
 }
+
+/// An enum to allow retro and forward compatibility while deserializing ChangeSets
+#[derive(serde::Deserialize, serde::Serialize)]
+pub enum VersionedChangeSet {
+    /// The first ChangeSet version. Should be renamed if deprecated by new ones
+    V1(ChangeSet),
+}
+
+/// VersionedChangeSet::default should always return the current version
+impl Default for VersionedChangeSet {
+    fn default() -> Self {
+        Self::V1(ChangeSet::default())
+    }
+}
+
+impl From<VersionedChangeSet> for ChangeSet {
+    fn from(versioned_change_set: VersionedChangeSet) -> Self {
+        match versioned_change_set {
+            VersionedChangeSet::V1(changeset) => changeset,
+        }
+    }
+}
+
+impl From<ChangeSet> for VersionedChangeSet {
+    fn from(changeset: ChangeSet) -> Self {
+        VersionedChangeSet::V1(changeset)
+    }
+}

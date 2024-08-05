@@ -57,7 +57,9 @@ that the `Wallet` can use to update its view of the chain.
 
 ## Persistence
 
-To persist `Wallet` state data use a data store crate that reads and writes [`ChangeSet`].
+To persist `Wallet` state data use a data store crate that reads and writes
+[`ChangeSet`]. If you want to preserve compatibility between [`ChangeSet`]s and
+code versions use [`VersionedChangeSet`] additionally.
 
 **Implementations**
 
@@ -96,6 +98,16 @@ let receive_address = wallet.reveal_next_address(KeychainKind::External);
 // Persist staged wallet data changes to the file store.
 wallet.persist(&mut db).expect("persist");
 println!("Your new receive address is: {}", receive_address.address);
+```
+
+To preserve compatibility with [`VersionedChangeSet`]:
+
+```rust
+use bdk_wallet::{bitcoin::Network, KeychainKind, VersionedChangeSet, ChangeSet, Wallet};
+// Open or create a new file store for wallet data.
+let mut db =
+    bdk_file_store::Store::<ChangeSet, VersionedChangeSet>::open_or_create_new(b"magic_bytes", "/tmp/my_wallet.db")
+        .expect("create store");
 ```
 
 <!-- ### Sync the balance of a descriptor -->

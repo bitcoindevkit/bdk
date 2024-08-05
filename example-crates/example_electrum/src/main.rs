@@ -1,14 +1,9 @@
-use std::{
-    io::{self, Write},
-    sync::Mutex,
-};
+use std::io::{self, Write};
 
 use bdk_chain::{
-    bitcoin::{constants::genesis_block, Address, Network, Txid},
+    bitcoin::{Address, Network, Txid},
     collections::BTreeSet,
-    indexed_tx_graph::{self, IndexedTxGraph},
-    indexer::keychain_txout,
-    local_chain::{self, LocalChain},
+    indexed_tx_graph,
     spk_client::{FullScanRequest, SyncRequest},
     ConfirmationBlockTime, Merge,
 };
@@ -17,9 +12,10 @@ use bdk_electrum::{
     BdkElectrumClient,
 };
 use example_cli::{
+    self,
     anyhow::{self, Context},
     clap::{self, Parser, Subcommand},
-    Keychain,
+    ChangeSet, Keychain,
 };
 
 const DB_MAGIC: &[u8] = b"bdk_example_electrum";
@@ -98,46 +94,28 @@ pub struct ScanOptions {
     pub batch_size: usize,
 }
 
-type ChangeSet = (
-    local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
-);
-
 fn main() -> anyhow::Result<()> {
     let example_cli::Init {
         args,
-        keymap,
-        index,
+        graph,
+        chain,
         db,
-        init_changeset,
-    } = example_cli::init::<ElectrumCommands, ElectrumArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
-
-    let (disk_local_chain, disk_tx_graph) = init_changeset;
-
-    let graph = Mutex::new({
-        let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(disk_tx_graph);
-        graph
-    });
-
-    let chain = Mutex::new({
-        let genesis_hash = genesis_block(args.network).block_hash();
-        let (mut chain, _) = LocalChain::from_genesis_hash(genesis_hash);
-        chain.apply_changeset(&disk_local_chain)?;
-        chain
-    });
+        network,
+    } = match example_cli::init_or_load::<ElectrumCommands, ElectrumArgs>(DB_MAGIC, DB_PATH)? {
+        Some(init) => init,
+        None => return Ok(()),
+    };
 
     let electrum_cmd = match &args.command {
         example_cli::Commands::ChainSpecific(electrum_cmd) => electrum_cmd,
         general_cmd => {
             return example_cli::handle_commands(
                 &graph,
-                &db,
                 &chain,
-                &keymap,
-                args.network,
+                &db,
+                network,
                 |electrum_args, tx| {
-                    let client = electrum_args.client(args.network)?;
+                    let client = electrum_args.client(network)?;
                     client.transaction_broadcast(tx)?;
                     Ok(())
                 },
@@ -146,7 +124,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(args.network)?);
+    let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(network)?);
 
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download them
     client.populate_tx_cache(&*graph.lock().unwrap());
@@ -244,7 +222,7 @@ fn main() -> anyhow::Result<()> {
                     request.chain_spks(unused_spks.into_iter().map(move |((k, spk_i), spk)| {
                         eprint!(
                             "Checking if address {} {}:{} has been used",
-                            Address::from_script(&spk, args.network).unwrap(),
+                            Address::from_script(&spk, network).unwrap(),
                             k,
                             spk_i,
                         );
@@ -345,7 +323,12 @@ fn main() -> anyhow::Result<()> {
         }
         indexed_tx_graph_changeset.merge(graph.apply_update(graph_update));
 
-        (chain_changeset, indexed_tx_graph_changeset)
+        ChangeSet {
+            local_chain: chain_changeset,
+            tx_graph: indexed_tx_graph_changeset.tx_graph,
+            indexer: indexed_tx_graph_changeset.indexer,
+            ..Default::default()
+        }
     };
 
     let mut db = db.lock().unwrap();
