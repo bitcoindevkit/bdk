@@ -10,6 +10,8 @@
 // licenses.
 
 use alloc::boxed::Box;
+#[cfg(feature = "labels")]
+use alloc::string::String;
 use core::convert::AsRef;
 
 use bdk_chain::ConfirmationTime;
@@ -63,6 +65,46 @@ pub struct LocalOutput {
     pub derivation_index: u32,
     /// The confirmation time for transaction containing this utxo
     pub confirmation_time: ConfirmationTime,
+    #[cfg(feature = "labels")]
+    /// The label for this UTXO according to
+    /// [BIP 329](https://github.com/bitcoin/bips/blob/master/bip-0329.mediawiki)
+    /// format
+    pub label: Option<Label>,
+}
+
+#[cfg(feature = "labels")]
+/// A label for a [`LocalOutput`], used to identify the purpose of the UTXO.
+///
+/// # Note
+///
+/// The labels follow the [BIP 329](https://github.com/bitcoin/bips/blob/master/bip-0329.mediawiki)
+/// export/import format.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive] // We might add more types in the future
+pub enum Label {
+    /// Input Outpoint: Transaction id and input index separated by a colon
+    Input(String),
+    /// Output Outpoint: Transaction id and input index separated by a colon
+    Output(String),
+}
+
+#[cfg(feature = "labels")]
+impl Label {
+    /// Gets the [`Label`]
+    pub fn label(&self) -> &str {
+        match self {
+            Label::Input(s) => s,
+            Label::Output(s) => s,
+        }
+    }
+
+    /// Edits the [`Label`]
+    pub fn edit(&mut self, new_label: String) {
+        match self {
+            Label::Input(s) => *s = new_label,
+            Label::Output(s) => *s = new_label,
+        }
+    }
 }
 
 /// A [`Utxo`] with its `satisfaction_weight`.
