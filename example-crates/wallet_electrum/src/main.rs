@@ -27,7 +27,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     let wallet_opt = Wallet::load()
         .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
-        .network(NETWORK)
+        .check_network(NETWORK)
         .load_wallet(&mut db)?;
     let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
