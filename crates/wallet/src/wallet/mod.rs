@@ -482,7 +482,7 @@ impl Wallet {
     ///     .keymap(KeychainKind::External, external_keymap)
     ///     .keymap(KeychainKind::Internal, internal_keymap)
     ///     // ensure loaded wallet's genesis hash matches this value
-    ///     .genesis_hash(genesis_hash)
+    ///     .check_genesis_hash(genesis_hash)
     ///     // set a lookahead for our indexer
     ///     .lookahead(101)
     ///     .load_wallet(&mut conn)?

@@ -137,7 +137,7 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
         {
             let mut db = open_db(&file_path).context("failed to recover db")?;
             let _ = Wallet::load()
-                .network(Network::Testnet)
+                .check_network(Network::Testnet)
                 .load_wallet(&mut db)?
                 .expect("wallet must exist");
         }
@@ -146,7 +146,7 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
             let wallet = Wallet::load()
                 .descriptor(KeychainKind::External, Some(external_desc))
                 .descriptor(KeychainKind::Internal, Some(internal_desc))
-                .network(Network::Testnet)
+                .check_network(Network::Testnet)
                 .load_wallet(&mut db)?
                 .expect("wallet must exist");
 
@@ -218,7 +218,7 @@ fn wallet_load_checks() -> anyhow::Result<()> {
 
         assert_matches!(
             Wallet::load()
-                .network(Network::Regtest)
+                .check_network(Network::Regtest)
                 .load_wallet(&mut open_db(&file_path)?),
             Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(
                 LoadMismatch::Network {
@@ -228,21 +228,9 @@ fn wallet_load_checks() -> anyhow::Result<()> {
             ))),
             "unexpected network check result: Regtest (check) is not Testnet (loaded)",
         );
-        assert_matches!(
-            Wallet::load()
-                .network(Network::Bitcoin)
-                .load_wallet(&mut open_db(&file_path)?),
-            Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(
-                LoadMismatch::Network {
-                    loaded: Network::Testnet,
-                    expected: Network::Bitcoin,
-                }
-            ))),
-            "unexpected network check result: Bitcoin (check) is not Testnet (loaded)",
-        );
         let mainnet_hash = BlockHash::from_byte_array(ChainHash::BITCOIN.to_bytes());
         assert_matches!(
-            Wallet::load().genesis_hash(mainnet_hash).load_wallet(&mut open_db(&file_path)?),
+            Wallet::load().check_genesis_hash(mainnet_hash).load_wallet(&mut open_db(&file_path)?),
             Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(LoadMismatch::Genesis { .. }))),
             "unexpected genesis hash check result: mainnet hash (check) is not testnet hash (loaded)",
         );

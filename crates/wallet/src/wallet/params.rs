@@ -194,14 +194,14 @@ impl LoadParams {
         self
     }
 
-    /// Check for `network`.
-    pub fn network(mut self, network: Network) -> Self {
+    /// Checks that the given network matches the one loaded from persistence.
+    pub fn check_network(mut self, network: Network) -> Self {
         self.check_network = Some(network);
         self
     }
 
-    /// Check for a `genesis_hash`.
-    pub fn genesis_hash(mut self, genesis_hash: BlockHash) -> Self {
+    /// Checks that the given `genesis_hash` matches the one loaded from persistence.
+    pub fn check_genesis_hash(mut self, genesis_hash: BlockHash) -> Self {
         self.check_genesis_hash = Some(genesis_hash);
         self
     }
