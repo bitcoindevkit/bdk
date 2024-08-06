@@ -56,28 +56,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("Compiled into Descriptor: \n{}", descriptor);
 
-    // Do the same for another (internal) keychain
-    let policy_str = "or(
-        10@thresh(2,
-            pk(029ffbe722b147f3035c87cb1c60b9a5947dd49c774cc31e94773478711a929ac0),pk(025f05815e3a1a8a83bfbb03ce016c9a2ee31066b98f567f6227df1d76ec4bd143),pk(025625f41e4a065efc06d5019cbbd56fe8c07595af1231e7cbc03fafb87ebb71ec)
-        ),1@and(
-            pk(03deae92101c790b12653231439f27b8897264125ecb2f46f48278603102573165),
-            older(12960)
-        )
-    )"
-    .replace(&[' ', '\n', '\t'][..], "");
-
-    println!("Compiling internal policy: \n{}", policy_str);
-
-    let policy = Concrete::<String>::from_str(&policy_str)?;
-    let internal_descriptor = Descriptor::new_wsh(policy.compile()?)?.to_string();
-    println!(
-        "Compiled into internal Descriptor: \n{}",
-        internal_descriptor
-    );
-
     // Create a new wallet from descriptors
-    let mut wallet = Wallet::create(descriptor, internal_descriptor)
+    let mut wallet = Wallet::create_single(descriptor)
         .network(Network::Regtest)
         .create_wallet_no_persist()?;
 
