@@ -32,7 +32,7 @@ where
 pub struct CreateParams {
     pub(crate) descriptor: DescriptorToExtract,
     pub(crate) descriptor_keymap: KeyMap,
-    pub(crate) change_descriptor: DescriptorToExtract,
+    pub(crate) change_descriptor: Option<DescriptorToExtract>,
     pub(crate) change_descriptor_keymap: KeyMap,
     pub(crate) network: Network,
     pub(crate) genesis_hash: Option<BlockHash>,
@@ -40,14 +40,39 @@ pub struct CreateParams {
 }
 
 impl CreateParams {
-    /// Construct parameters with provided `descriptor`, `change_descriptor` and `network`.
+    /// Construct parameters with provided `descriptor`.
     ///
-    /// Default values: `genesis_hash` = `None`, `lookahead` = [`DEFAULT_LOOKAHEAD`]
+    /// Default values:
+    /// * `change_descriptor` = `None`
+    /// * `network` = [`Network::Bitcoin`]
+    /// * `genesis_hash` = `None`
+    /// * `lookahead` = [`DEFAULT_LOOKAHEAD`]
+    ///
+    /// Use this method only when building a wallet with a single descriptor. See
+    /// also [`Wallet::create_single`].
+    pub fn new_single<D: IntoWalletDescriptor + 'static>(descriptor: D) -> Self {
+        Self {
+            descriptor: make_descriptor_to_extract(descriptor),
+            descriptor_keymap: KeyMap::default(),
+            change_descriptor: None,
+            change_descriptor_keymap: KeyMap::default(),
+            network: Network::Bitcoin,
+            genesis_hash: None,
+            lookahead: DEFAULT_LOOKAHEAD,
+        }
+    }
+
+    /// Construct parameters with provided `descriptor` and `change_descriptor`.
+    ///
+    /// Default values:
+    /// * `network` = [`Network::Bitcoin`]
+    /// * `genesis_hash` = `None`
+    /// * `lookahead` = [`DEFAULT_LOOKAHEAD`]
     pub fn new<D: IntoWalletDescriptor + 'static>(descriptor: D, change_descriptor: D) -> Self {
         Self {
             descriptor: make_descriptor_to_extract(descriptor),
             descriptor_keymap: KeyMap::default(),
-            change_descriptor: make_descriptor_to_extract(change_descriptor),
+            change_descriptor: Some(make_descriptor_to_extract(change_descriptor)),
             change_descriptor_keymap: KeyMap::default(),
             network: Network::Bitcoin,
             genesis_hash: None,
