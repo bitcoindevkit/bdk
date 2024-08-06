@@ -266,6 +266,41 @@ fn wallet_load_checks() -> anyhow::Result<()> {
 }
 
 #[test]
+fn single_descriptor_wallet_persist_and_recover() {
+    use bdk_chain::miniscript::Descriptor;
+    use bdk_chain::miniscript::DescriptorPublicKey;
+    use bdk_chain::rusqlite;
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("wallet.db");
+    let mut db = rusqlite::Connection::open(db_path).unwrap();
+
+    let desc = get_test_tr_single_sig_xprv();
+    let mut wallet = CreateParams::new_single(desc)
+        .network(Network::Testnet)
+        .create_wallet(&mut db)
+        .unwrap();
+
+    let _ = wallet.reveal_addresses_to(KeychainKind::External, 2);
+    assert!(wallet.persist(&mut db).unwrap());
+
+    // should recover persisted wallet
+    let secp = wallet.secp_ctx();
+    let (_, keymap) = <Descriptor<DescriptorPublicKey>>::parse_descriptor(secp, desc).unwrap();
+    let wallet = LoadParams::new()
+        .keymap(KeychainKind::External, keymap.clone())
+        .load_wallet(&mut db)
+        .unwrap()
+        .expect("must have loaded changeset");
+
+    assert_eq!(wallet.derivation_index(KeychainKind::External), Some(2));
+    // should have private key
+    assert_eq!(
+        wallet.get_signers(KeychainKind::External).as_key_map(secp),
+        keymap,
+    );
+}
+
+#[test]
 fn test_error_external_and_internal_are_the_same() {
     // identical descriptors should fail to create wallet
     let desc = get_test_wpkh();
@@ -4115,4 +4150,41 @@ fn test_insert_tx_balance_and_utxos() {
     insert_seen_at(&mut wallet, txid, 2);
     assert!(wallet.list_unspent().next().is_none());
     assert_eq!(wallet.balance().total().to_sat(), 0);
+}
+
+#[test]
+fn single_descriptor_wallet_can_create_tx_and_receive_change() {
+    // create single descriptor wallet and fund it
+    let mut wallet = CreateParams::new_single(get_test_tr_single_sig_xprv())
+        .network(Network::Testnet)
+        .create_wallet_no_persist()
+        .unwrap();
+    assert_eq!(wallet.keychains().count(), 1);
+    let amt = Amount::from_sat(5_000);
+    receive_output(
+        &mut wallet,
+        2 * amt.to_sat(),
+        ConfirmationTime::Unconfirmed { last_seen: 2 },
+    );
+    // create spend tx that produces a change output
+    let addr = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")
+        .unwrap()
+        .assume_checked();
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), amt);
+    let mut psbt = builder.finish().unwrap();
+    assert!(wallet.sign(&mut psbt, SignOptions::default()).unwrap());
+    let tx = psbt.extract_tx().unwrap();
+    let txid = tx.compute_txid();
+    wallet.insert_tx(tx);
+    insert_seen_at(&mut wallet, txid, 4);
+    let unspent: Vec<_> = wallet.list_unspent().collect();
+    assert_eq!(unspent.len(), 1);
+    let utxo = unspent.first().unwrap();
+    assert!(utxo.txout.value < amt);
+    assert_eq!(
+        utxo.keychain,
+        KeychainKind::External,
+        "tx change should go to external keychain"
+    );
 }
