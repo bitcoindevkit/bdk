@@ -481,7 +481,8 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// Do not spend change outputs
     ///
     /// This effectively adds all the change outputs to the "unspendable" list. See
-    /// [`TxBuilder::unspendable`].
+    /// [`TxBuilder::unspendable`]. This method assumes the presence of an internal
+    /// keychain, otherwise it has no effect.
     pub fn do_not_spend_change(&mut self) -> &mut Self {
         self.params.change_policy = ChangeSpendPolicy::ChangeForbidden;
         self
@@ -490,14 +491,16 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// Only spend change outputs
     ///
     /// This effectively adds all the non-change outputs to the "unspendable" list. See
-    /// [`TxBuilder::unspendable`].
+    /// [`TxBuilder::unspendable`]. This method assumes the presence of an internal
+    /// keychain, otherwise it has no effect.
     pub fn only_spend_change(&mut self) -> &mut Self {
         self.params.change_policy = ChangeSpendPolicy::OnlyChange;
         self
     }
 
     /// Set a specific [`ChangeSpendPolicy`]. See [`TxBuilder::do_not_spend_change`] and
-    /// [`TxBuilder::only_spend_change`] for some shortcuts.
+    /// [`TxBuilder::only_spend_change`] for some shortcuts. This method assumes the presence
+    /// of an internal keychain, otherwise it has no effect.
     pub fn change_policy(&mut self, change_policy: ChangeSpendPolicy) -> &mut Self {
         self.params.change_policy = change_policy;
         self
