@@ -80,7 +80,7 @@ let descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKM
 let change_descriptor = "wpkh(tprv8ZgxMBicQKsPdcAqYBpzAFwU5yxBUo88ggoBqu1qPcHUfSbKK1sKMLmC7EAk438btHQrSdu3jGGQa6PA71nvH5nkDexhLteJqkM4dQmWF9g/84'/1'/0'/1/*)";
 let wallet_opt = Wallet::load()
     .descriptors(descriptor, change_descriptor)
-    .network(network)
+    .check_network(network)
     .load_wallet(&mut db)
     .expect("wallet");
 let mut wallet = match wallet_opt {

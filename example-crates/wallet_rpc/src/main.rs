@@ -90,7 +90,7 @@ fn main() -> anyhow::Result<()> {
         Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?;
     let wallet_opt = Wallet::load()
         .descriptors(args.descriptor.clone(), args.change_descriptor.clone())
-        .network(args.network)
+        .check_network(args.network)
         .load_wallet(&mut db)?;
     let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
