@@ -38,9 +38,10 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
+use alloc::collections::BTreeSet;
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
 use core::cell::RefCell;
-use core::fmt;
+use core::fmt::{self, Debug};
 
 use alloc::sync::Arc;
 
@@ -56,7 +57,7 @@ use super::coin_selection::CoinSelectionAlgorithm;
 use super::utils::shuffle_slice;
 use super::{CreateTxError, Wallet};
 use crate::collections::{BTreeMap, HashSet};
-use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
+use crate::{LocalOutput, Utxo, WalletKeychain, WeightedUtxo};
 
 /// A transaction builder
 ///
@@ -112,23 +113,22 @@ use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 /// [`finish`]: Self::finish
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
-pub struct TxBuilder<'a, Cs> {
-    pub(crate) wallet: Rc<RefCell<&'a mut Wallet>>,
-    pub(crate) params: TxParams,
+pub struct TxBuilder<'a, K, Cs> {
+    pub(crate) wallet: Rc<RefCell<&'a mut Wallet<K>>>,
+    pub(crate) params: TxParams<K>,
     pub(crate) coin_selection: Cs,
 }
 
 /// The parameters for transaction creation sans coin selection algorithm.
 //TODO: TxParams should eventually be exposed publicly.
-#[derive(Default, Debug, Clone)]
-pub(crate) struct TxParams {
+#[derive(Debug, Clone)]
+pub(crate) struct TxParams<K> {
     pub(crate) recipients: Vec<(ScriptBuf, u64)>,
     pub(crate) drain_wallet: bool,
-    pub(crate) drain_to: Option<ScriptBuf>,
+    pub(crate) drain_to: DrainTo<K>,
     pub(crate) fee_policy: Option<FeePolicy>,
-    pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) utxos: Vec<WeightedUtxo>,
+    pub(crate) policy_paths: BTreeMap<K, BTreeMap<String, Vec<usize>>>,
+    pub(crate) utxos: Vec<WeightedUtxo<K>>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<psbt::PsbtSighashType>,
@@ -136,7 +136,7 @@ pub(crate) struct TxParams {
     pub(crate) locktime: Option<absolute::LockTime>,
     pub(crate) rbf: Option<RbfValue>,
     pub(crate) version: Option<Version>,
-    pub(crate) change_policy: ChangeSpendPolicy,
+    pub(crate) spend_keychain_policy: SpendKeychainPolicy<K>,
     pub(crate) only_witness_utxo: bool,
     pub(crate) add_global_xpubs: bool,
     pub(crate) include_output_redeem_witness_script: bool,
@@ -157,13 +157,52 @@ pub(crate) enum FeePolicy {
     FeeAmount(u64),
 }
 
+#[derive(Debug, Clone)]
+pub enum DrainTo<K> {
+    Keychain(K),
+    Script(ScriptBuf),
+}
+
+impl<K: WalletKeychain> Default for TxParams<K> {
+    fn default() -> Self {
+        Self {
+            recipients: Default::default(),
+            drain_wallet: Default::default(),
+            drain_to: Default::default(),
+            fee_policy: Default::default(),
+            policy_paths: Default::default(),
+            utxos: Default::default(),
+            unspendable: Default::default(),
+            manually_selected_only: Default::default(),
+            sighash: Default::default(),
+            ordering: Default::default(),
+            locktime: Default::default(),
+            rbf: Default::default(),
+            version: Default::default(),
+            spend_keychain_policy: Default::default(),
+            only_witness_utxo: Default::default(),
+            add_global_xpubs: Default::default(),
+            include_output_redeem_witness_script: Default::default(),
+            bumping_fee: Default::default(),
+            current_height: Default::default(),
+            allow_dust: Default::default(),
+        }
+    }
+}
+
+impl<K: WalletKeychain> Default for DrainTo<K> {
+    fn default() -> Self {
+        Self::Keychain(K::DEFAULT_CHANGE_VARIANT)
+    }
+}
+
 impl Default for FeePolicy {
     fn default() -> Self {
         FeePolicy::FeeRate(FeeRate::BROADCAST_MIN)
     }
 }
 
-impl<'a, Cs: Clone> Clone for TxBuilder<'a, Cs> {
+impl<'a, K: Clone, Cs: Clone> Clone for TxBuilder<'a, K, Cs> {
     fn clone(&self) -> Self {
         TxBuilder {
             wallet: self.wallet.clone(),
@@ -174,7 +213,7 @@ impl<'a, Cs: Clone> Clone for TxBuilder<'a, Cs> {
 }
 
 // Methods supported for any CoinSelectionAlgorithm.
-impl<'a, Cs> TxBuilder<'a, Cs> {
+impl<'a, K: core::fmt::Debug + Default + Clone + Ord, Cs> TxBuilder<'a, K, Cs> {
     /// Set a custom fee rate.
     ///
     /// This method sets the mining fee paid by the transaction as a rate on its size.
@@ -269,14 +308,9 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     pub fn policy_path(
         &mut self,
         policy_path: BTreeMap<String, Vec<usize>>,
-        keychain: KeychainKind,
+        keychain: K,
     ) -> &mut Self {
-        let to_update = match keychain {
-            KeychainKind::Internal => &mut self.params.internal_policy_path,
-            KeychainKind::External => &mut self.params.external_policy_path,
-        };
-
-        *to_update = Some(policy_path);
+        self.params.policy_paths.insert(keychain, policy_path);
         self
     }
 
@@ -299,7 +333,10 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
                 .collect::<Result<Vec<_>, _>>()?;
 
             for utxo in utxos {
-                let descriptor = wallet.public_descriptor(utxo.keychain);
+                let descriptor = match wallet.public_descriptor(utxo.keychain.clone()) {
+                    Some(d) => d,
+                    None => continue,
+                };
                 let satisfaction_weight = descriptor.max_weight_to_satisfy().unwrap();
                 self.params.utxos.push(WeightedUtxo {
                     satisfaction_weight,
@@ -478,28 +515,30 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         self
     }
 
-    /// Do not spend change outputs
+    /// Do not spend outputs of the given `keychains`
     ///
     /// This effectively adds all the change outputs to the "unspendable" list. See
     /// [`TxBuilder::unspendable`].
-    pub fn do_not_spend_change(&mut self) -> &mut Self {
-        self.params.change_policy = ChangeSpendPolicy::ChangeForbidden;
+    pub fn do_not_spend_keychains(&mut self, keychains: impl IntoIterator<Item = K>) -> &mut Self {
+        self.params.spend_keychain_policy =
+            SpendKeychainPolicy::Disallow(keychains.into_iter().collect());
         self
     }
 
-    /// Only spend change outputs
+    /// Only spend outputs of the given `keychains`
     ///
     /// This effectively adds all the non-change outputs to the "unspendable" list. See
     /// [`TxBuilder::unspendable`].
-    pub fn only_spend_change(&mut self) -> &mut Self {
-        self.params.change_policy = ChangeSpendPolicy::OnlyChange;
+    pub fn only_spend_keychains(&mut self, keychains: impl IntoIterator<Item = K>) -> &mut Self {
+        self.params.spend_keychain_policy =
+            SpendKeychainPolicy::AllowOnly(keychains.into_iter().collect());
         self
     }
 
     /// Set a specific [`ChangeSpendPolicy`]. See [`TxBuilder::do_not_spend_change`] and
     /// [`TxBuilder::only_spend_change`] for some shortcuts.
-    pub fn change_policy(&mut self, change_policy: ChangeSpendPolicy) -> &mut Self {
-        self.params.change_policy = change_policy;
+    pub fn spend_keychain_policy(&mut self, policy: SpendKeychainPolicy<K>) -> &mut Self {
+        self.params.spend_keychain_policy = policy;
         self
     }
 
@@ -543,7 +582,10 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// Overrides the [`CoinSelectionAlgorithm`].
     ///
     /// Note that this function consumes the builder and returns it so it is usually best to put this as the first call on the builder.
-    pub fn coin_selection<P: CoinSelectionAlgorithm>(self, coin_selection: P) -> TxBuilder<'a, P> {
+    pub fn coin_selection<P: CoinSelectionAlgorithm>(
+        self,
+        coin_selection: P,
+    ) -> TxBuilder<'a, K, P> {
         TxBuilder {
             wallet: self.wallet,
             params: self.params,
@@ -666,12 +708,17 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// [`add_utxos`]: Self::add_utxos
     /// [`drain_wallet`]: Self::drain_wallet
     pub fn drain_to(&mut self, script_pubkey: ScriptBuf) -> &mut Self {
-        self.params.drain_to = Some(script_pubkey);
+        self.params.drain_to = DrainTo::Script(script_pubkey);
+        self
+    }
+
+    pub fn drain_to_keychain(&mut self, keychain: K) -> &mut Self {
+        self.params.drain_to = DrainTo::Keychain(keychain);
         self
     }
 }
 
-impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs> {
+impl<'a, K: Debug + Default + Clone + Ord, Cs: CoinSelectionAlgorithm> TxBuilder<'a, K, Cs> {
     /// Finish building the transaction.
     ///
     /// Uses the thread-local random number generator (rng).
@@ -683,7 +730,7 @@ impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs> {
     /// **WARNING**: To avoid change address reuse you must persist the changes resulting from one
     /// or more calls to this method before closing the wallet. See [`Wallet::reveal_next_address`].
     #[cfg(feature = "std")]
-    pub fn finish(self) -> Result<Psbt, CreateTxError> {
+    pub fn finish(self) -> Result<Psbt, CreateTxError<K>> {
         self.finish_with_aux_rand(&mut bitcoin::key::rand::thread_rng())
     }
 
@@ -697,7 +744,7 @@ impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs> {
     ///
     /// **WARNING**: To avoid change address reuse you must persist the changes resulting from one
     /// or more calls to this method before closing the wallet. See [`Wallet::reveal_next_address`].
-    pub fn finish_with_aux_rand(self, rng: &mut impl RngCore) -> Result<Psbt, CreateTxError> {
+    pub fn finish_with_aux_rand(self, rng: &mut impl RngCore) -> Result<Psbt, CreateTxError<K>> {
         self.wallet
             .borrow_mut()
             .create_tx(self.coin_selection, self.params, rng)
@@ -856,24 +903,28 @@ impl RbfValue {
 }
 
 /// Policy regarding the use of change outputs when creating a transaction
-#[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
-pub enum ChangeSpendPolicy {
-    /// Use both change and non-change outputs (default)
+#[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone)]
+pub enum SpendKeychainPolicy<K> {
+    /// Allow spending all keychains.
     #[default]
-    ChangeAllowed,
-    /// Only use change outputs (see [`TxBuilder::only_spend_change`])
-    OnlyChange,
-    /// Only use non-change outputs (see [`TxBuilder::do_not_spend_change`])
-    ChangeForbidden,
+    AllowAll,
+    /// Only allow these keychains.
+    AllowOnly(BTreeSet<K>),
+    /// Disallow these keychains, allow all other keychains.
+    Disallow(BTreeSet<K>),
 }
 
-impl ChangeSpendPolicy {
-    pub(crate) fn is_satisfied_by(&self, utxo: &LocalOutput) -> bool {
+impl<K: Ord> SpendKeychainPolicy<K> {
+    pub(crate) fn can_spend(&self, keychain: &K) -> bool {
         match self {
-            ChangeSpendPolicy::ChangeAllowed => true,
-            ChangeSpendPolicy::OnlyChange => utxo.keychain == KeychainKind::Internal,
-            ChangeSpendPolicy::ChangeForbidden => utxo.keychain == KeychainKind::External,
+            SpendKeychainPolicy::AllowAll => true,
+            SpendKeychainPolicy::AllowOnly(allowed) => allowed.contains(keychain),
+            SpendKeychainPolicy::Disallow(disallowed) => !disallowed.contains(keychain),
         }
+    }
+
+    pub(crate) fn is_satisfied_by(&self, utxo: &LocalOutput<K>) -> bool {
+        self.can_spend(&utxo.keychain)
     }
 }
 
@@ -1074,7 +1125,7 @@ mod test {
 
     #[test]
     fn test_change_spend_policy_default() {
-        let change_spend_policy = ChangeSpendPolicy::default();
+        let change_spend_policy = SpendKeychainPolicy::default();
         let filtered = get_test_utxos()
             .into_iter()
             .filter(|u| change_spend_policy.is_satisfied_by(u))
@@ -1085,7 +1136,7 @@ mod test {
 
     #[test]
     fn test_change_spend_policy_no_internal() {
-        let change_spend_policy = ChangeSpendPolicy::ChangeForbidden;
+        let change_spend_policy = SpendKeychainPolicy::ChangeForbidden;
         let filtered = get_test_utxos()
             .into_iter()
             .filter(|u| change_spend_policy.is_satisfied_by(u))
@@ -1097,7 +1148,7 @@ mod test {
 
     #[test]
     fn test_change_spend_policy_only_internal() {
-        let change_spend_policy = ChangeSpendPolicy::OnlyChange;
+        let change_spend_policy = SpendKeychainPolicy::OnlyChange;
         let filtered = get_test_utxos()
             .into_iter()
             .filter(|u| change_spend_policy.is_satisfied_by(u))

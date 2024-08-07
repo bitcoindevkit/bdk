@@ -11,10 +11,10 @@
 
 //! Errors that can be thrown by the [`Wallet`](crate::wallet::Wallet)
 
+use crate::descriptor;
 use crate::descriptor::policy::PolicyError;
 use crate::descriptor::DescriptorError;
 use crate::wallet::coin_selection;
-use crate::{descriptor, KeychainKind};
 use alloc::string::String;
 use bitcoin::{absolute, psbt, Amount, OutPoint, Sequence, Txid};
 use core::fmt;
@@ -47,13 +47,13 @@ impl std::error::Error for MiniscriptPsbtError {}
 /// Error returned from [`TxBuilder::finish`]
 ///
 /// [`TxBuilder::finish`]: crate::wallet::tx_builder::TxBuilder::finish
-pub enum CreateTxError {
+pub enum CreateTxError<K> {
     /// There was a problem with the descriptors passed in
     Descriptor(DescriptorError),
     /// There was a problem while extracting and manipulating policies
     Policy(PolicyError),
     /// Spending policy is not compatible with this [`KeychainKind`]
-    SpendingPolicyRequired(KeychainKind),
+    SpendingPolicyRequired(K),
     /// Requested invalid transaction version '0'
     Version0,
     /// Requested transaction version `1`, but at least `2` is needed to use OP_CSV
@@ -104,11 +104,13 @@ pub enum CreateTxError {
     UnknownUtxo,
     /// Missing non_witness_utxo on foreign utxo for given `OutPoint`
     MissingNonWitnessUtxo(OutPoint),
+    /// Missing associated descriptor for keychain `K`
+    MissingDescriptor(K),
     /// Miniscript PSBT error
     MiniscriptPsbt(MiniscriptPsbtError),
 }
 
-impl fmt::Display for CreateTxError {
+impl<K: core::fmt::Debug> fmt::Display for CreateTxError<K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Descriptor(e) => e.fmt(f),
@@ -173,6 +175,9 @@ impl fmt::Display for CreateTxError {
             CreateTxError::MissingNonWitnessUtxo(outpoint) => {
                 write!(f, "Missing non_witness_utxo on foreign utxo {}", outpoint)
             }
+            CreateTxError::MissingDescriptor(k) => {
+                write!(f, "Missing associated descriptor for keychain '{:?}'", k)
+            }
             CreateTxError::MiniscriptPsbt(err) => {
                 write!(f, "Miniscript PSBT error: {}", err)
             }
@@ -180,38 +185,38 @@ impl fmt::Display for CreateTxError {
     }
 }
 
-impl From<descriptor::error::Error> for CreateTxError {
+impl<K> From<descriptor::error::Error> for CreateTxError<K> {
     fn from(err: descriptor::error::Error) -> Self {
         CreateTxError::Descriptor(err)
     }
 }
 
-impl From<PolicyError> for CreateTxError {
+impl<K> From<PolicyError> for CreateTxError<K> {
     fn from(err: PolicyError) -> Self {
         CreateTxError::Policy(err)
     }
 }
 
-impl From<MiniscriptPsbtError> for CreateTxError {
+impl<K> From<MiniscriptPsbtError> for CreateTxError<K> {
     fn from(err: MiniscriptPsbtError) -> Self {
         CreateTxError::MiniscriptPsbt(err)
     }
 }
 
-impl From<psbt::Error> for CreateTxError {
+impl<K> From<psbt::Error> for CreateTxError<K> {
     fn from(err: psbt::Error) -> Self {
         CreateTxError::Psbt(err)
     }
 }
 
-impl From<coin_selection::Error> for CreateTxError {
+impl<K> From<coin_selection::Error> for CreateTxError<K> {
     fn from(err: coin_selection::Error) -> Self {
         CreateTxError::CoinSelection(err)
     }
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for CreateTxError {}
+impl<K: core::fmt::Debug> std::error::Error for CreateTxError<K> {}
 
 #[derive(Debug)]
 /// Error returned from [`Wallet::build_fee_bump`]

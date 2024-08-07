@@ -3,15 +3,24 @@ use core::fmt;
 use crate::{descriptor::DescriptorError, Wallet};
 
 /// Represents a persisted wallet.
-pub type PersistedWallet = bdk_chain::Persisted<Wallet>;
+pub type PersistedWallet<K> = bdk_chain::Persisted<Wallet<K>>;
 
 #[cfg(feature = "rusqlite")]
-impl<'c> chain::PersistWith<bdk_chain::rusqlite::Transaction<'c>> for Wallet {
-    type CreateParams = crate::CreateParams;
-    type LoadParams = crate::LoadParams;
+impl<'c, K> chain::PersistWith<bdk_chain::rusqlite::Transaction<'c>> for Wallet<K>
+where
+    K: core::fmt::Debug
+        + Clone
+        + Ord
+        + Send
+        + Sync
+        + serde::Serialize
+        + serde::de::DeserializeOwned,
+{
+    type CreateParams = crate::CreateParams<K>;
+    type LoadParams = crate::LoadParams<K>;
 
     type CreateError = CreateWithPersistError<bdk_chain::rusqlite::Error>;
-    type LoadError = LoadWithPersistError<bdk_chain::rusqlite::Error>;
+    type LoadError = LoadWithPersistError<K, bdk_chain::rusqlite::Error>;
     type PersistError = bdk_chain::rusqlite::Error;
 
     fn create(
@@ -49,12 +58,21 @@ impl<'c> chain::PersistWith<bdk_chain::rusqlite::Transaction<'c>> for Wallet {
 }
 
 #[cfg(feature = "rusqlite")]
-impl chain::PersistWith<bdk_chain::rusqlite::Connection> for Wallet {
-    type CreateParams = crate::CreateParams;
-    type LoadParams = crate::LoadParams;
+impl<K> chain::PersistWith<bdk_chain::rusqlite::Connection> for Wallet<K>
+where
+    K: core::fmt::Debug
+        + Clone
+        + Ord
+        + Send
+        + Sync
+        + serde::Serialize
+        + serde::de::DeserializeOwned,
+{
+    type CreateParams = crate::CreateParams<K>;
+    type LoadParams = crate::LoadParams<K>;
 
     type CreateError = CreateWithPersistError<bdk_chain::rusqlite::Error>;
-    type LoadError = LoadWithPersistError<bdk_chain::rusqlite::Error>;
+    type LoadError = LoadWithPersistError<K, bdk_chain::rusqlite::Error>;
     type PersistError = bdk_chain::rusqlite::Error;
 
     fn create(
@@ -88,16 +106,25 @@ impl chain::PersistWith<bdk_chain::rusqlite::Connection> for Wallet {
 }
 
 #[cfg(feature = "file_store")]
-impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
-    type CreateParams = crate::CreateParams;
-    type LoadParams = crate::LoadParams;
+impl<K> chain::PersistWith<bdk_file_store::Store<crate::ChangeSet<K>>> for Wallet<K>
+where
+    K: core::fmt::Debug
+        + Clone
+        + Ord
+        + Send
+        + Sync
+        + serde::Serialize
+        + serde::de::DeserializeOwned,
+{
+    type CreateParams = crate::CreateParams<K>;
+    type LoadParams = crate::LoadParams<K>;
     type CreateError = CreateWithPersistError<std::io::Error>;
     type LoadError =
-        LoadWithPersistError<bdk_file_store::AggregateChangesetsError<crate::ChangeSet>>;
+        LoadWithPersistError<K, bdk_file_store::AggregateChangesetsError<crate::ChangeSet<K>>>;
     type PersistError = std::io::Error;
 
     fn create(
-        db: &mut bdk_file_store::Store<crate::ChangeSet>,
+        db: &mut bdk_file_store::Store<crate::ChangeSet<K>>,
         params: Self::CreateParams,
     ) -> Result<Self, Self::CreateError> {
         let mut wallet =
@@ -110,7 +137,7 @@ impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
     }
 
     fn load(
-        db: &mut bdk_file_store::Store<crate::ChangeSet>,
+        db: &mut bdk_file_store::Store<crate::ChangeSet<K>>,
         params: Self::LoadParams,
     ) -> Result<Option<Self>, Self::LoadError> {
         let changeset = db
@@ -121,7 +148,7 @@ impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
     }
 
     fn persist(
-        db: &mut bdk_file_store::Store<crate::ChangeSet>,
+        db: &mut bdk_file_store::Store<crate::ChangeSet<K>>,
         changeset: &<Self as chain::Staged>::ChangeSet,
     ) -> Result<(), Self::PersistError> {
         db.append_changeset(changeset)
@@ -130,14 +157,14 @@ impl chain::PersistWith<bdk_file_store::Store<crate::ChangeSet>> for Wallet {
 
 /// Error type for [`PersistedWallet::load`].
 #[derive(Debug, PartialEq)]
-pub enum LoadWithPersistError<E> {
+pub enum LoadWithPersistError<K, E> {
     /// Error from persistence.
     Persist(E),
     /// Occurs when the loaded changeset cannot construct [`Wallet`].
-    InvalidChangeSet(crate::LoadError),
+    InvalidChangeSet(crate::LoadError<K>),
 }
 
-impl<E: fmt::Display> fmt::Display for LoadWithPersistError<E> {
+impl<K: fmt::Debug, E: fmt::Display> fmt::Display for LoadWithPersistError<K, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Persist(err) => fmt::Display::fmt(err, f),
@@ -147,7 +174,7 @@ impl<E: fmt::Display> fmt::Display for LoadWithPersistError<E> {
 }
 
 #[cfg(feature = "std")]
-impl<E: fmt::Debug + fmt::Display> std::error::Error for LoadWithPersistError<E> {}
+impl<K: fmt::Debug, E: fmt::Debug + fmt::Display> std::error::Error for LoadWithPersistError<K, E> {}
 
 /// Error type for [`PersistedWallet::create`].
 #[derive(Debug)]
