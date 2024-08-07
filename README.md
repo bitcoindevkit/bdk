@@ -54,6 +54,7 @@ Fully working examples of how to use these components are in `/example-crates`:
 - [`wallet_esplora_blocking`](./example-crates/wallet_esplora_blocking): Uses the `Wallet` to sync and spend using the Esplora blocking interface.
 - [`wallet_esplora_async`](./example-crates/wallet_esplora_async): Uses the `Wallet` to sync and spend using the Esplora asynchronous interface.
 - [`wallet_electrum`](./example-crates/wallet_electrum): Uses the `Wallet` to sync and spend using Electrum.
+- [`wallet_rpc`](./example-crates/wallet_rpc): Uses the `Wallet` to sync and spend using Bitcoin RPC.
 
 [`BDK 1.0 project page`]: https://github.com/orgs/bitcoindevkit/projects/14
 [`rust-miniscript`]: https://github.com/rust-bitcoin/rust-miniscript

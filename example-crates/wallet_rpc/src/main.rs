@@ -1,16 +1,19 @@
+use std::path::PathBuf;
+use std::sync::mpsc::sync_channel;
+use std::thread::spawn;
+use std::time::Instant;
+
+use clap::{self, Parser};
+
 use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
 use bdk_wallet::{
     bitcoin::{Block, Network, Transaction},
-    file_store::Store,
+    rusqlite::Connection,
     Wallet,
 };
-use clap::{self, Parser};
-use std::{path::PathBuf, sync::mpsc::sync_channel, thread::spawn, time::Instant};
-
-const DB_MAGIC: &str = "bdk-rpc-wallet-example";
 
 /// Bitcoind RPC example using `bdk_wallet::Wallet`.
 ///
@@ -27,21 +30,14 @@ pub struct Args {
     #[clap(env = "CHANGE_DESCRIPTOR")]
     pub change_descriptor: String,
     /// Earliest block height to start sync from
-    #[clap(env = "START_HEIGHT", long, default_value = "481824")]
+    #[clap(env = "START_HEIGHT", long, default_value = "100000")]
     pub start_height: u32,
     /// Bitcoin network to connect to
-    #[clap(env = "BITCOIN_NETWORK", long, default_value = "testnet")]
+    #[clap(env = "BITCOIN_NETWORK", long, default_value = "signet")]
     pub network: Network,
-    /// Where to store wallet data
-    #[clap(
-        env = "BDK_DB_PATH",
-        long,
-        default_value = ".bdk_wallet_rpc_example.db"
-    )]
-    pub db_path: PathBuf,
 
     /// RPC URL
-    #[clap(env = "RPC_URL", long, default_value = "127.0.0.1:8332")]
+    #[clap(env = "RPC_URL", long, default_value = "127.0.0.1:38332")]
     pub url: String,
     /// RPC auth cookie file
     #[clap(env = "RPC_COOKIE", long)]
@@ -86,17 +82,17 @@ fn main() -> anyhow::Result<()> {
     );
 
     let start_load_wallet = Instant::now();
-    let mut db =
-        Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?;
+    let mut conn = Connection::open_in_memory().expect("must open connection");
+
     let wallet_opt = Wallet::load()
         .descriptors(args.descriptor.clone(), args.change_descriptor.clone())
         .network(args.network)
-        .load_wallet(&mut db)?;
+        .load_wallet(&mut conn)?;
     let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
         None => Wallet::create(args.descriptor, args.change_descriptor)
             .network(args.network)
-            .create_wallet(&mut db)?,
+            .create_wallet(&mut conn)?,
     };
     println!(
         "Loaded wallet in {}s",
@@ -104,7 +100,7 @@ fn main() -> anyhow::Result<()> {
     );
 
     let balance = wallet.balance();
-    println!("Wallet balance before syncing: {} sats", balance.total());
+    println!("Wallet balance before syncing: {}", balance.total());
 
     let wallet_tip = wallet.latest_checkpoint();
     println!(
@@ -146,7 +142,7 @@ fn main() -> anyhow::Result<()> {
                 let connected_to = block_emission.connected_to();
                 let start_apply_block = Instant::now();
                 wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
-                wallet.persist(&mut db)?;
+                wallet.persist(&mut conn)?;
                 let elapsed = start_apply_block.elapsed().as_secs_f32();
                 println!(
                     "Applied block {} at height {} in {}s",
@@ -156,7 +152,7 @@ fn main() -> anyhow::Result<()> {
             Emission::Mempool(mempool_emission) => {
                 let start_apply_mempool = Instant::now();
                 wallet.apply_unconfirmed_txs(mempool_emission.iter().map(|(tx, time)| (tx, *time)));
-                wallet.persist(&mut db)?;
+                wallet.persist(&mut conn)?;
                 println!(
                     "Applied unconfirmed transactions in {}s",
                     start_apply_mempool.elapsed().as_secs_f32()
@@ -177,7 +173,7 @@ fn main() -> anyhow::Result<()> {
         wallet_tip_end.height(),
         wallet_tip_end.hash()
     );
-    println!("Wallet balance is {} sats", balance.total());
+    println!("Wallet balance is {}", balance.total());
     println!(
         "Wallet has {} transactions and {} utxos",
         wallet.transactions().count(),

@@ -1,9 +1,9 @@
 [package]
-name = "wallet_electrum_example"
+name = "wallet_electrum"
 version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-bdk_wallet = { path = "../../crates/wallet", features = ["file_store"] }
+bdk_wallet = { path = "../../crates/wallet", features = ["rusqlite"] }
 bdk_electrum = { path = "../../crates/electrum" }
 anyhow = "1"
