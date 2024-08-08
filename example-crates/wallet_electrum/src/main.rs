@@ -1,3 +1,5 @@
+use bdk_wallet::chain::PersistWith;
+use bdk_wallet::chain::Staged;
 use bdk_wallet::file_store::Store;
 use bdk_wallet::Wallet;
 use std::io::Write;
@@ -19,6 +21,38 @@ const NETWORK: Network = Network::Testnet;
 const EXTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
 const INTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
 const ELECTRUM_URL: &str = "ssl://electrum.blockstream.info:60002";
+
+pub struct CustomDb;
+
+impl PersistWith<CustomDb> for Wallet {
+    type CreateParams = ();
+
+    type LoadParams = ();
+
+    type CreateError = ();
+
+    type LoadError = ();
+
+    type PersistError = ();
+
+    fn create(_db: &mut CustomDb, _params: Self::CreateParams) -> Result<Self, Self::CreateError> {
+        todo!()
+    }
+
+    fn load(
+        _db: &mut CustomDb,
+        _params: Self::LoadParams,
+    ) -> Result<Option<Self>, Self::LoadError> {
+        todo!()
+    }
+
+    fn persist(
+        _db: &mut CustomDb,
+        _changeset: &<Self as Staged>::ChangeSet,
+    ) -> Result<(), Self::PersistError> {
+        Ok(())
+    }
+}
 
 fn main() -> Result<(), anyhow::Error> {
     let db_path = "bdk-electrum-example.db";
