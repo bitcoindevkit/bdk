@@ -19,20 +19,28 @@ const INTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7
 const ESPLORA_URL: &str = "http://signet.bitcoindevkit.net";
 
 fn main() -> Result<(), anyhow::Error> {
-    let mut db = Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), DB_PATH)?;
+    let mut db = Store::<bdk_wallet::ChangeSet<KeychainKind>>::open_or_create_new(
+        DB_MAGIC.as_bytes(),
+        DB_PATH,
+    )?;
 
-    let wallet_opt = Wallet::load()
-        .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
+    let wallet_opt = Wallet::<KeychainKind>::load()
+        .descriptor(KeychainKind::External, EXTERNAL_DESC)
+        .descriptor(KeychainKind::Internal, INTERNAL_DESC)
         .network(NETWORK)
         .load_wallet(&mut db)?;
     let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
-        None => Wallet::create(EXTERNAL_DESC, INTERNAL_DESC)
+        None => Wallet::create()
+            .descriptor(KeychainKind::External, EXTERNAL_DESC)
+            .descriptor(KeychainKind::Internal, INTERNAL_DESC)
             .network(NETWORK)
             .create_wallet(&mut db)?,
     };
 
-    let address = wallet.next_unused_address(KeychainKind::External);
+    let address = wallet
+        .next_unused_address(KeychainKind::External)
+        .expect("must contain external address");
     wallet.persist(&mut db)?;
     println!(
         "Next unused address: ({}) {}",

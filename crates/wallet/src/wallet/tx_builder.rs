@@ -213,7 +213,7 @@ impl<'a, K: Clone, Cs: Clone> Clone for TxBuilder<'a, K, Cs> {
 }
 
 // Methods supported for any CoinSelectionAlgorithm.
-impl<'a, K: core::fmt::Debug + Default + Clone + Ord, Cs> TxBuilder<'a, K, Cs> {
+impl<'a, K: core::fmt::Debug + Clone + Ord, Cs> TxBuilder<'a, K, Cs> {
     /// Set a custom fee rate.
     ///
     /// This method sets the mining fee paid by the transaction as a rate on its size.
@@ -718,7 +718,7 @@ impl<'a, K: core::fmt::Debug + Default + Clone + Ord, Cs> TxBuilder<'a, K, Cs> {
     }
 }
 
-impl<'a, K: Debug + Default + Clone + Ord, Cs: CoinSelectionAlgorithm> TxBuilder<'a, K, Cs> {
+impl<'a, K: Debug + Clone + Ord, Cs: CoinSelectionAlgorithm> TxBuilder<'a, K, Cs> {
     /// Finish building the transaction.
     ///
     /// Uses the thread-local random number generator (rng).
