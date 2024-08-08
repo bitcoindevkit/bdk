@@ -180,16 +180,16 @@ pub enum Excess {
 
 /// Result of a successful coin selection
 #[derive(Debug)]
-pub struct CoinSelectionResult {
+pub struct CoinSelectionResult<K> {
     /// List of outputs selected for use as inputs
-    pub selected: Vec<Utxo>,
+    pub selected: Vec<Utxo<K>>,
     /// Total fee amount for the selected utxos in satoshis
     pub fee_amount: u64,
     /// Remaining amount after deducing fees and outgoing outputs
     pub excess: Excess,
 }
 
-impl CoinSelectionResult {
+impl<K> CoinSelectionResult<K> {
     /// The total value of the inputs selected.
     pub fn selected_amount(&self) -> u64 {
         self.selected.iter().map(|u| u.txout().value.to_sat()).sum()
@@ -227,14 +227,14 @@ pub trait CoinSelectionAlgorithm: core::fmt::Debug {
     ///                    accumulated from added outputs and transaction’s header.
     /// - `drain_script`: the script to use in case of change
     #[allow(clippy::too_many_arguments)]
-    fn coin_select(
+    fn coin_select<K: Clone>(
         &self,
-        required_utxos: Vec<WeightedUtxo>,
-        optional_utxos: Vec<WeightedUtxo>,
+        required_utxos: Vec<WeightedUtxo<K>>,
+        optional_utxos: Vec<WeightedUtxo<K>>,
         fee_rate: FeeRate,
         target_amount: u64,
         drain_script: &Script,
-    ) -> Result<CoinSelectionResult, Error>;
+    ) -> Result<CoinSelectionResult<K>, Error>;
 }
 
 /// Simple and dumb coin selection
@@ -245,14 +245,14 @@ pub trait CoinSelectionAlgorithm: core::fmt::Debug {
 pub struct LargestFirstCoinSelection;
 
 impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
-    fn coin_select(
+    fn coin_select<K>(
         &self,
-        required_utxos: Vec<WeightedUtxo>,
-        mut optional_utxos: Vec<WeightedUtxo>,
+        required_utxos: Vec<WeightedUtxo<K>>,
+        mut optional_utxos: Vec<WeightedUtxo<K>>,
         fee_rate: FeeRate,
         target_amount: u64,
         drain_script: &Script,
-    ) -> Result<CoinSelectionResult, Error> {
+    ) -> Result<CoinSelectionResult<K>, Error> {
         // We put the "required UTXOs" first and make sure the optional UTXOs are sorted,
         // initially smallest to largest, before being reversed with `.rev()`.
         let utxos = {
@@ -275,14 +275,14 @@ impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
 pub struct OldestFirstCoinSelection;
 
 impl CoinSelectionAlgorithm for OldestFirstCoinSelection {
-    fn coin_select(
+    fn coin_select<K>(
         &self,
-        required_utxos: Vec<WeightedUtxo>,
-        mut optional_utxos: Vec<WeightedUtxo>,
+        required_utxos: Vec<WeightedUtxo<K>>,
+        mut optional_utxos: Vec<WeightedUtxo<K>>,
         fee_rate: FeeRate,
         target_amount: u64,
         drain_script: &Script,
-    ) -> Result<CoinSelectionResult, Error> {
+    ) -> Result<CoinSelectionResult<K>, Error> {
         // We put the "required UTXOs" first and make sure the optional UTXOs are sorted from
         // oldest to newest according to blocktime
         // For utxo that doesn't exist in DB, they will have lowest priority to be selected
@@ -329,12 +329,12 @@ pub fn decide_change(remaining_amount: u64, fee_rate: FeeRate, drain_script: &Sc
     }
 }
 
-fn select_sorted_utxos(
-    utxos: impl Iterator<Item = (bool, WeightedUtxo)>,
+fn select_sorted_utxos<K>(
+    utxos: impl Iterator<Item = (bool, WeightedUtxo<K>)>,
     fee_rate: FeeRate,
     target_amount: u64,
     drain_script: &Script,
-) -> Result<CoinSelectionResult, Error> {
+) -> Result<CoinSelectionResult<K>, Error> {
     let mut selected_amount = 0;
     let mut fee_amount = 0;
     let selected = utxos
@@ -378,16 +378,16 @@ fn select_sorted_utxos(
 
 #[derive(Debug, Clone)]
 // Adds fee information to an UTXO.
-struct OutputGroup {
-    weighted_utxo: WeightedUtxo,
+struct OutputGroup<K> {
+    weighted_utxo: WeightedUtxo<K>,
     // Amount of fees for spending a certain utxo, calculated using a certain FeeRate
     fee: u64,
     // The effective value of the UTXO, i.e., the utxo value minus the fee for spending it
     effective_value: i64,
 }
 
-impl OutputGroup {
-    fn new(weighted_utxo: WeightedUtxo, fee_rate: FeeRate) -> Self {
+impl<K> OutputGroup<K> {
+    fn new(weighted_utxo: WeightedUtxo<K>, fee_rate: FeeRate) -> Self {
         let fee = (fee_rate
             * (TxIn::default()
                 .segwit_weight()
@@ -430,23 +430,23 @@ impl BranchAndBoundCoinSelection {
 const BNB_TOTAL_TRIES: usize = 100_000;
 
 impl CoinSelectionAlgorithm for BranchAndBoundCoinSelection {
-    fn coin_select(
+    fn coin_select<K: Clone>(
         &self,
-        required_utxos: Vec<WeightedUtxo>,
-        optional_utxos: Vec<WeightedUtxo>,
+        required_utxos: Vec<WeightedUtxo<K>>,
+        optional_utxos: Vec<WeightedUtxo<K>>,
         fee_rate: FeeRate,
         target_amount: u64,
         drain_script: &Script,
-    ) -> Result<CoinSelectionResult, Error> {
+    ) -> Result<CoinSelectionResult<K>, Error> {
         // Mapping every (UTXO, usize) to an output group
-        let required_utxos: Vec<OutputGroup> = required_utxos
+        let required_utxos: Vec<OutputGroup<K>> = required_utxos
             .into_iter()
             .map(|u| OutputGroup::new(u, fee_rate))
             .collect();
 
         // Mapping every (UTXO, usize) to an output group, filtering UTXOs with a negative
         // effective value
-        let optional_utxos: Vec<OutputGroup> = optional_utxos
+        let optional_utxos: Vec<OutputGroup<K>> = optional_utxos
             .into_iter()
             .map(|u| OutputGroup::new(u, fee_rate))
             .filter(|u| u.effective_value.is_positive())
@@ -534,17 +534,17 @@ impl BranchAndBoundCoinSelection {
     // TODO: make this more Rust-onic :)
     // (And perhaps refactor with less arguments?)
     #[allow(clippy::too_many_arguments)]
-    fn bnb(
+    fn bnb<K>(
         &self,
-        required_utxos: Vec<OutputGroup>,
-        mut optional_utxos: Vec<OutputGroup>,
+        required_utxos: Vec<OutputGroup<K>>,
+        mut optional_utxos: Vec<OutputGroup<K>>,
         mut curr_value: i64,
         mut curr_available_value: i64,
         target_amount: i64,
         cost_of_change: u64,
         drain_script: &Script,
         fee_rate: FeeRate,
-    ) -> Result<CoinSelectionResult, Error> {
+    ) -> Result<CoinSelectionResult<K>, Error> {
         // current_selection[i] will contain true if we are using optional_utxos[i],
         // false otherwise. Note that current_selection.len() could be less than
         // optional_utxos.len(), it just means that we still haven't decided if we should keep
@@ -635,7 +635,7 @@ impl BranchAndBoundCoinSelection {
             .into_iter()
             .zip(best_selection)
             .filter_map(|(optional, is_in_best)| if is_in_best { Some(optional) } else { None })
-            .collect::<Vec<OutputGroup>>();
+            .collect::<Vec<OutputGroup<K>>>();
 
         let selected_amount = best_selection_value.unwrap();
 
@@ -653,11 +653,11 @@ impl BranchAndBoundCoinSelection {
         ))
     }
 
-    fn calculate_cs_result(
-        mut selected_utxos: Vec<OutputGroup>,
-        mut required_utxos: Vec<OutputGroup>,
+    fn calculate_cs_result<K>(
+        mut selected_utxos: Vec<OutputGroup<K>>,
+        mut required_utxos: Vec<OutputGroup<K>>,
         excess: Excess,
-    ) -> CoinSelectionResult {
+    ) -> CoinSelectionResult<K> {
         selected_utxos.append(&mut required_utxos);
         let fee_amount = selected_utxos.iter().map(|u| u.fee).sum::<u64>();
         let selected = selected_utxos
@@ -674,24 +674,24 @@ impl BranchAndBoundCoinSelection {
 }
 
 // Pull UTXOs at random until we have enough to meet the target
-pub(crate) fn single_random_draw(
-    required_utxos: Vec<WeightedUtxo>,
-    optional_utxos: Vec<WeightedUtxo>,
+pub(crate) fn single_random_draw<K>(
+    required_utxos: Vec<WeightedUtxo<K>>,
+    optional_utxos: Vec<WeightedUtxo<K>>,
     target_amount: u64,
     drain_script: &Script,
     fee_rate: FeeRate,
     rng: &mut impl RngCore,
-) -> CoinSelectionResult {
+) -> CoinSelectionResult<K> {
     let target_amount = target_amount
         .try_into()
         .expect("Bitcoin amount to fit into i64");
 
-    let required_utxos: Vec<OutputGroup> = required_utxos
+    let required_utxos: Vec<OutputGroup<K>> = required_utxos
         .into_iter()
         .map(|u| OutputGroup::new(u, fee_rate))
         .collect();
 
-    let mut optional_utxos: Vec<OutputGroup> = optional_utxos
+    let mut optional_utxos: Vec<OutputGroup<K>> = optional_utxos
         .into_iter()
         .map(|u| OutputGroup::new(u, fee_rate))
         .collect();
@@ -728,9 +728,9 @@ pub(crate) fn single_random_draw(
 /// Remove duplicate UTXOs.
 ///
 /// If a UTXO appears in both `required` and `optional`, the appearance in `required` is kept.
-pub(crate) fn filter_duplicates<I>(required: I, optional: I) -> (I, I)
+pub(crate) fn filter_duplicates<K, I>(required: I, optional: I) -> (I, I)
 where
-    I: IntoIterator<Item = WeightedUtxo> + FromIterator<WeightedUtxo>,
+    I: IntoIterator<Item = WeightedUtxo<K>> + FromIterator<WeightedUtxo<K>>,
 {
     let mut visited = HashSet::<OutPoint>::new();
     let required = required

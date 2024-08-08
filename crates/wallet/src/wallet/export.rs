@@ -113,15 +113,17 @@ impl FullyNodedExport {
     /// If the database is empty or `include_blockheight` is false, the `blockheight` field
     /// returned will be `0`.
     pub fn export_wallet(
-        wallet: &Wallet,
+        wallet: &Wallet<KeychainKind>,
         label: &str,
         include_blockheight: bool,
     ) -> Result<Self, &'static str> {
         let descriptor = wallet
             .public_descriptor(KeychainKind::External)
+            .ok_or("missing external descriptor")?
             .to_string_with_secret(
                 &wallet
                     .get_signers(KeychainKind::External)
+                    .unwrap_or_default()
                     .as_key_map(wallet.secp_ctx()),
             );
         let descriptor = remove_checksum(descriptor);
@@ -144,15 +146,17 @@ impl FullyNodedExport {
             blockheight,
         };
 
-        let change_descriptor = {
-            let descriptor = wallet
-                .public_descriptor(KeychainKind::Internal)
-                .to_string_with_secret(
+        let change_descriptor = match wallet.public_descriptor(KeychainKind::Internal) {
+            Some(descriptor) => {
+                let descriptor = descriptor.to_string_with_secret(
                     &wallet
                         .get_signers(KeychainKind::Internal)
+                        .unwrap_or_default()
                         .as_key_map(wallet.secp_ctx()),
                 );
-            Some(remove_checksum(descriptor))
+                Some(remove_checksum(descriptor))
+            }
+            None => None,
         };
 
         if export.change_descriptor() != change_descriptor {
@@ -223,10 +227,16 @@ mod test {
     use super::*;
     use crate::Wallet;
 
-    fn get_test_wallet(descriptor: &str, change_descriptor: &str, network: Network) -> Wallet {
+    fn get_test_wallet(
+        descriptor: &str,
+        change_descriptor: &str,
+        network: Network,
+    ) -> Wallet<KeychainKind> {
         use crate::wallet::Update;
         use bdk_chain::TxGraph;
-        let mut wallet = Wallet::create(descriptor.to_string(), change_descriptor.to_string())
+        let mut wallet = Wallet::create()
+            .descriptor(KeychainKind::External, descriptor.to_string())
+            .descriptor(KeychainKind::Internal, change_descriptor.to_string())
             .network(network)
             .create_wallet_no_persist()
             .expect("must create wallet");

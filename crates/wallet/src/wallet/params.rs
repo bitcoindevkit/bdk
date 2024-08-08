@@ -1,4 +1,4 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, collections::BTreeMap};
 use bdk_chain::{keychain_txout::DEFAULT_LOOKAHEAD, PersistAsyncWith, PersistWith};
 use bitcoin::{BlockHash, Network};
 use miniscript::descriptor::KeyMap;
@@ -6,7 +6,7 @@ use miniscript::descriptor::KeyMap;
 use crate::{
     descriptor::{DescriptorError, ExtendedDescriptor, IntoWalletDescriptor},
     utils::SecpCtx,
-    KeychainKind, Wallet,
+    Wallet,
 };
 
 use super::{ChangeSet, LoadError, PersistedWallet};
@@ -29,42 +29,48 @@ where
 
 /// Parameters for [`Wallet::create`] or [`PersistedWallet::create`].
 #[must_use]
-pub struct CreateParams {
-    pub(crate) descriptor: DescriptorToExtract,
-    pub(crate) descriptor_keymap: KeyMap,
-    pub(crate) change_descriptor: DescriptorToExtract,
-    pub(crate) change_descriptor_keymap: KeyMap,
+pub struct CreateParams<K> {
+    pub(crate) descriptors: BTreeMap<K, DescriptorToExtract>,
+    pub(crate) keymaps: BTreeMap<K, KeyMap>,
     pub(crate) network: Network,
     pub(crate) genesis_hash: Option<BlockHash>,
     pub(crate) lookahead: u32,
 }
 
-impl CreateParams {
-    /// Construct parameters with provided `descriptor`, `change_descriptor` and `network`.
+impl<K: core::fmt::Debug + Clone + Ord> CreateParams<K> {
+    /// Construct parameters with provided `descriptor`, `change_descriptor`.
     ///
     /// Default values: `genesis_hash` = `None`, `lookahead` = [`DEFAULT_LOOKAHEAD`]
-    pub fn new<D: IntoWalletDescriptor + 'static>(descriptor: D, change_descriptor: D) -> Self {
+    pub fn new() -> Self {
         Self {
-            descriptor: make_descriptor_to_extract(descriptor),
-            descriptor_keymap: KeyMap::default(),
-            change_descriptor: make_descriptor_to_extract(change_descriptor),
-            change_descriptor_keymap: KeyMap::default(),
+            descriptors: BTreeMap::new(),
+            keymaps: BTreeMap::new(),
             network: Network::Bitcoin,
             genesis_hash: None,
             lookahead: DEFAULT_LOOKAHEAD,
         }
     }
 
-    /// Extend the given `keychain`'s `keymap`.
-    pub fn keymap(mut self, keychain: KeychainKind, keymap: KeyMap) -> Self {
-        match keychain {
-            KeychainKind::External => &mut self.descriptor_keymap,
-            KeychainKind::Internal => &mut self.change_descriptor_keymap,
-        }
-        .extend(keymap);
+    pub fn descriptor<D: IntoWalletDescriptor + 'static>(
+        mut self,
+        keychain: K,
+        descriptor: D,
+    ) -> Self {
+        self.descriptors
+            .insert(keychain, make_descriptor_to_extract(descriptor));
         self
     }
 
+    /// Extend the `keymap` of the given `keychain`.
+    pub fn keymap(mut self, keychain: K, keymap: KeyMap) -> Self {
+        self.keymaps.entry(keychain).or_default().extend(keymap);
+        self
+    }
+
+    /// Create [`Wallet`] without persistence.
+    pub fn create_wallet_no_persist(self) -> Result<Wallet<K>, DescriptorError> {
+        Wallet::<K>::create_with_params(self)
+    }
     /// Set `network`.
     pub fn network(mut self, network: Network) -> Self {
         self.network = network;
@@ -87,76 +93,63 @@ impl CreateParams {
     pub fn create_wallet<Db>(
         self,
         db: &mut Db,
-    ) -> Result<PersistedWallet, <Wallet as PersistWith<Db>>::CreateError>
+    ) -> Result<PersistedWallet<K>, <Wallet<K> as PersistWith<Db>>::CreateError>
     where
-        Wallet: PersistWith<Db, CreateParams = Self>,
+        Wallet<K>: PersistWith<Db, CreateParams = Self>,
     {
-        PersistedWallet::create(db, self)
+        PersistedWallet::<K>::create(db, self)
     }
 
     /// Create [`PersistedWallet`] with the given async `Db`.
     pub async fn create_wallet_async<Db>(
         self,
         db: &mut Db,
-    ) -> Result<PersistedWallet, <Wallet as PersistAsyncWith<Db>>::CreateError>
+    ) -> Result<PersistedWallet<K>, <Wallet<K> as PersistAsyncWith<Db>>::CreateError>
     where
-        Wallet: PersistAsyncWith<Db, CreateParams = Self>,
+        Wallet<K>: PersistAsyncWith<Db, CreateParams = Self>,
     {
-        PersistedWallet::create_async(db, self).await
-    }
-
-    /// Create [`Wallet`] without persistence.
-    pub fn create_wallet_no_persist(self) -> Result<Wallet, DescriptorError> {
-        Wallet::create_with_params(self)
+        PersistedWallet::<K>::create_async(db, self).await
     }
 }
 
 /// Parameters for [`Wallet::load`] or [`PersistedWallet::load`].
 #[must_use]
-pub struct LoadParams {
-    pub(crate) descriptor_keymap: KeyMap,
-    pub(crate) change_descriptor_keymap: KeyMap,
+pub struct LoadParams<K> {
+    pub(crate) keymaps: BTreeMap<K, KeyMap>,
     pub(crate) lookahead: u32,
     pub(crate) check_network: Option<Network>,
     pub(crate) check_genesis_hash: Option<BlockHash>,
-    pub(crate) check_descriptor: Option<DescriptorToExtract>,
-    pub(crate) check_change_descriptor: Option<DescriptorToExtract>,
+    pub(crate) check_descriptors: BTreeMap<K, DescriptorToExtract>,
 }
 
-impl LoadParams {
+impl<K: core::fmt::Debug + Clone + Ord> LoadParams<K> {
     /// Construct parameters with default values.
     ///
     /// Default values: `lookahead` = [`DEFAULT_LOOKAHEAD`]
     pub fn new() -> Self {
         Self {
-            descriptor_keymap: KeyMap::default(),
-            change_descriptor_keymap: KeyMap::default(),
+            keymaps: BTreeMap::default(),
             lookahead: DEFAULT_LOOKAHEAD,
             check_network: None,
             check_genesis_hash: None,
-            check_descriptor: None,
-            check_change_descriptor: None,
+            check_descriptors: BTreeMap::default(),
         }
     }
 
     /// Extend the given `keychain`'s `keymap`.
-    pub fn keymap(mut self, keychain: KeychainKind, keymap: KeyMap) -> Self {
-        match keychain {
-            KeychainKind::External => &mut self.descriptor_keymap,
-            KeychainKind::Internal => &mut self.change_descriptor_keymap,
-        }
-        .extend(keymap);
+    pub fn keymap(mut self, keychain: K, keymap: KeyMap) -> Self {
+        self.keymaps.entry(keychain).or_default().extend(keymap);
         self
     }
 
     /// Checks that `descriptor` of `keychain` matches this, and extracts private keys (if
     /// available).
-    pub fn descriptors<D>(mut self, descriptor: D, change_descriptor: D) -> Self
+    pub fn descriptor<D>(mut self, keychain: K, descriptor: D) -> Self
     where
         D: IntoWalletDescriptor + 'static,
     {
-        self.check_descriptor = Some(make_descriptor_to_extract(descriptor));
-        self.check_change_descriptor = Some(make_descriptor_to_extract(change_descriptor));
+        self.check_descriptors
+            .insert(keychain, make_descriptor_to_extract(descriptor));
         self
     }
 
@@ -182,31 +175,34 @@ impl LoadParams {
     pub fn load_wallet<Db>(
         self,
         db: &mut Db,
-    ) -> Result<Option<PersistedWallet>, <Wallet as PersistWith<Db>>::LoadError>
+    ) -> Result<Option<PersistedWallet<K>>, <Wallet<K> as PersistWith<Db>>::LoadError>
     where
-        Wallet: PersistWith<Db, LoadParams = Self>,
+        Wallet<K>: PersistWith<Db, LoadParams = Self>,
     {
-        PersistedWallet::load(db, self)
+        PersistedWallet::<K>::load(db, self)
     }
 
     /// Load [`PersistedWallet`] with the given async `Db`.
     pub async fn load_wallet_async<Db>(
         self,
         db: &mut Db,
-    ) -> Result<Option<PersistedWallet>, <Wallet as PersistAsyncWith<Db>>::LoadError>
+    ) -> Result<Option<PersistedWallet<K>>, <Wallet<K> as PersistAsyncWith<Db>>::LoadError>
     where
-        Wallet: PersistAsyncWith<Db, LoadParams = Self>,
+        Wallet<K>: PersistAsyncWith<Db, LoadParams = Self>,
     {
-        PersistedWallet::load_async(db, self).await
+        PersistedWallet::<K>::load_async(db, self).await
     }
 
     /// Load [`Wallet`] without persistence.
-    pub fn load_wallet_no_persist(self, changeset: ChangeSet) -> Result<Option<Wallet>, LoadError> {
-        Wallet::load_with_params(changeset, self)
+    pub fn load_wallet_no_persist(
+        self,
+        changeset: ChangeSet<K>,
+    ) -> Result<Option<Wallet<K>>, LoadError<K>> {
+        Wallet::<K>::load_with_params(changeset, self)
     }
 }
 
-impl Default for LoadParams {
+impl<K: core::fmt::Debug + Clone + Ord> Default for LoadParams<K> {
     fn default() -> Self {
         Self::new()
     }

@@ -70,6 +70,25 @@ pub fn migrate_schema(
     Ok(())
 }
 
+/// Serde!
+pub struct SerdeImpl<T>(pub T);
+
+impl<T: serde_crate::de::DeserializeOwned> FromSql for SerdeImpl<T> {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        serde_json::from_str(value.as_str()?)
+            .map(SerdeImpl)
+            .map_err(from_sql_error)
+    }
+}
+
+impl<T: serde_crate::Serialize> ToSql for SerdeImpl<T> {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        serde_json::to_string(&self.0)
+            .map(Into::into)
+            .map_err(to_sql_error)
+    }
+}
+
 impl FromSql for Impl<bitcoin::Txid> {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         bitcoin::Txid::from_str(value.as_str()?)
