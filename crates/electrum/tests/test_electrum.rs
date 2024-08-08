@@ -275,7 +275,9 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ensure that [`BdkElectrumClient::sync`] can confirm previously unconfirmed transactions in both reorg and no-reorg situations.
+/// Ensure that [`BdkElectrumClient::sync`] can confirm previously unconfirmed transactions in both
+/// reorg and no-reorg situations. After the transaction is confirmed after reorg, check if floating
+/// txouts for previous outputs were inserted for transaction fee calculation.
 #[test]
 fn test_sync() -> anyhow::Result<()> {
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
@@ -316,7 +318,7 @@ fn test_sync() -> anyhow::Result<()> {
         &mut recv_graph,
     )?;
 
-    // Check if balance is zero when transaction exists only in mempool.
+    // Check for unconfirmed balance when transaction exists only in mempool.
     assert_eq!(
         get_balance(&recv_chain, &recv_graph)?,
         Balance {
