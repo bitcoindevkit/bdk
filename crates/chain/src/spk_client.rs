@@ -317,6 +317,7 @@ impl<K: Ord + Clone> FullScanRequest<K> {
 /// Data returned from a spk-based blockchain client full scan.
 ///
 /// See also [`FullScanRequest`].
+#[derive(Debug, Clone)]
 pub struct FullScanResult<K, A = ConfirmationBlockTime> {
     /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
     pub graph_update: TxGraph<A>,

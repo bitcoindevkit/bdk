@@ -36,8 +36,7 @@ fn main() -> Result<(), anyhow::Error> {
             .create_wallet(&mut db)?,
     };
 
-    let address = wallet.next_unused_address(KeychainKind::External);
-    wallet.persist(&mut db)?;
+    let address = wallet.mutate(&mut db, |w| w.next_unused_address(KeychainKind::External))?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.balance();
@@ -71,8 +70,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     println!();
 
-    wallet.apply_update(update)?;
-    wallet.persist(&mut db)?;
+    wallet.mutate(&mut db, |w| w.apply_update(update.clone()))??;
 
     let balance = wallet.balance();
     println!("Wallet balance after syncing: {} sats", balance.total());
@@ -88,12 +86,13 @@ fn main() -> Result<(), anyhow::Error> {
     let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?
         .require_network(Network::Testnet)?;
 
-    let mut tx_builder = wallet.build_tx();
-    tx_builder
-        .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
-        .enable_rbf();
-
-    let mut psbt = tx_builder.finish()?;
+    let mut psbt = wallet.mutate(&mut db, |w| -> anyhow::Result<_> {
+        let mut tx_builder = w.build_tx();
+        tx_builder
+            .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
+            .enable_rbf();
+        Ok(tx_builder.finish()?)
+    })??;
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 

@@ -32,8 +32,7 @@ fn main() -> Result<(), anyhow::Error> {
             .create_wallet(&mut db)?,
     };
 
-    let address = wallet.next_unused_address(KeychainKind::External);
-    wallet.persist(&mut db)?;
+    let address = wallet.mutate(&mut db, |w| w.next_unused_address(KeychainKind::External))?;
     println!(
         "Next unused address: ({}) {}",
         address.index, address.address
@@ -60,10 +59,7 @@ fn main() -> Result<(), anyhow::Error> {
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
     let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
-    wallet.apply_update(update)?;
-    if let Some(changeset) = wallet.take_staged() {
-        db.append_changeset(&changeset)?;
-    }
+    wallet.mutate(&mut db, |w| w.apply_update(update.clone()))??;
     println!();
 
     let balance = wallet.balance();
@@ -77,12 +73,13 @@ fn main() -> Result<(), anyhow::Error> {
         std::process::exit(0);
     }
 
-    let mut tx_builder = wallet.build_tx();
-    tx_builder
-        .add_recipient(address.script_pubkey(), SEND_AMOUNT)
-        .enable_rbf();
-
-    let mut psbt = tx_builder.finish()?;
+    let mut psbt = wallet.mutate(&mut db, |w| -> anyhow::Result<_> {
+        let mut tx_builder = w.build_tx();
+        tx_builder
+            .add_recipient(address.script_pubkey(), SEND_AMOUNT)
+            .enable_rbf();
+        Ok(tx_builder.finish()?)
+    })??;
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 
