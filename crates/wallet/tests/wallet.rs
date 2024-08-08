@@ -126,10 +126,9 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
             let mut wallet = Wallet::create(external_desc, internal_desc)
                 .network(Network::Testnet)
                 .create_wallet(&mut db)?;
-            wallet.reveal_next_address(KeychainKind::External);
-
-            // persist new wallet changes
-            assert!(wallet.persist(&mut db)?, "must write");
+            wallet
+                .mutate(&mut db, |w| w.reveal_next_address(KeychainKind::External))
+                .expect("must write changes");
             wallet.spk_index().clone()
         };
 

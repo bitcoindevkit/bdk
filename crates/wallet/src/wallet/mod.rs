@@ -581,9 +581,6 @@ impl Wallet {
     /// index defined in [BIP32](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki),
     /// then the last revealed address will be returned.
     ///
-    /// **WARNING**: To avoid address reuse you must persist the changes resulting from one or more
-    /// calls to this method before closing the wallet. For example:
-    ///
     /// ```rust,no_run
     /// # use bdk_wallet::{LoadParams, ChangeSet, KeychainKind};
     /// use bdk_chain::rusqlite::Connection;
@@ -592,10 +589,10 @@ impl Wallet {
     ///     .load_wallet(&mut conn)
     ///     .expect("database is okay")
     ///     .expect("database has data");
-    /// let next_address = wallet.reveal_next_address(KeychainKind::External);
-    /// wallet.persist(&mut conn).expect("write is okay");
+    /// let next_address = wallet
+    ///     .mutate(&mut conn, |w| w.reveal_next_address(KeychainKind::External))
+    ///     .expect("write is okay");
     ///
-    /// // Now it's safe to show the user their next address!
     /// println!("Next address: {}", next_address.address);
     /// # Ok::<(), anyhow::Error>(())
     /// ```

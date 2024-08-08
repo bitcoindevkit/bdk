@@ -1,8 +1,4 @@
-use core::{
-    future::Future,
-    ops::{Deref, DerefMut},
-    pin::Pin,
-};
+use core::{fmt::Debug, future::Future, ops::Deref, pin::Pin};
 
 use alloc::boxed::Box;
 
@@ -121,7 +117,7 @@ impl<T> Persisted<T> {
     /// Persist staged changes of `T` into `Db`.
     ///
     /// If the database errors, the staged changes will not be cleared.
-    pub fn persist<Db>(&mut self, db: &mut Db) -> Result<bool, T::PersistError>
+    fn persist<Db>(&mut self, db: &mut Db) -> Result<bool, T::PersistError>
     where
         T: PersistWith<Db>,
     {
@@ -134,13 +130,21 @@ impl<T> Persisted<T> {
         Ok(true)
     }
 
+    /// Mutate `T` and persist changes into `Db` atomically.
+    pub fn mutate<Db, F, R>(&mut self, db: &mut Db, mut mutate: F) -> Result<R, T::PersistError>
+    where
+        T: PersistWith<Db>,
+        F: FnMut(&mut T) -> R,
+    {
+        let r = mutate(&mut self.inner);
+        self.persist(db)?;
+        Ok(r)
+    }
+
     /// Persist staged changes of `T` into an async `Db`.
     ///
     /// If the database errors, the staged changes will not be cleared.
-    pub async fn persist_async<'a, Db>(
-        &'a mut self,
-        db: &'a mut Db,
-    ) -> Result<bool, T::PersistError>
+    async fn persist_async<'a, Db>(&'a mut self, db: &'a mut Db) -> Result<bool, T::PersistError>
     where
         T: PersistAsyncWith<Db>,
     {
@@ -152,6 +156,21 @@ impl<T> Persisted<T> {
         stage.take();
         Ok(true)
     }
+
+    /// Mutate `T` and persist changes into async `Db` atomically.
+    pub async fn mutate_async<'a, Db, F, R>(
+        &'a mut self,
+        db: &'a mut Db,
+        mut mutate: F,
+    ) -> Result<R, T::PersistError>
+    where
+        T: PersistAsyncWith<Db>,
+        F: FnMut(&mut T) -> R,
+    {
+        let r = mutate(&mut self.inner);
+        self.persist_async(db).await?;
+        Ok(r)
+    }
 }
 
 impl<T> Deref for Persisted<T> {
@@ -159,11 +178,5 @@ impl<T> Deref for Persisted<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
-    }
-}
-
-impl<T> DerefMut for Persisted<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
     }
 }

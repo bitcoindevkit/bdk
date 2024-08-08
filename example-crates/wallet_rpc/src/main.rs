@@ -145,8 +145,9 @@ fn main() -> anyhow::Result<()> {
                 let hash = block_emission.block_hash();
                 let connected_to = block_emission.connected_to();
                 let start_apply_block = Instant::now();
-                wallet.apply_block_connected_to(&block_emission.block, height, connected_to)?;
-                wallet.persist(&mut db)?;
+                wallet.mutate(&mut db, |w| {
+                    w.apply_block_connected_to(&block_emission.block, height, connected_to)
+                })??;
                 let elapsed = start_apply_block.elapsed().as_secs_f32();
                 println!(
                     "Applied block {} at height {} in {}s",
@@ -155,8 +156,9 @@ fn main() -> anyhow::Result<()> {
             }
             Emission::Mempool(mempool_emission) => {
                 let start_apply_mempool = Instant::now();
-                wallet.apply_unconfirmed_txs(mempool_emission.iter().map(|(tx, time)| (tx, *time)));
-                wallet.persist(&mut db)?;
+                wallet.mutate(&mut db, |w| {
+                    w.apply_unconfirmed_txs(mempool_emission.iter().map(|(tx, time)| (tx, *time)))
+                })?;
                 println!(
                     "Applied unconfirmed transactions in {}s",
                     start_apply_mempool.elapsed().as_secs_f32()

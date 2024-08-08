@@ -1,3 +1,5 @@
+use bdk_wallet::chain::PersistWith;
+use bdk_wallet::chain::Staged;
 use bdk_wallet::file_store::Store;
 use bdk_wallet::Wallet;
 use std::io::Write;
@@ -20,6 +22,38 @@ const EXTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7
 const INTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)";
 const ELECTRUM_URL: &str = "ssl://electrum.blockstream.info:60002";
 
+pub struct CustomDb;
+
+impl PersistWith<CustomDb> for Wallet {
+    type CreateParams = ();
+
+    type LoadParams = ();
+
+    type CreateError = ();
+
+    type LoadError = ();
+
+    type PersistError = ();
+
+    fn create(_db: &mut CustomDb, _params: Self::CreateParams) -> Result<Self, Self::CreateError> {
+        todo!()
+    }
+
+    fn load(
+        _db: &mut CustomDb,
+        _params: Self::LoadParams,
+    ) -> Result<Option<Self>, Self::LoadError> {
+        todo!()
+    }
+
+    fn persist(
+        _db: &mut CustomDb,
+        _changeset: &<Self as Staged>::ChangeSet,
+    ) -> Result<(), Self::PersistError> {
+        Ok(())
+    }
+}
+
 fn main() -> Result<(), anyhow::Error> {
     let db_path = "bdk-electrum-example.db";
 
@@ -36,8 +70,7 @@ fn main() -> Result<(), anyhow::Error> {
             .create_wallet(&mut db)?,
     };
 
-    let address = wallet.next_unused_address(KeychainKind::External);
-    wallet.persist(&mut db)?;
+    let address = wallet.mutate(&mut db, |w| w.next_unused_address(KeychainKind::External))?;
     println!("Generated Address: {}", address);
 
     let balance = wallet.balance();
@@ -71,8 +104,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     println!();
 
-    wallet.apply_update(update)?;
-    wallet.persist(&mut db)?;
+    wallet.mutate(&mut db, |w| w.apply_update(update.clone()))??;
 
     let balance = wallet.balance();
     println!("Wallet balance after syncing: {} sats", balance.total());
@@ -88,12 +120,13 @@ fn main() -> Result<(), anyhow::Error> {
     let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?
         .require_network(Network::Testnet)?;
 
-    let mut tx_builder = wallet.build_tx();
-    tx_builder
-        .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
-        .enable_rbf();
-
-    let mut psbt = tx_builder.finish()?;
+    let mut psbt = wallet.mutate(&mut db, |w| -> anyhow::Result<_> {
+        let mut tx_builder = w.build_tx();
+        tx_builder
+            .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
+            .enable_rbf();
+        Ok(tx_builder.finish()?)
+    })??;
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;
     assert!(finalized);
 

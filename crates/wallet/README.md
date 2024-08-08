@@ -91,10 +91,10 @@ let mut wallet = match wallet_opt {
         .expect("wallet"),
 };
 
-// Get a new address to receive bitcoin.
-let receive_address = wallet.reveal_next_address(KeychainKind::External);
-// Persist staged wallet data changes to the file store.
-wallet.persist(&mut db).expect("persist");
+// Get a new address to receive bitcoin and persist staged wallet data changes to the file store.
+let receive_address = wallet
+    .mutate(&mut db, |w| w.reveal_next_address(KeychainKind::External))
+    .expect("persist");
 println!("Your new receive address is: {}", receive_address.address);
 ```
 
