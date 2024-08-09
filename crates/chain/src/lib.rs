@@ -113,6 +113,13 @@ pub type KeychainIndexed<K, T> = ((K, u32), T);
 /// A wrapper that we use to impl remote traits for types in our crate or dependency crates.
 pub struct Impl<T>(pub T);
 
+impl<T> Impl<T> {
+    /// Returns the inner `T`.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 impl<T> From<T> for Impl<T> {
     fn from(value: T) -> Self {
         Self(value)
