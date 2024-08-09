@@ -1,14 +1,18 @@
 use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash},
     local_chain::LocalChain,
-    spk_client::{FullScanRequest, SyncRequest},
+    spk_client::{FullScanRequest, SyncRequest, SyncResult},
     spk_txout::SpkTxOutIndex,
-    Balance, ConfirmationBlockTime, IndexedTxGraph,
+    Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
+use core::time::Duration;
 use std::collections::{BTreeSet, HashSet};
 use std::str::FromStr;
+
+// Batch size for `sync_with_electrum`.
+const BATCH_SIZE: usize = 5;
 
 fn get_balance(
     recv_chain: &LocalChain,
@@ -20,6 +24,39 @@ fn get_balance(
         .graph()
         .balance(recv_chain, chain_tip, outpoints, |_, _| true);
     Ok(balance)
+}
+
+fn sync_with_electrum<I, Spks>(
+    client: &BdkElectrumClient<electrum_client::Client>,
+    spks: Spks,
+    chain: &mut LocalChain,
+    graph: &mut IndexedTxGraph<ConfirmationBlockTime, I>,
+) -> anyhow::Result<SyncResult>
+where
+    I: Indexer,
+    I::ChangeSet: Default + Merge,
+    Spks: IntoIterator<Item = ScriptBuf>,
+    Spks::IntoIter: ExactSizeIterator + Send + 'static,
+{
+    let mut update = client.sync(
+        SyncRequest::from_chain_tip(chain.tip()).chain_spks(spks),
+        BATCH_SIZE,
+        true,
+    )?;
+
+    // Update `last_seen` to be able to calculate balance for unconfirmed transactions.
+    let now = std::time::UNIX_EPOCH
+        .elapsed()
+        .expect("must get time")
+        .as_secs();
+    let _ = update.graph_update.update_last_seen_unconfirmed(now);
+
+    let _ = chain
+        .apply_update(update.chain_update.clone())
+        .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
+    let _ = graph.apply_update(update.graph_update.clone());
+
+    Ok(update)
 }
 
 #[test]
@@ -60,7 +97,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         None,
     )?;
     env.mine_blocks(1, None)?;
-    env.wait_until_electrum_sees_block()?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
     // use a full checkpoint linked list (since this is not what we are testing)
     let cp_tip = env.make_checkpoint_tip();
@@ -162,7 +199,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         None,
     )?;
     env.mine_blocks(1, None)?;
-    env.wait_until_electrum_sees_block()?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
     // use a full checkpoint linked list (since this is not what we are testing)
     let cp_tip = env.make_checkpoint_tip();
@@ -204,7 +241,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         None,
     )?;
     env.mine_blocks(1, None)?;
-    env.wait_until_electrum_sees_block()?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
     // A scan with gap limit 5 won't find the second transaction, but a scan with gap limit 6 will.
     // The last active indice won't be updated in the first case but will in the second one.
@@ -238,14 +275,9 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ensure that [`ElectrumExt`] can sync properly.
-///
-/// 1. Mine 101 blocks.
-/// 2. Send a tx.
-/// 3. Mine extra block to confirm sent tx.
-/// 4. Check [`Balance`] to ensure tx is confirmed.
+/// Ensure that [`BdkElectrumClient::sync`] can confirm previously unconfirmed transactions in both reorg and no-reorg situations.
 #[test]
-fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
+fn test_sync() -> anyhow::Result<()> {
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
     let env = TestEnv::new()?;
@@ -271,35 +303,88 @@ fn scan_detects_confirmed_tx() -> anyhow::Result<()> {
 
     // Mine some blocks.
     env.mine_blocks(101, Some(addr_to_mine))?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
-    // Create transaction that is tracked by our receiver.
-    env.send(&addr_to_track, SEND_AMOUNT)?;
+    // Broadcast transaction to mempool.
+    let txid = env.send(&addr_to_track, SEND_AMOUNT)?;
+    env.wait_until_electrum_sees_txid(txid, Duration::from_secs(6))?;
 
-    // Mine a block to confirm sent tx.
-    env.mine_blocks(1, None)?;
-
-    // Sync up to tip.
-    env.wait_until_electrum_sees_block()?;
-    let update = client.sync(
-        SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks(core::iter::once(spk_to_track)),
-        5,
-        true,
+    sync_with_electrum(
+        &client,
+        [spk_to_track.clone()],
+        &mut recv_chain,
+        &mut recv_graph,
     )?;
 
-    let _ = recv_chain
-        .apply_update(update.chain_update)
-        .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
-    let _ = recv_graph.apply_update(update.graph_update);
+    // Check if balance is zero when transaction exists only in mempool.
+    assert_eq!(
+        get_balance(&recv_chain, &recv_graph)?,
+        Balance {
+            trusted_pending: SEND_AMOUNT,
+            ..Balance::default()
+        },
+        "balance must be correct",
+    );
 
-    // Check to see if tx is confirmed.
+    // Mine block to confirm transaction.
+    env.mine_blocks(1, None)?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    sync_with_electrum(
+        &client,
+        [spk_to_track.clone()],
+        &mut recv_chain,
+        &mut recv_graph,
+    )?;
+
+    // Check if balance is correct when transaction is confirmed.
     assert_eq!(
         get_balance(&recv_chain, &recv_graph)?,
         Balance {
             confirmed: SEND_AMOUNT,
             ..Balance::default()
         },
+        "balance must be correct",
     );
 
+    // Perform reorg on block with confirmed transaction.
+    env.reorg_empty_blocks(1)?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    sync_with_electrum(
+        &client,
+        [spk_to_track.clone()],
+        &mut recv_chain,
+        &mut recv_graph,
+    )?;
+
+    // Check if balance is correct when transaction returns to mempool.
+    assert_eq!(
+        get_balance(&recv_chain, &recv_graph)?,
+        Balance {
+            trusted_pending: SEND_AMOUNT,
+            ..Balance::default()
+        },
+    );
+
+    // Mine block to confirm transaction again.
+    env.mine_blocks(1, None)?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    sync_with_electrum(&client, [spk_to_track], &mut recv_chain, &mut recv_graph)?;
+
+    // Check if balance is correct once transaction is confirmed again.
+    assert_eq!(
+        get_balance(&recv_chain, &recv_graph)?,
+        Balance {
+            confirmed: SEND_AMOUNT,
+            ..Balance::default()
+        },
+        "balance must be correct",
+    );
+
+    // Check to see if we have the floating txouts available from our transactions' previous outputs
+    // in order to calculate transaction fees.
     for tx in recv_graph.graph().full_txs() {
         // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
         // floating txouts available from the transaction's previous outputs.
@@ -371,17 +456,13 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     }
 
     // Sync up to tip.
-    env.wait_until_electrum_sees_block()?;
-    let update = client.sync(
-        SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
-        5,
-        false,
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+    let update = sync_with_electrum(
+        &client,
+        [spk_to_track.clone()],
+        &mut recv_chain,
+        &mut recv_graph,
     )?;
-
-    let _ = recv_chain
-        .apply_update(update.chain_update)
-        .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
-    let _ = recv_graph.apply_update(update.graph_update.clone());
 
     // Retain a snapshot of all anchors before reorg process.
     let initial_anchors = update.graph_update.all_anchors();
@@ -407,24 +488,21 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     for depth in 1..=REORG_COUNT {
         env.reorg_empty_blocks(depth)?;
 
-        env.wait_until_electrum_sees_block()?;
-        let update = client.sync(
-            SyncRequest::from_chain_tip(recv_chain.tip()).chain_spks([spk_to_track.clone()]),
-            5,
-            false,
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        let update = sync_with_electrum(
+            &client,
+            [spk_to_track.clone()],
+            &mut recv_chain,
+            &mut recv_graph,
         )?;
-
-        let _ = recv_chain
-            .apply_update(update.chain_update)
-            .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
 
         // Check that no new anchors are added during current reorg.
         assert!(initial_anchors.is_superset(update.graph_update.all_anchors()));
-        let _ = recv_graph.apply_update(update.graph_update);
 
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,
             Balance {
+                trusted_pending: SEND_AMOUNT * depth as u64,
                 confirmed: SEND_AMOUNT * (REORG_COUNT - depth) as u64,
                 ..Balance::default()
             },
