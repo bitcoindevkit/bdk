@@ -23,7 +23,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut conn = Connection::open(DB_PATH)?;
 
     let wallet_opt = Wallet::load()
-        .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
+        .descriptor(KeychainKind::External, EXTERNAL_DESC)
+        .descriptor(KeychainKind::Internal, INTERNAL_DESC)
         .network(NETWORK)
         .load_wallet(&mut conn)?;
     let mut wallet = match wallet_opt {

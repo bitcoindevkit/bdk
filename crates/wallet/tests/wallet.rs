@@ -137,7 +137,8 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
         {
             let mut db = open_db(&file_path).context("failed to recover db")?;
             let wallet = Wallet::load()
-                .descriptors(external_desc, internal_desc)
+                .descriptor(KeychainKind::External, external_desc)
+                .descriptor(KeychainKind::Internal, internal_desc)
                 .network(Network::Testnet)
                 .load_wallet(&mut db)?
                 .expect("wallet must exist");
@@ -240,7 +241,7 @@ fn wallet_load_checks() -> anyhow::Result<()> {
         );
         assert_matches!(
             Wallet::load()
-                .descriptors(internal_desc, external_desc)
+                .descriptor(KeychainKind::External, internal_desc)
                 .load_wallet(&mut open_db(&file_path)?),
             Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(
                 LoadMismatch::Descriptor { .. }
@@ -287,7 +288,7 @@ fn single_descriptor_wallet_persist_and_recover() {
     let secp = wallet.secp_ctx();
     let (_, keymap) = <Descriptor<DescriptorPublicKey>>::parse_descriptor(secp, desc).unwrap();
     let wallet = LoadParams::new()
-        .keymap(KeychainKind::External, keymap.clone())
+        .descriptor(KeychainKind::External, desc)
         .load_wallet(&mut db)
         .unwrap()
         .expect("must have loaded changeset");

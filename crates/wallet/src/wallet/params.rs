@@ -176,12 +176,18 @@ impl LoadParams {
 
     /// Checks that `descriptor` of `keychain` matches this, and extracts private keys (if
     /// available).
-    pub fn descriptors<D>(mut self, descriptor: D, change_descriptor: D) -> Self
+    pub fn descriptor<D>(mut self, keychain: KeychainKind, descriptor: D) -> Self
     where
         D: IntoWalletDescriptor + 'static,
     {
-        self.check_descriptor = Some(make_descriptor_to_extract(descriptor));
-        self.check_change_descriptor = Some(make_descriptor_to_extract(change_descriptor));
+        match keychain {
+            KeychainKind::External => {
+                self.check_descriptor = Some(make_descriptor_to_extract(descriptor))
+            }
+            KeychainKind::Internal => {
+                self.check_change_descriptor = Some(make_descriptor_to_extract(descriptor))
+            }
+        }
         self
     }
 

@@ -442,7 +442,7 @@ impl Wallet {
     /// Note that the descriptor secret keys are not persisted to the db. You can either add
     /// signers after-the-fact with [`Wallet::add_signer`] or [`Wallet::set_keymap`]. Or you can
     /// add keys when building the wallet using [`LoadParams::keymap`] and/or
-    /// [`LoadParams::descriptors`].
+    /// [`LoadParams::descriptor`].
     ///
     /// # Synopsis
     ///
@@ -467,7 +467,8 @@ impl Wallet {
     /// let mut conn = bdk_wallet::rusqlite::Connection::open(file_path)?;
     /// let mut wallet = Wallet::load()
     ///     // check loaded descriptors matches these values and extract private keys
-    ///     .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
+    ///     .descriptor(KeychainKind::External, EXTERNAL_DESC)
+    ///     .descriptor(KeychainKind::Internal, INTERNAL_DESC)
     ///     // you can also manually add private keys
     ///     .keymap(KeychainKind::External, external_keymap)
     ///     .keymap(KeychainKind::Internal, internal_keymap)
