@@ -11,6 +11,8 @@ use bitcoincore_rpc::{
     bitcoincore_rpc_json::{GetBlockTemplateModes, GetBlockTemplateRules},
     RpcApi,
 };
+use electrsd::bitcoind::anyhow::Context;
+
 pub use electrsd;
 pub use electrsd::bitcoind;
 pub use electrsd::bitcoind::anyhow;
@@ -26,35 +28,52 @@ pub struct TestEnv {
     pub electrsd: electrsd::ElectrsD,
 }
 
-impl TestEnv {
-    /// Construct a new [`TestEnv`] instance with default configurations.
-    pub fn new() -> anyhow::Result<Self> {
-        let bitcoind = match std::env::var_os("BITCOIND_EXE") {
-            Some(bitcoind_path) => electrsd::bitcoind::BitcoinD::new(bitcoind_path),
-            None => {
-                let bitcoind_exe = electrsd::bitcoind::downloaded_exe_path()
-                    .expect(
-                "you need to provide an env var BITCOIND_EXE or specify a bitcoind version feature",
-                );
-                electrsd::bitcoind::BitcoinD::with_conf(
-                    bitcoind_exe,
-                    &electrsd::bitcoind::Conf::default(),
-                )
-            }
-        }?;
+/// Configuration parameters.
+#[derive(Debug)]
+pub struct Config<'a> {
+    /// [`bitcoind::Conf`]
+    pub bitcoind: bitcoind::Conf<'a>,
+    /// [`electrsd::Conf`]
+    pub electrsd: electrsd::Conf<'a>,
+}
 
-        let mut electrsd_conf = electrsd::Conf::default();
-        electrsd_conf.http_enabled = true;
-        let electrsd = match std::env::var_os("ELECTRS_EXE") {
-            Some(env_electrs_exe) => {
-                electrsd::ElectrsD::with_conf(env_electrs_exe, &bitcoind, &electrsd_conf)
-            }
-            None => {
-                let electrs_exe = electrsd::downloaded_exe_path()
-                    .expect("electrs version feature must be enabled");
-                electrsd::ElectrsD::with_conf(electrs_exe, &bitcoind, &electrsd_conf)
-            }
-        }?;
+impl<'a> Default for Config<'a> {
+    /// Use the default configuration plus set `http_enabled = true` for [`electrsd::Conf`]
+    /// which is required for testing `bdk_esplora`.
+    fn default() -> Self {
+        Self {
+            bitcoind: bitcoind::Conf::default(),
+            electrsd: {
+                let mut conf = electrsd::Conf::default();
+                conf.http_enabled = true;
+                conf
+            },
+        }
+    }
+}
+
+impl TestEnv {
+    /// Construct a new [`TestEnv`] instance with the default configuration used by BDK.
+    pub fn new() -> anyhow::Result<Self> {
+        TestEnv::new_with_config(Config::default())
+    }
+
+    /// Construct a new [`TestEnv`] instance with the provided [`Config`].
+    pub fn new_with_config(config: Config) -> anyhow::Result<Self> {
+        let bitcoind_exe = match std::env::var("BITCOIND_EXE") {
+            Ok(path) => path,
+            Err(_) => bitcoind::downloaded_exe_path().context(
+                "you need to provide an env var BITCOIND_EXE or specify a bitcoind version feature",
+            )?,
+        };
+        let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &config.bitcoind)?;
+
+        let electrs_exe = match std::env::var("ELECTRS_EXE") {
+            Ok(path) => path,
+            Err(_) => electrsd::downloaded_exe_path()
+                .context("electrs version feature must be enabled")?,
+        };
+        let electrsd = electrsd::ElectrsD::with_conf(electrs_exe, &bitcoind, &config.electrsd)?;
 
         Ok(Self { bitcoind, electrsd })
     }
