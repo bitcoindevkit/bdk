@@ -63,9 +63,9 @@ pub mod spk_client;
 #[macro_use]
 extern crate alloc;
 #[cfg(feature = "rusqlite")]
-pub extern crate rusqlite_crate as rusqlite;
+pub extern crate rusqlite;
 #[cfg(feature = "serde")]
-pub extern crate serde_crate as serde;
+pub extern crate serde;
 
 #[cfg(feature = "std")]
 #[macro_use]

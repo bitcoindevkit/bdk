@@ -1228,13 +1228,10 @@ impl<A: Anchor> TxGraph<A> {
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
-    serde(
-        crate = "serde_crate",
-        bound(
-            deserialize = "A: Ord + serde::Deserialize<'de>",
-            serialize = "A: Ord + serde::Serialize",
-        )
-    )
+    serde(bound(
+        deserialize = "A: Ord + serde::Deserialize<'de>",
+        serialize = "A: Ord + serde::Serialize",
+    ))
 )]
 #[must_use]
 pub struct ChangeSet<A = ()> {

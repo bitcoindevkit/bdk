@@ -2,11 +2,7 @@ use bitcoin::Amount;
 
 /// Balance, differentiated into various categories.
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate",)
-)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Balance {
     /// All coinbase outputs not yet matured
     pub immature: Amount,
