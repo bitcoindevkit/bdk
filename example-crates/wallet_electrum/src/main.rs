@@ -26,8 +26,10 @@ fn main() -> Result<(), anyhow::Error> {
     let mut db = Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), db_path)?;
 
     let wallet_opt = Wallet::load()
-        .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
         .network(NETWORK)
+        .descriptor(KeychainKind::External, Some(EXTERNAL_DESC))
+        .descriptor(KeychainKind::Internal, Some(INTERNAL_DESC))
+        .extract_keys()
         .load_wallet(&mut db)?;
     let mut wallet = match wallet_opt {
         Some(wallet) => wallet,

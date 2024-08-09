@@ -136,8 +136,16 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
         // recover wallet
         {
             let mut db = open_db(&file_path).context("failed to recover db")?;
+            let _ = Wallet::load()
+                .network(Network::Testnet)
+                .load_wallet(&mut db)?
+                .expect("wallet must exist");
+        }
+        {
+            let mut db = open_db(&file_path).context("failed to recover db")?;
             let wallet = Wallet::load()
-                .descriptors(external_desc, internal_desc)
+                .descriptor(KeychainKind::External, Some(external_desc))
+                .descriptor(KeychainKind::Internal, Some(internal_desc))
                 .network(Network::Testnet)
                 .load_wallet(&mut db)?
                 .expect("wallet must exist");
@@ -240,7 +248,16 @@ fn wallet_load_checks() -> anyhow::Result<()> {
         );
         assert_matches!(
             Wallet::load()
-                .descriptors(internal_desc, external_desc)
+                .descriptor(KeychainKind::External, Some(internal_desc))
+                .load_wallet(&mut open_db(&file_path)?),
+            Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(
+                LoadMismatch::Descriptor { .. }
+            ))),
+            "unexpected descriptors check result",
+        );
+        assert_matches!(
+            Wallet::load()
+                .descriptor(KeychainKind::External, Option::<&str>::None)
                 .load_wallet(&mut open_db(&file_path)?),
             Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(
                 LoadMismatch::Descriptor { .. }
@@ -279,24 +296,38 @@ fn single_descriptor_wallet_persist_and_recover() {
         .network(Network::Testnet)
         .create_wallet(&mut db)
         .unwrap();
-
     let _ = wallet.reveal_addresses_to(KeychainKind::External, 2);
     assert!(wallet.persist(&mut db).unwrap());
 
     // should recover persisted wallet
     let secp = wallet.secp_ctx();
     let (_, keymap) = <Descriptor<DescriptorPublicKey>>::parse_descriptor(secp, desc).unwrap();
-    let wallet = LoadParams::new()
-        .keymap(KeychainKind::External, keymap.clone())
+    assert!(!keymap.is_empty());
+    let wallet = Wallet::load()
+        .descriptor(KeychainKind::External, Some(desc))
+        .extract_keys()
         .load_wallet(&mut db)
         .unwrap()
         .expect("must have loaded changeset");
-
     assert_eq!(wallet.derivation_index(KeychainKind::External), Some(2));
     // should have private key
     assert_eq!(
         wallet.get_signers(KeychainKind::External).as_key_map(secp),
         keymap,
+    );
+
+    // should error on wrong internal params
+    let desc = get_test_wpkh();
+    let (exp_desc, _) = <Descriptor<DescriptorPublicKey>>::parse_descriptor(secp, desc).unwrap();
+    let err = Wallet::load()
+        .descriptor(KeychainKind::Internal, Some(desc))
+        .extract_keys()
+        .load_wallet(&mut db);
+    assert_matches!(
+        err,
+        Err(LoadWithPersistError::InvalidChangeSet(LoadError::Mismatch(LoadMismatch::Descriptor { keychain, loaded, expected })))
+        if keychain == KeychainKind::Internal && loaded.is_none() && expected == Some(exp_desc),
+        "single descriptor wallet should refuse change descriptor param"
     );
 }
 

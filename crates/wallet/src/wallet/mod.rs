@@ -246,9 +246,9 @@ pub enum LoadMismatch {
         /// Keychain identifying the descriptor.
         keychain: KeychainKind,
         /// The loaded descriptor.
-        loaded: ExtendedDescriptor,
+        loaded: Option<ExtendedDescriptor>,
         /// The expected descriptor.
-        expected: ExtendedDescriptor,
+        expected: Option<ExtendedDescriptor>,
     },
 }
 
@@ -401,11 +401,15 @@ impl Wallet {
         ));
 
         let (change_descriptor, change_signers) = match params.change_descriptor {
-            Some(desc_fn) => {
-                let (descriptor, mut keymap) = desc_fn(&secp, network)?;
-                keymap.extend(params.change_descriptor_keymap);
-                let change_signers = Arc::new(SignersContainer::build(keymap, &descriptor, &secp));
-                (Some(descriptor), change_signers)
+            Some(make_desc) => {
+                let (change_descriptor, mut internal_keymap) = make_desc(&secp, network)?;
+                internal_keymap.extend(params.change_descriptor_keymap);
+                let change_signers = Arc::new(SignersContainer::build(
+                    internal_keymap,
+                    &change_descriptor,
+                    &secp,
+                ));
+                (Some(change_descriptor), change_signers)
             }
             None => (None, Arc::new(SignersContainer::new())),
         };
@@ -442,7 +446,7 @@ impl Wallet {
     /// Note that the descriptor secret keys are not persisted to the db. You can either add
     /// signers after-the-fact with [`Wallet::add_signer`] or [`Wallet::set_keymap`]. Or you can
     /// add keys when building the wallet using [`LoadParams::keymap`] and/or
-    /// [`LoadParams::descriptors`].
+    /// [`LoadParams::descriptor`].
     ///
     /// # Synopsis
     ///
@@ -467,7 +471,9 @@ impl Wallet {
     /// let mut conn = bdk_wallet::rusqlite::Connection::open(file_path)?;
     /// let mut wallet = Wallet::load()
     ///     // check loaded descriptors matches these values and extract private keys
-    ///     .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
+    ///     .descriptor(KeychainKind::External, Some(EXTERNAL_DESC))
+    ///     .descriptor(KeychainKind::Internal, Some(INTERNAL_DESC))
+    ///     .extract_keys()
     ///     // you can also manually add private keys
     ///     .keymap(KeychainKind::External, external_keymap)
     ///     .keymap(KeychainKind::Internal, internal_keymap)
@@ -499,42 +505,6 @@ impl Wallet {
         let chain = LocalChain::from_changeset(changeset.local_chain)
             .map_err(|_| LoadError::MissingGenesis)?;
 
-        let mut descriptor_keymap = params.descriptor_keymap;
-        let descriptor = changeset
-            .descriptor
-            .ok_or(LoadError::MissingDescriptor(KeychainKind::External))?;
-        check_wallet_descriptor(&descriptor).map_err(LoadError::Descriptor)?;
-
-        let (change_descriptor, change_signers) = match changeset.change_descriptor {
-            Some(change_descriptor) => {
-                check_wallet_descriptor(&change_descriptor).map_err(LoadError::Descriptor)?;
-                let mut change_descriptor_keymap = params.change_descriptor_keymap;
-
-                // check params match loaded
-                if let Some(exp_change_descriptor) = params.check_change_descriptor {
-                    let (exp_change_descriptor, keymap) =
-                        (exp_change_descriptor)(&secp, network).map_err(LoadError::Descriptor)?;
-                    change_descriptor_keymap.extend(keymap);
-
-                    if change_descriptor.descriptor_id() != exp_change_descriptor.descriptor_id() {
-                        return Err(LoadError::Mismatch(LoadMismatch::Descriptor {
-                            keychain: KeychainKind::Internal,
-                            loaded: change_descriptor,
-                            expected: exp_change_descriptor,
-                        }));
-                    }
-                }
-                let change_signers = Arc::new(SignersContainer::build(
-                    change_descriptor_keymap,
-                    &change_descriptor,
-                    &secp,
-                ));
-                (Some(change_descriptor), change_signers)
-            }
-            None => (None, Arc::new(SignersContainer::new())),
-        };
-
-        // checks
         if let Some(exp_network) = params.check_network {
             if network != exp_network {
                 return Err(LoadError::Mismatch(LoadMismatch::Network {
@@ -551,25 +521,88 @@ impl Wallet {
                 }));
             }
         }
-        if let Some(exp_descriptor) = params.check_descriptor {
-            let (exp_descriptor, keymap) =
-                (exp_descriptor)(&secp, network).map_err(LoadError::Descriptor)?;
-            descriptor_keymap.extend(keymap);
 
-            if descriptor.descriptor_id() != exp_descriptor.descriptor_id() {
+        let descriptor = changeset
+            .descriptor
+            .ok_or(LoadError::MissingDescriptor(KeychainKind::External))?;
+        check_wallet_descriptor(&descriptor).map_err(LoadError::Descriptor)?;
+        let mut external_keymap = params.descriptor_keymap;
+
+        if let Some(expected) = params.check_descriptor {
+            if let Some(make_desc) = expected {
+                let (exp_desc, keymap) =
+                    make_desc(&secp, network).map_err(LoadError::Descriptor)?;
+                if descriptor.descriptor_id() != exp_desc.descriptor_id() {
+                    return Err(LoadError::Mismatch(LoadMismatch::Descriptor {
+                        keychain: KeychainKind::External,
+                        loaded: Some(descriptor),
+                        expected: Some(exp_desc),
+                    }));
+                }
+                if params.extract_keys {
+                    external_keymap.extend(keymap);
+                }
+            } else {
                 return Err(LoadError::Mismatch(LoadMismatch::Descriptor {
                     keychain: KeychainKind::External,
-                    loaded: descriptor,
-                    expected: exp_descriptor,
+                    loaded: Some(descriptor),
+                    expected: None,
                 }));
             }
         }
+        let signers = Arc::new(SignersContainer::build(external_keymap, &descriptor, &secp));
 
-        let signers = Arc::new(SignersContainer::build(
-            descriptor_keymap,
-            &descriptor,
-            &secp,
-        ));
+        let (mut change_descriptor, mut change_signers) = (None, Arc::new(SignersContainer::new()));
+        match (changeset.change_descriptor, params.check_change_descriptor) {
+            // empty signer
+            (None, None) => {}
+            (None, Some(expect)) => {
+                // expected desc but none loaded
+                if let Some(make_desc) = expect {
+                    let (exp_desc, _) = make_desc(&secp, network).map_err(LoadError::Descriptor)?;
+                    return Err(LoadError::Mismatch(LoadMismatch::Descriptor {
+                        keychain: KeychainKind::Internal,
+                        loaded: None,
+                        expected: Some(exp_desc),
+                    }));
+                }
+            }
+            // nothing expected
+            (Some(desc), None) => {
+                check_wallet_descriptor(&desc).map_err(LoadError::Descriptor)?;
+                change_descriptor = Some(desc);
+            }
+            (Some(desc), Some(expect)) => match expect {
+                // expected none for existing
+                None => {
+                    return Err(LoadError::Mismatch(LoadMismatch::Descriptor {
+                        keychain: KeychainKind::Internal,
+                        loaded: Some(desc),
+                        expected: None,
+                    }))
+                }
+                // parameters must match
+                Some(make_desc) => {
+                    let (exp_desc, keymap) =
+                        make_desc(&secp, network).map_err(LoadError::Descriptor)?;
+                    if desc.descriptor_id() != exp_desc.descriptor_id() {
+                        return Err(LoadError::Mismatch(LoadMismatch::Descriptor {
+                            keychain: KeychainKind::Internal,
+                            loaded: Some(desc),
+                            expected: Some(exp_desc),
+                        }));
+                    }
+                    let mut internal_keymap = params.change_descriptor_keymap;
+                    if params.extract_keys {
+                        internal_keymap.extend(keymap);
+                    }
+                    change_signers =
+                        Arc::new(SignersContainer::build(internal_keymap, &desc, &secp));
+                    change_descriptor = Some(desc);
+                }
+            },
+        }
+
         let index = create_indexer(descriptor, change_descriptor, params.lookahead)
             .map_err(LoadError::Descriptor)?;
 
