@@ -843,11 +843,7 @@ impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 /// [`apply_changeset`]: crate::keychain_txout::KeychainTxOutIndex::apply_changeset
 /// [`merge`]: Self::merge
 #[derive(Clone, Debug, Default, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate")
-)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[must_use]
 pub struct ChangeSet {
     /// Contains for each descriptor_id the last revealed index of derivation

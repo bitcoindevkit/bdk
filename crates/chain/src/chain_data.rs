@@ -42,11 +42,7 @@ impl<A: Anchor> ChainPosition<A> {
 
 /// Block height and timestamp at which a transaction is confirmed.
 #[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate")
-)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum ConfirmationTime {
     /// The transaction is confirmed
     Confirmed {
@@ -91,11 +87,7 @@ impl From<ChainPosition<ConfirmationBlockTime>> for ConfirmationTime {
 /// `BlockId` implements [`Anchor`]. When a transaction is anchored to `BlockId`, the confirmation
 /// block and anchor block are the same block.
 #[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate")
-)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct BlockId {
     /// The height of the block.
     pub height: u32,
@@ -149,11 +141,7 @@ impl From<(&u32, &BlockHash)> for BlockId {
 ///
 /// Refer to [`Anchor`] for more details.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate")
-)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ConfirmationBlockTime {
     /// The anchor block.
     pub block_id: BlockId,

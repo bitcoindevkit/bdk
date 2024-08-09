@@ -631,11 +631,7 @@ impl LocalChain {
 
 /// The [`ChangeSet`] represents changes to [`LocalChain`].
 #[derive(Debug, Default, Clone, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(crate = "serde_crate")
-)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ChangeSet {
     /// Changes to the [`LocalChain`] blocks.
     ///

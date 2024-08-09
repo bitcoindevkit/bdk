@@ -157,7 +157,7 @@ impl ToSql for Impl<bitcoin::Amount> {
     }
 }
 
-impl<A: Anchor + serde_crate::de::DeserializeOwned> FromSql for Impl<A> {
+impl<A: Anchor + serde::de::DeserializeOwned> FromSql for Impl<A> {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         serde_json::from_str(value.as_str()?)
             .map(Impl)
@@ -165,7 +165,7 @@ impl<A: Anchor + serde_crate::de::DeserializeOwned> FromSql for Impl<A> {
     }
 }
 
-impl<A: Anchor + serde_crate::Serialize> ToSql for Impl<A> {
+impl<A: Anchor + serde::Serialize> ToSql for Impl<A> {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         serde_json::to_string(&self.0)
             .map(Into::into)
