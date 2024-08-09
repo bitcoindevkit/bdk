@@ -1,40 +1,29 @@
 use std::{
     collections::BTreeSet,
     io::{self, Write},
-    sync::Mutex,
 };
 
 use bdk_chain::{
-    bitcoin::{constants::genesis_block, Address, Network, Txid},
-    indexed_tx_graph::{self, IndexedTxGraph},
-    indexer::keychain_txout,
-    local_chain::{self, LocalChain},
+    bitcoin::{Address, Network, Txid},
     spk_client::{FullScanRequest, SyncRequest},
-    ConfirmationBlockTime, Merge,
+    Merge,
 };
-
 use bdk_esplora::{esplora_client, EsploraExt};
-
 use example_cli::{
     anyhow::{self, Context},
     clap::{self, Parser, Subcommand},
-    Keychain,
+    ChangeSet, Keychain,
 };
 
 const DB_MAGIC: &[u8] = b"bdk_example_esplora";
-const DB_PATH: &str = "bdk_example_esplora.db";
-
-type ChangeSet = (
-    local_chain::ChangeSet,
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
-);
+const DB_PATH: &str = ".bdk_example_esplora.db";
 
 #[derive(Subcommand, Debug, Clone)]
 enum EsploraCommands {
     /// Scans the addresses in the wallet using the esplora API.
     Scan {
         /// When a gap this large has been found for a keychain, it will stop.
-        #[clap(long, default_value = "5")]
+        #[clap(long, short = 'g', default_value = "10")]
         stop_gap: usize,
         #[clap(flatten)]
         scan_options: ScanOptions,
@@ -73,8 +62,8 @@ impl EsploraCommands {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct EsploraArgs {
-    /// The esplora url endpoint to connect to e.g. `<https://blockstream.info/api>`
-    /// If not provided it'll be set to a default for the network provided
+    /// The esplora url endpoint to connect to.
+    #[clap(long, short = 'u', env = "ESPLORA_SERVER")]
     esplora_url: Option<String>,
 }
 
@@ -103,29 +92,14 @@ pub struct ScanOptions {
 fn main() -> anyhow::Result<()> {
     let example_cli::Init {
         args,
-        keymap,
-        index,
+        graph,
+        chain,
         db,
-        init_changeset,
-    } = example_cli::init::<EsploraCommands, EsploraArgs, ChangeSet>(DB_MAGIC, DB_PATH)?;
-
-    let genesis_hash = genesis_block(args.network).block_hash();
-
-    let (init_chain_changeset, init_indexed_tx_graph_changeset) = init_changeset;
-
-    // Construct `IndexedTxGraph` and `LocalChain` with our initial changeset. They are wrapped in
-    // `Mutex` to display how they can be used in a multithreaded context. Technically the mutexes
-    // aren't strictly needed here.
-    let graph = Mutex::new({
-        let mut graph = IndexedTxGraph::new(index);
-        graph.apply_changeset(init_indexed_tx_graph_changeset);
-        graph
-    });
-    let chain = Mutex::new({
-        let (mut chain, _) = LocalChain::from_genesis_hash(genesis_hash);
-        chain.apply_changeset(&init_chain_changeset)?;
-        chain
-    });
+        network,
+    } = match example_cli::init_or_load::<EsploraCommands, EsploraArgs>(DB_MAGIC, DB_PATH)? {
+        Some(init) => init,
+        None => return Ok(()),
+    };
 
     let esplora_cmd = match &args.command {
         // These are commands that are handled by this example (sync, scan).
@@ -134,12 +108,11 @@ fn main() -> anyhow::Result<()> {
         general_cmd => {
             return example_cli::handle_commands(
                 &graph,
-                &db,
                 &chain,
-                &keymap,
-                args.network,
+                &db,
+                network,
                 |esplora_args, tx| {
-                    let client = esplora_args.client(args.network)?;
+                    let client = esplora_args.client(network)?;
                     client
                         .broadcast(tx)
                         .map(|_| ())
@@ -150,7 +123,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let client = esplora_cmd.esplora_args().client(args.network)?;
+    let client = esplora_cmd.esplora_args().client(network)?;
     // Prepare the `IndexedTxGraph` and `LocalChain` updates based on whether we are scanning or
     // syncing.
     //
@@ -264,7 +237,7 @@ fn main() -> anyhow::Result<()> {
                         request.chain_spks(unused_spks.into_iter().map(move |((k, i), spk)| {
                             eprint!(
                                 "Checking if address {} {}:{} has been used",
-                                Address::from_script(&spk, args.network).unwrap(),
+                                Address::from_script(&spk, network).unwrap(),
                                 k,
                                 i,
                             );
@@ -361,6 +334,11 @@ fn main() -> anyhow::Result<()> {
 
     // We persist the changes
     let mut db = db.lock().unwrap();
-    db.append_changeset(&(local_chain_changeset, indexed_tx_graph_changeset))?;
+    db.append_changeset(&ChangeSet {
+        local_chain: local_chain_changeset,
+        tx_graph: indexed_tx_graph_changeset.tx_graph,
+        indexer: indexed_tx_graph_changeset.indexer,
+        ..Default::default()
+    })?;
     Ok(())
 }
