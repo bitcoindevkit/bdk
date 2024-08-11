@@ -6,7 +6,7 @@ use core::{
 };
 
 use alloc::boxed::Box;
-use chain::{Merge, Staged};
+use chain::Merge;
 
 use crate::{descriptor::DescriptorError, ChangeSet, CreateParams, LoadParams, Wallet};
 
@@ -206,13 +206,14 @@ impl PersistedWallet {
     where
         P: WalletPersister,
     {
-        let stage = Staged::staged(&mut self.0);
-        if stage.is_empty() {
-            return Ok(false);
+        match self.0.staged_mut() {
+            Some(stage) => {
+                P::persist(persister, &*stage)?;
+                let _ = stage.take();
+                Ok(true)
+            }
+            None => Ok(false),
         }
-        P::persist(persister, &*stage)?;
-        stage.take();
-        Ok(true)
     }
 
     /// Persist staged changes of wallet into an async `persister`.
@@ -222,13 +223,14 @@ impl PersistedWallet {
     where
         P: AsyncWalletPersister,
     {
-        let stage = Staged::staged(&mut self.0);
-        if stage.is_empty() {
-            return Ok(false);
+        match self.0.staged_mut() {
+            Some(stage) => {
+                P::persist(persister, &*stage).await?;
+                let _ = stage.take();
+                Ok(true)
+            }
+            None => Ok(false),
         }
-        P::persist(persister, &*stage).await?;
-        stage.take();
-        Ok(true)
     }
 }
 
