@@ -225,7 +225,7 @@ where
     pub const ANCHORS_TABLE_NAME: &'static str = "bdk_anchors";
 
     /// Initialize sqlite tables.
-    fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
         let schema_v0: &[&str] = &[
             // full transactions
             &format!(
@@ -264,9 +264,9 @@ where
     }
 
     /// Construct a [`TxGraph`] from an sqlite database.
+    ///
+    /// Remember to call [`Self::init_sqlite_tables`] beforehand.
     pub fn from_sqlite(db_tx: &rusqlite::Transaction) -> rusqlite::Result<Self> {
-        Self::init_sqlite_tables(db_tx)?;
-
         let mut changeset = Self::default();
 
         let mut statement = db_tx.prepare(&format!(
@@ -332,9 +332,9 @@ where
     }
 
     /// Persist `changeset` to the sqlite database.
+    ///
+    /// Remember to call [`Self::init_sqlite_tables`] beforehand.
     pub fn persist_to_sqlite(&self, db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        Self::init_sqlite_tables(db_tx)?;
-
         let mut statement = db_tx.prepare_cached(&format!(
             "INSERT INTO {}(txid, raw_tx) VALUES(:txid, :raw_tx) ON CONFLICT(txid) DO UPDATE SET raw_tx=:raw_tx",
             Self::TXS_TABLE_NAME,
@@ -396,7 +396,7 @@ impl local_chain::ChangeSet {
     pub const BLOCKS_TABLE_NAME: &'static str = "bdk_blocks";
 
     /// Initialize sqlite tables for persisting [`local_chain::LocalChain`].
-    fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
         let schema_v0: &[&str] = &[
             // blocks
             &format!(
@@ -411,9 +411,9 @@ impl local_chain::ChangeSet {
     }
 
     /// Construct a [`LocalChain`](local_chain::LocalChain) from sqlite database.
+    ///
+    /// Remember to call [`Self::init_sqlite_tables`] beforehand.
     pub fn from_sqlite(db_tx: &rusqlite::Transaction) -> rusqlite::Result<Self> {
-        Self::init_sqlite_tables(db_tx)?;
-
         let mut changeset = Self::default();
 
         let mut statement = db_tx.prepare(&format!(
@@ -435,9 +435,9 @@ impl local_chain::ChangeSet {
     }
 
     /// Persist `changeset` to the sqlite database.
+    ///
+    /// Remember to call [`Self::init_sqlite_tables`] beforehand.
     pub fn persist_to_sqlite(&self, db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        Self::init_sqlite_tables(db_tx)?;
-
         let mut replace_statement = db_tx.prepare_cached(&format!(
             "REPLACE INTO {}(block_height, block_hash) VALUES(:block_height, :block_hash)",
             Self::BLOCKS_TABLE_NAME,
@@ -471,7 +471,7 @@ impl keychain_txout::ChangeSet {
 
     /// Initialize sqlite tables for persisting
     /// [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex).
-    fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
         let schema_v0: &[&str] = &[
             // last revealed
             &format!(
@@ -487,9 +487,9 @@ impl keychain_txout::ChangeSet {
 
     /// Construct [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex) from sqlite database
     /// and given parameters.
+    ///
+    /// Remember to call [`Self::init_sqlite_tables`] beforehand.
     pub fn from_sqlite(db_tx: &rusqlite::Transaction) -> rusqlite::Result<Self> {
-        Self::init_sqlite_tables(db_tx)?;
-
         let mut changeset = Self::default();
 
         let mut statement = db_tx.prepare(&format!(
@@ -511,9 +511,9 @@ impl keychain_txout::ChangeSet {
     }
 
     /// Persist `changeset` to the sqlite database.
+    ///
+    /// Remember to call [`Self::init_sqlite_tables`] beforehand.
     pub fn persist_to_sqlite(&self, db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        Self::init_sqlite_tables(db_tx)?;
-
         let mut statement = db_tx.prepare_cached(&format!(
             "REPLACE INTO {}(descriptor_id, last_revealed) VALUES(:descriptor_id, :last_revealed)",
             Self::LAST_REVEALED_TABLE_NAME,

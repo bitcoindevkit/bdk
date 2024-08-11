@@ -249,7 +249,11 @@ fn wallet_load_checks() -> anyhow::Result<()> {
 
     run(
         "store.db",
-        |path| Ok(bdk_file_store::Store::<ChangeSet>::create_new(DB_MAGIC, path)?),
+        |path| {
+            Ok(bdk_file_store::Store::<ChangeSet>::create_new(
+                DB_MAGIC, path,
+            )?)
+        },
         |path| Ok(bdk_file_store::Store::<ChangeSet>::open(DB_MAGIC, path)?),
     )?;
     run(
