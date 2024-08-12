@@ -130,3 +130,32 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features --all-targets -- -D warnings
+
+  build-examples:
+    name: Build Examples
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        example-dir:
+          - example_cli
+          - example_bitcoind_rpc_polling
+          - example_electrum
+          - example_esplora
+          - wallet_electrum
+          - wallet_esplora_async
+          - wallet_esplora_blocking
+          - wallet_rpc
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2.2.1
+      - name: Build
+        working-directory: example-crates/${{ matrix.example-dir }}
+        run: cargo build
