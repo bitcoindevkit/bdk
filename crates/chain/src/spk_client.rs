@@ -139,6 +139,43 @@ impl<SpkLabel> SyncRequestBuilder<SpkLabel> {
     }
 
     /// Add [`Script`]s coupled with an associated label that will be synced against.
+    ///
+    /// # Example
+    ///
+    /// Sync revealed script pubkeys obtained from a
+    /// [`KeychainTxOutIndex`](crate::keychain_txout::KeychainTxOutIndex).
+    ///
+    /// ```rust
+    /// # use bdk_chain::spk_client::SyncRequest;
+    /// # use bdk_chain::indexer::keychain_txout::KeychainTxOutIndex;
+    /// # use bdk_chain::miniscript::{Descriptor, DescriptorPublicKey};
+    /// # let secp = bdk_chain::bitcoin::secp256k1::Secp256k1::signing_only();
+    /// # let (descriptor_a,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)").unwrap();
+    /// # let (descriptor_b,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/1/*)").unwrap();
+    /// let mut indexer = KeychainTxOutIndex::<&'static str>::default();
+    /// indexer.insert_descriptor("descriptor_a", descriptor_a)?;
+    /// indexer.insert_descriptor("descriptor_b", descriptor_b)?;
+    ///
+    /// /* Assume that the caller does more mutations to the `indexer` here... */
+    ///
+    /// // Reveal spks for "descriptor_a", then build a sync request. Each spk will be labelled with
+    /// // `u32`, which represents the derivation index of the associated spk from "descriptor_a".
+    /// let (newly_revealed_spks, _changeset) = indexer
+    ///     .reveal_to_target("descriptor_a", 21)
+    ///     .expect("keychain must exist");
+    /// let _request = SyncRequest::builder()
+    ///     .spks_with_labels(newly_revealed_spks)
+    ///     .build();
+    ///
+    /// // Sync all revealed spks in the indexer. This time, spks may be derived from different
+    /// // keychains. Each spk will be labelled with `(&'static str, u32)` where `&'static str` is
+    /// // the keychain identifier and `u32` is the derivation index.
+    /// let all_revealed_spks = indexer.revealed_spks(..);
+    /// let _request = SyncRequest::builder()
+    ///     .spks_with_labels(all_revealed_spks)
+    ///     .build();
+    /// # Ok::<_, bdk_chain::keychain_txout::InsertDescriptorError<_>>(())
+    /// ```
     pub fn spks_with_labels(
         mut self,
         spks: impl IntoIterator<Item = (SpkLabel, ScriptBuf)>,
