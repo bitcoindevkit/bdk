@@ -187,22 +187,48 @@ impl TestEnv {
     }
 
     /// This method waits for the Electrum notification indicating that a new block has been mined.
-    pub fn wait_until_electrum_sees_block(&self) -> anyhow::Result<()> {
+    /// `timeout` is the maximum [`Duration`] we want to wait for a response from Electrsd.
+    pub fn wait_until_electrum_sees_block(&self, timeout: Duration) -> anyhow::Result<()> {
         self.electrsd.client.block_headers_subscribe()?;
-        let mut delay = Duration::from_millis(64);
+        let delay = Duration::from_millis(200);
+        let start = std::time::Instant::now();
 
-        loop {
+        while start.elapsed() < timeout {
             self.electrsd.trigger()?;
             self.electrsd.client.ping()?;
             if self.electrsd.client.block_headers_pop()?.is_some() {
                 return Ok(());
             }
 
-            if delay.as_millis() < 512 {
-                delay = delay.mul_f32(2.0);
-            }
             std::thread::sleep(delay);
         }
+
+        Err(anyhow::Error::msg(
+            "Timed out waiting for Electrsd to get block header",
+        ))
+    }
+
+    /// This method waits for Electrsd to see a transaction with given `txid`. `timeout` is the
+    /// maximum [`Duration`] we want to wait for a response from Electrsd.
+    pub fn wait_until_electrum_sees_txid(
+        &self,
+        txid: Txid,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
+        let delay = Duration::from_millis(200);
+        let start = std::time::Instant::now();
+
+        while start.elapsed() < timeout {
+            if self.electrsd.client.transaction_get(&txid).is_ok() {
+                return Ok(());
+            }
+
+            std::thread::sleep(delay);
+        }
+
+        Err(anyhow::Error::msg(
+            "Timed out waiting for Electrsd to get transaction",
+        ))
     }
 
     /// Invalidate a number of blocks of a given size `count`.
@@ -285,6 +311,7 @@ impl TestEnv {
 #[cfg(test)]
 mod test {
     use crate::TestEnv;
+    use core::time::Duration;
     use electrsd::bitcoind::{anyhow::Result, bitcoincore_rpc::RpcApi};
 
     /// This checks that reorgs initiated by `bitcoind` is detected by our `electrsd` instance.
@@ -294,7 +321,7 @@ mod test {
 
         // Mine some blocks.
         env.mine_blocks(101, None)?;
-        env.wait_until_electrum_sees_block()?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
         let height = env.bitcoind.client.get_block_count()?;
         let blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
@@ -302,7 +329,7 @@ mod test {
 
         // Perform reorg on six blocks.
         env.reorg(6)?;
-        env.wait_until_electrum_sees_block()?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
         let reorged_height = env.bitcoind.client.get_block_count()?;
         let reorged_blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
