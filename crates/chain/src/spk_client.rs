@@ -557,8 +557,8 @@ impl<'r, I> Iterator for SyncIter<'r, I, ScriptBuf> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let consumed = self.request.spks_consumed;
-        (consumed, Some(consumed))
+        let remaining = self.request.spks.len();
+        (remaining, Some(remaining))
     }
 }
 
@@ -570,8 +570,8 @@ impl<'r, I> Iterator for SyncIter<'r, I, Txid> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let consumed = self.request.txids_consumed;
-        (consumed, Some(consumed))
+        let remaining = self.request.txids.len();
+        (remaining, Some(remaining))
     }
 }
 
@@ -583,7 +583,7 @@ impl<'r, I> Iterator for SyncIter<'r, I, OutPoint> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let consumed = self.request.outpoints_consumed;
-        (consumed, Some(consumed))
+        let remaining = self.request.outpoints.len();
+        (remaining, Some(remaining))
     }
 }
