@@ -209,10 +209,10 @@ fn main() -> anyhow::Result<()> {
                     });
 
             if all_spks {
-                request = request.spks_with_labels(graph.index.revealed_spks(..));
+                request = request.spks_with_indexes(graph.index.revealed_spks(..));
             }
             if unused_spks {
-                request = request.spks_with_labels(graph.index.unused_spks());
+                request = request.spks_with_indexes(graph.index.unused_spks());
             }
             if utxos {
                 let init_outpoints = graph.index.outpoints();

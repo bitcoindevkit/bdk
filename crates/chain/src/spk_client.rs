@@ -89,11 +89,11 @@ impl SyncProgress {
 
 /// Builds a [`SyncRequest`].
 #[must_use]
-pub struct SyncRequestBuilder<SpkLabel = ()> {
-    inner: SyncRequest<SpkLabel>,
+pub struct SyncRequestBuilder<I = ()> {
+    inner: SyncRequest<I>,
 }
 
-impl<SpkLabel> Default for SyncRequestBuilder<SpkLabel> {
+impl<I> Default for SyncRequestBuilder<I> {
     fn default() -> Self {
         Self {
             inner: Default::default(),
@@ -110,7 +110,7 @@ impl<K: Clone + Ord + core::fmt::Debug + Send + Sync> SyncRequestBuilder<(K, u32
         indexer: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
         spk_range: impl core::ops::RangeBounds<K>,
     ) -> Self {
-        self.spks_with_labels(indexer.revealed_spks(spk_range))
+        self.spks_with_indexes(indexer.revealed_spks(spk_range))
     }
 
     /// Add [`Script`]s that are revealed by the `indexer` but currently unused.
@@ -118,18 +118,18 @@ impl<K: Clone + Ord + core::fmt::Debug + Send + Sync> SyncRequestBuilder<(K, u32
         self,
         indexer: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
     ) -> Self {
-        self.spks_with_labels(indexer.unused_spks())
+        self.spks_with_indexes(indexer.unused_spks())
     }
 }
 
 impl SyncRequestBuilder<()> {
     /// Add [`Script`]s that will be synced against.
     pub fn spks(self, spks: impl IntoIterator<Item = ScriptBuf>) -> Self {
-        self.spks_with_labels(spks.into_iter().map(|spk| ((), spk)))
+        self.spks_with_indexes(spks.into_iter().map(|spk| ((), spk)))
     }
 }
 
-impl<SpkLabel> SyncRequestBuilder<SpkLabel> {
+impl<I> SyncRequestBuilder<I> {
     /// Set the initial chain tip for the sync request.
     ///
     /// This is used to update [`LocalChain`](crate::local_chain::LocalChain).
@@ -138,7 +138,7 @@ impl<SpkLabel> SyncRequestBuilder<SpkLabel> {
         self
     }
 
-    /// Add [`Script`]s coupled with an associated label that will be synced against.
+    /// Add [`Script`]s coupled with associated indexes that will be synced against.
     ///
     /// # Example
     ///
@@ -158,28 +158,25 @@ impl<SpkLabel> SyncRequestBuilder<SpkLabel> {
     ///
     /// /* Assume that the caller does more mutations to the `indexer` here... */
     ///
-    /// // Reveal spks for "descriptor_a", then build a sync request. Each spk will be labelled with
+    /// // Reveal spks for "descriptor_a", then build a sync request. Each spk will be indexed with
     /// // `u32`, which represents the derivation index of the associated spk from "descriptor_a".
     /// let (newly_revealed_spks, _changeset) = indexer
     ///     .reveal_to_target("descriptor_a", 21)
     ///     .expect("keychain must exist");
     /// let _request = SyncRequest::builder()
-    ///     .spks_with_labels(newly_revealed_spks)
+    ///     .spks_with_indexes(newly_revealed_spks)
     ///     .build();
     ///
     /// // Sync all revealed spks in the indexer. This time, spks may be derived from different
-    /// // keychains. Each spk will be labelled with `(&'static str, u32)` where `&'static str` is
+    /// // keychains. Each spk will be indexed with `(&'static str, u32)` where `&'static str` is
     /// // the keychain identifier and `u32` is the derivation index.
     /// let all_revealed_spks = indexer.revealed_spks(..);
     /// let _request = SyncRequest::builder()
-    ///     .spks_with_labels(all_revealed_spks)
+    ///     .spks_with_indexes(all_revealed_spks)
     ///     .build();
     /// # Ok::<_, bdk_chain::keychain_txout::InsertDescriptorError<_>>(())
     /// ```
-    pub fn spks_with_labels(
-        mut self,
-        spks: impl IntoIterator<Item = (SpkLabel, ScriptBuf)>,
-    ) -> Self {
+    pub fn spks_with_indexes(mut self, spks: impl IntoIterator<Item = (I, ScriptBuf)>) -> Self {
         self.inner.spks.extend(spks);
         self
     }
@@ -199,14 +196,14 @@ impl<SpkLabel> SyncRequestBuilder<SpkLabel> {
     /// Set the closure that will inspect every sync item visited.
     pub fn inspect<F>(mut self, inspect: F) -> Self
     where
-        F: FnMut(SyncItem<SpkLabel>, SyncProgress) + Send + 'static,
+        F: FnMut(SyncItem<I>, SyncProgress) + Send + 'static,
     {
         self.inner.inspect = Box::new(inspect);
         self
     }
 
     /// Build the [`SyncRequest`].
-    pub fn build(self) -> SyncRequest<SpkLabel> {
+    pub fn build(self) -> SyncRequest<I> {
         self.inner
     }
 }
