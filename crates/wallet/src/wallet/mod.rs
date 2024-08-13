@@ -144,7 +144,7 @@ impl From<FullScanResult<KeychainKind>> for Update {
     fn from(value: FullScanResult<KeychainKind>) -> Self {
         Self {
             last_active_indices: value.last_active_indices,
-            graph: value.graph_update,
+            graph: value.graph_update.into_tx_graph(),
             chain: value.chain_update,
         }
     }
@@ -154,7 +154,7 @@ impl From<SyncResult> for Update {
     fn from(value: SyncResult) -> Self {
         Self {
             last_active_indices: BTreeMap::new(),
-            graph: value.graph_update,
+            graph: value.graph_update.into_tx_graph(),
             chain: value.chain_update,
         }
     }
