@@ -166,13 +166,14 @@ fn main() -> anyhow::Result<()> {
             // is reached. It returns a `TxGraph` update (`graph_update`) and a structure that
             // represents the last active spk derivation indices of keychains
             // (`keychain_indices_update`).
-            let mut update = client
+            let update = client
                 .full_scan(request, *stop_gap, scan_options.parallel_requests)
                 .context("scanning for transactions")?;
+            let mut tx_graph = update.graph_update.into_tx_graph();
 
             // We want to keep track of the latest time a transaction was seen unconfirmed.
             let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-            let _ = update.graph_update.update_last_seen_unconfirmed(now);
+            let _ = tx_graph.update_last_seen_unconfirmed(now);
 
             let mut graph = graph.lock().expect("mutex must not be poisoned");
             let mut chain = chain.lock().expect("mutex must not be poisoned");
@@ -186,7 +187,7 @@ fn main() -> anyhow::Result<()> {
                     let index_changeset = graph
                         .index
                         .reveal_to_target_multi(&update.last_active_indices);
-                    let mut indexed_tx_graph_changeset = graph.apply_update(update.graph_update);
+                    let mut indexed_tx_graph_changeset = graph.apply_update(tx_graph);
                     indexed_tx_graph_changeset.merge(index_changeset.into());
                     indexed_tx_graph_changeset
                 },
@@ -265,18 +266,19 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            let mut update = client.sync(request, scan_options.parallel_requests)?;
+            let update = client.sync(request, scan_options.parallel_requests)?;
+            let mut tx_graph = update.graph_update.into_tx_graph();
 
             // Update last seen unconfirmed
             let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-            let _ = update.graph_update.update_last_seen_unconfirmed(now);
+            let _ = tx_graph.update_last_seen_unconfirmed(now);
 
             (
                 chain
                     .lock()
                     .unwrap()
                     .apply_update(update.chain_update.expect("request has chain tip"))?,
-                graph.lock().unwrap().apply_update(update.graph_update),
+                graph.lock().unwrap().apply_update(tx_graph),
             )
         }
     };

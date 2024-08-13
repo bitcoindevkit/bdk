@@ -50,7 +50,7 @@ fn main() -> Result<(), anyhow::Error> {
 
     // Populate the electrum client's transaction cache so it doesn't redownload transaction we
     // already have.
-    client.populate_tx_cache(wallet.tx_graph());
+    client.populate_tx_cache(wallet.tx_graph().clone());
 
     let request = wallet.start_full_scan().inspect({
         let mut stdout = std::io::stdout();
@@ -65,9 +65,11 @@ fn main() -> Result<(), anyhow::Error> {
     });
 
     let mut update = client.full_scan(request, STOP_GAP, BATCH_SIZE, false)?;
+    let mut tx_graph = update.graph_update.into_tx_graph();
 
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = update.graph_update.update_last_seen_unconfirmed(now);
+    let _ = tx_graph.update_last_seen_unconfirmed(now);
+    update.graph_update = tx_graph.into();
 
     println!();
 

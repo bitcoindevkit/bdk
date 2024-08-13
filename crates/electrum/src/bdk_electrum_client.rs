@@ -3,7 +3,7 @@ use bdk_chain::{
     collections::{BTreeMap, HashMap},
     local_chain::CheckPoint,
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
-    tx_graph::TxGraph,
+    tx_graph::Update,
     Anchor, BlockId, ConfirmationBlockTime,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
@@ -39,11 +39,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
     /// Inserts transactions into the transaction cache so that the client will not fetch these
     /// transactions.
-    pub fn populate_tx_cache<A>(&self, tx_graph: impl AsRef<TxGraph<A>>) {
-        let txs = tx_graph
-            .as_ref()
-            .full_txs()
-            .map(|tx_node| (tx_node.txid, tx_node.tx));
+    pub fn populate_tx_cache<A>(&self, update: impl Into<Update<A>>) {
+        let txs = update.into().whole_txs();
 
         let mut tx_cache = self.tx_cache.lock().unwrap();
         for (txid, tx) in txs {
@@ -138,7 +135,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             None => None,
         };
 
-        let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
+        let mut graph_update = Update::<ConfirmationBlockTime>::default();
         let mut last_active_indices = BTreeMap::<K, u32>::default();
         for keychain in request.keychains() {
             let spks = request.iter_spks(keychain.clone());
@@ -205,7 +202,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             None => None,
         };
 
-        let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
+        let mut graph_update = Update::<ConfirmationBlockTime>::default();
         self.populate_with_spks(
             &mut graph_update,
             request
@@ -245,7 +242,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// also included.
     fn populate_with_spks(
         &self,
-        graph_update: &mut TxGraph<ConfirmationBlockTime>,
+        graph_update: &mut Update<ConfirmationBlockTime>,
         mut spks: impl Iterator<Item = (u32, ScriptBuf)>,
         stop_gap: usize,
         batch_size: usize,
@@ -278,7 +275,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 }
 
                 for tx_res in spk_history {
-                    let _ = graph_update.insert_tx(self.fetch_tx(tx_res.tx_hash)?);
+                    graph_update.insert_tx(self.fetch_tx(tx_res.tx_hash)?);
                     self.validate_merkle_for_anchor(graph_update, tx_res.tx_hash, tx_res.height)?;
                 }
             }
@@ -291,7 +288,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// included. Anchors of the aforementioned transactions are included.
     fn populate_with_outpoints(
         &self,
-        graph_update: &mut TxGraph<ConfirmationBlockTime>,
+        graph_update: &mut Update<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
     ) -> Result<(), Error> {
         for outpoint in outpoints {
@@ -314,7 +311,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
                 if !has_residing && res.tx_hash == op_txid {
                     has_residing = true;
-                    let _ = graph_update.insert_tx(Arc::clone(&op_tx));
+                    graph_update.insert_tx(Arc::clone(&op_tx));
                     self.validate_merkle_for_anchor(graph_update, res.tx_hash, res.height)?;
                 }
 
@@ -328,7 +325,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     if !has_spending {
                         continue;
                     }
-                    let _ = graph_update.insert_tx(Arc::clone(&res_tx));
+                    graph_update.insert_tx(Arc::clone(&res_tx));
                     self.validate_merkle_for_anchor(graph_update, res.tx_hash, res.height)?;
                 }
             }
@@ -339,7 +336,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Populate the `graph_update` with transactions/anchors of the provided `txids`.
     fn populate_with_txids(
         &self,
-        graph_update: &mut TxGraph<ConfirmationBlockTime>,
+        graph_update: &mut Update<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
     ) -> Result<(), Error> {
         for txid in txids {
@@ -366,7 +363,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 self.validate_merkle_for_anchor(graph_update, txid, r.height)?;
             }
 
-            let _ = graph_update.insert_tx(tx);
+            graph_update.insert_tx(tx);
         }
         Ok(())
     }
@@ -375,7 +372,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     // An anchor is inserted if the transaction is validated to be in a confirmed block.
     fn validate_merkle_for_anchor(
         &self,
-        graph_update: &mut TxGraph<ConfirmationBlockTime>,
+        graph_update: &mut Update<ConfirmationBlockTime>,
         txid: Txid,
         confirmation_height: i32,
     ) -> Result<(), Error> {
@@ -402,7 +399,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             }
 
             if is_confirmed_tx {
-                let _ = graph_update.insert_anchor(
+                graph_update.insert_anchor(
                     txid,
                     ConfirmationBlockTime {
                         confirmation_time: header.time as u64,
@@ -421,17 +418,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     // which we do not have by default. This data is needed to calculate the transaction fee.
     fn fetch_prev_txout(
         &self,
-        graph_update: &mut TxGraph<ConfirmationBlockTime>,
+        graph_update: &mut Update<ConfirmationBlockTime>,
     ) -> Result<(), Error> {
         let full_txs: Vec<Arc<Transaction>> =
-            graph_update.full_txs().map(|tx_node| tx_node.tx).collect();
+            graph_update.whole_txs().map(|(_txid, tx)| tx).collect();
         for tx in full_txs {
             for vin in &tx.input {
                 let outpoint = vin.previous_output;
                 let vout = outpoint.vout;
                 let prev_tx = self.fetch_tx(outpoint.txid)?;
                 let txout = prev_tx.output[vout as usize].clone();
-                let _ = graph_update.insert_txout(outpoint, txout);
+                graph_update.insert_txout(outpoint, txout);
             }
         }
         Ok(())

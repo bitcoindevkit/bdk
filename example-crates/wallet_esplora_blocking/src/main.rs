@@ -60,8 +60,10 @@ fn main() -> Result<(), anyhow::Error> {
     });
 
     let mut update = client.full_scan(request, STOP_GAP, PARALLEL_REQUESTS)?;
+    let mut tx_graph = update.graph_update.clone().into_tx_graph();
     let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = update.graph_update.update_last_seen_unconfirmed(now);
+    let _ = tx_graph.update_last_seen_unconfirmed(now);
+    update.graph_update = tx_graph.into();
 
     wallet.apply_update(update)?;
     if let Some(changeset) = wallet.take_staged() {

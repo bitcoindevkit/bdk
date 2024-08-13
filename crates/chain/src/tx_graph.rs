@@ -89,7 +89,8 @@
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::{
-    collections::*, Anchor, Balance, BlockId, ChainOracle, ChainPosition, FullTxOut, Merge,
+    collections::*, Anchor, Balance, BlockId, ChainOracle, ChainPosition, ConfirmationBlockTime,
+    FullTxOut, Merge,
 };
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
@@ -640,15 +641,15 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
-    pub fn apply_update(&mut self, update: TxGraph<A>) -> ChangeSet<A> {
-        let changeset = self.determine_changeset(update);
+    pub fn apply_update(&mut self, update: impl Into<Update<A>>) -> ChangeSet<A> {
+        let changeset = self.determine_changeset(update.into());
         self.apply_changeset(changeset.clone());
         changeset
     }
 
     /// Determines the [`ChangeSet`] between `self` and an empty [`TxGraph`].
     pub fn initial_changeset(&self) -> ChangeSet<A> {
-        Self::default().determine_changeset(self.clone())
+        Self::default().determine_changeset(Update::from(self.clone()))
     }
 
     /// Applies [`ChangeSet`] to [`TxGraph`].
@@ -715,36 +716,28 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The [`ChangeSet`] would be the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
-    pub(crate) fn determine_changeset(&self, update: TxGraph<A>) -> ChangeSet<A> {
+    pub(crate) fn determine_changeset(&self, update: Update<A>) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
 
-        for (&txid, (update_tx_node, _)) in &update.txs {
-            match (self.txs.get(&txid), update_tx_node) {
-                (None, TxNodeInternal::Whole(update_tx)) => {
-                    changeset.txs.insert(update_tx.clone());
+        for (txid, tx) in update.whole_txs {
+            match self.txs.get(&txid) {
+                None | Some((TxNodeInternal::Partial(_), _)) => {
+                    changeset.txs.insert(tx);
                 }
-                (None, TxNodeInternal::Partial(update_txos)) => {
-                    changeset.txouts.extend(
-                        update_txos
-                            .iter()
-                            .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
-                    );
+                Some((TxNodeInternal::Whole(old_tx), _)) if *old_tx != tx => {
+                    // Update the `tx` in graph if does not match up with the tx from `update`.
+                    changeset.txs.insert(tx);
                 }
-                (Some((TxNodeInternal::Whole(_), _)), _) => {}
-                (Some((TxNodeInternal::Partial(_), _)), TxNodeInternal::Whole(update_tx)) => {
-                    changeset.txs.insert(update_tx.clone());
-                }
-                (
-                    Some((TxNodeInternal::Partial(txos), _)),
-                    TxNodeInternal::Partial(update_txos),
-                ) => {
-                    changeset.txouts.extend(
-                        update_txos
-                            .iter()
-                            .filter(|(vout, _)| !txos.contains_key(*vout))
-                            .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
-                    );
-                }
+                _ => {}
+            }
+        }
+
+        for (op, txout) in update.partial_txs {
+            if matches!(
+                self.txs.get(&op.txid),
+                None | Some((TxNodeInternal::Partial(_), _))
+            ) {
+                changeset.txouts.insert(op, txout);
             }
         }
 
@@ -758,6 +751,138 @@ impl<A: Clone + Ord> TxGraph<A> {
         changeset.anchors = update.anchors.difference(&self.anchors).cloned().collect();
 
         changeset
+    }
+}
+
+/// An update to [`TxGraph`].
+#[derive(Clone, Debug)]
+pub struct Update<A = ()> {
+    whole_txs: HashMap<Txid, Arc<Transaction>>,
+    partial_txs: HashMap<OutPoint, TxOut>,
+    last_seen: HashMap<Txid, u64>,
+    anchors: BTreeSet<(A, Txid)>,
+}
+
+impl<A> Default for Update<A> {
+    fn default() -> Self {
+        Update {
+            whole_txs: Default::default(),
+            partial_txs: Default::default(),
+            last_seen: Default::default(),
+            anchors: Default::default(),
+        }
+    }
+}
+
+impl<A> Update<A> {
+    /// Iterate over all full transactions in the graph.
+    pub fn whole_txs(&self) -> impl Iterator<Item = (Txid, Arc<Transaction>)> {
+        self.whole_txs.clone().into_iter()
+    }
+
+    /// Get a transaction by txid. This only returns `Some` for full transactions.
+    pub fn get_tx(&self, txid: Txid) -> Option<Arc<Transaction>> {
+        self.whole_txs.get(&txid).cloned()
+    }
+
+    /// Inserts the given transaction into [`Update`].
+    pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) {
+        let tx = tx.into();
+        let txid = tx.compute_txid();
+
+        // Remove any floating txouts with the full transaction's txid to enforce invariance.
+        self.partial_txs.retain(|op, _| op.txid != txid);
+
+        self.whole_txs.insert(txid, tx);
+    }
+
+    /// Inserts the given [`TxOut`] at [`OutPoint`] into [`Update`].
+    ///
+    /// Inserting floating txouts are useful for determining fee/feerate of transactions we care
+    /// about.
+    pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) {
+        self.partial_txs.insert(outpoint, txout);
+    }
+
+    /// Inserts the given `seen_at` for `txid` into [`Update`].
+    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) {
+        self.last_seen.insert(txid, seen_at);
+    }
+}
+
+impl<A: Anchor> Update<A> {
+    /// Get all transaction anchors known by [`Update`].
+    pub fn all_anchors(&self) -> &BTreeSet<(A, Txid)> {
+        &self.anchors
+    }
+
+    /// Returns the [`Update`] as a `TxGraph` with `ConfirmationBlockTime` anchors.
+    pub fn into_tx_graph(self) -> TxGraph<ConfirmationBlockTime> {
+        let mut txs = HashMap::new();
+        let mut conf_anchors = BTreeSet::new();
+
+        for (txid, tx) in self.whole_txs {
+            txs.insert(txid, (TxNodeInternal::Whole(tx), BTreeSet::new()));
+        }
+        for (op, txout) in self.partial_txs {
+            txs.insert(
+                op.txid,
+                (
+                    TxNodeInternal::Partial([(op.vout, txout)].into()),
+                    BTreeSet::new(),
+                ),
+            );
+        }
+        for (anchor, txid) in self.anchors {
+            conf_anchors.insert((
+                ConfirmationBlockTime {
+                    block_id: anchor.anchor_block(),
+                    confirmation_time: anchor.confirmation_height_upper_bound() as u64,
+                },
+                txid,
+            ));
+        }
+
+        TxGraph {
+            txs,
+            spends: BTreeMap::new(),
+            anchors: conf_anchors,
+            last_seen: self.last_seen,
+            empty_outspends: HashSet::new(),
+        }
+    }
+}
+
+impl<A: Ord> Update<A> {
+    /// Inserts the given `anchor` into [`Update`].
+    pub fn insert_anchor(&mut self, txid: Txid, anchor: A) {
+        self.anchors.insert((anchor, txid));
+    }
+
+    /// Extends this [`Update`] with another so that `self` becomes the union of the two sets of
+    /// [`Update`]s.
+    pub fn extend(&mut self, update: Update<A>) {
+        self.whole_txs.extend(update.whole_txs);
+        self.partial_txs.extend(update.partial_txs);
+        self.last_seen.extend(update.last_seen);
+        self.anchors.extend(update.anchors);
+    }
+}
+
+impl<A> From<TxGraph<A>> for Update<A> {
+    fn from(graph: TxGraph<A>) -> Self {
+        Update {
+            whole_txs: graph
+                .full_txs()
+                .map(|value| (value.txid, value.tx))
+                .collect::<HashMap<_, _>>(),
+            partial_txs: graph
+                .floating_txouts()
+                .map(|(op, txout)| (op, txout.clone()))
+                .collect::<HashMap<_, _>>(),
+            last_seen: graph.last_seen,
+            anchors: graph.anchors,
+        }
     }
 }
 
