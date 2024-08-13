@@ -32,6 +32,7 @@ all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
 rusqlite = ["bdk_chain/rusqlite"]
 file_store = ["bdk_file_store"]
+labels = []
 
 [dev-dependencies]
 lazy_static = "1.4"
