@@ -111,6 +111,9 @@ impl CreateParams {
     }
 }
 
+unsafe impl Send for CreateParams {}
+unsafe impl Send for LoadParams {}
+
 /// Parameters for [`Wallet::load`] or [`PersistedWallet::load`].
 #[must_use]
 pub struct LoadParams {

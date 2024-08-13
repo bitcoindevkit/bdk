@@ -21,7 +21,10 @@ hashbrown = { version = "0.9.1", optional = true, features = ["serde"] }
 miniscript = { version = "12.0.0", optional = true, default-features = false }
 
 # Feature dependencies
-rusqlite = { version = "0.31.0", features = ["bundled"], optional = true }
+#rusqlite = { version = "0.31.0", features = ["bundled"], optional = true }
+sqlx = { version = "0.7.4", features = ["migrate", "runtime-tokio-rustls", "postgres", "json", "chrono", "uuid"] , optional = true}
+async-trait = "0.1.81"
+
 serde_json = {version = "1", optional = true }
 
 [dev-dependencies]
@@ -32,4 +35,5 @@ proptest = "1.2.0"
 default = ["std", "miniscript"]
 std = ["bitcoin/std", "miniscript?/std"]
 serde = ["dep:serde", "bitcoin/serde", "miniscript?/serde"]
-rusqlite = ["std", "dep:rusqlite", "serde", "serde_json"]
+#rusqlite = ["std", "dep:rusqlite", "serde", "serde_json"]
+sqlx = ["std", "dep:sqlx", "serde", "serde_json"]

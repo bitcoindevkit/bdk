@@ -55,15 +55,15 @@ mod spk_iter;
 pub use indexer::keychain_txout;
 #[cfg(feature = "miniscript")]
 pub use spk_iter::*;
-#[cfg(feature = "rusqlite")]
-pub mod rusqlite_impl;
 pub mod spk_client;
+#[cfg(feature = "sqlx")]
+pub mod sqlx_impl;
 
 #[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
-#[cfg(feature = "rusqlite")]
-pub extern crate rusqlite;
+#[cfg(feature = "sqlx")]
+pub extern crate sqlx;
 #[cfg(feature = "serde")]
 pub extern crate serde;
 
