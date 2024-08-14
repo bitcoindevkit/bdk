@@ -62,16 +62,16 @@ pub trait PersistAsyncWith<Db>: Staged + Sized {
     type PersistError;
 
     /// Initialize the `Db` and create `Self`.
-    async fn create(db: &mut Db, params: Self::CreateParams) -> Result<Self, Self::CreateError>;
+    fn create(db: &mut Db, params: Self::CreateParams) -> FutureResult<Self, Self::CreateError>;
 
     /// Initialize the `Db` and load a previously-persisted `Self`.
-    async fn load(db: &mut Db, params: Self::LoadParams) -> Result<Option<Self>, Self::LoadError>;
+    fn load(db: &mut Db, params: Self::LoadParams) -> FutureResult<Option<Self>, Self::LoadError>;
 
     /// Persist changes to the `Db`.
-    async fn persist<'a>(
+    fn persist<'a>(
         db: &'a mut Db,
         changeset: &'a <Self as Staged>::ChangeSet,
-    ) -> Result<(), Self::PersistError>;
+    ) -> FutureResult<'a, (), Self::PersistError>;
 }
 
 /// Represents a persisted `T`.

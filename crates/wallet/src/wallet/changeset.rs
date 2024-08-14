@@ -81,7 +81,8 @@ impl ChangeSet {
         db_tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     ) -> sqlx::Result<()> {
 
-        sqlx::migrate!("/Users/matthiasdebernardini/Projects/bdk/crates/wallet/src/wallet_migrations").run(db_tx).await
+        // sqlx::migrate!("/Users/matthiasdebernardini/Projects/bdk/crates/wallet/src/wallet_migrations").run(db_tx).await
+        Ok(())
     }
 
     /// Recover a [`ChangeSet`] from PostgreSQL database.
