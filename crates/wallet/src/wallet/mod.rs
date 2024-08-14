@@ -443,10 +443,11 @@ impl Wallet {
 
     /// Build [`Wallet`] by loading from persistence or [`ChangeSet`].
     ///
-    /// Note that the descriptor secret keys are not persisted to the db. You can either add
-    /// signers after-the-fact with [`Wallet::add_signer`] or [`Wallet::set_keymap`]. Or you can
-    /// add keys when building the wallet using [`LoadParams::keymap`] and/or
-    /// [`LoadParams::descriptor`].
+    /// Note that the descriptor secret keys are not persisted to the db. You can add
+    /// signers after-the-fact with [`Wallet::add_signer`] or [`Wallet::set_keymap`]. You
+    /// can also add keys when building the wallet by using [`LoadParams::keymap`]. Finally
+    /// you can check the wallet's descriptors are what you expect with [`LoadParams::descriptor`]
+    /// which will try to populate signers if [`LoadParams::extract_keys`] is enabled.
     ///
     /// # Synopsis
     ///
