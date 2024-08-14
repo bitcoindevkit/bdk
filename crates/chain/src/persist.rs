@@ -45,9 +45,10 @@ pub trait PersistWith<Db>: Staged + Sized {
     ) -> Result<(), Self::PersistError>;
 }
 
-type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
+pub type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
 /// Trait that persists the type with an async `Db`.
+#[async_trait::async_trait]
 pub trait PersistAsyncWith<Db>: Staged + Sized {
     /// Parameters for [`PersistAsyncWith::create`].
     type CreateParams;
@@ -61,16 +62,16 @@ pub trait PersistAsyncWith<Db>: Staged + Sized {
     type PersistError;
 
     /// Initialize the `Db` and create `Self`.
-    fn create(db: &mut Db, params: Self::CreateParams) -> FutureResult<Self, Self::CreateError>;
+    async fn create(db: &mut Db, params: Self::CreateParams) -> Result<Self, Self::CreateError>;
 
     /// Initialize the `Db` and load a previously-persisted `Self`.
-    fn load(db: &mut Db, params: Self::LoadParams) -> FutureResult<Option<Self>, Self::LoadError>;
+    async fn load(db: &mut Db, params: Self::LoadParams) -> Result<Option<Self>, Self::LoadError>;
 
     /// Persist changes to the `Db`.
-    fn persist<'a>(
+    async fn persist<'a>(
         db: &'a mut Db,
         changeset: &'a <Self as Staged>::ChangeSet,
-    ) -> FutureResult<'a, (), Self::PersistError>;
+    ) -> Result<(), Self::PersistError>;
 }
 
 /// Represents a persisted `T`.

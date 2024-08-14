@@ -4,9 +4,10 @@ use anyhow::Ok;
 use bdk_esplora::{esplora_client, EsploraAsyncExt};
 use bdk_wallet::{
     bitcoin::{Amount, Network},
-    rusqlite::Connection,
+    // rusqlite::Connection,
     KeychainKind, SignOptions, Wallet,
 };
+use bdk_wallet::chain::sqlx;
 
 const SEND_AMOUNT: Amount = Amount::from_sat(5000);
 const STOP_GAP: usize = 5;
@@ -20,7 +21,8 @@ const ESPLORA_URL: &str = "http://signet.bitcoindevkit.net";
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let mut conn = Connection::open(DB_PATH)?;
+    let mut conn = sqlx::Connection::connect("postgresql://sirendb_owner:2vDJjo9pGKiP@ep-sweet-shape-a5ouj5s7.us-east-2.aws.neon.tech/sirendb?sslmode=require").await.unwrap();
+        // Connection::open(DB_PATH)?;
 
     let wallet_opt = Wallet::load()
         .descriptors(EXTERNAL_DESC, INTERNAL_DESC)
