@@ -10,14 +10,9 @@ use std::sync::Mutex;
 use anyhow::bail;
 use anyhow::Context;
 use bdk_chain::bitcoin::{
-    absolute,
-    address::NetworkUnchecked,
-    bip32, consensus, constants,
-    hex::DisplayHex,
-    relative,
-    secp256k1::{rand::prelude::*, Secp256k1},
-    transaction, Address, Amount, Network, NetworkKind, PrivateKey, Psbt, PublicKey, Sequence,
-    Transaction, TxIn, TxOut,
+    absolute, address::NetworkUnchecked, bip32, consensus, constants, hex::DisplayHex, relative,
+    secp256k1::Secp256k1, transaction, Address, Amount, Network, NetworkKind, PrivateKey, Psbt,
+    PublicKey, Sequence, Transaction, TxIn, TxOut,
 };
 use bdk_chain::miniscript::{
     descriptor::{DescriptorSecretKey, SinglePubKey},
@@ -37,6 +32,7 @@ use bdk_coin_select::{
 };
 use bdk_file_store::Store;
 use clap::{Parser, Subcommand};
+use rand::prelude::*;
 
 pub use anyhow;
 pub use clap;
@@ -675,7 +671,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 Ok(())
             }
             PsbtCmd::Sign { psbt, descriptor } => {
-                let mut psbt = Psbt::from_str(&psbt.unwrap_or_default())?;
+                let mut psbt = Psbt::from_str(psbt.unwrap_or_default().as_str())?;
 
                 let desc_str = match descriptor {
                     Some(s) => s,
@@ -717,7 +713,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 chain_specific,
                 psbt,
             } => {
-                let mut psbt = Psbt::from_str(&psbt)?;
+                let mut psbt = Psbt::from_str(psbt.as_str())?;
                 psbt.finalize_mut(&Secp256k1::new())
                     .map_err(|errors| anyhow::anyhow!("failed to finalize PSBT {errors:?}"))?;
 
