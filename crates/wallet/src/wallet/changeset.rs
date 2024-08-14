@@ -103,16 +103,18 @@ impl ChangeSet {
         let row = wallet_statement
             .query_row([], |row| {
                 Ok((
-                    row.get::<_, Impl<Descriptor<DescriptorPublicKey>>>("descriptor")?,
-                    row.get::<_, Impl<Descriptor<DescriptorPublicKey>>>("change_descriptor")?,
-                    row.get::<_, Impl<bitcoin::Network>>("network")?,
+                    row.get::<_, Option<Impl<Descriptor<DescriptorPublicKey>>>>("descriptor")?,
+                    row.get::<_, Option<Impl<Descriptor<DescriptorPublicKey>>>>(
+                        "change_descriptor",
+                    )?,
+                    row.get::<_, Option<Impl<bitcoin::Network>>>("network")?,
                 ))
             })
             .optional()?;
-        if let Some((Impl(desc), Impl(change_desc), Impl(network))) = row {
-            changeset.descriptor = Some(desc);
-            changeset.change_descriptor = Some(change_desc);
-            changeset.network = Some(network);
+        if let Some((desc, change_desc, network)) = row {
+            changeset.descriptor = desc.map(Impl::into_inner);
+            changeset.change_descriptor = change_desc.map(Impl::into_inner);
+            changeset.network = network.map(Impl::into_inner);
         }
 
         changeset.local_chain = local_chain::ChangeSet::from_sqlite(db_tx)?;

@@ -5,7 +5,7 @@ use bdk_bitcoind_rpc::{
 use bdk_wallet::{
     bitcoin::{Block, Network, Transaction},
     file_store::Store,
-    Wallet,
+    KeychainKind, Wallet,
 };
 use clap::{self, Parser};
 use std::{path::PathBuf, sync::mpsc::sync_channel, thread::spawn, time::Instant};
@@ -89,8 +89,10 @@ fn main() -> anyhow::Result<()> {
     let mut db =
         Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?;
     let wallet_opt = Wallet::load()
-        .descriptors(args.descriptor.clone(), args.change_descriptor.clone())
         .network(args.network)
+        .descriptor(KeychainKind::External, Some(args.descriptor.clone()))
+        .descriptor(KeychainKind::Internal, Some(args.change_descriptor.clone()))
+        .extract_keys()
         .load_wallet(&mut db)?;
     let mut wallet = match wallet_opt {
         Some(wallet) => wallet,

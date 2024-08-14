@@ -32,7 +32,7 @@ where
 pub struct CreateParams {
     pub(crate) descriptor: DescriptorToExtract,
     pub(crate) descriptor_keymap: KeyMap,
-    pub(crate) change_descriptor: DescriptorToExtract,
+    pub(crate) change_descriptor: Option<DescriptorToExtract>,
     pub(crate) change_descriptor_keymap: KeyMap,
     pub(crate) network: Network,
     pub(crate) genesis_hash: Option<BlockHash>,
@@ -40,14 +40,39 @@ pub struct CreateParams {
 }
 
 impl CreateParams {
-    /// Construct parameters with provided `descriptor`, `change_descriptor` and `network`.
+    /// Construct parameters with provided `descriptor`.
     ///
-    /// Default values: `genesis_hash` = `None`, `lookahead` = [`DEFAULT_LOOKAHEAD`]
+    /// Default values:
+    /// * `change_descriptor` = `None`
+    /// * `network` = [`Network::Bitcoin`]
+    /// * `genesis_hash` = `None`
+    /// * `lookahead` = [`DEFAULT_LOOKAHEAD`]
+    ///
+    /// Use this method only when building a wallet with a single descriptor. See
+    /// also [`Wallet::create_single`].
+    pub fn new_single<D: IntoWalletDescriptor + 'static>(descriptor: D) -> Self {
+        Self {
+            descriptor: make_descriptor_to_extract(descriptor),
+            descriptor_keymap: KeyMap::default(),
+            change_descriptor: None,
+            change_descriptor_keymap: KeyMap::default(),
+            network: Network::Bitcoin,
+            genesis_hash: None,
+            lookahead: DEFAULT_LOOKAHEAD,
+        }
+    }
+
+    /// Construct parameters with provided `descriptor` and `change_descriptor`.
+    ///
+    /// Default values:
+    /// * `network` = [`Network::Bitcoin`]
+    /// * `genesis_hash` = `None`
+    /// * `lookahead` = [`DEFAULT_LOOKAHEAD`]
     pub fn new<D: IntoWalletDescriptor + 'static>(descriptor: D, change_descriptor: D) -> Self {
         Self {
             descriptor: make_descriptor_to_extract(descriptor),
             descriptor_keymap: KeyMap::default(),
-            change_descriptor: make_descriptor_to_extract(change_descriptor),
+            change_descriptor: Some(make_descriptor_to_extract(change_descriptor)),
             change_descriptor_keymap: KeyMap::default(),
             network: Network::Bitcoin,
             genesis_hash: None,
@@ -119,8 +144,9 @@ pub struct LoadParams {
     pub(crate) lookahead: u32,
     pub(crate) check_network: Option<Network>,
     pub(crate) check_genesis_hash: Option<BlockHash>,
-    pub(crate) check_descriptor: Option<DescriptorToExtract>,
-    pub(crate) check_change_descriptor: Option<DescriptorToExtract>,
+    pub(crate) check_descriptor: Option<Option<DescriptorToExtract>>,
+    pub(crate) check_change_descriptor: Option<Option<DescriptorToExtract>>,
+    pub(crate) extract_keys: bool,
 }
 
 impl LoadParams {
@@ -136,6 +162,7 @@ impl LoadParams {
             check_genesis_hash: None,
             check_descriptor: None,
             check_change_descriptor: None,
+            extract_keys: false,
         }
     }
 
@@ -149,14 +176,21 @@ impl LoadParams {
         self
     }
 
-    /// Checks that `descriptor` of `keychain` matches this, and extracts private keys (if
-    /// available).
-    pub fn descriptors<D>(mut self, descriptor: D, change_descriptor: D) -> Self
+    /// Checks the `expected_descriptor` matches exactly what is loaded for `keychain`.
+    ///
+    /// # Note
+    ///
+    /// You must also specify [`extract_keys`](Self::extract_keys) if you wish to add a signer
+    /// for an expected descriptor containing secrets.
+    pub fn descriptor<D>(mut self, keychain: KeychainKind, expected_descriptor: Option<D>) -> Self
     where
         D: IntoWalletDescriptor + 'static,
     {
-        self.check_descriptor = Some(make_descriptor_to_extract(descriptor));
-        self.check_change_descriptor = Some(make_descriptor_to_extract(change_descriptor));
+        let expected = expected_descriptor.map(|d| make_descriptor_to_extract(d));
+        match keychain {
+            KeychainKind::External => self.check_descriptor = Some(expected),
+            KeychainKind::Internal => self.check_change_descriptor = Some(expected),
+        }
         self
     }
 
@@ -175,6 +209,13 @@ impl LoadParams {
     /// Use custom lookahead value.
     pub fn lookahead(mut self, lookahead: u32) -> Self {
         self.lookahead = lookahead;
+        self
+    }
+
+    /// Whether to try extracting private keys from the *provided descriptors* upon loading.
+    /// See also [`LoadParams::descriptor`].
+    pub fn extract_keys(mut self) -> Self {
+        self.extract_keys = true;
         self
     }
 
