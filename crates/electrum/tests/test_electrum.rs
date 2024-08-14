@@ -39,7 +39,7 @@ where
     Spks::IntoIter: ExactSizeIterator + Send + 'static,
 {
     let mut update = client.sync(
-        SyncRequest::from_chain_tip(chain.tip()).chain_spks(spks),
+        SyncRequest::builder().chain_tip(chain.tip()).spks(spks),
         BATCH_SIZE,
         true,
     )?;
@@ -51,9 +51,11 @@ where
         .as_secs();
     let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
-    let _ = chain
-        .apply_update(update.chain_update.clone())
-        .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
+    if let Some(chain_update) = update.chain_update.clone() {
+        let _ = chain
+            .apply_update(chain_update)
+            .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
+    }
     let _ = graph.apply_update(update.graph_update.clone());
 
     Ok(update)
@@ -103,7 +105,9 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let cp_tip = env.make_checkpoint_tip();
 
     let sync_update = {
-        let request = SyncRequest::from_chain_tip(cp_tip.clone()).set_spks(misc_spks);
+        let request = SyncRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks(misc_spks);
         client.sync(request, 1, true)?
     };
 
@@ -207,15 +211,17 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     // A scan with a stop_gap of 3 won't find the transaction, but a scan with a gap limit of 4
     // will.
     let full_scan_update = {
-        let request =
-            FullScanRequest::from_chain_tip(cp_tip.clone()).set_spks_for_keychain(0, spks.clone());
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 3, 1, false)?
     };
     assert!(full_scan_update.graph_update.full_txs().next().is_none());
     assert!(full_scan_update.last_active_indices.is_empty());
     let full_scan_update = {
-        let request =
-            FullScanRequest::from_chain_tip(cp_tip.clone()).set_spks_for_keychain(0, spks.clone());
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 4, 1, false)?
     };
     assert_eq!(
@@ -246,8 +252,9 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     // A scan with gap limit 5 won't find the second transaction, but a scan with gap limit 6 will.
     // The last active indice won't be updated in the first case but will in the second one.
     let full_scan_update = {
-        let request =
-            FullScanRequest::from_chain_tip(cp_tip.clone()).set_spks_for_keychain(0, spks.clone());
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 5, 1, false)?
     };
     let txs: HashSet<_> = full_scan_update
@@ -259,8 +266,9 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     assert!(txs.contains(&txid_4th_addr));
     assert_eq!(full_scan_update.last_active_indices[&0], 3);
     let full_scan_update = {
-        let request =
-            FullScanRequest::from_chain_tip(cp_tip.clone()).set_spks_for_keychain(0, spks.clone());
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 6, 1, false)?
     };
     let txs: HashSet<_> = full_scan_update
@@ -311,7 +319,7 @@ fn test_sync() -> anyhow::Result<()> {
     let txid = env.send(&addr_to_track, SEND_AMOUNT)?;
     env.wait_until_electrum_sees_txid(txid, Duration::from_secs(6))?;
 
-    sync_with_electrum(
+    let _ = sync_with_electrum(
         &client,
         [spk_to_track.clone()],
         &mut recv_chain,
@@ -332,7 +340,7 @@ fn test_sync() -> anyhow::Result<()> {
     env.mine_blocks(1, None)?;
     env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
-    sync_with_electrum(
+    let _ = sync_with_electrum(
         &client,
         [spk_to_track.clone()],
         &mut recv_chain,
@@ -353,7 +361,7 @@ fn test_sync() -> anyhow::Result<()> {
     env.reorg_empty_blocks(1)?;
     env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
-    sync_with_electrum(
+    let _ = sync_with_electrum(
         &client,
         [spk_to_track.clone()],
         &mut recv_chain,
@@ -373,7 +381,7 @@ fn test_sync() -> anyhow::Result<()> {
     env.mine_blocks(1, None)?;
     env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
-    sync_with_electrum(&client, [spk_to_track], &mut recv_chain, &mut recv_graph)?;
+    let _ = sync_with_electrum(&client, [spk_to_track], &mut recv_chain, &mut recv_graph)?;
 
     // Check if balance is correct once transaction is confirmed again.
     assert_eq!(
