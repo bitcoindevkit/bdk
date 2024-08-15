@@ -1,6 +1,7 @@
 use core::{
     fmt,
     future::Future,
+    marker::PhantomData,
     ops::{Deref, DerefMut},
     pin::Pin,
 };
@@ -10,7 +11,7 @@ use chain::Merge;
 
 use crate::{descriptor::DescriptorError, ChangeSet, CreateParams, LoadParams, Wallet};
 
-/// Trait that persists [`Wallet`].
+/// Trait that persists [`PersistedWallet`].
 ///
 /// For an async version, use [`AsyncWalletPersister`].
 ///
@@ -50,7 +51,7 @@ pub trait WalletPersister {
 
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
-/// Async trait that persists [`Wallet`].
+/// Async trait that persists [`PersistedWallet`].
 ///
 /// For a blocking version, use [`WalletPersister`].
 ///
@@ -95,7 +96,7 @@ pub trait AsyncWalletPersister {
         Self: 'a;
 }
 
-/// Represents a persisted wallet.
+/// Represents a persisted wallet which persists into type `P`.
 ///
 /// This is a light wrapper around [`Wallet`] that enforces some level of safety-checking when used
 /// with a [`WalletPersister`] or [`AsyncWalletPersister`] implementation. Safety checks assume that
@@ -107,32 +108,36 @@ pub trait AsyncWalletPersister {
 /// * Ensure there were no previously persisted wallet data before creating a fresh wallet and
 ///     persisting it.
 /// * Only clear the staged changes of [`Wallet`] after persisting succeeds.
+/// * Ensure the wallet is persisted to the same `P` type as when created/loaded. Note that this is
+///     not completely fool-proof as you can have multiple instances of the same `P` type that are
+///     connected to different databases.
 #[derive(Debug)]
-pub struct PersistedWallet(pub(crate) Wallet);
+pub struct PersistedWallet<P> {
+    inner: Wallet,
+    marker: PhantomData<P>,
+}
 
-impl Deref for PersistedWallet {
+impl<P> Deref for PersistedWallet<P> {
     type Target = Wallet;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.inner
     }
 }
 
-impl DerefMut for PersistedWallet {
+impl<P> DerefMut for PersistedWallet<P> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.inner
     }
 }
 
-impl PersistedWallet {
+/// Methods when `P` is a [`WalletPersister`].
+impl<P: WalletPersister> PersistedWallet<P> {
     /// Create a new [`PersistedWallet`] with the given `persister` and `params`.
-    pub fn create<P>(
+    pub fn create(
         persister: &mut P,
         params: CreateParams,
-    ) -> Result<Self, CreateWithPersistError<P::Error>>
-    where
-        P: WalletPersister,
-    {
+    ) -> Result<Self, CreateWithPersistError<P::Error>> {
         let existing = P::initialize(persister).map_err(CreateWithPersistError::Persist)?;
         if !existing.is_empty() {
             return Err(CreateWithPersistError::DataAlreadyExists(existing));
@@ -142,17 +147,50 @@ impl PersistedWallet {
         if let Some(changeset) = inner.take_staged() {
             P::persist(persister, &changeset).map_err(CreateWithPersistError::Persist)?;
         }
-        Ok(Self(inner))
+        Ok(Self {
+            inner,
+            marker: PhantomData,
+        })
     }
 
+    /// Load a previously [`PersistedWallet`] from the given `persister` and `params`.
+    pub fn load(
+        persister: &mut P,
+        params: LoadParams,
+    ) -> Result<Option<Self>, LoadWithPersistError<P::Error>> {
+        let changeset = P::initialize(persister).map_err(LoadWithPersistError::Persist)?;
+        Wallet::load_with_params(changeset, params)
+            .map(|opt| {
+                opt.map(|inner| PersistedWallet {
+                    inner,
+                    marker: PhantomData,
+                })
+            })
+            .map_err(LoadWithPersistError::InvalidChangeSet)
+    }
+
+    /// Persist staged changes of wallet into `persister`.
+    ///
+    /// If the `persister` errors, the staged changes will not be cleared.
+    pub fn persist(&mut self, persister: &mut P) -> Result<bool, P::Error> {
+        match self.inner.staged_mut() {
+            Some(stage) => {
+                P::persist(persister, &*stage)?;
+                let _ = stage.take();
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+}
+
+/// Methods when `P` is an [`AsyncWalletPersister`].
+impl<P: AsyncWalletPersister> PersistedWallet<P> {
     /// Create a new [`PersistedWallet`] witht the given async `persister` and `params`.
-    pub async fn create_async<P>(
+    pub async fn create_async(
         persister: &mut P,
         params: CreateParams,
-    ) -> Result<Self, CreateWithPersistError<P::Error>>
-    where
-        P: AsyncWalletPersister,
-    {
+    ) -> Result<Self, CreateWithPersistError<P::Error>> {
         let existing = P::initialize(persister)
             .await
             .map_err(CreateWithPersistError::Persist)?;
@@ -166,64 +204,35 @@ impl PersistedWallet {
                 .await
                 .map_err(CreateWithPersistError::Persist)?;
         }
-        Ok(Self(inner))
-    }
-
-    /// Load a previously [`PersistedWallet`] from the given `persister` and `params`.
-    pub fn load<P>(
-        persister: &mut P,
-        params: LoadParams,
-    ) -> Result<Option<Self>, LoadWithPersistError<P::Error>>
-    where
-        P: WalletPersister,
-    {
-        let changeset = P::initialize(persister).map_err(LoadWithPersistError::Persist)?;
-        Wallet::load_with_params(changeset, params)
-            .map(|opt| opt.map(PersistedWallet))
-            .map_err(LoadWithPersistError::InvalidChangeSet)
+        Ok(Self {
+            inner,
+            marker: PhantomData,
+        })
     }
 
     /// Load a previously [`PersistedWallet`] from the given async `persister` and `params`.
-    pub async fn load_async<P>(
+    pub async fn load_async(
         persister: &mut P,
         params: LoadParams,
-    ) -> Result<Option<Self>, LoadWithPersistError<P::Error>>
-    where
-        P: AsyncWalletPersister,
-    {
+    ) -> Result<Option<Self>, LoadWithPersistError<P::Error>> {
         let changeset = P::initialize(persister)
             .await
             .map_err(LoadWithPersistError::Persist)?;
         Wallet::load_with_params(changeset, params)
-            .map(|opt| opt.map(PersistedWallet))
+            .map(|opt| {
+                opt.map(|inner| PersistedWallet {
+                    inner,
+                    marker: PhantomData,
+                })
+            })
             .map_err(LoadWithPersistError::InvalidChangeSet)
-    }
-
-    /// Persist staged changes of wallet into `persister`.
-    ///
-    /// If the `persister` errors, the staged changes will not be cleared.
-    pub fn persist<P>(&mut self, persister: &mut P) -> Result<bool, P::Error>
-    where
-        P: WalletPersister,
-    {
-        match self.0.staged_mut() {
-            Some(stage) => {
-                P::persist(persister, &*stage)?;
-                let _ = stage.take();
-                Ok(true)
-            }
-            None => Ok(false),
-        }
     }
 
     /// Persist staged changes of wallet into an async `persister`.
     ///
     /// If the `persister` errors, the staged changes will not be cleared.
-    pub async fn persist_async<'a, P>(&'a mut self, persister: &mut P) -> Result<bool, P::Error>
-    where
-        P: AsyncWalletPersister,
-    {
-        match self.0.staged_mut() {
+    pub async fn persist_async<'a>(&'a mut self, persister: &mut P) -> Result<bool, P::Error> {
+        match self.inner.staged_mut() {
             Some(stage) => {
                 P::persist(persister, &*stage).await?;
                 let _ = stage.take();

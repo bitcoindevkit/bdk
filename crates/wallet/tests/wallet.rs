@@ -194,7 +194,7 @@ fn wallet_load_checks() -> anyhow::Result<()> {
     where
         CreateDb: Fn(&Path) -> anyhow::Result<Db>,
         OpenDb: Fn(&Path) -> anyhow::Result<Db>,
-        Db: WalletPersister,
+        Db: WalletPersister + std::fmt::Debug,
         Db::Error: std::error::Error + Send + Sync + 'static,
     {
         let temp_dir = tempfile::tempdir().expect("must create tempdir");
