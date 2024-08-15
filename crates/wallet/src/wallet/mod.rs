@@ -171,7 +171,7 @@ impl From<SyncResult> for Update {
 
 /// A derived address and the index it was found at.
 /// For convenience this automatically derefs to `Address`
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddressInfo {
     /// Child index of this address
     pub index: u32,
