@@ -36,7 +36,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
     };
 
     // See if the emitter outputs the right blocks.
-    println!("first sync:");
+
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
         let hash = emission.block_hash();
@@ -76,7 +76,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         .collect::<Vec<_>>();
 
     // See if the emitter outputs the right blocks.
-    println!("after reorg:");
+
     let mut exp_height = exp_hashes.len() - reorged_blocks.len();
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
@@ -132,7 +132,6 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
 fn test_into_tx_graph() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
 
-    println!("getting new addresses!");
     let addr_0 = env
         .rpc_client()
         .get_new_address(None, None)?
@@ -145,11 +144,8 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         .rpc_client()
         .get_new_address(None, None)?
         .assume_checked();
-    println!("got new addresses!");
 
-    println!("mining block!");
     env.mine_blocks(101, None)?;
-    println!("mined blocks!");
 
     let (mut chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
     let mut indexed_tx_graph = IndexedTxGraph::<BlockId, _>::new({
@@ -609,7 +605,6 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
     // perform reorgs at different heights, these reorgs will not confirm transactions in the
     // mempool
     for reorg_count in 1..TIP_DIFF {
-        println!("REORG COUNT: {}", reorg_count);
         env.reorg_empty_blocks(reorg_count)?;
 
         // This is a map of mempool txids to tip height where the tx was introduced to the mempool
@@ -627,7 +622,6 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
         // `next_header` emits the replacement block of the reorg
         if let Some(emission) = emitter.next_header()? {
             let height = emission.block_height();
-            println!("\t- replacement height: {}", height);
 
             // the mempool emission (that follows the first block emission after reorg) should only
             // include mempool txs introduced at reorg height or greater
