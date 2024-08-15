@@ -1579,7 +1579,6 @@ mod test {
         ];
 
         for (i, t) in test_cases.into_iter().enumerate() {
-            println!("Case {}: {}", i, t.name);
             let (required, optional) =
                 filter_duplicates(to_utxo_vec(t.required), to_utxo_vec(t.optional));
             assert_eq!(

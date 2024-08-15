@@ -340,7 +340,6 @@ mod test {
 
         for short_write_len in 1..last_changeset_bytes.len() - 1 {
             let file_path = temp_dir.path().join(format!("{}.dat", short_write_len));
-            println!("Test file: {:?}", file_path);
 
             // simulate creating a file, writing data where the last write is incomplete
             {
@@ -406,7 +405,6 @@ mod test {
 
         for read_count in 0..changesets.len() {
             let file_path = temp_dir.path().join(format!("{}.dat", read_count));
-            println!("Test file: {:?}", file_path);
 
             // First, we create the file with all the changesets!
             let mut db = Store::<TestChangeSet>::create_new(&TEST_MAGIC_BYTES, &file_path).unwrap();
