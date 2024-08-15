@@ -19,6 +19,7 @@ use std::str::FromStr;
 
 /// This example demonstrates how to generate a mnemonic phrase
 /// using BDK and use that to generate a descriptor string.
+#[allow(clippy::print_stdout)]
 fn main() -> Result<(), anyhow::Error> {
     let secp = Secp256k1::new();
 
