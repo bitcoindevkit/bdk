@@ -109,7 +109,7 @@ impl CreateParams {
         self
     }
 
-    /// Create [`PersistedWallet`] with the given `Db`.
+    /// Create [`PersistedWallet`] with the given [`WalletPersister`].
     pub fn create_wallet<P>(
         self,
         persister: &mut P,
@@ -120,7 +120,7 @@ impl CreateParams {
         PersistedWallet::create(persister, self)
     }
 
-    /// Create [`PersistedWallet`] with the given async `Db`.
+    /// Create [`PersistedWallet`] with the given [`AsyncWalletPersister`].
     pub async fn create_wallet_async<P>(
         self,
         persister: &mut P,
@@ -220,7 +220,7 @@ impl LoadParams {
         self
     }
 
-    /// Load [`PersistedWallet`] with the given `persister`.
+    /// Load [`PersistedWallet`] with the given [`WalletPersister`].
     pub fn load_wallet<P>(
         self,
         persister: &mut P,
@@ -231,7 +231,7 @@ impl LoadParams {
         PersistedWallet::load(persister, self)
     }
 
-    /// Load [`PersistedWallet`] with the given async `persister`.
+    /// Load [`PersistedWallet`] with the given [`AsyncWalletPersister`].
     pub async fn load_wallet_async<P>(
         self,
         persister: &mut P,
