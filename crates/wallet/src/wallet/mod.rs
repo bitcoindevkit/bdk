@@ -343,7 +343,7 @@ impl Wallet {
     /// [`reveal_next_address`]: Self::reveal_next_address
     pub fn create_single<D>(descriptor: D) -> CreateParams
     where
-        D: IntoWalletDescriptor + Clone + 'static,
+        D: IntoWalletDescriptor + Send + Clone + 'static,
     {
         CreateParams::new_single(descriptor)
     }
@@ -378,7 +378,7 @@ impl Wallet {
     /// ```
     pub fn create<D>(descriptor: D, change_descriptor: D) -> CreateParams
     where
-        D: IntoWalletDescriptor + Clone + 'static,
+        D: IntoWalletDescriptor + Send + Clone + 'static,
     {
         CreateParams::new(descriptor, change_descriptor)
     }
