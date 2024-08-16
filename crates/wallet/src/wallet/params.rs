@@ -18,12 +18,13 @@ use super::{ChangeSet, LoadError, PersistedWallet};
 /// [object safety rules](https://doc.rust-lang.org/reference/items/traits.html#object-safety).
 type DescriptorToExtract = Box<
     dyn FnOnce(&SecpCtx, Network) -> Result<(ExtendedDescriptor, KeyMap), DescriptorError>
+        + Send
         + 'static,
 >;
 
 fn make_descriptor_to_extract<D>(descriptor: D) -> DescriptorToExtract
 where
-    D: IntoWalletDescriptor + 'static,
+    D: IntoWalletDescriptor + Send + 'static,
 {
     Box::new(|secp, network| descriptor.into_wallet_descriptor(secp, network))
 }
@@ -51,7 +52,7 @@ impl CreateParams {
     ///
     /// Use this method only when building a wallet with a single descriptor. See
     /// also [`Wallet::create_single`].
-    pub fn new_single<D: IntoWalletDescriptor + 'static>(descriptor: D) -> Self {
+    pub fn new_single<D: IntoWalletDescriptor + Send + 'static>(descriptor: D) -> Self {
         Self {
             descriptor: make_descriptor_to_extract(descriptor),
             descriptor_keymap: KeyMap::default(),
@@ -69,7 +70,10 @@ impl CreateParams {
     /// * `network` = [`Network::Bitcoin`]
     /// * `genesis_hash` = `None`
     /// * `lookahead` = [`DEFAULT_LOOKAHEAD`]
-    pub fn new<D: IntoWalletDescriptor + 'static>(descriptor: D, change_descriptor: D) -> Self {
+    pub fn new<D: IntoWalletDescriptor + Send + 'static>(
+        descriptor: D,
+        change_descriptor: D,
+    ) -> Self {
         Self {
             descriptor: make_descriptor_to_extract(descriptor),
             descriptor_keymap: KeyMap::default(),
@@ -185,7 +189,7 @@ impl LoadParams {
     /// for an expected descriptor containing secrets.
     pub fn descriptor<D>(mut self, keychain: KeychainKind, expected_descriptor: Option<D>) -> Self
     where
-        D: IntoWalletDescriptor + 'static,
+        D: IntoWalletDescriptor + Send + 'static,
     {
         let expected = expected_descriptor.map(|d| make_descriptor_to_extract(d));
         match keychain {
