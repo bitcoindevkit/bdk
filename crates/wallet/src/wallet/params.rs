@@ -1,12 +1,13 @@
 use alloc::boxed::Box;
-use bdk_chain::{keychain_txout::DEFAULT_LOOKAHEAD, PersistAsyncWith, PersistWith};
+use bdk_chain::keychain_txout::DEFAULT_LOOKAHEAD;
 use bitcoin::{BlockHash, Network};
 use miniscript::descriptor::KeyMap;
 
 use crate::{
     descriptor::{DescriptorError, ExtendedDescriptor, IntoWalletDescriptor},
     utils::SecpCtx,
-    KeychainKind, Wallet,
+    AsyncWalletPersister, CreateWithPersistError, KeychainKind, LoadWithPersistError, Wallet,
+    WalletPersister,
 };
 
 use super::{ChangeSet, LoadError, PersistedWallet};
@@ -108,26 +109,26 @@ impl CreateParams {
         self
     }
 
-    /// Create [`PersistedWallet`] with the given `Db`.
-    pub fn create_wallet<Db>(
+    /// Create [`PersistedWallet`] with the given [`WalletPersister`].
+    pub fn create_wallet<P>(
         self,
-        db: &mut Db,
-    ) -> Result<PersistedWallet, <Wallet as PersistWith<Db>>::CreateError>
+        persister: &mut P,
+    ) -> Result<PersistedWallet<P>, CreateWithPersistError<P::Error>>
     where
-        Wallet: PersistWith<Db, CreateParams = Self>,
+        P: WalletPersister,
     {
-        PersistedWallet::create(db, self)
+        PersistedWallet::create(persister, self)
     }
 
-    /// Create [`PersistedWallet`] with the given async `Db`.
-    pub async fn create_wallet_async<Db>(
+    /// Create [`PersistedWallet`] with the given [`AsyncWalletPersister`].
+    pub async fn create_wallet_async<P>(
         self,
-        db: &mut Db,
-    ) -> Result<PersistedWallet, <Wallet as PersistAsyncWith<Db>>::CreateError>
+        persister: &mut P,
+    ) -> Result<PersistedWallet<P>, CreateWithPersistError<P::Error>>
     where
-        Wallet: PersistAsyncWith<Db, CreateParams = Self>,
+        P: AsyncWalletPersister,
     {
-        PersistedWallet::create_async(db, self).await
+        PersistedWallet::create_async(persister, self).await
     }
 
     /// Create [`Wallet`] without persistence.
@@ -219,26 +220,26 @@ impl LoadParams {
         self
     }
 
-    /// Load [`PersistedWallet`] with the given `Db`.
-    pub fn load_wallet<Db>(
+    /// Load [`PersistedWallet`] with the given [`WalletPersister`].
+    pub fn load_wallet<P>(
         self,
-        db: &mut Db,
-    ) -> Result<Option<PersistedWallet>, <Wallet as PersistWith<Db>>::LoadError>
+        persister: &mut P,
+    ) -> Result<Option<PersistedWallet<P>>, LoadWithPersistError<P::Error>>
     where
-        Wallet: PersistWith<Db, LoadParams = Self>,
+        P: WalletPersister,
     {
-        PersistedWallet::load(db, self)
+        PersistedWallet::load(persister, self)
     }
 
-    /// Load [`PersistedWallet`] with the given async `Db`.
-    pub async fn load_wallet_async<Db>(
+    /// Load [`PersistedWallet`] with the given [`AsyncWalletPersister`].
+    pub async fn load_wallet_async<P>(
         self,
-        db: &mut Db,
-    ) -> Result<Option<PersistedWallet>, <Wallet as PersistAsyncWith<Db>>::LoadError>
+        persister: &mut P,
+    ) -> Result<Option<PersistedWallet<P>>, LoadWithPersistError<P::Error>>
     where
-        Wallet: PersistAsyncWith<Db, LoadParams = Self>,
+        P: AsyncWalletPersister,
     {
-        PersistedWallet::load_async(db, self).await
+        PersistedWallet::load_async(persister, self).await
     }
 
     /// Load [`Wallet`] without persistence.

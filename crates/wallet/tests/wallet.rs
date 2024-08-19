@@ -5,15 +5,15 @@ use std::str::FromStr;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
+use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ConfirmationTime};
-use bdk_chain::{PersistWith, COINBASE_MATURITY};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
 use bdk_wallet::error::CreateTxError;
 use bdk_wallet::psbt::PsbtUtils;
 use bdk_wallet::signer::{SignOptions, SignerError};
 use bdk_wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::{AddressInfo, Balance, CreateParams, LoadParams, Wallet};
+use bdk_wallet::{AddressInfo, Balance, ChangeSet, Wallet, WalletPersister};
 use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
 use bitcoin::constants::ChainHash;
 use bitcoin::hashes::Hash;
@@ -111,10 +111,8 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
     where
         CreateDb: Fn(&Path) -> anyhow::Result<Db>,
         OpenDb: Fn(&Path) -> anyhow::Result<Db>,
-        Wallet: PersistWith<Db, CreateParams = CreateParams, LoadParams = LoadParams>,
-        <Wallet as PersistWith<Db>>::CreateError: std::error::Error + Send + Sync + 'static,
-        <Wallet as PersistWith<Db>>::LoadError: std::error::Error + Send + Sync + 'static,
-        <Wallet as PersistWith<Db>>::PersistError: std::error::Error + Send + Sync + 'static,
+        Db: WalletPersister,
+        Db::Error: std::error::Error + Send + Sync + 'static,
     {
         let temp_dir = tempfile::tempdir().expect("must create tempdir");
         let file_path = temp_dir.path().join(filename);
@@ -188,7 +186,7 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
 
 #[test]
 fn wallet_load_checks() -> anyhow::Result<()> {
-    fn run<Db, CreateDb, OpenDb, LoadDbError>(
+    fn run<Db, CreateDb, OpenDb>(
         filename: &str,
         create_db: CreateDb,
         open_db: OpenDb,
@@ -196,15 +194,8 @@ fn wallet_load_checks() -> anyhow::Result<()> {
     where
         CreateDb: Fn(&Path) -> anyhow::Result<Db>,
         OpenDb: Fn(&Path) -> anyhow::Result<Db>,
-        Wallet: PersistWith<
-            Db,
-            CreateParams = CreateParams,
-            LoadParams = LoadParams,
-            LoadError = LoadWithPersistError<LoadDbError>,
-        >,
-        <Wallet as PersistWith<Db>>::CreateError: std::error::Error + Send + Sync + 'static,
-        <Wallet as PersistWith<Db>>::LoadError: std::error::Error + Send + Sync + 'static,
-        <Wallet as PersistWith<Db>>::PersistError: std::error::Error + Send + Sync + 'static,
+        Db: WalletPersister + std::fmt::Debug,
+        Db::Error: std::error::Error + Send + Sync + 'static,
     {
         let temp_dir = tempfile::tempdir().expect("must create tempdir");
         let file_path = temp_dir.path().join(filename);
@@ -258,8 +249,12 @@ fn wallet_load_checks() -> anyhow::Result<()> {
 
     run(
         "store.db",
-        |path| Ok(bdk_file_store::Store::create_new(DB_MAGIC, path)?),
-        |path| Ok(bdk_file_store::Store::open(DB_MAGIC, path)?),
+        |path| {
+            Ok(bdk_file_store::Store::<ChangeSet>::create_new(
+                DB_MAGIC, path,
+            )?)
+        },
+        |path| Ok(bdk_file_store::Store::<ChangeSet>::open(DB_MAGIC, path)?),
     )?;
     run(
         "store.sqlite",
@@ -280,7 +275,7 @@ fn single_descriptor_wallet_persist_and_recover() {
     let mut db = rusqlite::Connection::open(db_path).unwrap();
 
     let desc = get_test_tr_single_sig_xprv();
-    let mut wallet = CreateParams::new_single(desc)
+    let mut wallet = Wallet::create_single(desc)
         .network(Network::Testnet)
         .create_wallet(&mut db)
         .unwrap();
@@ -4174,7 +4169,7 @@ fn test_insert_tx_balance_and_utxos() {
 #[test]
 fn single_descriptor_wallet_can_create_tx_and_receive_change() {
     // create single descriptor wallet and fund it
-    let mut wallet = CreateParams::new_single(get_test_tr_single_sig_xprv())
+    let mut wallet = Wallet::create_single(get_test_tr_single_sig_xprv())
         .network(Network::Testnet)
         .create_wallet_no_persist()
         .unwrap();
