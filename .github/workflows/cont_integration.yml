@@ -4,6 +4,17 @@ name: CI
 
 jobs:
 
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      rust_version: ${{ steps.read_toolchain.outputs.rust_version }}
+    steps:
+      - name: "Checkout repo"
+        uses: actions/checkout@v4
+      - name: "Read rust version"
+        id: read_toolchain
+        run: echo "rust_version=$(cat rust-version)" >> $GITHUB_OUTPUT
+  
   build-test:
     name: Build and test
     runs-on: ubuntu-latest
@@ -116,12 +127,13 @@ jobs:
         run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
 
   clippy_check:
+    needs: prepare
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1
         with:
-            toolchain: 1.78.0
+            toolchain: ${{ needs.prepare.outputs.rust_version }}
             components: clippy
             override: true
       - name: Rust Cache
