@@ -565,74 +565,11 @@ impl<A: Clone + Ord> TxGraph<A> {
 
     /// Inserts the given `seen_at` for `txid` into [`TxGraph`].
     ///
-    /// Note that [`TxGraph`] only keeps track of the latest `seen_at`. To batch
-    /// update all unconfirmed transactions with the latest `seen_at`, see
-    /// [`update_last_seen_unconfirmed`].
-    ///
-    /// [`update_last_seen_unconfirmed`]: Self::update_last_seen_unconfirmed
+    /// Note that [`TxGraph`] only keeps track of the latest `seen_at`.
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
         let mut update = Self::default();
         update.last_seen.insert(txid, seen_at);
         self.apply_update(update)
-    }
-
-    /// Update the last seen time for all unconfirmed transactions.
-    ///
-    /// This method updates the last seen unconfirmed time for this [`TxGraph`] by inserting
-    /// the given `seen_at` for every transaction not yet anchored to a confirmed block,
-    /// and returns the [`ChangeSet`] after applying all updates to `self`.
-    ///
-    /// This is useful for keeping track of the latest time a transaction was seen
-    /// unconfirmed, which is important for evaluating transaction conflicts in the same
-    /// [`TxGraph`]. For details of how [`TxGraph`] resolves conflicts, see the docs for
-    /// [`try_get_chain_position`].
-    ///
-    /// A normal use of this method is to call it with the current system time. Although
-    /// block headers contain a timestamp, using the header time would be less effective
-    /// at tracking mempool transactions, because it can drift from actual clock time, plus
-    /// we may want to update a transaction's last seen time repeatedly between blocks.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use bdk_chain::example_utils::*;
-    /// # use std::time::UNIX_EPOCH;
-    /// # let tx = tx_from_hex(RAW_TX_1);
-    /// # let mut tx_graph = bdk_chain::TxGraph::<()>::new([tx]);
-    /// let now = std::time::SystemTime::now()
-    ///     .duration_since(UNIX_EPOCH)
-    ///     .expect("valid duration")
-    ///     .as_secs();
-    /// let changeset = tx_graph.update_last_seen_unconfirmed(now);
-    /// assert!(!changeset.last_seen.is_empty());
-    /// ```
-    ///
-    /// Note that [`TxGraph`] only keeps track of the latest `seen_at`, so the given time must
-    /// by strictly greater than what is currently stored for a transaction to have an effect.
-    /// To insert a last seen time for a single txid, see [`insert_seen_at`].
-    ///
-    /// [`insert_seen_at`]: Self::insert_seen_at
-    /// [`try_get_chain_position`]: Self::try_get_chain_position
-    pub fn update_last_seen_unconfirmed(&mut self, seen_at: u64) -> ChangeSet<A> {
-        let mut changeset = ChangeSet::default();
-        let unanchored_txs: Vec<Txid> = self
-            .txs
-            .iter()
-            .filter_map(
-                |(&txid, (_, anchors))| {
-                    if anchors.is_empty() {
-                        Some(txid)
-                    } else {
-                        None
-                    }
-                },
-            )
-            .collect();
-
-        for txid in unanchored_txs {
-            changeset.merge(self.insert_seen_at(txid, seen_at));
-        }
-        changeset
     }
 
     /// Extends this graph with another so that `self` becomes the union of the two sets of

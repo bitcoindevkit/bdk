@@ -129,7 +129,7 @@ fn main() -> anyhow::Result<()> {
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download them
     client.populate_tx_cache(&*graph.lock().unwrap());
 
-    let (chain_update, mut graph_update, keychain_update) = match electrum_cmd.clone() {
+    let (chain_update, graph_update, keychain_update) = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
             stop_gap,
             scan_options,
@@ -157,6 +157,7 @@ fn main() -> anyhow::Result<()> {
                             .into_iter()
                             .flatten(),
                     )
+                    .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
                     .inspect({
                         let mut once = BTreeSet::new();
                         move |k, spk_i, _| {
@@ -200,13 +201,13 @@ fn main() -> anyhow::Result<()> {
             }
 
             let chain_tip = chain.tip();
-            let mut request =
-                SyncRequest::builder()
-                    .chain_tip(chain_tip.clone())
-                    .inspect(|item, progress| {
-                        let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
-                        eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
-                    });
+            let mut request = SyncRequest::builder()
+                .chain_tip(chain_tip.clone())
+                .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
+                .inspect(|item, progress| {
+                    let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
+                    eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
+                });
 
             if all_spks {
                 request = request.spks_with_indexes(graph.index.revealed_spks(..));
@@ -247,12 +248,6 @@ fn main() -> anyhow::Result<()> {
             (res.chain_update, res.graph_update, None)
         }
     };
-
-    let now = std::time::UNIX_EPOCH
-        .elapsed()
-        .expect("must get time")
-        .as_secs();
-    let _ = graph_update.update_last_seen_unconfirmed(now);
 
     let db_changeset = {
         let mut chain = chain.lock().unwrap();

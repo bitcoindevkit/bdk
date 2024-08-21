@@ -45,23 +45,24 @@ async fn main() -> Result<(), anyhow::Error> {
     print!("Syncing...");
     let client = esplora_client::Builder::new(ESPLORA_URL).build_async()?;
 
-    let request = wallet.start_full_scan().inspect({
-        let mut stdout = std::io::stdout();
-        let mut once = BTreeSet::<KeychainKind>::new();
-        move |keychain, spk_i, _| {
-            if once.insert(keychain) {
-                print!("\nScanning keychain [{:?}]", keychain);
+    let request = wallet
+        .start_full_scan()
+        .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
+        .inspect({
+            let mut stdout = std::io::stdout();
+            let mut once = BTreeSet::<KeychainKind>::new();
+            move |keychain, spk_i, _| {
+                if once.insert(keychain) {
+                    print!("\nScanning keychain [{:?}]", keychain);
+                }
+                print!(" {:<3}", spk_i);
+                stdout.flush().expect("must flush")
             }
-            print!(" {:<3}", spk_i);
-            stdout.flush().expect("must flush")
-        }
-    });
+        });
 
-    let mut update = client
+    let update = client
         .full_scan(request, STOP_GAP, PARALLEL_REQUESTS)
         .await?;
-    let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     wallet.apply_update(update)?;
     wallet.persist(&mut conn)?;

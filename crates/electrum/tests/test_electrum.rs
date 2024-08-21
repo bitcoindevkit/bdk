@@ -38,18 +38,14 @@ where
     Spks: IntoIterator<Item = ScriptBuf>,
     Spks::IntoIter: ExactSizeIterator + Send + 'static,
 {
-    let mut update = client.sync(
-        SyncRequest::builder().chain_tip(chain.tip()).spks(spks),
+    let update = client.sync(
+        SyncRequest::builder()
+            .chain_tip(chain.tip())
+            .spks(spks)
+            .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()),
         BATCH_SIZE,
         true,
     )?;
-
-    // Update `last_seen` to be able to calculate balance for unconfirmed transactions.
-    let now = std::time::UNIX_EPOCH
-        .elapsed()
-        .expect("must get time")
-        .as_secs();
-    let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     if let Some(chain_update) = update.chain_update.clone() {
         let _ = chain
@@ -107,6 +103,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let sync_update = {
         let request = SyncRequest::builder()
             .chain_tip(cp_tip.clone())
+            .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
             .spks(misc_spks);
         client.sync(request, 1, true)?
     };
@@ -213,6 +210,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     let full_scan_update = {
         let request = FullScanRequest::builder()
             .chain_tip(cp_tip.clone())
+            .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 3, 1, false)?
     };
@@ -221,6 +219,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     let full_scan_update = {
         let request = FullScanRequest::builder()
             .chain_tip(cp_tip.clone())
+            .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 4, 1, false)?
     };
@@ -254,6 +253,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     let full_scan_update = {
         let request = FullScanRequest::builder()
             .chain_tip(cp_tip.clone())
+            .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 5, 1, false)?
     };
@@ -268,6 +268,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     let full_scan_update = {
         let request = FullScanRequest::builder()
             .chain_tip(cp_tip.clone())
+            .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 6, 1, false)?
     };

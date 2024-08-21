@@ -2446,10 +2446,10 @@ impl Wallet {
             .revealed_spks_from_indexer(&self.indexed_graph.index, ..)
     }
 
-    /// Create a [`FullScanRequest] for this wallet.
+    /// Create a [`FullScanRequest`] for this wallet.
     ///
     /// This is the first step when performing a spk-based wallet full scan, the returned
-    /// [`FullScanRequest] collects iterators for the wallet's keychain script pub keys needed to
+    /// [`FullScanRequest`] collects iterators for the wallet's keychain script pub keys needed to
     /// start a blockchain full scan with a spk based blockchain client.
     ///
     /// This operation is generally only used when importing or restoring a previously used wallet

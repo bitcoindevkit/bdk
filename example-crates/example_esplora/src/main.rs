@@ -148,6 +148,7 @@ fn main() -> anyhow::Result<()> {
                 FullScanRequest::builder()
                     .chain_tip(chain_tip)
                     .spks_from_indexer(&indexed_graph.index)
+                    .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
                     .inspect({
                         let mut once = BTreeSet::<Keychain>::new();
                         move |keychain, spk_i, _| {
@@ -166,13 +167,9 @@ fn main() -> anyhow::Result<()> {
             // is reached. It returns a `TxGraph` update (`graph_update`) and a structure that
             // represents the last active spk derivation indices of keychains
             // (`keychain_indices_update`).
-            let mut update = client
+            let update = client
                 .full_scan(request, *stop_gap, scan_options.parallel_requests)
                 .context("scanning for transactions")?;
-
-            // We want to keep track of the latest time a transaction was seen unconfirmed.
-            let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-            let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
             let mut graph = graph.lock().expect("mutex must not be poisoned");
             let mut chain = chain.lock().expect("mutex must not be poisoned");
@@ -213,15 +210,15 @@ fn main() -> anyhow::Result<()> {
 
             let local_tip = chain.lock().expect("mutex must not be poisoned").tip();
             // Spks, outpoints and txids we want updates on will be accumulated here.
-            let mut request =
-                SyncRequest::builder()
-                    .chain_tip(local_tip.clone())
-                    .inspect(|item, progress| {
-                        let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
-                        eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
-                        // Flush early to ensure we print at every iteration.
-                        let _ = io::stderr().flush();
-                    });
+            let mut request = SyncRequest::builder()
+                .chain_tip(local_tip.clone())
+                .time_of_sync(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs())
+                .inspect(|item, progress| {
+                    let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
+                    eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
+                    // Flush early to ensure we print at every iteration.
+                    let _ = io::stderr().flush();
+                });
 
             // Get a short lock on the structures to get spks, utxos, and txs that we are interested
             // in.
@@ -265,11 +262,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            let mut update = client.sync(request, scan_options.parallel_requests)?;
-
-            // Update last seen unconfirmed
-            let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-            let _ = update.graph_update.update_last_seen_unconfirmed(now);
+            let update = client.sync(request, scan_options.parallel_requests)?;
 
             (
                 chain

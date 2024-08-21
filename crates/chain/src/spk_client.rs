@@ -193,6 +193,12 @@ impl<I> SyncRequestBuilder<I> {
         self
     }
 
+    /// Set the `time_of_sync` for unconfirmed transactions.
+    pub fn time_of_sync(mut self, time_of_sync: u64) -> Self {
+        self.inner.time_of_sync = Some(time_of_sync);
+        self
+    }
+
     /// Set the closure that will inspect every sync item visited.
     pub fn inspect<F>(mut self, inspect: F) -> Self
     where
@@ -239,6 +245,7 @@ pub struct SyncRequest<I = ()> {
     txids_consumed: usize,
     outpoints: VecDeque<OutPoint>,
     outpoints_consumed: usize,
+    time_of_sync: Option<u64>,
     inspect: Box<InspectSync<I>>,
 }
 
@@ -252,6 +259,7 @@ impl<I> Default for SyncRequest<I> {
             txids_consumed: 0,
             outpoints: VecDeque::new(),
             outpoints_consumed: 0,
+            time_of_sync: None,
             inspect: Box::new(|_, _| {}),
         }
     }
@@ -333,6 +341,11 @@ impl<I> SyncRequest<I> {
         SyncIter::<I, OutPoint>::new(self)
     }
 
+    /// Retrive the `time_of_sync`.
+    pub fn get_time_of_sync(&self) -> Option<u64> {
+        self.time_of_sync
+    }
+
     fn _call_inspect(&mut self, item: SyncItem<I>) {
         let progress = self.progress();
         (*self.inspect)(item, progress);
@@ -409,6 +422,12 @@ impl<K: Ord> FullScanRequestBuilder<K> {
         self
     }
 
+    /// Set the `time_of_sync` for unconfirmed transactions.
+    pub fn time_of_sync(mut self, time_of_sync: u64) -> Self {
+        self.inner.time_of_sync = Some(time_of_sync);
+        self
+    }
+
     /// Set the closure that will inspect every sync item visited.
     pub fn inspect<F>(mut self, inspect: F) -> Self
     where
@@ -435,6 +454,7 @@ impl<K: Ord> FullScanRequestBuilder<K> {
 pub struct FullScanRequest<K> {
     chain_tip: Option<CheckPoint>,
     spks_by_keychain: BTreeMap<K, Box<dyn Iterator<Item = Indexed<ScriptBuf>> + Send>>,
+    time_of_sync: Option<u64>,
     inspect: Box<InspectFullScan<K>>,
 }
 
@@ -449,6 +469,7 @@ impl<K> Default for FullScanRequest<K> {
         Self {
             chain_tip: None,
             spks_by_keychain: Default::default(),
+            time_of_sync: None,
             inspect: Box::new(|_, _, _| {}),
         }
     }
@@ -487,6 +508,11 @@ impl<K: Ord + Clone> FullScanRequest<K> {
             spks,
             inspect,
         }
+    }
+
+    /// Retrive the `time_of_sync`.
+    pub fn get_time_of_sync(&self) -> Option<u64> {
+        self.time_of_sync
     }
 }
 

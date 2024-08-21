@@ -137,14 +137,19 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
             None => None,
         };
+        let time_of_sync = request.get_time_of_sync();
 
         let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
         let mut last_active_indices = BTreeMap::<K, u32>::default();
         for keychain in request.keychains() {
             let spks = request.iter_spks(keychain.clone());
-            if let Some(last_active_index) =
-                self.populate_with_spks(&mut graph_update, spks, stop_gap, batch_size)?
-            {
+            if let Some(last_active_index) = self.populate_with_spks(
+                &mut graph_update,
+                spks,
+                stop_gap,
+                batch_size,
+                time_of_sync,
+            )? {
                 last_active_indices.insert(keychain, last_active_index);
             }
         }
@@ -204,6 +209,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
             None => None,
         };
+        let time_of_sync = request.get_time_of_sync();
 
         let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
         self.populate_with_spks(
@@ -214,9 +220,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .map(|(i, spk)| (i as u32, spk)),
             usize::MAX,
             batch_size,
+            time_of_sync,
         )?;
-        self.populate_with_txids(&mut graph_update, request.iter_txids())?;
-        self.populate_with_outpoints(&mut graph_update, request.iter_outpoints())?;
+        self.populate_with_txids(&mut graph_update, request.iter_txids(), time_of_sync)?;
+        self.populate_with_outpoints(&mut graph_update, request.iter_outpoints(), time_of_sync)?;
 
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
@@ -249,6 +256,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         mut spks: impl Iterator<Item = (u32, ScriptBuf)>,
         stop_gap: usize,
         batch_size: usize,
+        time_of_sync: Option<u64>,
     ) -> Result<Option<u32>, Error> {
         let mut unused_spk_count = 0_usize;
         let mut last_active_index = Option::<u32>::None;
@@ -279,7 +287,12 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
                 for tx_res in spk_history {
                     let _ = graph_update.insert_tx(self.fetch_tx(tx_res.tx_hash)?);
-                    self.validate_merkle_for_anchor(graph_update, tx_res.tx_hash, tx_res.height)?;
+                    self.validate_merkle_for_anchor(
+                        graph_update,
+                        tx_res.tx_hash,
+                        tx_res.height,
+                        time_of_sync,
+                    )?;
                 }
             }
         }
@@ -293,6 +306,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         &self,
         graph_update: &mut TxGraph<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
+        time_of_sync: Option<u64>,
     ) -> Result<(), Error> {
         for outpoint in outpoints {
             let op_txid = outpoint.txid;
@@ -315,7 +329,12 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 if !has_residing && res.tx_hash == op_txid {
                     has_residing = true;
                     let _ = graph_update.insert_tx(Arc::clone(&op_tx));
-                    self.validate_merkle_for_anchor(graph_update, res.tx_hash, res.height)?;
+                    self.validate_merkle_for_anchor(
+                        graph_update,
+                        res.tx_hash,
+                        res.height,
+                        time_of_sync,
+                    )?;
                 }
 
                 if !has_spending && res.tx_hash != op_txid {
@@ -329,7 +348,12 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         continue;
                     }
                     let _ = graph_update.insert_tx(Arc::clone(&res_tx));
-                    self.validate_merkle_for_anchor(graph_update, res.tx_hash, res.height)?;
+                    self.validate_merkle_for_anchor(
+                        graph_update,
+                        res.tx_hash,
+                        res.height,
+                        time_of_sync,
+                    )?;
                 }
             }
         }
@@ -341,6 +365,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         &self,
         graph_update: &mut TxGraph<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
+        time_of_sync: Option<u64>,
     ) -> Result<(), Error> {
         for txid in txids {
             let tx = match self.fetch_tx(txid) {
@@ -363,7 +388,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .into_iter()
                 .find(|r| r.tx_hash == txid)
             {
-                self.validate_merkle_for_anchor(graph_update, txid, r.height)?;
+                self.validate_merkle_for_anchor(graph_update, txid, r.height, time_of_sync)?;
             }
 
             let _ = graph_update.insert_tx(tx);
@@ -378,6 +403,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         graph_update: &mut TxGraph<ConfirmationBlockTime>,
         txid: Txid,
         confirmation_height: i32,
+        time_of_sync: Option<u64>,
     ) -> Result<(), Error> {
         if let Ok(merkle_res) = self
             .inner
@@ -412,6 +438,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         },
                     },
                 );
+            }
+        } else {
+            // If no merkle proof is returned, then the tx is unconfirmed and we set the last_seen.
+            if let Some(seen_at) = time_of_sync {
+                let _ = graph_update.insert_seen_at(txid, seen_at);
             }
         }
         Ok(())
