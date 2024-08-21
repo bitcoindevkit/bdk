@@ -93,12 +93,12 @@ fn main() -> anyhow::Result<()> {
         .descriptor(KeychainKind::Internal, Some(args.change_descriptor.clone()))
         .extract_keys()
         .check_network(args.network)
-        .load_wallet(&mut db)?;
+        .load_wallet(&mut db, ())?;
     let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
         None => Wallet::create(args.descriptor, args.change_descriptor)
             .network(args.network)
-            .create_wallet(&mut db)?,
+            .create_wallet(&mut db, ())?,
     };
     println!(
         "Loaded wallet in {}s",

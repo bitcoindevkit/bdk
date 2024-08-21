@@ -117,22 +117,24 @@ impl CreateParams {
     pub fn create_wallet<P>(
         self,
         persister: &mut P,
+        persister_params: P::Params,
     ) -> Result<PersistedWallet<P>, CreateWithPersistError<P::Error>>
     where
         P: WalletPersister,
     {
-        PersistedWallet::create(persister, self)
+        PersistedWallet::create(persister, persister_params, self)
     }
 
     /// Create [`PersistedWallet`] with the given [`AsyncWalletPersister`].
     pub async fn create_wallet_async<P>(
         self,
         persister: &mut P,
+        persister_params: P::Params,
     ) -> Result<PersistedWallet<P>, CreateWithPersistError<P::Error>>
     where
         P: AsyncWalletPersister,
     {
-        PersistedWallet::create_async(persister, self).await
+        PersistedWallet::create_async(persister, persister_params, self).await
     }
 
     /// Create [`Wallet`] without persistence.
@@ -228,22 +230,24 @@ impl LoadParams {
     pub fn load_wallet<P>(
         self,
         persister: &mut P,
+        persister_params: P::Params,
     ) -> Result<Option<PersistedWallet<P>>, LoadWithPersistError<P::Error>>
     where
         P: WalletPersister,
     {
-        PersistedWallet::load(persister, self)
+        PersistedWallet::load(persister, persister_params, self)
     }
 
     /// Load [`PersistedWallet`] with the given [`AsyncWalletPersister`].
     pub async fn load_wallet_async<P>(
         self,
         persister: &mut P,
+        persister_params: P::Params,
     ) -> Result<Option<PersistedWallet<P>>, LoadWithPersistError<P::Error>>
     where
         P: AsyncWalletPersister,
     {
-        PersistedWallet::load_async(persister, self).await
+        PersistedWallet::load_async(persister, persister_params, self).await
     }
 
     /// Load [`Wallet`] without persistence.

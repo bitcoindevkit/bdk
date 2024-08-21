@@ -27,12 +27,12 @@ async fn main() -> Result<(), anyhow::Error> {
         .descriptor(KeychainKind::Internal, Some(INTERNAL_DESC))
         .extract_keys()
         .check_network(NETWORK)
-        .load_wallet(&mut conn)?;
+        .load_wallet(&mut conn, ())?;
     let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
         None => Wallet::create(EXTERNAL_DESC, INTERNAL_DESC)
             .network(NETWORK)
-            .create_wallet(&mut conn)?,
+            .create_wallet(&mut conn, ())?,
     };
 
     let address = wallet.next_unused_address(KeychainKind::External);

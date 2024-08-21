@@ -83,13 +83,13 @@ let wallet_opt = Wallet::load()
     .descriptor(KeychainKind::Internal, Some(change_descriptor))
     .extract_keys()
     .check_network(network)
-    .load_wallet(&mut db)
+    .load_wallet(&mut db, ())
     .expect("wallet");
 let mut wallet = match wallet_opt {
     Some(wallet) => wallet,
     None => Wallet::create(descriptor, change_descriptor)
         .network(network)
-        .create_wallet(&mut db)
+        .create_wallet(&mut db, ())
         .expect("wallet"),
 };
 

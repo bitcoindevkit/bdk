@@ -1,7 +1,6 @@
 use core::{
     fmt,
     future::Future,
-    marker::PhantomData,
     ops::{Deref, DerefMut},
     pin::Pin,
 };
@@ -11,6 +10,14 @@ use chain::Merge;
 
 use crate::{descriptor::DescriptorError, ChangeSet, CreateParams, LoadParams, Wallet};
 
+/// Trait which contains common type parameters for [`WalletPersister`] and [`AsyncWalletPersister`].
+pub trait WalletPersisterCommon {
+    /// Error type of the persister.
+    type Error;
+    /// Parameters for the persister.
+    type Params;
+}
+
 /// Trait that persists [`PersistedWallet`].
 ///
 /// For an async version, use [`AsyncWalletPersister`].
@@ -19,10 +26,7 @@ use crate::{descriptor::DescriptorError, ChangeSet, CreateParams, LoadParams, Wa
 /// that associated functions are hard to find (since they are not methods!). [`WalletPersister`] is
 /// used by [`PersistedWallet`] (a light wrapper around [`Wallet`]) which enforces some level of
 /// safety. Refer to [`PersistedWallet`] for more about the safety checks.
-pub trait WalletPersister {
-    /// Error type of the persister.
-    type Error;
-
+pub trait WalletPersister: WalletPersisterCommon {
     /// Initialize the `persister` and load all data.
     ///
     /// This is called by [`PersistedWallet::create`] and [`PersistedWallet::load`] to ensure
@@ -42,14 +46,18 @@ pub trait WalletPersister {
     /// persister implementations may NOT require initialization at all (and not error).
     ///
     /// [`persist`]: WalletPersister::persist
-    fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error>;
+    fn initialize(persister: &mut Self, params: &Self::Params) -> Result<ChangeSet, Self::Error>;
 
     /// Persist the given `changeset` to the `persister`.
     ///
     /// This method can fail if the `persister` is not [`initialize`]d.
     ///
     /// [`initialize`]: WalletPersister::initialize
-    fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error>;
+    fn persist(
+        persister: &mut Self,
+        params: &Self::Params,
+        changeset: &ChangeSet,
+    ) -> Result<(), Self::Error>;
 }
 
 type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
@@ -62,10 +70,7 @@ type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send +
 /// that associated functions are hard to find (since they are not methods!). [`AsyncWalletPersister`] is
 /// used by [`PersistedWallet`] (a light wrapper around [`Wallet`]) which enforces some level of
 /// safety. Refer to [`PersistedWallet`] for more about the safety checks.
-pub trait AsyncWalletPersister {
-    /// Error type of the persister.
-    type Error;
-
+pub trait AsyncWalletPersister: WalletPersisterCommon {
     /// Initialize the `persister` and load all data.
     ///
     /// This is called by [`PersistedWallet::create_async`] and [`PersistedWallet::load_async`] to
@@ -85,7 +90,10 @@ pub trait AsyncWalletPersister {
     /// persister implementations may NOT require initialization at all (and not error).
     ///
     /// [`persist`]: AsyncWalletPersister::persist
-    fn initialize<'a>(persister: &'a mut Self) -> FutureResult<'a, ChangeSet, Self::Error>
+    fn initialize<'a>(
+        persister: &'a mut Self,
+        params: &'a Self::Params,
+    ) -> FutureResult<'a, ChangeSet, Self::Error>
     where
         Self: 'a;
 
@@ -96,6 +104,7 @@ pub trait AsyncWalletPersister {
     /// [`initialize`]: AsyncWalletPersister::initialize
     fn persist<'a>(
         persister: &'a mut Self,
+        params: &'a Self::Params,
         changeset: &'a ChangeSet,
     ) -> FutureResult<'a, (), Self::Error>
     where
@@ -118,12 +127,12 @@ pub trait AsyncWalletPersister {
 ///     not completely fool-proof as you can have multiple instances of the same `P` type that are
 ///     connected to different databases.
 #[derive(Debug)]
-pub struct PersistedWallet<P> {
+pub struct PersistedWallet<P: WalletPersisterCommon> {
     inner: Wallet,
-    marker: PhantomData<P>,
+    persister_params: P::Params,
 }
 
-impl<P> Deref for PersistedWallet<P> {
+impl<P: WalletPersisterCommon> Deref for PersistedWallet<P> {
     type Target = Wallet;
 
     fn deref(&self) -> &Self::Target {
@@ -131,7 +140,7 @@ impl<P> Deref for PersistedWallet<P> {
     }
 }
 
-impl<P> DerefMut for PersistedWallet<P> {
+impl<P: WalletPersisterCommon> DerefMut for PersistedWallet<P> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }
@@ -142,34 +151,39 @@ impl<P: WalletPersister> PersistedWallet<P> {
     /// Create a new [`PersistedWallet`] with the given `persister` and `params`.
     pub fn create(
         persister: &mut P,
+        persister_params: P::Params,
         params: CreateParams,
     ) -> Result<Self, CreateWithPersistError<P::Error>> {
-        let existing = P::initialize(persister).map_err(CreateWithPersistError::Persist)?;
+        let existing =
+            P::initialize(persister, &persister_params).map_err(CreateWithPersistError::Persist)?;
         if !existing.is_empty() {
             return Err(CreateWithPersistError::DataAlreadyExists(existing));
         }
         let mut inner =
             Wallet::create_with_params(params).map_err(CreateWithPersistError::Descriptor)?;
         if let Some(changeset) = inner.take_staged() {
-            P::persist(persister, &changeset).map_err(CreateWithPersistError::Persist)?;
+            P::persist(persister, &persister_params, &changeset)
+                .map_err(CreateWithPersistError::Persist)?;
         }
         Ok(Self {
             inner,
-            marker: PhantomData,
+            persister_params,
         })
     }
 
     /// Load a previously [`PersistedWallet`] from the given `persister` and `params`.
     pub fn load(
         persister: &mut P,
+        persister_params: P::Params,
         params: LoadParams,
     ) -> Result<Option<Self>, LoadWithPersistError<P::Error>> {
-        let changeset = P::initialize(persister).map_err(LoadWithPersistError::Persist)?;
+        let changeset =
+            P::initialize(persister, &persister_params).map_err(LoadWithPersistError::Persist)?;
         Wallet::load_with_params(changeset, params)
             .map(|opt| {
                 opt.map(|inner| PersistedWallet {
                     inner,
-                    marker: PhantomData,
+                    persister_params,
                 })
             })
             .map_err(LoadWithPersistError::InvalidChangeSet)
@@ -183,7 +197,7 @@ impl<P: WalletPersister> PersistedWallet<P> {
     pub fn persist(&mut self, persister: &mut P) -> Result<bool, P::Error> {
         match self.inner.staged_mut() {
             Some(stage) => {
-                P::persist(persister, &*stage)?;
+                P::persist(persister, &self.persister_params, &*stage)?;
                 let _ = stage.take();
                 Ok(true)
             }
@@ -197,9 +211,10 @@ impl<P: AsyncWalletPersister> PersistedWallet<P> {
     /// Create a new [`PersistedWallet`] with the given async `persister` and `params`.
     pub async fn create_async(
         persister: &mut P,
+        persister_params: P::Params,
         params: CreateParams,
     ) -> Result<Self, CreateWithPersistError<P::Error>> {
-        let existing = P::initialize(persister)
+        let existing = P::initialize(persister, &persister_params)
             .await
             .map_err(CreateWithPersistError::Persist)?;
         if !existing.is_empty() {
@@ -208,29 +223,30 @@ impl<P: AsyncWalletPersister> PersistedWallet<P> {
         let mut inner =
             Wallet::create_with_params(params).map_err(CreateWithPersistError::Descriptor)?;
         if let Some(changeset) = inner.take_staged() {
-            P::persist(persister, &changeset)
+            P::persist(persister, &persister_params, &changeset)
                 .await
                 .map_err(CreateWithPersistError::Persist)?;
         }
         Ok(Self {
             inner,
-            marker: PhantomData,
+            persister_params,
         })
     }
 
     /// Load a previously [`PersistedWallet`] from the given async `persister` and `params`.
     pub async fn load_async(
         persister: &mut P,
+        persister_params: P::Params,
         params: LoadParams,
     ) -> Result<Option<Self>, LoadWithPersistError<P::Error>> {
-        let changeset = P::initialize(persister)
+        let changeset = P::initialize(persister, &persister_params)
             .await
             .map_err(LoadWithPersistError::Persist)?;
         Wallet::load_with_params(changeset, params)
             .map(|opt| {
                 opt.map(|inner| PersistedWallet {
                     inner,
-                    marker: PhantomData,
+                    persister_params,
                 })
             })
             .map_err(LoadWithPersistError::InvalidChangeSet)
@@ -244,7 +260,7 @@ impl<P: AsyncWalletPersister> PersistedWallet<P> {
     pub async fn persist_async<'a>(&'a mut self, persister: &mut P) -> Result<bool, P::Error> {
         match self.inner.staged_mut() {
             Some(stage) => {
-                P::persist(persister, &*stage).await?;
+                P::persist(persister, &self.persister_params, &*stage).await?;
                 let _ = stage.take();
                 Ok(true)
             }
@@ -254,24 +270,36 @@ impl<P: AsyncWalletPersister> PersistedWallet<P> {
 }
 
 #[cfg(feature = "rusqlite")]
-impl<'c> WalletPersister for bdk_chain::rusqlite::Transaction<'c> {
+impl<'c> WalletPersisterCommon for bdk_chain::rusqlite::Transaction<'c> {
     type Error = bdk_chain::rusqlite::Error;
+    type Params = ();
+}
 
-    fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error> {
+#[cfg(feature = "rusqlite")]
+impl<'c> WalletPersister for bdk_chain::rusqlite::Transaction<'c> {
+    fn initialize(persister: &mut Self, _: &Self::Params) -> Result<ChangeSet, Self::Error> {
         ChangeSet::init_sqlite_tables(&*persister)?;
         ChangeSet::from_sqlite(persister)
     }
 
-    fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
+    fn persist(
+        persister: &mut Self,
+        _: &Self::Params,
+        changeset: &ChangeSet,
+    ) -> Result<(), Self::Error> {
         changeset.persist_to_sqlite(persister)
     }
 }
 
 #[cfg(feature = "rusqlite")]
-impl WalletPersister for bdk_chain::rusqlite::Connection {
+impl WalletPersisterCommon for bdk_chain::rusqlite::Connection {
     type Error = bdk_chain::rusqlite::Error;
+    type Params = ();
+}
 
-    fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error> {
+#[cfg(feature = "rusqlite")]
+impl WalletPersister for bdk_chain::rusqlite::Connection {
+    fn initialize(persister: &mut Self, _: &Self::Params) -> Result<ChangeSet, Self::Error> {
         let db_tx = persister.transaction()?;
         ChangeSet::init_sqlite_tables(&db_tx)?;
         let changeset = ChangeSet::from_sqlite(&db_tx)?;
@@ -279,7 +307,11 @@ impl WalletPersister for bdk_chain::rusqlite::Connection {
         Ok(changeset)
     }
 
-    fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
+    fn persist(
+        persister: &mut Self,
+        _: &Self::Params,
+        changeset: &ChangeSet,
+    ) -> Result<(), Self::Error> {
         let db_tx = persister.transaction()?;
         changeset.persist_to_sqlite(&db_tx)?;
         db_tx.commit()
@@ -311,17 +343,25 @@ impl core::fmt::Display for FileStoreError {
 impl std::error::Error for FileStoreError {}
 
 #[cfg(feature = "file_store")]
-impl WalletPersister for bdk_file_store::Store<ChangeSet> {
+impl WalletPersisterCommon for bdk_file_store::Store<ChangeSet> {
     type Error = FileStoreError;
+    type Params = ();
+}
 
-    fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error> {
+#[cfg(feature = "file_store")]
+impl WalletPersister for bdk_file_store::Store<ChangeSet> {
+    fn initialize(persister: &mut Self, _: &Self::Params) -> Result<ChangeSet, Self::Error> {
         persister
             .aggregate_changesets()
             .map(Option::unwrap_or_default)
             .map_err(FileStoreError::Load)
     }
 
-    fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
+    fn persist(
+        persister: &mut Self,
+        _: &Self::Params,
+        changeset: &ChangeSet,
+    ) -> Result<(), Self::Error> {
         persister
             .append_changeset(changeset)
             .map_err(FileStoreError::Write)

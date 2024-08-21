@@ -324,7 +324,7 @@ impl Wallet {
     /// let mut conn = Connection::open(file_path)?;
     /// let wallet = Wallet::create_single(EXTERNAL_DESC)
     ///     .network(Network::Testnet)
-    ///     .create_wallet(&mut conn)?;
+    ///     .create_wallet(&mut conn, ())?;
     /// # Ok::<_, anyhow::Error>(())
     /// ```
     /// [`change_policy`]: TxBuilder::change_policy
@@ -363,7 +363,7 @@ impl Wallet {
     /// let mut conn = Connection::open(file_path)?;
     /// let wallet = Wallet::create(EXTERNAL_DESC, INTERNAL_DESC)
     ///     .network(Network::Testnet)
-    ///     .create_wallet(&mut conn)?;
+    ///     .create_wallet(&mut conn, ())?;
     /// # Ok(())
     /// # }
     /// ```
@@ -476,7 +476,7 @@ impl Wallet {
     ///     .check_genesis_hash(genesis_hash)
     ///     // set a lookahead for our indexer
     ///     .lookahead(101)
-    ///     .load_wallet(&mut conn)?
+    ///     .load_wallet(&mut conn, ())?
     ///     .expect("must have data to load wallet");
     /// # Ok(())
     /// # }
@@ -672,7 +672,7 @@ impl Wallet {
     /// use bdk_chain::rusqlite::Connection;
     /// let mut conn = Connection::open_in_memory().expect("must open connection");
     /// let mut wallet = LoadParams::new()
-    ///     .load_wallet(&mut conn)
+    ///     .load_wallet(&mut conn, ())
     ///     .expect("database is okay")
     ///     .expect("database has data");
     /// let next_address = wallet.reveal_next_address(KeychainKind::External);
