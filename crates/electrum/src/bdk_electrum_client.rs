@@ -7,10 +7,7 @@ use bdk_chain::{
     Anchor, BlockId, ConfirmationBlockTime,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
-use std::{
-    collections::BTreeSet,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
@@ -40,7 +37,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Inserts transactions into the transaction cache so that the client will not fetch these
     /// transactions.
     pub fn populate_tx_cache<A>(&self, update: impl Into<Update<A>>) {
-        let txs = update.into().whole_txs();
+        let update = update.into();
+        let txs = update.iter_txs();
 
         let mut tx_cache = self.tx_cache.lock().unwrap();
         for (txid, tx) in txs {
@@ -155,7 +153,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             Some((chain_tip, latest_blocks)) => Some(chain_update(
                 chain_tip,
                 &latest_blocks,
-                graph_update.all_anchors(),
+                graph_update.iter_anchors(),
             )?),
             _ => None,
         };
@@ -224,7 +222,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             Some((chain_tip, latest_blocks)) => Some(chain_update(
                 chain_tip,
                 &latest_blocks,
-                graph_update.all_anchors(),
+                graph_update.iter_anchors(),
             )?),
             None => None,
         };
@@ -421,7 +419,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         graph_update: &mut Update<ConfirmationBlockTime>,
     ) -> Result<(), Error> {
         let full_txs: Vec<Arc<Transaction>> =
-            graph_update.whole_txs().map(|(_txid, tx)| tx).collect();
+            graph_update.iter_txs().map(|(_txid, tx)| tx).collect();
         for tx in full_txs {
             for vin in &tx.input {
                 let outpoint = vin.previous_output;
@@ -513,17 +511,17 @@ fn fetch_tip_and_latest_blocks(
 fn chain_update<A: Anchor>(
     mut tip: CheckPoint,
     latest_blocks: &BTreeMap<u32, BlockHash>,
-    anchors: &BTreeSet<(A, Txid)>,
+    anchors: impl Iterator<Item = (Txid, A)>,
 ) -> Result<CheckPoint, Error> {
-    for anchor in anchors {
-        let height = anchor.0.anchor_block().height;
+    for (_txid, anchor) in anchors {
+        let height = anchor.anchor_block().height;
 
         // Checkpoint uses the `BlockHash` from `latest_blocks` so that the hash will be consistent
         // in case of a re-org.
         if tip.get(height).is_none() && height <= tip.height() {
             let hash = match latest_blocks.get(&height) {
                 Some(&hash) => hash,
-                None => anchor.0.anchor_block().hash,
+                None => anchor.anchor_block().hash,
             };
             tip = tip.insert(BlockId { hash, height });
         }

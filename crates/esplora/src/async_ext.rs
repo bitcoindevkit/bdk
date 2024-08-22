@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use async_trait::async_trait;
 use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
 use bdk_chain::{
@@ -88,7 +86,13 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
 
         let chain_update = match (chain_tip, latest_blocks) {
             (Some(chain_tip), Some(latest_blocks)) => Some(
-                chain_update(self, &latest_blocks, &chain_tip, graph_update.all_anchors()).await?,
+                chain_update(
+                    self,
+                    &latest_blocks,
+                    &chain_tip,
+                    graph_update.iter_anchors(),
+                )
+                .await?,
             ),
             _ => None,
         };
@@ -125,7 +129,13 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
 
         let chain_update = match (chain_tip, latest_blocks) {
             (Some(chain_tip), Some(latest_blocks)) => Some(
-                chain_update(self, &latest_blocks, &chain_tip, graph_update.all_anchors()).await?,
+                chain_update(
+                    self,
+                    &latest_blocks,
+                    &chain_tip,
+                    graph_update.iter_anchors(),
+                )
+                .await?,
             ),
             _ => None,
         };
@@ -188,7 +198,7 @@ async fn chain_update<A: Anchor>(
     client: &esplora_client::AsyncClient,
     latest_blocks: &BTreeMap<u32, BlockHash>,
     local_tip: &CheckPoint,
-    anchors: &BTreeSet<(A, Txid)>,
+    anchors: impl Iterator<Item = (Txid, A)>,
 ) -> Result<CheckPoint, Error> {
     let mut point_of_agreement = None;
     let mut conflicts = vec![];
@@ -217,8 +227,8 @@ async fn chain_update<A: Anchor>(
         .extend(conflicts.into_iter().rev())
         .expect("evicted are in order");
 
-    for anchor in anchors {
-        let height = anchor.0.anchor_block().height;
+    for (_txid, anchor) in anchors {
+        let height = anchor.anchor_block().height;
         if tip.get(height).is_none() {
             let hash = match fetch_block(client, latest_blocks, height).await? {
                 Some(hash) => hash,
@@ -367,7 +377,7 @@ where
             .take(parallel_requests)
             .map(|txid| {
                 let client = client.clone();
-                let tx_already_exists = update.get_tx(txid).is_some();
+                let tx_already_exists = update.contains_tx(txid);
                 async move {
                     if tx_already_exists {
                         client
@@ -452,7 +462,7 @@ where
                 Some(txid) => txid,
                 None => continue,
             };
-            if update.get_tx(spend_txid).is_none() {
+            if !update.contains_tx(spend_txid) {
                 missing_txs.push(spend_txid);
             }
             if let Some(spend_status) = op_status.status {

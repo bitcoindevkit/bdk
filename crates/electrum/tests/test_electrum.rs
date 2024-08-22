@@ -3,7 +3,7 @@ use bdk_chain::{
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest, SyncResult},
     spk_txout::SpkTxOutIndex,
-    Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge,
+    Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
@@ -43,7 +43,7 @@ where
         BATCH_SIZE,
         true,
     )?;
-    let mut tx_graph = update.graph_update.into_tx_graph();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::from(update.graph_update);
 
     // Update `last_seen` to be able to calculate balance for unconfirmed transactions.
     let now = std::time::UNIX_EPOCH
@@ -129,7 +129,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         "update should not alter original checkpoint tip since we already started with all checkpoints",
     );
 
-    let graph_update = sync_update.graph_update.into_tx_graph();
+    let graph_update = TxGraph::<ConfirmationBlockTime>::from(sync_update.graph_update);
     // Check to see if we have the floating txouts available from our two created transactions'
     // previous outputs in order to calculate transaction fees.
     for tx in graph_update.full_txs() {
@@ -212,28 +212,22 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
 
     // A scan with a stop_gap of 3 won't find the transaction, but a scan with a gap limit of 4
     // will.
-    let full_scan_update = {
+    let mut full_scan_update = {
         let request = FullScanRequest::builder()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 3, 1, false)?
     };
-    assert!(full_scan_update.graph_update.whole_txs().next().is_none());
+    assert!(full_scan_update.graph_update.take_txs().next().is_none());
     assert!(full_scan_update.last_active_indices.is_empty());
-    let full_scan_update = {
+    let mut full_scan_update = {
         let request = FullScanRequest::builder()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 4, 1, false)?
     };
     assert_eq!(
-        full_scan_update
-            .graph_update
-            .into_tx_graph()
-            .full_txs()
-            .next()
-            .unwrap()
-            .txid,
+        full_scan_update.graph_update.take_txs().next().unwrap().0,
         txid_4th_addr
     );
     assert_eq!(full_scan_update.last_active_indices[&0], 3);
@@ -260,9 +254,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 5, 1, false)?
     };
-    let txs: HashSet<_> = full_scan_update
-        .graph_update
-        .into_tx_graph()
+    let txs: HashSet<_> = TxGraph::<ConfirmationBlockTime>::from(full_scan_update.graph_update)
         .full_txs()
         .map(|tx| tx.txid)
         .collect();
@@ -275,9 +267,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 6, 1, false)?
     };
-    let txs: HashSet<_> = full_scan_update
-        .graph_update
-        .into_tx_graph()
+    let txs: HashSet<_> = TxGraph::<ConfirmationBlockTime>::from(full_scan_update.graph_update)
         .full_txs()
         .map(|tx| tx.txid)
         .collect();
@@ -472,7 +462,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
-    let update = sync_with_electrum(
+    let mut update = sync_with_electrum(
         &client,
         [spk_to_track.clone()],
         &mut recv_chain,
@@ -480,11 +470,11 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     )?;
 
     // Retain a snapshot of all anchors before reorg process.
-    let initial_anchors = update.graph_update.all_anchors();
-    let anchors: Vec<_> = initial_anchors.iter().cloned().collect();
+    let initial_anchors = update.graph_update.iter_anchors().collect::<Vec<_>>();
+    let anchors = initial_anchors.clone();
     assert_eq!(anchors.len(), REORG_COUNT);
     for i in 0..REORG_COUNT {
-        let (anchor, txid) = anchors[i];
+        let (txid, anchor) = anchors[i];
         assert_eq!(anchor.block_id.hash, hashes[i]);
         assert_eq!(txid, txids[i]);
     }
@@ -504,7 +494,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         env.reorg_empty_blocks(depth)?;
 
         env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
-        let update = sync_with_electrum(
+        let mut update = sync_with_electrum(
             &client,
             [spk_to_track.clone()],
             &mut recv_chain,
@@ -512,7 +502,12 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         )?;
 
         // Check that no new anchors are added during current reorg.
-        assert!(initial_anchors.is_superset(update.graph_update.all_anchors()));
+        for (txid, anchor) in update.graph_update.iter_anchors() {
+            assert!(
+                initial_anchors.contains(&(txid, anchor)),
+                "update should not introduce new anchor"
+            );
+        }
 
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,
