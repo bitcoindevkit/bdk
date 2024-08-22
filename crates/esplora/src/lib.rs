@@ -41,11 +41,18 @@ mod async_ext;
 #[cfg(feature = "async")]
 pub use async_ext::*;
 
-fn insert_anchor_from_status(
+fn insert_anchor_or_seen_at_from_status(
     tx_graph: &mut TxGraph<ConfirmationBlockTime>,
     txid: Txid,
     status: TxStatus,
+    time_of_sync: Option<u64>,
 ) {
+    if !status.confirmed {
+        if let Some(seen_at) = time_of_sync {
+            let _ = tx_graph.insert_seen_at(txid, seen_at);
+        }
+    }
+
     if let TxStatus {
         block_height: Some(height),
         block_hash: Some(hash),

@@ -11,7 +11,7 @@ use bdk_chain::{
 use bdk_chain::{Anchor, Indexed};
 use esplora_client::{OutputStatus, Tx, TxStatus};
 
-use crate::{insert_anchor_from_status, insert_prevouts};
+use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
 
 /// [`esplora_client::Error`]
 pub type Error = Box<esplora_client::Error>;
@@ -65,13 +65,19 @@ impl EsploraExt for esplora_client::BlockingClient {
         } else {
             None
         };
+        let time_of_sync = request.get_time_of_sync();
 
         let mut graph_update = TxGraph::default();
         let mut last_active_indices = BTreeMap::<K, u32>::new();
         for keychain in request.keychains() {
             let keychain_spks = request.iter_spks(keychain.clone());
-            let (tx_graph, last_active_index) =
-                fetch_txs_with_keychain_spks(self, keychain_spks, stop_gap, parallel_requests)?;
+            let (tx_graph, last_active_index) = fetch_txs_with_keychain_spks(
+                self,
+                keychain_spks,
+                stop_gap,
+                parallel_requests,
+                time_of_sync,
+            )?;
             let _ = graph_update.apply_update(tx_graph);
             if let Some(last_active_index) = last_active_index {
                 last_active_indices.insert(keychain, last_active_index);
@@ -108,22 +114,26 @@ impl EsploraExt for esplora_client::BlockingClient {
         } else {
             None
         };
+        let time_of_sync = request.get_time_of_sync();
 
         let mut graph_update = TxGraph::default();
         let _ = graph_update.apply_update(fetch_txs_with_spks(
             self,
             request.iter_spks(),
             parallel_requests,
+            time_of_sync,
         )?);
         let _ = graph_update.apply_update(fetch_txs_with_txids(
             self,
             request.iter_txids(),
             parallel_requests,
+            time_of_sync,
         )?);
         let _ = graph_update.apply_update(fetch_txs_with_outpoints(
             self,
             request.iter_outpoints(),
             parallel_requests,
+            time_of_sync,
         )?);
 
         let chain_update = match (chain_tip, latest_blocks) {
@@ -247,6 +257,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
     mut keychain_spks: I,
     stop_gap: usize,
     parallel_requests: usize,
+    time_of_sync: Option<u64>,
 ) -> Result<(TxGraph<ConfirmationBlockTime>, Option<u32>), Error> {
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
 
@@ -290,7 +301,12 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
             }
             for tx in txs {
                 let _ = tx_graph.insert_tx(tx.to_tx());
-                insert_anchor_from_status(&mut tx_graph, tx.txid, tx.status);
+                insert_anchor_or_seen_at_from_status(
+                    &mut tx_graph,
+                    tx.txid,
+                    tx.status,
+                    time_of_sync,
+                );
                 insert_prevouts(&mut tx_graph, tx.vin);
             }
         }
@@ -321,12 +337,14 @@ fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf>>(
     client: &esplora_client::BlockingClient,
     spks: I,
     parallel_requests: usize,
+    time_of_sync: Option<u64>,
 ) -> Result<TxGraph<ConfirmationBlockTime>, Error> {
     fetch_txs_with_keychain_spks(
         client,
         spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
         usize::MAX,
         parallel_requests,
+        time_of_sync,
     )
     .map(|(tx_graph, _)| tx_graph)
 }
@@ -341,6 +359,7 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
     client: &esplora_client::BlockingClient,
     txids: I,
     parallel_requests: usize,
+    time_of_sync: Option<u64>,
 ) -> Result<TxGraph<ConfirmationBlockTime>, Error> {
     enum EsploraResp {
         TxStatus(TxStatus),
@@ -380,11 +399,16 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
             let (txid, resp) = handle.join().expect("thread must not panic")?;
             match resp {
                 EsploraResp::TxStatus(status) => {
-                    insert_anchor_from_status(&mut tx_graph, txid, status);
+                    insert_anchor_or_seen_at_from_status(&mut tx_graph, txid, status, time_of_sync);
                 }
                 EsploraResp::Tx(Some(tx_info)) => {
                     let _ = tx_graph.insert_tx(tx_info.to_tx());
-                    insert_anchor_from_status(&mut tx_graph, txid, tx_info.status);
+                    insert_anchor_or_seen_at_from_status(
+                        &mut tx_graph,
+                        txid,
+                        tx_info.status,
+                        time_of_sync,
+                    );
                     insert_prevouts(&mut tx_graph, tx_info.vin);
                 }
                 _ => continue,
@@ -404,6 +428,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     client: &esplora_client::BlockingClient,
     outpoints: I,
     parallel_requests: usize,
+    time_of_sync: Option<u64>,
 ) -> Result<TxGraph<ConfirmationBlockTime>, Error> {
     let outpoints = outpoints.into_iter().collect::<Vec<_>>();
 
@@ -413,6 +438,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
         client,
         outpoints.iter().map(|op| op.txid),
         parallel_requests,
+        time_of_sync,
     )?;
 
     // get outpoint spend-statuses
@@ -446,7 +472,12 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
                     missing_txs.push(spend_txid);
                 }
                 if let Some(spend_status) = op_status.status {
-                    insert_anchor_from_status(&mut tx_graph, spend_txid, spend_status);
+                    insert_anchor_or_seen_at_from_status(
+                        &mut tx_graph,
+                        spend_txid,
+                        spend_status,
+                        time_of_sync,
+                    );
                 }
             }
         }
@@ -456,6 +487,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
         client,
         missing_txs,
         parallel_requests,
+        time_of_sync,
     )?);
     Ok(tx_graph)
 }
