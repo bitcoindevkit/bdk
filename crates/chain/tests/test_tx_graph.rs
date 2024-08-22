@@ -301,59 +301,28 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
 #[test]
 fn insert_tx_displaces_txouts() {
     let mut tx_graph = TxGraph::<()>::default();
+
     let tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![],
         output: vec![TxOut {
             value: Amount::from_sat(42_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: ScriptBuf::default(),
         }],
     };
+    let txid = tx.compute_txid();
+    let outpoint = OutPoint::new(txid, 0);
+    let txout = tx.output.first().unwrap();
 
-    let changeset = tx_graph.insert_txout(
-        OutPoint {
-            txid: tx.compute_txid(),
-            vout: 0,
-        },
-        TxOut {
-            value: Amount::from_sat(1_337_000),
-            script_pubkey: ScriptBuf::default(),
-        },
-    );
-
+    let changeset = tx_graph.insert_txout(outpoint, txout.clone());
     assert!(!changeset.is_empty());
 
-    let _ = tx_graph.insert_txout(
-        OutPoint {
-            txid: tx.compute_txid(),
-            vout: 0,
-        },
-        TxOut {
-            value: Amount::from_sat(1_000_000_000),
-            script_pubkey: ScriptBuf::new(),
-        },
-    );
-
-    let _changeset = tx_graph.insert_tx(tx.clone());
-
-    assert_eq!(
-        tx_graph
-            .get_txout(OutPoint {
-                txid: tx.compute_txid(),
-                vout: 0
-            })
-            .unwrap()
-            .value,
-        Amount::from_sat(42_000)
-    );
-    assert_eq!(
-        tx_graph.get_txout(OutPoint {
-            txid: tx.compute_txid(),
-            vout: 1
-        }),
-        None
-    );
+    let changeset = tx_graph.insert_tx(tx.clone());
+    assert_eq!(changeset.txs.len(), 1);
+    assert!(changeset.txouts.is_empty());
+    assert!(tx_graph.get_tx(txid).is_some());
+    assert_eq!(tx_graph.get_txout(outpoint), Some(txout));
 }
 
 #[test]
@@ -385,7 +354,7 @@ fn insert_txout_does_not_displace_tx() {
     let _ = tx_graph.insert_txout(
         OutPoint {
             txid: tx.compute_txid(),
-            vout: 0,
+            vout: 1,
         },
         TxOut {
             value: Amount::from_sat(1_000_000_000),

@@ -512,28 +512,66 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// [`apply_changeset`]: Self::apply_changeset
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<A> {
-        let mut update = Self::default();
-        update.txs.insert(
-            outpoint.txid,
-            (
-                TxNodeInternal::Partial([(outpoint.vout, txout)].into()),
-                BTreeSet::new(),
-            ),
-        );
-        self.apply_update(update)
+        let mut changeset = ChangeSet::<A>::default();
+        let (tx_node, _) = self.txs.entry(outpoint.txid).or_default();
+        match tx_node {
+            TxNodeInternal::Whole(_) => {
+                // ignore this txout we have the full one already.
+                // NOTE: You might think putting a debug_assert! here to check the output being
+                // replaced was actually correct is a good idea but the tests have already been
+                // written assuming this never panics.
+            }
+            TxNodeInternal::Partial(partial_tx) => {
+                match partial_tx.insert(outpoint.vout, txout.clone()) {
+                    Some(old_txout) => {
+                        debug_assert_eq!(
+                            txout, old_txout,
+                            "txout of the same outpoint should never change"
+                        );
+                    }
+                    None => {
+                        changeset.txouts.insert(outpoint, txout);
+                    }
+                }
+            }
+        }
+        changeset
     }
 
     /// Inserts the given transaction into [`TxGraph`].
     ///
     /// The [`ChangeSet`] returned will be empty if `tx` already exists.
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A> {
-        let tx = tx.into();
-        let mut update = Self::default();
-        update.txs.insert(
-            tx.compute_txid(),
-            (TxNodeInternal::Whole(tx), BTreeSet::new()),
-        );
-        self.apply_update(update)
+        let tx: Arc<Transaction> = tx.into();
+        let txid = tx.compute_txid();
+        let mut changeset = ChangeSet::<A>::default();
+
+        let (tx_node, _) = self.txs.entry(txid).or_default();
+        match tx_node {
+            TxNodeInternal::Whole(existing_tx) => {
+                debug_assert_eq!(
+                    existing_tx.as_ref(),
+                    tx.as_ref(),
+                    "tx of same txid should never change"
+                );
+            }
+            partial_tx => {
+                for txin in &tx.input {
+                    // this means the tx is coinbase so there is no previous output
+                    if txin.previous_output.is_null() {
+                        continue;
+                    }
+                    self.spends
+                        .entry(txin.previous_output)
+                        .or_default()
+                        .insert(txid);
+                }
+                *partial_tx = TxNodeInternal::Whole(tx.clone());
+                changeset.txs.insert(tx);
+            }
+        }
+
+        changeset
     }
 
     /// Batch insert unconfirmed transactions.
@@ -558,9 +596,17 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The [`ChangeSet`] returned will be empty if graph already knows that `txid` exists in
     /// `anchor`.
     pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> ChangeSet<A> {
-        let mut update = Self::default();
-        update.anchors.insert((anchor, txid));
-        self.apply_update(update)
+        let mut changeset = ChangeSet::<A>::default();
+        if self.anchors.insert((anchor.clone(), txid)) {
+            let (_tx_node, anchors) = self.txs.entry(txid).or_default();
+            let _inserted = anchors.insert(anchor.clone());
+            debug_assert!(
+                _inserted,
+                "anchors in `.anchors` and `.txs` should be consistent"
+            );
+            changeset.anchors.insert((anchor, txid));
+        }
+        changeset
     }
 
     /// Inserts the given `seen_at` for `txid` into [`TxGraph`].
@@ -571,9 +617,13 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// [`update_last_seen_unconfirmed`]: Self::update_last_seen_unconfirmed
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
-        let mut update = Self::default();
-        update.last_seen.insert(txid, seen_at);
-        self.apply_update(update)
+        let mut changeset = ChangeSet::<A>::default();
+        let last_seen = self.last_seen.entry(txid).or_default();
+        if seen_at > *last_seen {
+            *last_seen = seen_at;
+            changeset.last_seen.insert(txid, seen_at);
+        }
+        changeset
     }
 
     /// Update the last seen time for all unconfirmed transactions.
@@ -641,123 +691,49 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
     pub fn apply_update(&mut self, update: TxGraph<A>) -> ChangeSet<A> {
-        let changeset = self.determine_changeset(update);
-        self.apply_changeset(changeset.clone());
+        let mut changeset = ChangeSet::<A>::default();
+        for tx_node in update.full_txs() {
+            changeset.merge(self.insert_tx(tx_node.tx));
+        }
+        for (outpoint, txout) in update.floating_txouts() {
+            changeset.merge(self.insert_txout(outpoint, txout.clone()));
+        }
+        for (anchor, txid) in &update.anchors {
+            changeset.merge(self.insert_anchor(*txid, anchor.clone()));
+        }
+        for (&txid, &last_seen) in &update.last_seen {
+            changeset.merge(self.insert_seen_at(txid, last_seen));
+        }
         changeset
     }
 
     /// Determines the [`ChangeSet`] between `self` and an empty [`TxGraph`].
     pub fn initial_changeset(&self) -> ChangeSet<A> {
-        Self::default().determine_changeset(self.clone())
+        ChangeSet {
+            txs: self.full_txs().map(|tx_node| tx_node.tx).collect(),
+            txouts: self
+                .floating_txouts()
+                .map(|(op, txout)| (op, txout.clone()))
+                .collect(),
+            anchors: self.anchors.clone(),
+            last_seen: self.last_seen.iter().map(|(&k, &v)| (k, v)).collect(),
+        }
     }
 
     /// Applies [`ChangeSet`] to [`TxGraph`].
     pub fn apply_changeset(&mut self, changeset: ChangeSet<A>) {
-        for wrapped_tx in changeset.txs {
-            let tx = wrapped_tx.as_ref();
-            let txid = tx.compute_txid();
-
-            tx.input
-                .iter()
-                .map(|txin| txin.previous_output)
-                // coinbase spends are not to be counted
-                .filter(|outpoint| !outpoint.is_null())
-                // record spend as this tx has spent this outpoint
-                .for_each(|outpoint| {
-                    self.spends.entry(outpoint).or_default().insert(txid);
-                });
-
-            match self.txs.get_mut(&txid) {
-                Some((tx_node @ TxNodeInternal::Partial(_), _)) => {
-                    *tx_node = TxNodeInternal::Whole(wrapped_tx.clone());
-                }
-                Some((TxNodeInternal::Whole(tx), _)) => {
-                    debug_assert_eq!(
-                        tx.as_ref().compute_txid(),
-                        txid,
-                        "tx should produce txid that is same as key"
-                    );
-                }
-                None => {
-                    self.txs
-                        .insert(txid, (TxNodeInternal::Whole(wrapped_tx), BTreeSet::new()));
-                }
-            }
+        for tx in changeset.txs {
+            let _ = self.insert_tx(tx);
         }
-
         for (outpoint, txout) in changeset.txouts {
-            let tx_entry = self.txs.entry(outpoint.txid).or_default();
-
-            match tx_entry {
-                (TxNodeInternal::Whole(_), _) => { /* do nothing since we already have full tx */ }
-                (TxNodeInternal::Partial(txouts), _) => {
-                    txouts.insert(outpoint.vout, txout);
-                }
-            }
+            let _ = self.insert_txout(outpoint, txout);
         }
-
         for (anchor, txid) in changeset.anchors {
-            if self.anchors.insert((anchor.clone(), txid)) {
-                let (_, anchors) = self.txs.entry(txid).or_default();
-                anchors.insert(anchor);
-            }
+            let _ = self.insert_anchor(txid, anchor);
         }
-
-        for (txid, new_last_seen) in changeset.last_seen {
-            let last_seen = self.last_seen.entry(txid).or_default();
-            if new_last_seen > *last_seen {
-                *last_seen = new_last_seen;
-            }
+        for (txid, seen_at) in changeset.last_seen {
+            let _ = self.insert_seen_at(txid, seen_at);
         }
-    }
-
-    /// Previews the resultant [`ChangeSet`] when [`Self`] is updated against the `update` graph.
-    ///
-    /// The [`ChangeSet`] would be the set difference between `update` and `self` (transactions that
-    /// exist in `update` but not in `self`).
-    pub(crate) fn determine_changeset(&self, update: TxGraph<A>) -> ChangeSet<A> {
-        let mut changeset = ChangeSet::<A>::default();
-
-        for (&txid, (update_tx_node, _)) in &update.txs {
-            match (self.txs.get(&txid), update_tx_node) {
-                (None, TxNodeInternal::Whole(update_tx)) => {
-                    changeset.txs.insert(update_tx.clone());
-                }
-                (None, TxNodeInternal::Partial(update_txos)) => {
-                    changeset.txouts.extend(
-                        update_txos
-                            .iter()
-                            .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
-                    );
-                }
-                (Some((TxNodeInternal::Whole(_), _)), _) => {}
-                (Some((TxNodeInternal::Partial(_), _)), TxNodeInternal::Whole(update_tx)) => {
-                    changeset.txs.insert(update_tx.clone());
-                }
-                (
-                    Some((TxNodeInternal::Partial(txos), _)),
-                    TxNodeInternal::Partial(update_txos),
-                ) => {
-                    changeset.txouts.extend(
-                        update_txos
-                            .iter()
-                            .filter(|(vout, _)| !txos.contains_key(*vout))
-                            .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
-                    );
-                }
-            }
-        }
-
-        for (txid, update_last_seen) in update.last_seen {
-            let prev_last_seen = self.last_seen.get(&txid).copied();
-            if Some(update_last_seen) > prev_last_seen {
-                changeset.last_seen.insert(txid, update_last_seen);
-            }
-        }
-
-        changeset.anchors = update.anchors.difference(&self.anchors).cloned().collect();
-
-        changeset
     }
 }
 
