@@ -52,7 +52,8 @@ pub trait WalletPersister {
     fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error>;
 }
 
-type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
+/// A future that is allocated on the heap, so it may be used in a trait.
+pub type FutureResult<'a, T, E> = Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'a>>;
 
 /// Async trait that persists [`PersistedWallet`].
 ///
