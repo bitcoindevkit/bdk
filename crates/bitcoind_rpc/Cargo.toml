@@ -15,12 +15,13 @@ readme = "README.md"
 [dependencies]
 bitcoin = { version = "0.32.0", default-features = false }
 bitcoincore-rpc = { version = "0.19.0" }
-bdk_chain = { path = "../chain", version = "0.17", default-features = false }
+bdk_core = { path = "../core", version = "0.1", default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", default-features = false }
+bdk_chain = { path = "../chain", version = "0.17" }
 
 [features]
 default = ["std"]
-std = ["bitcoin/std", "bdk_chain/std"]
-serde = ["bitcoin/serde", "bdk_chain/serde"]
+std = ["bitcoin/std", "bdk_core/std"]
+serde = ["bitcoin/serde", "bdk_core/serde"]

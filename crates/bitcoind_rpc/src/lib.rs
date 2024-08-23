@@ -9,7 +9,7 @@
 //! mempool.
 #![warn(missing_docs)]
 
-use bdk_chain::{local_chain::CheckPoint, BlockId};
+use bdk_core::{BlockId, CheckPoint};
 use bitcoin::{block::Header, Block, BlockHash, Transaction};
 pub use bitcoincore_rpc;
 use bitcoincore_rpc::bitcoincore_rpc_json;
