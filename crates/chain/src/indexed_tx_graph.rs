@@ -91,13 +91,10 @@ where
     /// Apply an `update` directly.
     ///
     /// `update` is a [`TxGraph<A>`] and the resultant changes is returned as [`ChangeSet`].
-    pub fn apply_update(&mut self, update: TxGraph<A>) -> ChangeSet<A, I::ChangeSet> {
-        let graph = self.graph.apply_update(update);
-        let indexer = self.index_tx_graph_changeset(&graph);
-        ChangeSet {
-            tx_graph: graph,
-            indexer,
-        }
+    pub fn apply_update(&mut self, update: tx_graph::Update<A>) -> ChangeSet<A, I::ChangeSet> {
+        let tx_graph = self.graph.apply_update(update);
+        let indexer = self.index_tx_graph_changeset(&tx_graph);
+        ChangeSet { tx_graph, indexer }
     }
 
     /// Insert a floating `txout` of given `outpoint`.

@@ -1,9 +1,9 @@
 use bdk_chain::{
-    bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash},
+    bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest, SyncResult},
     spk_txout::SpkTxOutIndex,
-    Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge,
+    Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
@@ -49,7 +49,7 @@ where
         .elapsed()
         .expect("must get time")
         .as_secs();
-    let _ = update.graph_update.update_last_seen_unconfirmed(now);
+    update.graph_update.update_last_seen_unconfirmed(now);
 
     if let Some(chain_update) = update.chain_update.clone() {
         let _ = chain
@@ -128,18 +128,23 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     );
 
     let graph_update = sync_update.graph_update;
+    let updated_graph = {
+        let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+        let _ = graph.apply_update(graph_update.clone());
+        graph
+    };
     // Check to see if we have the floating txouts available from our two created transactions'
     // previous outputs in order to calculate transaction fees.
-    for tx in graph_update.full_txs() {
+    for tx in &graph_update.txs {
         // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
         // floating txouts available from the transactions' previous outputs.
-        let fee = graph_update.calculate_fee(&tx.tx).expect("Fee must exist");
+        let fee = updated_graph.calculate_fee(tx).expect("Fee must exist");
 
         // Retrieve the fee in the transaction data from `bitcoind`.
         let tx_fee = env
             .bitcoind
             .client
-            .get_transaction(&tx.txid, None)
+            .get_transaction(&tx.compute_txid(), None)
             .expect("Tx must exist")
             .fee
             .expect("Fee must exist")
@@ -151,12 +156,15 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         assert_eq!(fee, tx_fee);
     }
 
-    let mut graph_update_txids: Vec<Txid> = graph_update.full_txs().map(|tx| tx.txid).collect();
-    graph_update_txids.sort();
-    let mut expected_txids = vec![txid1, txid2];
-    expected_txids.sort();
-    assert_eq!(graph_update_txids, expected_txids);
-
+    assert_eq!(
+        graph_update
+            .txs
+            .iter()
+            .map(|tx| tx.compute_txid())
+            .collect::<BTreeSet<_>>(),
+        [txid1, txid2].into(),
+        "update must include all expected transactions",
+    );
     Ok(())
 }
 
@@ -216,7 +224,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 3, 1, false)?
     };
-    assert!(full_scan_update.graph_update.full_txs().next().is_none());
+    assert!(full_scan_update.graph_update.txs.is_empty());
     assert!(full_scan_update.last_active_indices.is_empty());
     let full_scan_update = {
         let request = FullScanRequest::builder()
@@ -227,10 +235,10 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     assert_eq!(
         full_scan_update
             .graph_update
-            .full_txs()
-            .next()
+            .txs
+            .first()
             .unwrap()
-            .txid,
+            .compute_txid(),
         txid_4th_addr
     );
     assert_eq!(full_scan_update.last_active_indices[&0], 3);
@@ -259,8 +267,9 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     };
     let txs: HashSet<_> = full_scan_update
         .graph_update
-        .full_txs()
-        .map(|tx| tx.txid)
+        .txs
+        .iter()
+        .map(|tx| tx.compute_txid())
         .collect();
     assert_eq!(txs.len(), 1);
     assert!(txs.contains(&txid_4th_addr));
@@ -273,8 +282,9 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     };
     let txs: HashSet<_> = full_scan_update
         .graph_update
-        .full_txs()
-        .map(|tx| tx.txid)
+        .txs
+        .iter()
+        .map(|tx| tx.compute_txid())
         .collect();
     assert_eq!(txs.len(), 2);
     assert!(txs.contains(&txid_4th_addr) && txs.contains(&txid_last_addr));
@@ -475,13 +485,12 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     )?;
 
     // Retain a snapshot of all anchors before reorg process.
-    let initial_anchors = update.graph_update.all_anchors();
-    let anchors: Vec<_> = initial_anchors.iter().cloned().collect();
-    assert_eq!(anchors.len(), REORG_COUNT);
+    let initial_anchors = update.graph_update.anchors.clone();
+    assert_eq!(initial_anchors.len(), REORG_COUNT);
     for i in 0..REORG_COUNT {
-        let (anchor, txid) = anchors[i];
+        let (anchor, txid) = initial_anchors.iter().nth(i).unwrap();
         assert_eq!(anchor.block_id.hash, hashes[i]);
-        assert_eq!(txid, txids[i]);
+        assert_eq!(*txid, txids[i]);
     }
 
     // Check if initial balance is correct.
@@ -507,7 +516,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         )?;
 
         // Check that no new anchors are added during current reorg.
-        assert!(initial_anchors.is_superset(update.graph_update.all_anchors()));
+        assert!(initial_anchors.is_superset(&update.graph_update.anchors));
 
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,

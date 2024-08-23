@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use async_trait::async_trait;
 use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
@@ -6,10 +6,9 @@ use bdk_chain::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     collections::BTreeMap,
     local_chain::CheckPoint,
-    BlockId, ConfirmationBlockTime, TxGraph,
+    BlockId, ConfirmationBlockTime,
 };
-use bdk_chain::{Anchor, Indexed};
-use esplora_client::{Tx, TxStatus};
+use bdk_chain::{tx_graph, Anchor, Indexed};
 use futures::{stream::FuturesOrdered, TryStreamExt};
 
 use crate::{insert_anchor_from_status, insert_prevouts};
@@ -72,23 +71,29 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
             None
         };
 
-        let mut graph_update = TxGraph::default();
+        let mut graph_update = tx_graph::Update::<ConfirmationBlockTime>::default();
+        let mut inserted_txs = HashSet::<Txid>::new();
         let mut last_active_indices = BTreeMap::<K, u32>::new();
         for keychain in keychains {
             let keychain_spks = request.iter_spks(keychain.clone());
-            let (tx_graph, last_active_index) =
-                fetch_txs_with_keychain_spks(self, keychain_spks, stop_gap, parallel_requests)
-                    .await?;
-            let _ = graph_update.apply_update(tx_graph);
+            let (update, last_active_index) = fetch_txs_with_keychain_spks(
+                self,
+                &mut inserted_txs,
+                keychain_spks,
+                stop_gap,
+                parallel_requests,
+            )
+            .await?;
+            graph_update.extend(update);
             if let Some(last_active_index) = last_active_index {
                 last_active_indices.insert(keychain, last_active_index);
             }
         }
 
         let chain_update = match (chain_tip, latest_blocks) {
-            (Some(chain_tip), Some(latest_blocks)) => Some(
-                chain_update(self, &latest_blocks, &chain_tip, graph_update.all_anchors()).await?,
-            ),
+            (Some(chain_tip), Some(latest_blocks)) => {
+                Some(chain_update(self, &latest_blocks, &chain_tip, &graph_update.anchors).await?)
+            }
             _ => None,
         };
 
@@ -113,20 +118,40 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
             None
         };
 
-        let mut graph_update = TxGraph::<ConfirmationBlockTime>::default();
-        let _ = graph_update
-            .apply_update(fetch_txs_with_spks(self, request.iter_spks(), parallel_requests).await?);
-        let _ = graph_update.apply_update(
-            fetch_txs_with_txids(self, request.iter_txids(), parallel_requests).await?,
+        let mut graph_update = tx_graph::Update::<ConfirmationBlockTime>::default();
+        let mut inserted_txs = HashSet::<Txid>::new();
+        graph_update.extend(
+            fetch_txs_with_spks(
+                self,
+                &mut inserted_txs,
+                request.iter_spks(),
+                parallel_requests,
+            )
+            .await?,
         );
-        let _ = graph_update.apply_update(
-            fetch_txs_with_outpoints(self, request.iter_outpoints(), parallel_requests).await?,
+        graph_update.extend(
+            fetch_txs_with_txids(
+                self,
+                &mut inserted_txs,
+                request.iter_txids(),
+                parallel_requests,
+            )
+            .await?,
+        );
+        graph_update.extend(
+            fetch_txs_with_outpoints(
+                self,
+                &mut inserted_txs,
+                request.iter_outpoints(),
+                parallel_requests,
+            )
+            .await?,
         );
 
         let chain_update = match (chain_tip, latest_blocks) {
-            (Some(chain_tip), Some(latest_blocks)) => Some(
-                chain_update(self, &latest_blocks, &chain_tip, graph_update.all_anchors()).await?,
-            ),
+            (Some(chain_tip), Some(latest_blocks)) => {
+                Some(chain_update(self, &latest_blocks, &chain_tip, &graph_update.anchors).await?)
+            }
             _ => None,
         };
 
@@ -252,13 +277,14 @@ async fn chain_update<A: Anchor>(
 /// Refer to [crate-level docs](crate) for more.
 async fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>> + Send>(
     client: &esplora_client::AsyncClient,
+    inserted_txs: &mut HashSet<Txid>,
     mut keychain_spks: I,
     stop_gap: usize,
     parallel_requests: usize,
-) -> Result<(TxGraph<ConfirmationBlockTime>, Option<u32>), Error> {
+) -> Result<(tx_graph::Update<ConfirmationBlockTime>, Option<u32>), Error> {
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
 
-    let mut tx_graph = TxGraph::default();
+    let mut update = tx_graph::Update::<ConfirmationBlockTime>::default();
     let mut last_index = Option::<u32>::None;
     let mut last_active_index = Option::<u32>::None;
 
@@ -294,9 +320,11 @@ async fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>> + S
                 last_active_index = Some(index);
             }
             for tx in txs {
-                let _ = tx_graph.insert_tx(tx.to_tx());
-                insert_anchor_from_status(&mut tx_graph, tx.txid, tx.status);
-                insert_prevouts(&mut tx_graph, tx.vin);
+                if inserted_txs.insert(tx.txid) {
+                    update.txs.push(tx.to_tx().into());
+                }
+                insert_anchor_from_status(&mut update, tx.txid, tx.status);
+                insert_prevouts(&mut update, tx.vin);
             }
         }
 
@@ -311,7 +339,7 @@ async fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>> + S
         }
     }
 
-    Ok((tx_graph, last_active_index))
+    Ok((update, last_active_index))
 }
 
 /// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning `spks`
@@ -324,20 +352,22 @@ async fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>> + S
 /// Refer to [crate-level docs](crate) for more.
 async fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf> + Send>(
     client: &esplora_client::AsyncClient,
+    inserted_txs: &mut HashSet<Txid>,
     spks: I,
     parallel_requests: usize,
-) -> Result<TxGraph<ConfirmationBlockTime>, Error>
+) -> Result<tx_graph::Update<ConfirmationBlockTime>, Error>
 where
     I::IntoIter: Send,
 {
     fetch_txs_with_keychain_spks(
         client,
+        inserted_txs,
         spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
         usize::MAX,
         parallel_requests,
     )
     .await
-    .map(|(tx_graph, _)| tx_graph)
+    .map(|(update, _)| update)
 }
 
 /// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning `txids`
@@ -348,39 +378,27 @@ where
 /// Refer to [crate-level docs](crate) for more.
 async fn fetch_txs_with_txids<I: IntoIterator<Item = Txid> + Send>(
     client: &esplora_client::AsyncClient,
+    inserted_txs: &mut HashSet<Txid>,
     txids: I,
     parallel_requests: usize,
-) -> Result<TxGraph<ConfirmationBlockTime>, Error>
+) -> Result<tx_graph::Update<ConfirmationBlockTime>, Error>
 where
     I::IntoIter: Send,
 {
-    enum EsploraResp {
-        TxStatus(TxStatus),
-        Tx(Option<Tx>),
-    }
-
-    let mut tx_graph = TxGraph::default();
-    let mut txids = txids.into_iter();
+    let mut update = tx_graph::Update::<ConfirmationBlockTime>::default();
+    // Only fetch for non-inserted txs.
+    let mut txids = txids
+        .into_iter()
+        .filter(|txid| !inserted_txs.contains(txid))
+        .collect::<Vec<Txid>>()
+        .into_iter();
     loop {
         let handles = txids
             .by_ref()
             .take(parallel_requests)
             .map(|txid| {
                 let client = client.clone();
-                let tx_already_exists = tx_graph.get_tx(txid).is_some();
-                async move {
-                    if tx_already_exists {
-                        client
-                            .get_tx_status(&txid)
-                            .await
-                            .map(|s| (txid, EsploraResp::TxStatus(s)))
-                    } else {
-                        client
-                            .get_tx_info(&txid)
-                            .await
-                            .map(|t| (txid, EsploraResp::Tx(t)))
-                    }
-                }
+                async move { client.get_tx_info(&txid).await.map(|t| (txid, t)) }
             })
             .collect::<FuturesOrdered<_>>();
 
@@ -388,21 +406,17 @@ where
             break;
         }
 
-        for (txid, resp) in handles.try_collect::<Vec<_>>().await? {
-            match resp {
-                EsploraResp::TxStatus(status) => {
-                    insert_anchor_from_status(&mut tx_graph, txid, status);
+        for (txid, tx_info) in handles.try_collect::<Vec<_>>().await? {
+            if let Some(tx_info) = tx_info {
+                if inserted_txs.insert(txid) {
+                    update.txs.push(tx_info.to_tx().into());
                 }
-                EsploraResp::Tx(Some(tx_info)) => {
-                    let _ = tx_graph.insert_tx(tx_info.to_tx());
-                    insert_anchor_from_status(&mut tx_graph, txid, tx_info.status);
-                    insert_prevouts(&mut tx_graph, tx_info.vin);
-                }
-                _ => continue,
+                insert_anchor_from_status(&mut update, txid, tx_info.status);
+                insert_prevouts(&mut update, tx_info.vin);
             }
         }
     }
-    Ok(tx_graph)
+    Ok(update)
 }
 
 /// Fetch transactions and [`ConfirmationBlockTime`]s that contain and spend the provided
@@ -413,22 +427,27 @@ where
 /// Refer to [crate-level docs](crate) for more.
 async fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint> + Send>(
     client: &esplora_client::AsyncClient,
+    inserted_txs: &mut HashSet<Txid>,
     outpoints: I,
     parallel_requests: usize,
-) -> Result<TxGraph<ConfirmationBlockTime>, Error>
+) -> Result<tx_graph::Update<ConfirmationBlockTime>, Error>
 where
     I::IntoIter: Send,
 {
     let outpoints = outpoints.into_iter().collect::<Vec<_>>();
+    let mut update = tx_graph::Update::<ConfirmationBlockTime>::default();
 
     // make sure txs exists in graph and tx statuses are updated
     // TODO: We should maintain a tx cache (like we do with Electrum).
-    let mut tx_graph = fetch_txs_with_txids(
-        client,
-        outpoints.iter().copied().map(|op| op.txid),
-        parallel_requests,
-    )
-    .await?;
+    update.extend(
+        fetch_txs_with_txids(
+            client,
+            inserted_txs,
+            outpoints.iter().copied().map(|op| op.txid),
+            parallel_requests,
+        )
+        .await?,
+    );
 
     // get outpoint spend-statuses
     let mut outpoints = outpoints.into_iter();
@@ -452,18 +471,18 @@ where
                 Some(txid) => txid,
                 None => continue,
             };
-            if tx_graph.get_tx(spend_txid).is_none() {
+            if !inserted_txs.contains(&spend_txid) {
                 missing_txs.push(spend_txid);
             }
             if let Some(spend_status) = op_status.status {
-                insert_anchor_from_status(&mut tx_graph, spend_txid, spend_status);
+                insert_anchor_from_status(&mut update, spend_txid, spend_status);
             }
         }
     }
 
-    let _ =
-        tx_graph.apply_update(fetch_txs_with_txids(client, missing_txs, parallel_requests).await?);
-    Ok(tx_graph)
+    update
+        .extend(fetch_txs_with_txids(client, inserted_txs, missing_txs, parallel_requests).await?);
+    Ok(update)
 }
 
 #[cfg(test)]

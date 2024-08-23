@@ -252,7 +252,7 @@ fn main() -> anyhow::Result<()> {
         .elapsed()
         .expect("must get time")
         .as_secs();
-    let _ = graph_update.update_last_seen_unconfirmed(now);
+    graph_update.update_last_seen_unconfirmed(now);
 
     let db_changeset = {
         let mut chain = chain.lock().unwrap();

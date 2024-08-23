@@ -132,7 +132,7 @@ pub struct Update {
     pub last_active_indices: BTreeMap<KeychainKind, u32>,
 
     /// Update for the wallet's internal [`TxGraph`].
-    pub graph: TxGraph<ConfirmationBlockTime>,
+    pub graph: chain::tx_graph::Update<ConfirmationBlockTime>,
 
     /// Update for the wallet's internal [`LocalChain`].
     ///
@@ -2562,7 +2562,7 @@ macro_rules! floating_rate {
 macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
-        use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph};
+        use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph, tx_graph};
         use $crate::{Update, KeychainKind, Wallet};
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
@@ -2590,9 +2590,13 @@ macro_rules! doctest_wallet {
             confirmation_time: 50_000,
             block_id,
         };
-        let mut graph = TxGraph::default();
-        let _ = graph.insert_anchor(txid, anchor);
-        let update = Update { graph, ..Default::default() };
+        let update = Update {
+            graph: tx_graph::Update {
+                anchors: [(anchor, txid)].into_iter().collect(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         wallet.apply_update(update).unwrap();
         wallet
     }}

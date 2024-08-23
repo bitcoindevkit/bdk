@@ -1,5 +1,5 @@
 #![allow(unused)]
-use bdk_chain::{BlockId, ConfirmationBlockTime, ConfirmationTime, TxGraph};
+use bdk_chain::{tx_graph, BlockId, ConfirmationBlockTime, ConfirmationTime, TxGraph};
 use bdk_wallet::{CreateParams, KeychainKind, LocalOutput, Update, Wallet};
 use bitcoin::{
     hashes::Hash, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, Transaction,
@@ -218,11 +218,12 @@ pub fn insert_anchor_from_conf(wallet: &mut Wallet, txid: Txid, position: Confir
             })
             .expect("confirmation height cannot be greater than tip");
 
-        let mut graph = TxGraph::default();
-        let _ = graph.insert_anchor(txid, anchor);
         wallet
             .apply_update(Update {
-                graph,
+                graph: tx_graph::Update {
+                    anchors: [(anchor, txid)].into(),
+                    ..Default::default()
+                },
                 ..Default::default()
             })
             .unwrap();

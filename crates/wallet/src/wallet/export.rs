@@ -219,13 +219,13 @@ mod test {
     use bdk_chain::{BlockId, ConfirmationBlockTime};
     use bitcoin::hashes::Hash;
     use bitcoin::{transaction, BlockHash, Network, Transaction};
+    use chain::tx_graph;
 
     use super::*;
     use crate::Wallet;
 
     fn get_test_wallet(descriptor: &str, change_descriptor: &str, network: Network) -> Wallet {
         use crate::wallet::Update;
-        use bdk_chain::TxGraph;
         let mut wallet = Wallet::create(descriptor.to_string(), change_descriptor.to_string())
             .network(network)
             .create_wallet_no_persist()
@@ -253,11 +253,12 @@ mod test {
             confirmation_time: 0,
             block_id,
         };
-        let mut graph = TxGraph::default();
-        let _ = graph.insert_anchor(txid, anchor);
         wallet
             .apply_update(Update {
-                graph,
+                graph: tx_graph::Update {
+                    anchors: [(anchor, txid)].into_iter().collect(),
+                    ..Default::default()
+                },
                 ..Default::default()
             })
             .unwrap();

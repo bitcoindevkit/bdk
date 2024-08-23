@@ -172,7 +172,7 @@ fn main() -> anyhow::Result<()> {
 
             // We want to keep track of the latest time a transaction was seen unconfirmed.
             let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-            let _ = update.graph_update.update_last_seen_unconfirmed(now);
+            update.graph_update.update_last_seen_unconfirmed(now);
 
             let mut graph = graph.lock().expect("mutex must not be poisoned");
             let mut chain = chain.lock().expect("mutex must not be poisoned");
@@ -269,7 +269,7 @@ fn main() -> anyhow::Result<()> {
 
             // Update last seen unconfirmed
             let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-            let _ = update.graph_update.update_last_seen_unconfirmed(now);
+            update.graph_update.update_last_seen_unconfirmed(now);
 
             (
                 chain

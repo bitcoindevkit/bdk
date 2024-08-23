@@ -70,13 +70,17 @@
 //!
 //! ```
 //! # use bdk_chain::{Merge, BlockId};
-//! # use bdk_chain::tx_graph::TxGraph;
+//! # use bdk_chain::tx_graph::{self, TxGraph};
 //! # use bdk_chain::example_utils::*;
 //! # use bitcoin::Transaction;
+//! # use std::sync::Arc;
 //! # let tx_a = tx_from_hex(RAW_TX_1);
 //! # let tx_b = tx_from_hex(RAW_TX_2);
 //! let mut graph: TxGraph = TxGraph::default();
-//! let update = TxGraph::new(vec![tx_a, tx_b]);
+//!
+//! let mut update = tx_graph::Update::default();
+//! update.txs.push(Arc::new(tx_a));
+//! update.txs.push(Arc::new(tx_b));
 //!
 //! // apply the update graph
 //! let changeset = graph.apply_update(update.clone());
@@ -100,6 +104,79 @@ use core::{
     convert::Infallible,
     ops::{Deref, RangeInclusive},
 };
+
+/// Data object used to update the [`TxGraph`] with.
+#[derive(Debug, Clone)]
+pub struct Update<A = ()> {
+    /// Full transactions.
+    pub txs: Vec<Arc<Transaction>>,
+    /// Floating txouts.
+    pub txouts: BTreeMap<OutPoint, TxOut>,
+    /// Transaction anchors.
+    pub anchors: BTreeSet<(A, Txid)>,
+    /// Seen at times for transactions.
+    pub seen_ats: HashMap<Txid, u64>,
+}
+
+impl<A> Default for Update<A> {
+    fn default() -> Self {
+        Self {
+            txs: Default::default(),
+            txouts: Default::default(),
+            anchors: Default::default(),
+            seen_ats: Default::default(),
+        }
+    }
+}
+
+impl<A> From<TxGraph<A>> for Update<A> {
+    fn from(graph: TxGraph<A>) -> Self {
+        Self {
+            txs: graph.full_txs().map(|tx_node| tx_node.tx).collect(),
+            txouts: graph
+                .floating_txouts()
+                .map(|(op, txo)| (op, txo.clone()))
+                .collect(),
+            anchors: graph.anchors,
+            seen_ats: graph.last_seen.into_iter().collect(),
+        }
+    }
+}
+
+impl<A: Ord + Clone> From<Update<A>> for TxGraph<A> {
+    fn from(update: Update<A>) -> Self {
+        let mut graph = TxGraph::<A>::default();
+        let _ = graph.apply_update(update);
+        graph
+    }
+}
+
+impl<A: Ord> Update<A> {
+    /// Update the [`seen_ats`](Self::seen_ats) for all unanchored transactions.
+    pub fn update_last_seen_unconfirmed(&mut self, seen_at: u64) {
+        let seen_ats = &mut self.seen_ats;
+        let anchors = &self.anchors;
+        let unanchored_txids = self.txs.iter().map(|tx| tx.compute_txid()).filter(|txid| {
+            for (_, anchor_txid) in anchors {
+                if txid == anchor_txid {
+                    return false;
+                }
+            }
+            true
+        });
+        for txid in unanchored_txids {
+            seen_ats.insert(txid, seen_at);
+        }
+    }
+
+    /// Extend this update with `other`.
+    pub fn extend(&mut self, other: Update<A>) {
+        self.txs.extend(other.txs);
+        self.txouts.extend(other.txouts);
+        self.anchors.extend(other.anchors);
+        self.seen_ats.extend(other.seen_ats);
+    }
+}
 
 /// A graph of transactions and spends.
 ///
@@ -690,19 +767,19 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
-    pub fn apply_update(&mut self, update: TxGraph<A>) -> ChangeSet<A> {
+    pub fn apply_update(&mut self, update: Update<A>) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
-        for tx_node in update.full_txs() {
-            changeset.merge(self.insert_tx(tx_node.tx));
+        for tx in update.txs {
+            changeset.merge(self.insert_tx(tx));
         }
-        for (outpoint, txout) in update.floating_txouts() {
-            changeset.merge(self.insert_txout(outpoint, txout.clone()));
+        for (outpoint, txout) in update.txouts {
+            changeset.merge(self.insert_txout(outpoint, txout));
         }
-        for (anchor, txid) in &update.anchors {
-            changeset.merge(self.insert_anchor(*txid, anchor.clone()));
+        for (anchor, txid) in update.anchors {
+            changeset.merge(self.insert_anchor(txid, anchor));
         }
-        for (&txid, &last_seen) in &update.last_seen {
-            changeset.merge(self.insert_seen_at(txid, last_seen));
+        for (txid, seen_at) in update.seen_ats {
+            changeset.merge(self.insert_seen_at(txid, seen_at));
         }
         changeset
     }

@@ -2,7 +2,7 @@
 
 #[macro_use]
 mod common;
-use bdk_chain::tx_graph::CalculateFeeError;
+use bdk_chain::tx_graph::{self, CalculateFeeError};
 use bdk_chain::{
     collections::*,
     local_chain::LocalChain,
@@ -49,7 +49,7 @@ fn insert_txouts() {
     )];
 
     // One full transaction to be included in the update
-    let update_txs = Transaction {
+    let update_tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
         input: vec![TxIn {
@@ -63,17 +63,17 @@ fn insert_txouts() {
     };
 
     // Conf anchor used to mark the full transaction as confirmed.
-    let conf_anchor = ChainPosition::Confirmed(BlockId {
+    let conf_anchor = BlockId {
         height: 100,
         hash: h!("random blockhash"),
-    });
+    };
 
-    // Unconfirmed anchor to mark the partial transactions as unconfirmed
-    let unconf_anchor = ChainPosition::<BlockId>::Unconfirmed(1000000);
+    // Unconfirmed seen_at timestamp to mark the partial transactions as unconfirmed.
+    let unconf_seen_at = 1000000_u64;
 
     // Make the original graph
     let mut graph = {
-        let mut graph = TxGraph::<ChainPosition<BlockId>>::default();
+        let mut graph = TxGraph::<BlockId>::default();
         for (outpoint, txout) in &original_ops {
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
@@ -88,57 +88,21 @@ fn insert_txouts() {
 
     // Make the update graph
     let update = {
-        let mut graph = TxGraph::default();
+        let mut update = tx_graph::Update::default();
         for (outpoint, txout) in &update_ops {
-            // Insert partials transactions
-            assert_eq!(
-                graph.insert_txout(*outpoint, txout.clone()),
-                ChangeSet {
-                    txouts: [(*outpoint, txout.clone())].into(),
-                    ..Default::default()
-                }
-            );
+            // Insert partials transactions.
+            update.txouts.insert(*outpoint, txout.clone());
             // Mark them unconfirmed.
-            assert_eq!(
-                graph.insert_anchor(outpoint.txid, unconf_anchor),
-                ChangeSet {
-                    txs: [].into(),
-                    txouts: [].into(),
-                    anchors: [(unconf_anchor, outpoint.txid)].into(),
-                    last_seen: [].into()
-                }
-            );
-            // Mark them last seen at.
-            assert_eq!(
-                graph.insert_seen_at(outpoint.txid, 1000000),
-                ChangeSet {
-                    txs: [].into(),
-                    txouts: [].into(),
-                    anchors: [].into(),
-                    last_seen: [(outpoint.txid, 1000000)].into()
-                }
-            );
+            update.seen_ats.insert(outpoint.txid, unconf_seen_at);
         }
-        // Insert the full transaction
-        assert_eq!(
-            graph.insert_tx(update_txs.clone()),
-            ChangeSet {
-                txs: [Arc::new(update_txs.clone())].into(),
-                ..Default::default()
-            }
-        );
 
+        // Insert the full transaction.
+        update.txs.push(update_tx.clone().into());
         // Mark it as confirmed.
-        assert_eq!(
-            graph.insert_anchor(update_txs.compute_txid(), conf_anchor),
-            ChangeSet {
-                txs: [].into(),
-                txouts: [].into(),
-                anchors: [(conf_anchor, update_txs.compute_txid())].into(),
-                last_seen: [].into()
-            }
-        );
-        graph
+        update
+            .anchors
+            .insert((conf_anchor, update_tx.compute_txid()));
+        update
     };
 
     // Check the resulting addition.
@@ -147,13 +111,9 @@ fn insert_txouts() {
     assert_eq!(
         changeset,
         ChangeSet {
-            txs: [Arc::new(update_txs.clone())].into(),
+            txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.clone().into(),
-            anchors: [
-                (conf_anchor, update_txs.compute_txid()),
-                (unconf_anchor, h!("tx2"))
-            ]
-            .into(),
+            anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
             last_seen: [(h!("tx2"), 1000000)].into()
         }
     );
@@ -188,7 +148,7 @@ fn insert_txouts() {
 
     assert_eq!(
         graph
-            .tx_outputs(update_txs.compute_txid())
+            .tx_outputs(update_tx.compute_txid())
             .expect("should exists"),
         [(
             0u32,
@@ -204,13 +164,9 @@ fn insert_txouts() {
     assert_eq!(
         graph.initial_changeset(),
         ChangeSet {
-            txs: [Arc::new(update_txs.clone())].into(),
+            txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
-            anchors: [
-                (conf_anchor, update_txs.compute_txid()),
-                (unconf_anchor, h!("tx2"))
-            ]
-            .into(),
+            anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
             last_seen: [(h!("tx2"), 1000000)].into()
         }
     );
