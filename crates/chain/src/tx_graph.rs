@@ -146,29 +146,12 @@ impl<A> From<TxGraph<A>> for Update<A> {
 impl<A: Ord + Clone> From<Update<A>> for TxGraph<A> {
     fn from(update: Update<A>) -> Self {
         let mut graph = TxGraph::<A>::default();
-        let _ = graph.apply_update(update);
+        let _ = graph.apply_update_at(update, None);
         graph
     }
 }
 
 impl<A: Ord> Update<A> {
-    /// Update the [`seen_ats`](Self::seen_ats) for all unanchored transactions.
-    pub fn update_last_seen_unconfirmed(&mut self, seen_at: u64) {
-        let seen_ats = &mut self.seen_ats;
-        let anchors = &self.anchors;
-        let unanchored_txids = self.txs.iter().map(|tx| tx.compute_txid()).filter(|txid| {
-            for (_, anchor_txid) in anchors {
-                if txid == anchor_txid {
-                    return false;
-                }
-            }
-            true
-        });
-        for txid in unanchored_txids {
-            seen_ats.insert(txid, seen_at);
-        }
-    }
-
     /// Extend this update with `other`.
     pub fn extend(&mut self, other: Update<A>) {
         self.txs.extend(other.txs);
@@ -762,24 +745,55 @@ impl<A: Clone + Ord> TxGraph<A> {
         changeset
     }
 
-    /// Extends this graph with another so that `self` becomes the union of the two sets of
-    /// transactions.
+    /// Extends this graph with the given `update`.
     ///
     /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn apply_update(&mut self, update: Update<A>) -> ChangeSet<A> {
+        use std::time::*;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time must be greater than epoch anchor");
+        self.apply_update_at(update, Some(now.as_secs()))
+    }
+
+    /// Extends this graph with the given `update` alongside an optional `seen_at` timestamp.
+    ///
+    /// `seen_at` represents when the update is seen (in unix seconds). It is used to determine the
+    /// `last_seen`s for all transactions in the update which have no corresponding anchor(s). The
+    /// `last_seen` value is used internally to determine precedence of conflicting unconfirmed
+    /// transactions (where the transaction with the lower `last_seen` value is omitted from the
+    /// canonical history).
+    ///
+    /// Not setting a `seen_at` value means unconfirmed transactions introduced by this update will
+    /// not be part of the canonical history of transactions.
+    ///
+    /// Use [`apply_update`](TxGraph::apply_update) to have the `seen_at` value automatically set
+    /// to the current time.
+    pub fn apply_update_at(&mut self, update: Update<A>, seen_at: Option<u64>) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
+        let mut unanchored_txs = HashSet::<Txid>::new();
         for tx in update.txs {
-            changeset.merge(self.insert_tx(tx));
+            if unanchored_txs.insert(tx.compute_txid()) {
+                changeset.merge(self.insert_tx(tx));
+            }
         }
         for (outpoint, txout) in update.txouts {
             changeset.merge(self.insert_txout(outpoint, txout));
         }
         for (anchor, txid) in update.anchors {
+            unanchored_txs.remove(&txid);
             changeset.merge(self.insert_anchor(txid, anchor));
         }
         for (txid, seen_at) in update.seen_ats {
             changeset.merge(self.insert_seen_at(txid, seen_at));
+        }
+        if let Some(seen_at) = seen_at {
+            for txid in unanchored_txs {
+                changeset.merge(self.insert_seen_at(txid, seen_at));
+            }
         }
         changeset
     }

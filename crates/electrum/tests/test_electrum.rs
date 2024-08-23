@@ -38,18 +38,11 @@ where
     Spks: IntoIterator<Item = ScriptBuf>,
     Spks::IntoIter: ExactSizeIterator + Send + 'static,
 {
-    let mut update = client.sync(
+    let update = client.sync(
         SyncRequest::builder().chain_tip(chain.tip()).spks(spks),
         BATCH_SIZE,
         true,
     )?;
-
-    // Update `last_seen` to be able to calculate balance for unconfirmed transactions.
-    let now = std::time::UNIX_EPOCH
-        .elapsed()
-        .expect("must get time")
-        .as_secs();
-    update.graph_update.update_last_seen_unconfirmed(now);
 
     if let Some(chain_update) = update.chain_update.clone() {
         let _ = chain

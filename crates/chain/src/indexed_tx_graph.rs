@@ -90,9 +90,34 @@ where
 
     /// Apply an `update` directly.
     ///
-    /// `update` is a [`TxGraph<A>`] and the resultant changes is returned as [`ChangeSet`].
+    /// `update` is a [`tx_graph::Update<A>`] and the resultant changes is returned as [`ChangeSet`].
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn apply_update(&mut self, update: tx_graph::Update<A>) -> ChangeSet<A, I::ChangeSet> {
         let tx_graph = self.graph.apply_update(update);
+        let indexer = self.index_tx_graph_changeset(&tx_graph);
+        ChangeSet { tx_graph, indexer }
+    }
+
+    /// Apply the given `update` with an optional `seen_at` timestamp.
+    ///
+    /// `seen_at` represents when the update is seen (in unix seconds). It is used to determine the
+    /// `last_seen`s for all transactions in the update which have no corresponding anchor(s). The
+    /// `last_seen` value is used internally to determine precedence of conflicting unconfirmed
+    /// transactions (where the transaction with the lower `last_seen` value is omitted from the
+    /// canonical history).
+    ///
+    /// Not setting a `seen_at` value means unconfirmed transactions introduced by this update will
+    /// not be part of the canonical history of transactions.
+    ///
+    /// Use [`apply_update`](IndexedTxGraph::apply_update) to have the `seen_at` value automatically
+    /// set to the current time.
+    pub fn apply_update_at(
+        &mut self,
+        update: tx_graph::Update<A>,
+        seen_at: Option<u64>,
+    ) -> ChangeSet<A, I::ChangeSet> {
+        let tx_graph = self.graph.apply_update_at(update, seen_at);
         let indexer = self.index_tx_graph_changeset(&tx_graph);
         ChangeSet { tx_graph, indexer }
     }

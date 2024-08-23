@@ -129,7 +129,7 @@ fn main() -> anyhow::Result<()> {
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download them
     client.populate_tx_cache(&*graph.lock().unwrap());
 
-    let (chain_update, mut graph_update, keychain_update) = match electrum_cmd.clone() {
+    let (chain_update, graph_update, keychain_update) = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
             stop_gap,
             scan_options,
@@ -247,12 +247,6 @@ fn main() -> anyhow::Result<()> {
             (res.chain_update, res.graph_update, None)
         }
     };
-
-    let now = std::time::UNIX_EPOCH
-        .elapsed()
-        .expect("must get time")
-        .as_secs();
-    graph_update.update_last_seen_unconfirmed(now);
 
     let db_changeset = {
         let mut chain = chain.lock().unwrap();
