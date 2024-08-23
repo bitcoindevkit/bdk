@@ -207,46 +207,6 @@ impl CheckPoint {
         base.extend(core::iter::once(block_id).chain(tail.into_iter().rev()))
             .expect("tail is in order")
     }
-
-    /// Apply `changeset` to the checkpoint.
-    fn apply_changeset(mut self, changeset: &ChangeSet) -> Result<CheckPoint, MissingGenesisError> {
-        if let Some(start_height) = changeset.blocks.keys().next().cloned() {
-            // changes after point of agreement
-            let mut extension = BTreeMap::default();
-            // point of agreement
-            let mut base: Option<CheckPoint> = None;
-
-            for cp in self.iter() {
-                if cp.height() >= start_height {
-                    extension.insert(cp.height(), cp.hash());
-                } else {
-                    base = Some(cp);
-                    break;
-                }
-            }
-
-            for (&height, &hash) in &changeset.blocks {
-                match hash {
-                    Some(hash) => {
-                        extension.insert(height, hash);
-                    }
-                    None => {
-                        extension.remove(&height);
-                    }
-                };
-            }
-
-            let new_tip = match base {
-                Some(base) => base
-                    .extend(extension.into_iter().map(BlockId::from))
-                    .expect("extension is strictly greater than base"),
-                None => LocalChain::from_blocks(extension)?.tip(),
-            };
-            self = new_tip;
-        }
-
-        Ok(self)
-    }
 }
 
 /// Iterates over checkpoints backwards.
@@ -273,6 +233,49 @@ impl IntoIterator for CheckPoint {
             current: Some(self.0),
         }
     }
+}
+
+/// Apply `changeset` to the checkpoint.
+fn apply_changeset_to_checkpoint(
+    mut init_cp: CheckPoint,
+    changeset: &ChangeSet,
+) -> Result<CheckPoint, MissingGenesisError> {
+    if let Some(start_height) = changeset.blocks.keys().next().cloned() {
+        // changes after point of agreement
+        let mut extension = BTreeMap::default();
+        // point of agreement
+        let mut base: Option<CheckPoint> = None;
+
+        for cp in init_cp.iter() {
+            if cp.height() >= start_height {
+                extension.insert(cp.height(), cp.hash());
+            } else {
+                base = Some(cp);
+                break;
+            }
+        }
+
+        for (&height, &hash) in &changeset.blocks {
+            match hash {
+                Some(hash) => {
+                    extension.insert(height, hash);
+                }
+                None => {
+                    extension.remove(&height);
+                }
+            };
+        }
+
+        let new_tip = match base {
+            Some(base) => base
+                .extend(extension.into_iter().map(BlockId::from))
+                .expect("extension is strictly greater than base"),
+            None => LocalChain::from_blocks(extension)?.tip(),
+        };
+        init_cp = new_tip;
+    }
+
+    Ok(init_cp)
 }
 
 /// This is a local implementation of [`ChainOracle`].
@@ -490,7 +493,7 @@ impl LocalChain {
     /// Apply the given `changeset`.
     pub fn apply_changeset(&mut self, changeset: &ChangeSet) -> Result<(), MissingGenesisError> {
         let old_tip = self.tip.clone();
-        let new_tip = old_tip.apply_changeset(changeset)?;
+        let new_tip = apply_changeset_to_checkpoint(old_tip, changeset)?;
         self.tip = new_tip;
         debug_assert!(self._check_changeset_is_applied(changeset));
         Ok(())
@@ -848,12 +851,10 @@ fn merge_chains(
                         if is_update_height_superset_of_original {
                             return Ok((update_tip, changeset));
                         } else {
-                            let new_tip =
-                                original_tip.apply_changeset(&changeset).map_err(|_| {
-                                    CannotConnectError {
-                                        try_include_height: 0,
-                                    }
-                                })?;
+                            let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset)
+                                .map_err(|_| CannotConnectError {
+                                try_include_height: 0,
+                            })?;
                             return Ok((new_tip, changeset));
                         }
                     }
@@ -889,10 +890,10 @@ fn merge_chains(
         }
     }
 
-    let new_tip = original_tip
-        .apply_changeset(&changeset)
-        .map_err(|_| CannotConnectError {
+    let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset).map_err(|_| {
+        CannotConnectError {
             try_include_height: 0,
-        })?;
+        }
+    })?;
     Ok((new_tip, changeset))
 }
