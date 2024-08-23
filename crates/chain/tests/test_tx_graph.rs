@@ -1136,3 +1136,130 @@ fn call_map_anchors_with_non_deterministic_anchor() {
         ]
     );
 }
+
+/// Tests `From` impls for conversion between [`TxGraph`] and [`tx_graph::Update`].
+#[test]
+fn tx_graph_update_conversion() {
+    use tx_graph::Update;
+
+    type TestCase = (&'static str, Update<ConfirmationBlockTime>);
+
+    fn make_tx(v: i32) -> Transaction {
+        Transaction {
+            version: transaction::Version(v),
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![],
+            output: vec![],
+        }
+    }
+
+    fn make_txout(a: u64) -> TxOut {
+        TxOut {
+            value: Amount::from_sat(a),
+            script_pubkey: ScriptBuf::default(),
+        }
+    }
+
+    let test_cases: &[TestCase] = &[
+        ("empty_update", Update::default()),
+        (
+            "single_tx",
+            Update {
+                txs: vec![make_tx(0).into()],
+                ..Default::default()
+            },
+        ),
+        (
+            "two_txs",
+            Update {
+                txs: vec![make_tx(0).into(), make_tx(1).into()],
+                ..Default::default()
+            },
+        ),
+        (
+            "with_floating_txouts",
+            Update {
+                txs: vec![make_tx(0).into(), make_tx(1).into()],
+                txouts: [
+                    (OutPoint::new(h!("a"), 0), make_txout(0)),
+                    (OutPoint::new(h!("a"), 1), make_txout(1)),
+                    (OutPoint::new(h!("b"), 0), make_txout(2)),
+                ]
+                .into(),
+                ..Default::default()
+            },
+        ),
+        (
+            "with_anchors",
+            Update {
+                txs: vec![make_tx(0).into(), make_tx(1).into()],
+                txouts: [
+                    (OutPoint::new(h!("a"), 0), make_txout(0)),
+                    (OutPoint::new(h!("a"), 1), make_txout(1)),
+                    (OutPoint::new(h!("b"), 0), make_txout(2)),
+                ]
+                .into(),
+                anchors: [
+                    (ConfirmationBlockTime::default(), h!("a")),
+                    (ConfirmationBlockTime::default(), h!("b")),
+                ]
+                .into(),
+                ..Default::default()
+            },
+        ),
+        (
+            "with_seen_ats",
+            Update {
+                txs: vec![make_tx(0).into(), make_tx(1).into()],
+                txouts: [
+                    (OutPoint::new(h!("a"), 0), make_txout(0)),
+                    (OutPoint::new(h!("a"), 1), make_txout(1)),
+                    (OutPoint::new(h!("d"), 0), make_txout(2)),
+                ]
+                .into(),
+                anchors: [
+                    (ConfirmationBlockTime::default(), h!("a")),
+                    (ConfirmationBlockTime::default(), h!("b")),
+                ]
+                .into(),
+                seen_ats: [(h!("c"), 12346)].into_iter().collect(),
+            },
+        ),
+    ];
+
+    for (test_name, update) in test_cases {
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let _ = tx_graph.apply_update_at(update.clone(), None);
+        let update_from_tx_graph: Update<ConfirmationBlockTime> = tx_graph.into();
+
+        assert_eq!(
+            update
+                .txs
+                .iter()
+                .map(|tx| tx.compute_txid())
+                .collect::<HashSet<Txid>>(),
+            update_from_tx_graph
+                .txs
+                .iter()
+                .map(|tx| tx.compute_txid())
+                .collect::<HashSet<Txid>>(),
+            "{}: txs do not match",
+            test_name
+        );
+        assert_eq!(
+            update.txouts, update_from_tx_graph.txouts,
+            "{}: txouts do not match",
+            test_name
+        );
+        assert_eq!(
+            update.anchors, update_from_tx_graph.anchors,
+            "{}: anchors do not match",
+            test_name
+        );
+        assert_eq!(
+            update.seen_ats, update_from_tx_graph.seen_ats,
+            "{}: seen_ats do not match",
+            test_name
+        );
+    }
+}
