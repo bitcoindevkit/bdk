@@ -1,0 +1,42 @@
+name: Update rust version
+on:
+  schedule:
+    - cron: "0 0 15 * *" # At 00:00 on day-of-month 15.
+  workflow_dispatch: # allows manual triggering
+jobs:
+  format:
+    name: Update rustc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Update rust-version to use latest stable
+        run: |
+          set -x
+          # Extract the version from whatever version of the compiler dtolnay/rust-toolchain gives us.
+          RUST_VERSION=$(rustc --verbose --version | sed -ne 's/^release: //p')
+          # Update the version in the reference file.
+          echo "${RUST_VERSION}" > rust-version
+          echo "rust_version=${RUST_VERSION}" >> $GITHUB_ENV
+          # In case of no new version don't make an empty PR.
+          if ! git diff --exit-code > /dev/null; then
+              echo "Updated rustc. Opening PR."
+              echo "changes_made=true" >> $GITHUB_ENV
+          else
+              echo "Attempted to update rustc but the latest stable date did not change. Not opening any PR."
+              echo "changes_made=false" >> $GITHUB_ENV
+          fi
+      - name: Create Pull Request
+        if: env.changes_made == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          author: Update Rustc Bot <bot@example.com>
+          committer: Update Rustc Bot <bot@example.com>
+          branch: create-pull-request/update-rust-version
+          title: |
+            ci: automated update to rustc ${{ env.rust_version }}
+          commit-message: |
+            ci: automated update to rustc ${{ env.rust_version }}
+          body: |
+            Automated update to Github CI workflow `cont_integration.yml` by [create-pull-request](https://github.com/peter-evans/create-pull-request) GitHub action
