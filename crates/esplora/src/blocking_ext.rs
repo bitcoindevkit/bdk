@@ -1,15 +1,11 @@
-use std::collections::{BTreeSet, HashSet};
-use std::thread::JoinHandle;
-
-use bdk_chain::collections::BTreeMap;
-use bdk_chain::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
-use bdk_chain::{
+use bdk_core::collections::{BTreeMap, BTreeSet, HashSet};
+use bdk_core::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
+use bdk_core::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
-    local_chain::CheckPoint,
-    BlockId, ConfirmationBlockTime,
+    tx_graph, BlockId, CheckPoint, ConfirmationBlockTime, Indexed,
 };
-use bdk_chain::{tx_graph, Anchor, Indexed};
 use esplora_client::{OutputStatus, Tx};
+use std::thread::JoinHandle;
 
 use crate::{insert_anchor_from_status, insert_prevouts};
 
@@ -199,11 +195,11 @@ fn fetch_block(
 ///
 /// We want to have a corresponding checkpoint per anchor height. However, checkpoints fetched
 /// should not surpass `latest_blocks`.
-fn chain_update<A: Anchor>(
+fn chain_update(
     client: &esplora_client::BlockingClient,
     latest_blocks: &BTreeMap<u32, BlockHash>,
     local_tip: &CheckPoint,
-    anchors: &BTreeSet<(A, Txid)>,
+    anchors: &BTreeSet<(ConfirmationBlockTime, Txid)>,
 ) -> Result<CheckPoint, Error> {
     let mut point_of_agreement = None;
     let mut conflicts = vec![];
@@ -232,8 +228,8 @@ fn chain_update<A: Anchor>(
         .extend(conflicts.into_iter().rev())
         .expect("evicted are in order");
 
-    for anchor in anchors {
-        let height = anchor.0.anchor_block().height;
+    for (anchor, _) in anchors {
+        let height = anchor.block_id.height;
         if tip.get(height).is_none() {
             let hash = match fetch_block(client, latest_blocks, height)? {
                 Some(hash) => hash,
@@ -475,6 +471,7 @@ mod test {
     use bdk_chain::bitcoin::Txid;
     use bdk_chain::local_chain::LocalChain;
     use bdk_chain::BlockId;
+    use bdk_core::ConfirmationBlockTime;
     use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
     use esplora_client::{BlockHash, Builder};
     use std::collections::{BTreeMap, BTreeSet};
@@ -561,9 +558,12 @@ mod test {
                     .iter()
                     .map(|&height| -> anyhow::Result<_> {
                         Ok((
-                            BlockId {
-                                height,
-                                hash: env.bitcoind.client.get_block_hash(height as _)?,
+                            ConfirmationBlockTime {
+                                block_id: BlockId {
+                                    height,
+                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                },
+                                confirmation_time: height as _,
                             },
                             Txid::all_zeros(),
                         ))
@@ -598,9 +598,12 @@ mod test {
                     .iter()
                     .map(|&(height, txid)| -> anyhow::Result<_> {
                         Ok((
-                            BlockId {
-                                height,
-                                hash: env.bitcoind.client.get_block_hash(height as _)?,
+                            ConfirmationBlockTime {
+                                block_id: BlockId {
+                                    height,
+                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                },
+                                confirmation_time: height as _,
                             },
                             txid,
                         ))
@@ -794,9 +797,12 @@ mod test {
                     let txid: Txid = bdk_chain::bitcoin::hashes::Hash::hash(
                         &format!("txid_at_height_{}", h).into_bytes(),
                     );
-                    let anchor = BlockId {
-                        height: h,
-                        hash: anchor_blockhash,
+                    let anchor = ConfirmationBlockTime {
+                        block_id: BlockId {
+                            height: h,
+                            hash: anchor_blockhash,
+                        },
+                        confirmation_time: h as _,
                     };
                     (anchor, txid)
                 })

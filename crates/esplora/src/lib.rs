@@ -19,14 +19,9 @@
 //! Just like how [`EsploraExt`] extends the functionality of an
 //! [`esplora_client::BlockingClient`], [`EsploraAsyncExt`] is the async version which extends
 //! [`esplora_client::AsyncClient`].
-//!
-//! [`TxGraph`]: bdk_chain::tx_graph::TxGraph
-//! [`LocalChain`]: bdk_chain::local_chain::LocalChain
-//! [`ChainOracle`]: bdk_chain::ChainOracle
-//! [`example_esplora`]: https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_esplora
 
-use bdk_chain::bitcoin::{Amount, OutPoint, TxOut, Txid};
-use bdk_chain::{tx_graph, BlockId, ConfirmationBlockTime};
+use bdk_core::bitcoin::{Amount, OutPoint, TxOut, Txid};
+use bdk_core::{tx_graph, BlockId, ConfirmationBlockTime};
 use esplora_client::TxStatus;
 
 pub use esplora_client;

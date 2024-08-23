@@ -37,7 +37,7 @@ For full examples, refer to [`example-crates/wallet_esplora_blocking`](https://g
 [`bdk_chain`]: https://docs.rs/bdk-chain/
 [`EsploraExt`]: crate::EsploraExt
 [`EsploraAsyncExt`]: crate::EsploraAsyncExt
-[`SyncRequest`]: bdk_chain::spk_client::SyncRequest
-[`FullScanRequest`]: bdk_chain::spk_client::FullScanRequest
+[`SyncRequest`]: bdk_core::spk_client::SyncRequest
+[`FullScanRequest`]: bdk_core::spk_client::FullScanRequest
 [`sync`]: crate::EsploraExt::sync
 [`full_scan`]: crate::EsploraExt::full_scan
