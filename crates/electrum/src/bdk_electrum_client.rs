@@ -1,10 +1,8 @@
-use bdk_chain::{
+use bdk_core::{
     bitcoin::{block::Header, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     collections::{BTreeMap, HashMap},
-    local_chain::CheckPoint,
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
-    tx_graph::{self, TxGraph},
-    Anchor, BlockId, ConfirmationBlockTime,
+    tx_graph, BlockId, CheckPoint, ConfirmationBlockTime,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::{
@@ -39,14 +37,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
     /// Inserts transactions into the transaction cache so that the client will not fetch these
     /// transactions.
-    pub fn populate_tx_cache<A>(&self, tx_graph: impl AsRef<TxGraph<A>>) {
-        let txs = tx_graph
-            .as_ref()
-            .full_txs()
-            .map(|tx_node| (tx_node.txid, tx_node.tx));
-
+    pub fn populate_tx_cache(&self, txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>) {
         let mut tx_cache = self.tx_cache.lock().unwrap();
-        for (txid, tx) in txs {
+        for tx in txs {
+            let tx = tx.into();
+            let txid = tx.compute_txid();
             tx_cache.insert(txid, tx);
         }
     }
@@ -121,9 +116,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ///                        [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not
     ///                        present in the transaction graph.
     ///
-    /// [`CalculateFeeError::MissingTxOut`]: bdk_chain::tx_graph::CalculateFeeError::MissingTxOut
-    /// [`Wallet.calculate_fee`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee
-    /// [`Wallet.calculate_fee_rate`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
+    /// [`bdk_chain`]: ../bdk_chain/index.html
+    /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
+    /// [`Wallet.calculate_fee`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee
+    /// [`Wallet.calculate_fee_rate`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
     pub fn full_scan<K: Ord + Clone>(
         &self,
         request: impl Into<FullScanRequest<K>>,
@@ -189,9 +185,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
     /// [`full_scan`]: Self::full_scan
-    /// [`CalculateFeeError::MissingTxOut`]: bdk_chain::tx_graph::CalculateFeeError::MissingTxOut
-    /// [`Wallet.calculate_fee`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee
-    /// [`Wallet.calculate_fee_rate`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
+    /// [`bdk_chain`]: ../bdk_chain/index.html
+    /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
+    /// [`Wallet.calculate_fee`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee
+    /// [`Wallet.calculate_fee_rate`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
     pub fn sync<I: 'static>(
         &self,
         request: impl Into<SyncRequest<I>>,
@@ -514,20 +511,20 @@ fn fetch_tip_and_latest_blocks(
 
 // Add a corresponding checkpoint per anchor height if it does not yet exist. Checkpoints should not
 // surpass `latest_blocks`.
-fn chain_update<A: Anchor>(
+fn chain_update(
     mut tip: CheckPoint,
     latest_blocks: &BTreeMap<u32, BlockHash>,
-    anchors: impl Iterator<Item = (A, Txid)>,
+    anchors: impl Iterator<Item = (ConfirmationBlockTime, Txid)>,
 ) -> Result<CheckPoint, Error> {
-    for anchor in anchors {
-        let height = anchor.0.anchor_block().height;
+    for (anchor, _txid) in anchors {
+        let height = anchor.block_id.height;
 
         // Checkpoint uses the `BlockHash` from `latest_blocks` so that the hash will be consistent
         // in case of a re-org.
         if tip.get(height).is_none() && height <= tip.height() {
             let hash = match latest_blocks.get(&height) {
                 Some(&hash) => hash,
-                None => anchor.0.anchor_block().hash,
+                None => anchor.block_id.hash,
             };
             tip = tip.insert(BlockId { hash, height });
         }

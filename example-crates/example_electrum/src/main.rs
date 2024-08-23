@@ -127,7 +127,14 @@ fn main() -> anyhow::Result<()> {
     let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(network)?);
 
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download them
-    client.populate_tx_cache(&*graph.lock().unwrap());
+    client.populate_tx_cache(
+        graph
+            .lock()
+            .unwrap()
+            .graph()
+            .full_txs()
+            .map(|tx_node| tx_node.tx),
+    );
 
     let (chain_update, graph_update, keychain_update) = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
