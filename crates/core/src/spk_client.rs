@@ -2,8 +2,7 @@
 use crate::{
     alloc::{boxed::Box, collections::VecDeque, vec::Vec},
     collections::BTreeMap,
-    local_chain::CheckPoint,
-    ConfirmationBlockTime, Indexed,
+    CheckPoint, ConfirmationBlockTime, Indexed,
 };
 use bitcoin::{OutPoint, Script, ScriptBuf, Txid};
 
@@ -101,27 +100,6 @@ impl<I> Default for SyncRequestBuilder<I> {
     }
 }
 
-#[cfg(feature = "miniscript")]
-impl<K: Clone + Ord + core::fmt::Debug + Send + Sync> SyncRequestBuilder<(K, u32)> {
-    /// Add [`Script`]s that are revealed by the `indexer` of the given `spk_range` that will be
-    /// synced against.
-    pub fn revealed_spks_from_indexer(
-        self,
-        indexer: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
-        spk_range: impl core::ops::RangeBounds<K>,
-    ) -> Self {
-        self.spks_with_indexes(indexer.revealed_spks(spk_range))
-    }
-
-    /// Add [`Script`]s that are revealed by the `indexer` but currently unused.
-    pub fn unused_spks_from_indexer(
-        self,
-        indexer: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
-    ) -> Self {
-        self.spks_with_indexes(indexer.unused_spks())
-    }
-}
-
 impl SyncRequestBuilder<()> {
     /// Add [`Script`]s that will be synced against.
     pub fn spks(self, spks: impl IntoIterator<Item = ScriptBuf>) -> Self {
@@ -132,7 +110,7 @@ impl SyncRequestBuilder<()> {
 impl<I> SyncRequestBuilder<I> {
     /// Set the initial chain tip for the sync request.
     ///
-    /// This is used to update [`LocalChain`](crate::local_chain::LocalChain).
+    /// This is used to update [`LocalChain`](../../bdk_chain/local_chain/struct.LocalChain.html).
     pub fn chain_tip(mut self, cp: CheckPoint) -> Self {
         self.inner.chain_tip = Some(cp);
         self
@@ -143,7 +121,7 @@ impl<I> SyncRequestBuilder<I> {
     /// # Example
     ///
     /// Sync revealed script pubkeys obtained from a
-    /// [`KeychainTxOutIndex`](crate::keychain_txout::KeychainTxOutIndex).
+    /// [`KeychainTxOutIndex`](../../bdk_chain/indexer/keychain_txout/struct.KeychainTxOutIndex.html).
     ///
     /// ```rust
     /// # use bdk_chain::spk_client::SyncRequest;
@@ -216,9 +194,9 @@ impl<I> SyncRequestBuilder<I> {
 ///
 /// ```rust
 /// # use bdk_chain::{bitcoin::{hashes::Hash, ScriptBuf}, local_chain::LocalChain};
+/// # use bdk_chain::spk_client::SyncRequest;
 /// # let (local_chain, _) = LocalChain::from_genesis_hash(Hash::all_zeros());
 /// # let scripts = [ScriptBuf::default(), ScriptBuf::default()];
-/// # use bdk_chain::spk_client::SyncRequest;
 /// // Construct a sync request.
 /// let sync_request = SyncRequest::builder()
 ///     // Provide chain tip of the local wallet.
@@ -345,9 +323,11 @@ impl<I> SyncRequest<I> {
 #[must_use]
 #[derive(Debug)]
 pub struct SyncResult<A = ConfirmationBlockTime> {
-    /// The update to apply to the receiving [`TxGraph`](crate::tx_graph::TxGraph).
+    /// The update to apply to the receiving
+    /// [`TxGraph`](../../bdk_chain/tx_graph/struct.TxGraph.html).
     pub graph_update: crate::tx_graph::Update<A>,
-    /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
+    /// The update to apply to the receiving
+    /// [`LocalChain`](../../bdk_chain/local_chain/struct.LocalChain.html).
     pub chain_update: Option<CheckPoint>,
 }
 
@@ -374,24 +354,10 @@ impl<K> Default for FullScanRequestBuilder<K> {
     }
 }
 
-#[cfg(feature = "miniscript")]
-impl<K: Ord + Clone + core::fmt::Debug> FullScanRequestBuilder<K> {
-    /// Add spk iterators for each keychain tracked in `indexer`.
-    pub fn spks_from_indexer(
-        mut self,
-        indexer: &crate::indexer::keychain_txout::KeychainTxOutIndex<K>,
-    ) -> Self {
-        for (keychain, spks) in indexer.all_unbounded_spk_iters() {
-            self = self.spks_for_keychain(keychain, spks);
-        }
-        self
-    }
-}
-
 impl<K: Ord> FullScanRequestBuilder<K> {
     /// Set the initial chain tip for the full scan request.
     ///
-    /// This is used to update [`LocalChain`](crate::local_chain::LocalChain).
+    /// This is used to update [`LocalChain`](../../bdk_chain/local_chain/struct.LocalChain.html).
     pub fn chain_tip(mut self, tip: CheckPoint) -> Self {
         self.inner.chain_tip = Some(tip);
         self
@@ -496,9 +462,10 @@ impl<K: Ord + Clone> FullScanRequest<K> {
 #[must_use]
 #[derive(Debug)]
 pub struct FullScanResult<K, A = ConfirmationBlockTime> {
-    /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
+    /// The update to apply to the receiving
+    /// [`LocalChain`](../../bdk_chain/local_chain/struct.LocalChain.html).
     pub graph_update: crate::tx_graph::Update<A>,
-    /// The update to apply to the receiving [`TxGraph`](crate::tx_graph::TxGraph).
+    /// The update to apply to the receiving [`TxGraph`](../../bdk_chain/tx_graph/struct.TxGraph.html).
     pub chain_update: Option<CheckPoint>,
     /// Last active indices for the corresponding keychains (`K`).
     pub last_active_indices: BTreeMap<K, u32>,

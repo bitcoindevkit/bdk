@@ -54,11 +54,18 @@ pub mod collections {
     pub use hashbrown::hash_map;
 }
 
+/// A tuple of keychain index and `T` representing the indexed value.
+pub type Indexed<T> = (u32, T);
+/// A tuple of keychain `K`, derivation index (`u32`) and a `T` associated with them.
+pub type KeychainIndexed<K, T> = ((K, u32), T);
+
 mod chain_data;
 pub use chain_data::*;
 
 mod checkpoint;
 pub use checkpoint::*;
+
+pub mod spk_client;
 
 /// Core structures for [`TxGraph`].
 ///

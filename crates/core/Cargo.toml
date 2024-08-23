@@ -19,3 +19,6 @@ hashbrown = { version = "0.9.1", optional = true }
 default = ["std"]
 std = ["bitcoin/std"]
 serde = ["dep:serde", "bitcoin/serde", "hashbrown?/serde"]
+
+[dev-dependencies]
+bdk_chain = { version = "0.17.0", path = "../chain" }

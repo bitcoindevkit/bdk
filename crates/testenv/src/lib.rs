@@ -4,7 +4,8 @@ use bdk_chain::{
         secp256k1::rand::random, transaction, Address, Amount, Block, BlockHash, CompactTarget,
         ScriptBuf, ScriptHash, Transaction, TxIn, TxOut, Txid,
     },
-    BlockId, local_chain::CheckPoint,
+    local_chain::CheckPoint,
+    BlockId,
 };
 use bitcoincore_rpc::{
     bitcoincore_rpc_json::{GetBlockTemplateModes, GetBlockTemplateRules},

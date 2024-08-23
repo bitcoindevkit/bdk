@@ -2472,6 +2472,7 @@ impl Wallet {
     /// [`SyncRequest`] collects all revealed script pubkeys from the wallet keychain needed to
     /// start a blockchain sync with a spk based blockchain client.
     pub fn start_sync_with_revealed_spks(&self) -> SyncRequestBuilder<(KeychainKind, u32)> {
+        use bdk_chain::keychain_txout::SyncRequestBuilderExt;
         SyncRequest::builder()
             .chain_tip(self.chain.tip())
             .revealed_spks_from_indexer(&self.indexed_graph.index, ..)
@@ -2486,6 +2487,7 @@ impl Wallet {
     /// This operation is generally only used when importing or restoring a previously used wallet
     /// in which the list of used scripts is not known.
     pub fn start_full_scan(&self) -> FullScanRequestBuilder<KeychainKind> {
+        use bdk_chain::keychain_txout::FullScanRequestBuilderExt;
         FullScanRequest::builder()
             .chain_tip(self.chain.tip())
             .spks_from_indexer(&self.indexed_graph.index)

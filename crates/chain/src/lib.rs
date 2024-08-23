@@ -61,7 +61,6 @@ pub use indexer::keychain_txout;
 pub use spk_iter::*;
 #[cfg(feature = "rusqlite")]
 pub mod rusqlite_impl;
-pub mod spk_client;
 
 pub extern crate bdk_core;
 pub use bdk_core::*;
@@ -80,11 +79,6 @@ extern crate std;
 
 /// How many confirmations are needed f or a coinbase output to be spent.
 pub const COINBASE_MATURITY: u32 = 100;
-
-/// A tuple of keychain index and `T` representing the indexed value.
-pub type Indexed<T> = (u32, T);
-/// A tuple of keychain `K`, derivation index (`u32`) and a `T` associated with them.
-pub type KeychainIndexed<K, T> = ((K, u32), T);
 
 /// A wrapper that we use to impl remote traits for types in our crate or dependency crates.
 pub struct Impl<T>(pub T);

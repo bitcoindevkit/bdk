@@ -6,6 +6,7 @@ use std::{
 
 use bdk_chain::{
     bitcoin::Network,
+    keychain_txout::FullScanRequestBuilderExt,
     spk_client::{FullScanRequest, SyncRequest},
     Merge,
 };
