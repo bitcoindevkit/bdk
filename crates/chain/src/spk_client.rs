@@ -3,8 +3,9 @@ use crate::{
     alloc::{boxed::Box, collections::VecDeque, vec::Vec},
     collections::BTreeMap,
     local_chain::CheckPoint,
-    ConfirmationBlockTime, Indexed,
+    Indexed,
 };
+use bdk_core::ConfirmationBlockTime;
 use bitcoin::{OutPoint, Script, ScriptBuf, Txid};
 
 type InspectSync<I> = dyn FnMut(SyncItem<I>, SyncProgress) + Send + 'static;

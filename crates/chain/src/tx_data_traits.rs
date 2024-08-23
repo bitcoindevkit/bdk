@@ -1,6 +1,5 @@
-use crate::collections::BTreeMap;
-use crate::collections::BTreeSet;
-use crate::BlockId;
+use crate::collections::{BTreeMap, BTreeSet};
+use crate::{BlockId, ConfirmationBlockTime};
 use alloc::vec::Vec;
 
 /// Trait that "anchors" blockchain data to a specific block of height and hash.
@@ -85,11 +84,42 @@ impl<'a, A: Anchor> Anchor for &'a A {
     }
 }
 
+impl Anchor for BlockId {
+    fn anchor_block(&self) -> Self {
+        *self
+    }
+}
+
+impl Anchor for ConfirmationBlockTime {
+    fn anchor_block(&self) -> BlockId {
+        self.block_id
+    }
+
+    fn confirmation_height_upper_bound(&self) -> u32 {
+        self.block_id.height
+    }
+}
+
 /// An [`Anchor`] that can be constructed from a given block, block height and transaction position
 /// within the block.
 pub trait AnchorFromBlockPosition: Anchor {
     /// Construct the anchor from a given `block`, block height and `tx_pos` within the block.
     fn from_block_position(block: &bitcoin::Block, block_id: BlockId, tx_pos: usize) -> Self;
+}
+
+impl AnchorFromBlockPosition for BlockId {
+    fn from_block_position(_block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
+        block_id
+    }
+}
+
+impl AnchorFromBlockPosition for ConfirmationBlockTime {
+    fn from_block_position(block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
+        Self {
+            block_id,
+            confirmation_time: block.header.time as _,
+        }
+    }
 }
 
 /// Trait that makes an object mergeable.

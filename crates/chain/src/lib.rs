@@ -38,8 +38,8 @@ pub use indexer::spk_txout;
 pub use indexer::Indexer;
 pub mod local_chain;
 mod tx_data_traits;
-pub mod tx_graph;
 pub use tx_data_traits::*;
+pub mod tx_graph;
 pub use tx_graph::TxGraph;
 mod chain_oracle;
 pub use chain_oracle::*;
@@ -63,6 +63,9 @@ pub use spk_iter::*;
 pub mod rusqlite_impl;
 pub mod spk_client;
 
+pub extern crate bdk_core;
+pub use bdk_core::*;
+
 #[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
@@ -74,37 +77,6 @@ pub extern crate serde;
 #[cfg(feature = "std")]
 #[macro_use]
 extern crate std;
-
-#[cfg(all(not(feature = "std"), feature = "hashbrown"))]
-extern crate hashbrown;
-
-// When no-std use `alloc`'s Hash collections. This is activated by default
-#[cfg(all(not(feature = "std"), not(feature = "hashbrown")))]
-#[doc(hidden)]
-pub mod collections {
-    #![allow(dead_code)]
-    pub type HashSet<K> = alloc::collections::BTreeSet<K>;
-    pub type HashMap<K, V> = alloc::collections::BTreeMap<K, V>;
-    pub use alloc::collections::{btree_map as hash_map, *};
-}
-
-// When we have std, use `std`'s all collections
-#[cfg(all(feature = "std", not(feature = "hashbrown")))]
-#[doc(hidden)]
-pub mod collections {
-    pub use std::collections::{hash_map, *};
-}
-
-// With this special feature `hashbrown`, use `hashbrown`'s hash collections, and else from `alloc`.
-#[cfg(feature = "hashbrown")]
-#[doc(hidden)]
-pub mod collections {
-    #![allow(dead_code)]
-    pub type HashSet<K> = hashbrown::HashSet<K>;
-    pub type HashMap<K, V> = hashbrown::HashMap<K, V>;
-    pub use alloc::collections::*;
-    pub use hashbrown::hash_map;
-}
 
 /// How many confirmations are needed f or a coinbase output to be spent.
 pub const COINBASE_MATURITY: u32 = 100;
@@ -131,6 +103,30 @@ impl<T> From<T> for Impl<T> {
 }
 
 impl<T> core::ops::Deref for Impl<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A wrapper that we use to impl remote traits for types in our crate or dependency crates that impl [`Anchor`].
+pub struct AnchorImpl<T>(pub T);
+
+impl<T> AnchorImpl<T> {
+    /// Returns the inner `T`.
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> From<T> for AnchorImpl<T> {
+    fn from(value: T) -> Self {
+        Self(value)
+    }
+}
+
+impl<T> core::ops::Deref for AnchorImpl<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {

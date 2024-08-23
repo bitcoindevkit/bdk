@@ -92,9 +92,9 @@
 //! [`try_get_chain_position`]: TxGraph::try_get_chain_position
 //! [`insert_txout`]: TxGraph::insert_txout
 
-use crate::{
-    collections::*, Anchor, Balance, BlockId, ChainOracle, ChainPosition, FullTxOut, Merge,
-};
+use crate::collections::*;
+use crate::BlockId;
+use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;

@@ -2,12 +2,12 @@
 
 #[macro_use]
 mod common;
-use bdk_chain::tx_graph::{self, CalculateFeeError};
+use bdk_chain::{collections::*, BlockId, ConfirmationBlockTime};
 use bdk_chain::{
-    collections::*,
     local_chain::LocalChain,
+    tx_graph::{self, CalculateFeeError},
     tx_graph::{ChangeSet, TxGraph},
-    Anchor, BlockId, ChainOracle, ChainPosition, ConfirmationBlockTime, Merge,
+    Anchor, ChainOracle, ChainPosition, Merge,
 };
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,

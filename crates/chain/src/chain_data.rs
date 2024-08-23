@@ -1,6 +1,7 @@
-use bitcoin::{hashes::Hash, BlockHash, OutPoint, TxOut, Txid};
+use crate::ConfirmationBlockTime;
+use bitcoin::{OutPoint, TxOut, Txid};
 
-use crate::{Anchor, AnchorFromBlockPosition, COINBASE_MATURITY};
+use crate::{Anchor, COINBASE_MATURITY};
 
 /// Represents the observed position of some chain data.
 ///
@@ -82,92 +83,6 @@ impl From<ChainPosition<ConfirmationBlockTime>> for ConfirmationTime {
     }
 }
 
-/// A reference to a block in the canonical chain.
-///
-/// `BlockId` implements [`Anchor`]. When a transaction is anchored to `BlockId`, the confirmation
-/// block and anchor block are the same block.
-#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-pub struct BlockId {
-    /// The height of the block.
-    pub height: u32,
-    /// The hash of the block.
-    pub hash: BlockHash,
-}
-
-impl Anchor for BlockId {
-    fn anchor_block(&self) -> Self {
-        *self
-    }
-}
-
-impl AnchorFromBlockPosition for BlockId {
-    fn from_block_position(_block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
-        block_id
-    }
-}
-
-impl Default for BlockId {
-    fn default() -> Self {
-        Self {
-            height: Default::default(),
-            hash: BlockHash::all_zeros(),
-        }
-    }
-}
-
-impl From<(u32, BlockHash)> for BlockId {
-    fn from((height, hash): (u32, BlockHash)) -> Self {
-        Self { height, hash }
-    }
-}
-
-impl From<BlockId> for (u32, BlockHash) {
-    fn from(block_id: BlockId) -> Self {
-        (block_id.height, block_id.hash)
-    }
-}
-
-impl From<(&u32, &BlockHash)> for BlockId {
-    fn from((height, hash): (&u32, &BlockHash)) -> Self {
-        Self {
-            height: *height,
-            hash: *hash,
-        }
-    }
-}
-
-/// An [`Anchor`] implementation that also records the exact confirmation time of the transaction.
-///
-/// Refer to [`Anchor`] for more details.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-pub struct ConfirmationBlockTime {
-    /// The anchor block.
-    pub block_id: BlockId,
-    /// The confirmation time of the transaction being anchored.
-    pub confirmation_time: u64,
-}
-
-impl Anchor for ConfirmationBlockTime {
-    fn anchor_block(&self) -> BlockId {
-        self.block_id
-    }
-
-    fn confirmation_height_upper_bound(&self) -> u32 {
-        self.block_id.height
-    }
-}
-
-impl AnchorFromBlockPosition for ConfirmationBlockTime {
-    fn from_block_position(block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
-        Self {
-            block_id,
-            confirmation_time: block.header.time as _,
-        }
-    }
-}
-
 /// A `TxOut` with as much data as we can retrieve about it
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FullTxOut<A> {
@@ -244,6 +159,8 @@ impl<A: Anchor> FullTxOut<A> {
 
 #[cfg(test)]
 mod test {
+    use crate::BlockId;
+
     use super::*;
 
     #[test]

@@ -1,4 +1,3 @@
-use bdk_chain::ConfirmationBlockTime;
 use serde_json::json;
 use std::cmp;
 use std::collections::HashMap;
@@ -20,6 +19,7 @@ use bdk_chain::miniscript::{
     psbt::PsbtExt,
     Descriptor, DescriptorPublicKey,
 };
+use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
     indexed_tx_graph,
     indexer::keychain_txout::{self, KeychainTxOutIndex},
