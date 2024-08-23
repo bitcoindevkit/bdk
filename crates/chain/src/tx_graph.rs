@@ -98,36 +98,13 @@ use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+pub use bdk_core::tx_graph::Update;
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::{
     convert::Infallible,
     ops::{Deref, RangeInclusive},
 };
-
-/// Data object used to update the [`TxGraph`] with.
-#[derive(Debug, Clone)]
-pub struct Update<A = ()> {
-    /// Full transactions.
-    pub txs: Vec<Arc<Transaction>>,
-    /// Floating txouts.
-    pub txouts: BTreeMap<OutPoint, TxOut>,
-    /// Transaction anchors.
-    pub anchors: BTreeSet<(A, Txid)>,
-    /// Seen at times for transactions.
-    pub seen_ats: HashMap<Txid, u64>,
-}
-
-impl<A> Default for Update<A> {
-    fn default() -> Self {
-        Self {
-            txs: Default::default(),
-            txouts: Default::default(),
-            anchors: Default::default(),
-            seen_ats: Default::default(),
-        }
-    }
-}
 
 impl<A> From<TxGraph<A>> for Update<A> {
     fn from(graph: TxGraph<A>) -> Self {
@@ -148,16 +125,6 @@ impl<A: Ord + Clone> From<Update<A>> for TxGraph<A> {
         let mut graph = TxGraph::<A>::default();
         let _ = graph.apply_update_at(update, None);
         graph
-    }
-}
-
-impl<A: Ord> Update<A> {
-    /// Extend this update with `other`.
-    pub fn extend(&mut self, other: Update<A>) {
-        self.txs.extend(other.txs);
-        self.txouts.extend(other.txouts);
-        self.anchors.extend(other.anchors);
-        self.seen_ats.extend(other.seen_ats);
     }
 }
 
