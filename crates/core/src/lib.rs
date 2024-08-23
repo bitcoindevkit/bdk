@@ -56,3 +56,6 @@ pub mod collections {
 
 mod chain_data;
 pub use chain_data::*;
+
+mod checkpoint;
+pub use checkpoint::*;
