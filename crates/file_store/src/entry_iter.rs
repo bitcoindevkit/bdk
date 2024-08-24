@@ -72,6 +72,8 @@ where
                             pos_before_read = self.db_file.stream_position()?;
                             let actual_index =
                                 bincode_options().deserialize_from::<_, u64>(&mut self.db_file)?;
+                            // This will always happen as the `expected variant index` only will be
+                            // risen when actual_index > max_variant_index
                             if actual_index > max_variant_index {
                                 pos_before_read = self.db_file.stream_position()?;
                                 return bincode_options()

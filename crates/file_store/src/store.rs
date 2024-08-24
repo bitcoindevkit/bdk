@@ -327,6 +327,15 @@ mod test {
             let mut buf = TEST_MAGIC_BYTES.to_vec();
             DefaultOptions::new()
                 .with_varint_encoding()
+                .serialized_size(&changeset)
+                .and_then(|size| {
+                    DefaultOptions::new()
+                        .with_varint_encoding()
+                        .serialize_into(&mut buf, &size)
+                })
+                .expect("should prefix changeset size");
+            DefaultOptions::new()
+                .with_varint_encoding()
                 .serialize_into(&mut buf, &changeset)
                 .expect("should encode");
             buf
@@ -345,6 +354,10 @@ mod test {
             TestChangeSet::from(["4".into(), "5".into(), "6".into()]),
         ];
         let last_changeset = TestChangeSet::from(["7".into(), "8".into(), "9".into()]);
+        let last_changeset_bytes_size = bincode_options()
+            .serialized_size(&last_changeset)
+            .and_then(|size| bincode_options().serialize::<u64>(&size))
+            .unwrap();
         let last_changeset_bytes = bincode_options().serialize(&last_changeset).unwrap();
 
         for short_write_len in 1..last_changeset_bytes.len() - 1 {
@@ -357,6 +370,8 @@ mod test {
                 for changeset in &changesets {
                     db.append_changeset(changeset).unwrap();
                 }
+                // write last changeset full size
+                db.db_file.write_all(&last_changeset_bytes_size).unwrap();
                 // this is the incomplete write
                 db.db_file
                     .write_all(&last_changeset_bytes[..short_write_len])
@@ -378,6 +393,7 @@ mod test {
                     }),
                     "should recover all changesets that are written in full",
                 );
+                // write last changeset in full
                 db.db_file.write_all(&last_changeset_bytes).unwrap();
             }
 
