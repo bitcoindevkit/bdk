@@ -463,4 +463,171 @@ mod test {
             assert_eq!(aggregation, exp_aggregation);
         }
     }
+
+    #[test]
+    fn deserialize_newer_changeset_version_with_old_code() {
+        #[derive(PartialEq, Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+        struct TestChangeSetV1 {
+            field_a: BTreeSet<String>,
+        }
+        impl Merge for TestChangeSetV1 {
+            fn merge(&mut self, other: Self) {
+                self.field_a.extend(other.field_a);
+            }
+
+            fn is_empty(&self) -> bool {
+                self.field_a.is_empty()
+            }
+        }
+
+        #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+        struct TestChangeSetV2 {
+            field_a: BTreeSet<String>,
+            field_b: Option<BTreeSet<String>>,
+        }
+
+        impl Merge for TestChangeSetV2 {
+            fn merge(&mut self, other: Self) {
+                self.field_a.extend(other.field_a);
+                if let Some(ref mut field_b) = self.field_b {
+                    if let Some(other_field_b) = other.field_b {
+                        field_b.extend(other_field_b)
+                    }
+                }
+            }
+
+            fn is_empty(&self) -> bool {
+                if self.field_b.is_none() {
+                    false
+                } else {
+                    self.field_a.is_empty()
+                }
+            }
+        }
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("20.dat");
+        println!("Test file: {:?}", file_path);
+
+        let new_code_aggregation = {
+            #[derive(serde::Serialize, serde::Deserialize)]
+            enum VersionedTestChangeSet {
+                V1(TestChangeSetV1),
+                V2(TestChangeSetV2),
+            }
+
+            impl Default for VersionedTestChangeSet {
+                fn default() -> Self {
+                    VersionedTestChangeSet::V2(TestChangeSetV2::default())
+                }
+            }
+
+            impl From<VersionedTestChangeSet> for TestChangeSetV1 {
+                fn from(versioned_change_set: VersionedTestChangeSet) -> Self {
+                    match versioned_change_set {
+                        VersionedTestChangeSet::V1(changeset) => changeset,
+                        _ => panic!(),
+                    }
+                }
+            }
+
+            impl From<TestChangeSetV1> for VersionedTestChangeSet {
+                fn from(test_change_set: TestChangeSetV1) -> Self {
+                    VersionedTestChangeSet::V1(test_change_set)
+                }
+            }
+
+            impl From<VersionedTestChangeSet> for TestChangeSetV2 {
+                fn from(_: VersionedTestChangeSet) -> Self {
+                    Self::default()
+                }
+            }
+
+            impl From<TestChangeSetV2> for VersionedTestChangeSet {
+                fn from(_: TestChangeSetV2) -> Self {
+                    VersionedTestChangeSet::default()
+                }
+            }
+
+            let changesets = (0..2)
+                .map(|n| TestChangeSetV2 {
+                    field_a: BTreeSet::from([format!("{}", n)]),
+                    field_b: None,
+                })
+                .collect::<Vec<_>>();
+
+            // First, we create the file with all the versioned changesets!
+            let mut db = Store::<TestChangeSetV2, VersionedTestChangeSet>::create_new(
+                &TEST_MAGIC_BYTES,
+                &file_path,
+            )
+            .unwrap();
+            for changeset in &changesets {
+                db.append_changeset(changeset).unwrap();
+            }
+
+            // Get aggregated changeset with new code
+            db.iter_changesets()
+                .map(|r| r.expect("must read valid changeset"))
+                .fold(TestChangeSetV2::default(), |mut acc, v| {
+                    Merge::merge(&mut acc, v);
+                    acc
+                })
+        };
+        let old_code_aggregation = {
+            #[derive(serde::Serialize, serde::Deserialize)]
+            enum VersionedTestChangeSet {
+                V1(TestChangeSetV1),
+            }
+
+            impl Default for VersionedTestChangeSet {
+                fn default() -> Self {
+                    VersionedTestChangeSet::V1(TestChangeSetV1::default())
+                }
+            }
+
+            impl From<VersionedTestChangeSet> for TestChangeSetV1 {
+                fn from(versioned_change_set: VersionedTestChangeSet) -> Self {
+                    match versioned_change_set {
+                        VersionedTestChangeSet::V1(changeset) => changeset,
+                    }
+                }
+            }
+
+            impl From<TestChangeSetV1> for VersionedTestChangeSet {
+                fn from(test_change_set: TestChangeSetV1) -> Self {
+                    VersionedTestChangeSet::V1(test_change_set)
+                }
+            }
+
+            impl From<VersionedTestChangeSet> for TestChangeSetV2 {
+                fn from(_: VersionedTestChangeSet) -> Self {
+                    Self::default()
+                }
+            }
+
+            impl From<TestChangeSetV2> for VersionedTestChangeSet {
+                fn from(_: TestChangeSetV2) -> Self {
+                    VersionedTestChangeSet::default()
+                }
+            }
+
+            // We re-open the file and read all the versioned changesets using the "old"
+            // VersionedTestChangeSet
+            let mut db = Store::<TestChangeSetV2, VersionedTestChangeSet>::open(
+                &TEST_MAGIC_BYTES,
+                &file_path,
+            )
+            .unwrap();
+            // Merge all versioned changesets in the aggregated correct changeset
+            db.iter_changesets()
+                .map(|r| r.expect("must read valid changeset"))
+                .fold(TestChangeSetV2::default(), |mut acc, v| {
+                    Merge::merge(&mut acc, v);
+                    acc
+                })
+        };
+
+        assert_eq!(new_code_aggregation.field_a, old_code_aggregation.field_a);
+    }
 }
