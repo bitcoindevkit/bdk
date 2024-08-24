@@ -11,22 +11,16 @@ use std::{
 
 /// Persists an append-only list of changesets (`C`) to a single file.
 #[derive(Debug)]
-pub struct Store<C>
-where
-    C: Sync + Send,
-{
+pub struct Store<C, V = C> {
     magic_len: usize,
     db_file: File,
-    marker: PhantomData<C>,
+    marker: PhantomData<(C, V)>,
 }
 
-impl<C> Store<C>
+impl<C, V> Store<C, V>
 where
-    C: Merge
-        + serde::Serialize
-        + serde::de::DeserializeOwned
-        + core::marker::Send
-        + core::marker::Sync,
+    C: Into<V> + Merge + Clone + Default + serde::de::DeserializeOwned,
+    V: Into<C> + Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Create a new [`Store`] file in write-only mode; error if the file exists.
     ///
@@ -109,6 +103,19 @@ where
         }
     }
 
+    /// Iterates over the stored **versioned** changesets from first to last, changing the seek
+    /// position at each iteration.
+    ///
+    /// The iterator may fail to read an entry and therefore return an error. However, the first time
+    /// it returns an error will be the last. After doing so, the iterator will always yield `None`.
+    ///
+    /// **WARNING**: This method changes the write position in the underlying file. You should
+    /// always iterate over all entries until `None` is returned if you want your next write to go
+    /// at the end; otherwise, you will write over existing entries.
+    pub fn iter_versioned_changesets(&mut self) -> EntryIter<V, C> {
+        EntryIter::new(self.magic_len as u64, &mut self.db_file)
+    }
+
     /// Iterates over the stored changeset from first to last, changing the seek position at each
     /// iteration.
     ///
@@ -118,8 +125,8 @@ where
     /// **WARNING**: This method changes the write position in the underlying file. You should
     /// always iterate over all entries until `None` is returned if you want your next write to go
     /// at the end; otherwise, you will write over existing entries.
-    pub fn iter_changesets(&mut self) -> EntryIter<C> {
-        EntryIter::new(self.magic_len as u64, &mut self.db_file)
+    pub fn iter_changesets(&mut self) -> impl Iterator<Item = Result<C, IterError>> + '_ {
+        self.iter_versioned_changesets().map(|r| r.map(Into::into))
     }
 
     /// Loads all the changesets that have been stored as one giant changeset.
@@ -135,23 +142,22 @@ where
     /// **WARNING**: This method changes the write position of the underlying file. The next
     /// changeset will be written over the erroring entry (or the end of the file if none existed).
     pub fn aggregate_changesets(&mut self) -> Result<Option<C>, AggregateChangesetsError<C>> {
-        let mut changeset = Option::<C>::None;
-        for next_changeset in self.iter_changesets() {
-            let next_changeset = match next_changeset {
-                Ok(next_changeset) => next_changeset,
-                Err(iter_error) => {
-                    return Err(AggregateChangesetsError {
-                        changeset,
-                        iter_error,
-                    })
+        self.iter_changesets().try_fold(
+            Option::<C>::None,
+            |mut aggregated_changeset: Option<C>, next_changeset| match next_changeset {
+                Ok(next_changeset) => {
+                    match &mut aggregated_changeset {
+                        Some(aggregated_changeset) => aggregated_changeset.merge(next_changeset),
+                        aggregated_changeset => *aggregated_changeset = Some(next_changeset),
+                    }
+                    Ok(aggregated_changeset)
                 }
-            };
-            match &mut changeset {
-                Some(changeset) => changeset.merge(next_changeset),
-                changeset => *changeset = Some(next_changeset),
-            }
-        }
-        Ok(changeset)
+                Err(iter_error) => Err(AggregateChangesetsError {
+                    changeset: aggregated_changeset,
+                    iter_error,
+                }),
+            },
+        )
     }
 
     /// Append a new changeset to the file and truncate the file to the end of the appended
@@ -165,8 +171,11 @@ where
             return Ok(());
         }
 
+        let versioned_changeset: V = changeset.clone().into();
         bincode_options()
-            .serialize_into(&mut self.db_file, changeset)
+            .serialized_size(&versioned_changeset)
+            .and_then(|size| bincode_options().serialize_into::<_, u64>(&mut self.db_file, &size))
+            .and_then(|_| bincode_options().serialize_into(&mut self.db_file, &versioned_changeset))
             .map_err(|e| match *e {
                 bincode::ErrorKind::Io(error) => error,
                 unexpected_err => panic!("unexpected bincode error: {}", unexpected_err),
