@@ -21,4 +21,4 @@ std = ["bitcoin/std"]
 serde = ["dep:serde", "bitcoin/serde", "hashbrown?/serde"]
 
 [dev-dependencies]
-bdk_chain = { version = "0.18.0", path = "../chain" }
+bdk_chain = { path = "../chain" }
