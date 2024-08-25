@@ -70,13 +70,17 @@
 //!
 //! ```
 //! # use bdk_chain::{Merge, BlockId};
-//! # use bdk_chain::tx_graph::TxGraph;
+//! # use bdk_chain::tx_graph::{self, TxGraph};
 //! # use bdk_chain::example_utils::*;
 //! # use bitcoin::Transaction;
+//! # use std::sync::Arc;
 //! # let tx_a = tx_from_hex(RAW_TX_1);
 //! # let tx_b = tx_from_hex(RAW_TX_2);
 //! let mut graph: TxGraph = TxGraph::default();
-//! let update = TxGraph::new(vec![tx_a, tx_b]);
+//!
+//! let mut update = tx_graph::Update::default();
+//! update.txs.push(Arc::new(tx_a));
+//! update.txs.push(Arc::new(tx_b));
 //!
 //! // apply the update graph
 //! let changeset = graph.apply_update(update.clone());
@@ -100,6 +104,62 @@ use core::{
     convert::Infallible,
     ops::{Deref, RangeInclusive},
 };
+
+/// Data object used to update the [`TxGraph`] with.
+#[derive(Debug, Clone)]
+pub struct Update<A = ()> {
+    /// Full transactions.
+    pub txs: Vec<Arc<Transaction>>,
+    /// Floating txouts.
+    pub txouts: BTreeMap<OutPoint, TxOut>,
+    /// Transaction anchors.
+    pub anchors: BTreeSet<(A, Txid)>,
+    /// Seen at times for transactions.
+    pub seen_ats: HashMap<Txid, u64>,
+}
+
+impl<A> Default for Update<A> {
+    fn default() -> Self {
+        Self {
+            txs: Default::default(),
+            txouts: Default::default(),
+            anchors: Default::default(),
+            seen_ats: Default::default(),
+        }
+    }
+}
+
+impl<A> From<TxGraph<A>> for Update<A> {
+    fn from(graph: TxGraph<A>) -> Self {
+        Self {
+            txs: graph.full_txs().map(|tx_node| tx_node.tx).collect(),
+            txouts: graph
+                .floating_txouts()
+                .map(|(op, txo)| (op, txo.clone()))
+                .collect(),
+            anchors: graph.anchors,
+            seen_ats: graph.last_seen.into_iter().collect(),
+        }
+    }
+}
+
+impl<A: Ord + Clone> From<Update<A>> for TxGraph<A> {
+    fn from(update: Update<A>) -> Self {
+        let mut graph = TxGraph::<A>::default();
+        let _ = graph.apply_update_at(update, None);
+        graph
+    }
+}
+
+impl<A: Ord> Update<A> {
+    /// Extend this update with `other`.
+    pub fn extend(&mut self, other: Update<A>) {
+        self.txs.extend(other.txs);
+        self.txouts.extend(other.txouts);
+        self.anchors.extend(other.anchors);
+        self.seen_ats.extend(other.seen_ats);
+    }
+}
 
 /// A graph of transactions and spends.
 ///
@@ -512,28 +572,66 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// [`apply_changeset`]: Self::apply_changeset
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<A> {
-        let mut update = Self::default();
-        update.txs.insert(
-            outpoint.txid,
-            (
-                TxNodeInternal::Partial([(outpoint.vout, txout)].into()),
-                BTreeSet::new(),
-            ),
-        );
-        self.apply_update(update)
+        let mut changeset = ChangeSet::<A>::default();
+        let (tx_node, _) = self.txs.entry(outpoint.txid).or_default();
+        match tx_node {
+            TxNodeInternal::Whole(_) => {
+                // ignore this txout we have the full one already.
+                // NOTE: You might think putting a debug_assert! here to check the output being
+                // replaced was actually correct is a good idea but the tests have already been
+                // written assuming this never panics.
+            }
+            TxNodeInternal::Partial(partial_tx) => {
+                match partial_tx.insert(outpoint.vout, txout.clone()) {
+                    Some(old_txout) => {
+                        debug_assert_eq!(
+                            txout, old_txout,
+                            "txout of the same outpoint should never change"
+                        );
+                    }
+                    None => {
+                        changeset.txouts.insert(outpoint, txout);
+                    }
+                }
+            }
+        }
+        changeset
     }
 
     /// Inserts the given transaction into [`TxGraph`].
     ///
     /// The [`ChangeSet`] returned will be empty if `tx` already exists.
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A> {
-        let tx = tx.into();
-        let mut update = Self::default();
-        update.txs.insert(
-            tx.compute_txid(),
-            (TxNodeInternal::Whole(tx), BTreeSet::new()),
-        );
-        self.apply_update(update)
+        let tx: Arc<Transaction> = tx.into();
+        let txid = tx.compute_txid();
+        let mut changeset = ChangeSet::<A>::default();
+
+        let (tx_node, _) = self.txs.entry(txid).or_default();
+        match tx_node {
+            TxNodeInternal::Whole(existing_tx) => {
+                debug_assert_eq!(
+                    existing_tx.as_ref(),
+                    tx.as_ref(),
+                    "tx of same txid should never change"
+                );
+            }
+            partial_tx => {
+                for txin in &tx.input {
+                    // this means the tx is coinbase so there is no previous output
+                    if txin.previous_output.is_null() {
+                        continue;
+                    }
+                    self.spends
+                        .entry(txin.previous_output)
+                        .or_default()
+                        .insert(txid);
+                }
+                *partial_tx = TxNodeInternal::Whole(tx.clone());
+                changeset.txs.insert(tx);
+            }
+        }
+
+        changeset
     }
 
     /// Batch insert unconfirmed transactions.
@@ -558,206 +656,112 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The [`ChangeSet`] returned will be empty if graph already knows that `txid` exists in
     /// `anchor`.
     pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> ChangeSet<A> {
-        let mut update = Self::default();
-        update.anchors.insert((anchor, txid));
-        self.apply_update(update)
-    }
-
-    /// Inserts the given `seen_at` for `txid` into [`TxGraph`].
-    ///
-    /// Note that [`TxGraph`] only keeps track of the latest `seen_at`. To batch
-    /// update all unconfirmed transactions with the latest `seen_at`, see
-    /// [`update_last_seen_unconfirmed`].
-    ///
-    /// [`update_last_seen_unconfirmed`]: Self::update_last_seen_unconfirmed
-    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
-        let mut update = Self::default();
-        update.last_seen.insert(txid, seen_at);
-        self.apply_update(update)
-    }
-
-    /// Update the last seen time for all unconfirmed transactions.
-    ///
-    /// This method updates the last seen unconfirmed time for this [`TxGraph`] by inserting
-    /// the given `seen_at` for every transaction not yet anchored to a confirmed block,
-    /// and returns the [`ChangeSet`] after applying all updates to `self`.
-    ///
-    /// This is useful for keeping track of the latest time a transaction was seen
-    /// unconfirmed, which is important for evaluating transaction conflicts in the same
-    /// [`TxGraph`]. For details of how [`TxGraph`] resolves conflicts, see the docs for
-    /// [`try_get_chain_position`].
-    ///
-    /// A normal use of this method is to call it with the current system time. Although
-    /// block headers contain a timestamp, using the header time would be less effective
-    /// at tracking mempool transactions, because it can drift from actual clock time, plus
-    /// we may want to update a transaction's last seen time repeatedly between blocks.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use bdk_chain::example_utils::*;
-    /// # use std::time::UNIX_EPOCH;
-    /// # let tx = tx_from_hex(RAW_TX_1);
-    /// # let mut tx_graph = bdk_chain::TxGraph::<()>::new([tx]);
-    /// let now = std::time::SystemTime::now()
-    ///     .duration_since(UNIX_EPOCH)
-    ///     .expect("valid duration")
-    ///     .as_secs();
-    /// let changeset = tx_graph.update_last_seen_unconfirmed(now);
-    /// assert!(!changeset.last_seen.is_empty());
-    /// ```
-    ///
-    /// Note that [`TxGraph`] only keeps track of the latest `seen_at`, so the given time must
-    /// by strictly greater than what is currently stored for a transaction to have an effect.
-    /// To insert a last seen time for a single txid, see [`insert_seen_at`].
-    ///
-    /// [`insert_seen_at`]: Self::insert_seen_at
-    /// [`try_get_chain_position`]: Self::try_get_chain_position
-    pub fn update_last_seen_unconfirmed(&mut self, seen_at: u64) -> ChangeSet<A> {
-        let mut changeset = ChangeSet::default();
-        let unanchored_txs: Vec<Txid> = self
-            .txs
-            .iter()
-            .filter_map(
-                |(&txid, (_, anchors))| {
-                    if anchors.is_empty() {
-                        Some(txid)
-                    } else {
-                        None
-                    }
-                },
-            )
-            .collect();
-
-        for txid in unanchored_txs {
-            changeset.merge(self.insert_seen_at(txid, seen_at));
+        let mut changeset = ChangeSet::<A>::default();
+        if self.anchors.insert((anchor.clone(), txid)) {
+            let (_tx_node, anchors) = self.txs.entry(txid).or_default();
+            let _inserted = anchors.insert(anchor.clone());
+            debug_assert!(
+                _inserted,
+                "anchors in `.anchors` and `.txs` should be consistent"
+            );
+            changeset.anchors.insert((anchor, txid));
         }
         changeset
     }
 
-    /// Extends this graph with another so that `self` becomes the union of the two sets of
-    /// transactions.
+    /// Inserts the given `seen_at` for `txid` into [`TxGraph`].
+    ///
+    /// Note that [`TxGraph`] only keeps track of the latest `seen_at`.
+    pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
+        let mut changeset = ChangeSet::<A>::default();
+        let last_seen = self.last_seen.entry(txid).or_default();
+        if seen_at > *last_seen {
+            *last_seen = seen_at;
+            changeset.last_seen.insert(txid, seen_at);
+        }
+        changeset
+    }
+
+    /// Extends this graph with the given `update`.
     ///
     /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions that
     /// exist in `update` but not in `self`).
-    pub fn apply_update(&mut self, update: TxGraph<A>) -> ChangeSet<A> {
-        let changeset = self.determine_changeset(update);
-        self.apply_changeset(changeset.clone());
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+    pub fn apply_update(&mut self, update: Update<A>) -> ChangeSet<A> {
+        use std::time::*;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time must be greater than epoch anchor");
+        self.apply_update_at(update, Some(now.as_secs()))
+    }
+
+    /// Extends this graph with the given `update` alongside an optional `seen_at` timestamp.
+    ///
+    /// `seen_at` represents when the update is seen (in unix seconds). It is used to determine the
+    /// `last_seen`s for all transactions in the update which have no corresponding anchor(s). The
+    /// `last_seen` value is used internally to determine precedence of conflicting unconfirmed
+    /// transactions (where the transaction with the lower `last_seen` value is omitted from the
+    /// canonical history).
+    ///
+    /// Not setting a `seen_at` value means unconfirmed transactions introduced by this update will
+    /// not be part of the canonical history of transactions.
+    ///
+    /// Use [`apply_update`](TxGraph::apply_update) to have the `seen_at` value automatically set
+    /// to the current time.
+    pub fn apply_update_at(&mut self, update: Update<A>, seen_at: Option<u64>) -> ChangeSet<A> {
+        let mut changeset = ChangeSet::<A>::default();
+        let mut unanchored_txs = HashSet::<Txid>::new();
+        for tx in update.txs {
+            if unanchored_txs.insert(tx.compute_txid()) {
+                changeset.merge(self.insert_tx(tx));
+            }
+        }
+        for (outpoint, txout) in update.txouts {
+            changeset.merge(self.insert_txout(outpoint, txout));
+        }
+        for (anchor, txid) in update.anchors {
+            unanchored_txs.remove(&txid);
+            changeset.merge(self.insert_anchor(txid, anchor));
+        }
+        for (txid, seen_at) in update.seen_ats {
+            changeset.merge(self.insert_seen_at(txid, seen_at));
+        }
+        if let Some(seen_at) = seen_at {
+            for txid in unanchored_txs {
+                changeset.merge(self.insert_seen_at(txid, seen_at));
+            }
+        }
         changeset
     }
 
     /// Determines the [`ChangeSet`] between `self` and an empty [`TxGraph`].
     pub fn initial_changeset(&self) -> ChangeSet<A> {
-        Self::default().determine_changeset(self.clone())
+        ChangeSet {
+            txs: self.full_txs().map(|tx_node| tx_node.tx).collect(),
+            txouts: self
+                .floating_txouts()
+                .map(|(op, txout)| (op, txout.clone()))
+                .collect(),
+            anchors: self.anchors.clone(),
+            last_seen: self.last_seen.iter().map(|(&k, &v)| (k, v)).collect(),
+        }
     }
 
     /// Applies [`ChangeSet`] to [`TxGraph`].
     pub fn apply_changeset(&mut self, changeset: ChangeSet<A>) {
-        for wrapped_tx in changeset.txs {
-            let tx = wrapped_tx.as_ref();
-            let txid = tx.compute_txid();
-
-            tx.input
-                .iter()
-                .map(|txin| txin.previous_output)
-                // coinbase spends are not to be counted
-                .filter(|outpoint| !outpoint.is_null())
-                // record spend as this tx has spent this outpoint
-                .for_each(|outpoint| {
-                    self.spends.entry(outpoint).or_default().insert(txid);
-                });
-
-            match self.txs.get_mut(&txid) {
-                Some((tx_node @ TxNodeInternal::Partial(_), _)) => {
-                    *tx_node = TxNodeInternal::Whole(wrapped_tx.clone());
-                }
-                Some((TxNodeInternal::Whole(tx), _)) => {
-                    debug_assert_eq!(
-                        tx.as_ref().compute_txid(),
-                        txid,
-                        "tx should produce txid that is same as key"
-                    );
-                }
-                None => {
-                    self.txs
-                        .insert(txid, (TxNodeInternal::Whole(wrapped_tx), BTreeSet::new()));
-                }
-            }
+        for tx in changeset.txs {
+            let _ = self.insert_tx(tx);
         }
-
         for (outpoint, txout) in changeset.txouts {
-            let tx_entry = self.txs.entry(outpoint.txid).or_default();
-
-            match tx_entry {
-                (TxNodeInternal::Whole(_), _) => { /* do nothing since we already have full tx */ }
-                (TxNodeInternal::Partial(txouts), _) => {
-                    txouts.insert(outpoint.vout, txout);
-                }
-            }
+            let _ = self.insert_txout(outpoint, txout);
         }
-
         for (anchor, txid) in changeset.anchors {
-            if self.anchors.insert((anchor.clone(), txid)) {
-                let (_, anchors) = self.txs.entry(txid).or_default();
-                anchors.insert(anchor);
-            }
+            let _ = self.insert_anchor(txid, anchor);
         }
-
-        for (txid, new_last_seen) in changeset.last_seen {
-            let last_seen = self.last_seen.entry(txid).or_default();
-            if new_last_seen > *last_seen {
-                *last_seen = new_last_seen;
-            }
+        for (txid, seen_at) in changeset.last_seen {
+            let _ = self.insert_seen_at(txid, seen_at);
         }
-    }
-
-    /// Previews the resultant [`ChangeSet`] when [`Self`] is updated against the `update` graph.
-    ///
-    /// The [`ChangeSet`] would be the set difference between `update` and `self` (transactions that
-    /// exist in `update` but not in `self`).
-    pub(crate) fn determine_changeset(&self, update: TxGraph<A>) -> ChangeSet<A> {
-        let mut changeset = ChangeSet::<A>::default();
-
-        for (&txid, (update_tx_node, _)) in &update.txs {
-            match (self.txs.get(&txid), update_tx_node) {
-                (None, TxNodeInternal::Whole(update_tx)) => {
-                    changeset.txs.insert(update_tx.clone());
-                }
-                (None, TxNodeInternal::Partial(update_txos)) => {
-                    changeset.txouts.extend(
-                        update_txos
-                            .iter()
-                            .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
-                    );
-                }
-                (Some((TxNodeInternal::Whole(_), _)), _) => {}
-                (Some((TxNodeInternal::Partial(_), _)), TxNodeInternal::Whole(update_tx)) => {
-                    changeset.txs.insert(update_tx.clone());
-                }
-                (
-                    Some((TxNodeInternal::Partial(txos), _)),
-                    TxNodeInternal::Partial(update_txos),
-                ) => {
-                    changeset.txouts.extend(
-                        update_txos
-                            .iter()
-                            .filter(|(vout, _)| !txos.contains_key(*vout))
-                            .map(|(&vout, txo)| (OutPoint::new(txid, vout), txo.clone())),
-                    );
-                }
-            }
-        }
-
-        for (txid, update_last_seen) in update.last_seen {
-            let prev_last_seen = self.last_seen.get(&txid).copied();
-            if Some(update_last_seen) > prev_last_seen {
-                changeset.last_seen.insert(txid, update_last_seen);
-            }
-        }
-
-        changeset.anchors = update.anchors.difference(&self.anchors).cloned().collect();
-
-        changeset
     }
 }
 

@@ -64,10 +64,7 @@ fn main() -> Result<(), anyhow::Error> {
         }
     });
 
-    let mut update = client.full_scan(request, STOP_GAP, BATCH_SIZE, false)?;
-
-    let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = update.graph_update.update_last_seen_unconfirmed(now);
+    let update = client.full_scan(request, STOP_GAP, BATCH_SIZE, false)?;
 
     println!();
 

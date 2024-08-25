@@ -57,11 +57,9 @@ async fn main() -> Result<(), anyhow::Error> {
         }
     });
 
-    let mut update = client
+    let update = client
         .full_scan(request, STOP_GAP, PARALLEL_REQUESTS)
         .await?;
-    let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-    let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
     wallet.apply_update(update)?;
     wallet.persist(&mut conn)?;

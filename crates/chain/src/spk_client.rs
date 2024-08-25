@@ -3,7 +3,7 @@ use crate::{
     alloc::{boxed::Box, collections::VecDeque, vec::Vec},
     collections::BTreeMap,
     local_chain::CheckPoint,
-    ConfirmationBlockTime, Indexed, TxGraph,
+    ConfirmationBlockTime, Indexed,
 };
 use bitcoin::{OutPoint, Script, ScriptBuf, Txid};
 
@@ -345,8 +345,8 @@ impl<I> SyncRequest<I> {
 #[must_use]
 #[derive(Debug)]
 pub struct SyncResult<A = ConfirmationBlockTime> {
-    /// The update to apply to the receiving [`TxGraph`].
-    pub graph_update: TxGraph<A>,
+    /// The update to apply to the receiving [`TxGraph`](crate::tx_graph::TxGraph).
+    pub graph_update: crate::tx_graph::Update<A>,
     /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
     pub chain_update: Option<CheckPoint>,
 }
@@ -497,8 +497,8 @@ impl<K: Ord + Clone> FullScanRequest<K> {
 #[derive(Debug)]
 pub struct FullScanResult<K, A = ConfirmationBlockTime> {
     /// The update to apply to the receiving [`LocalChain`](crate::local_chain::LocalChain).
-    pub graph_update: TxGraph<A>,
-    /// The update to apply to the receiving [`TxGraph`].
+    pub graph_update: crate::tx_graph::Update<A>,
+    /// The update to apply to the receiving [`TxGraph`](crate::tx_graph::TxGraph).
     pub chain_update: Option<CheckPoint>,
     /// Last active indices for the corresponding keychains (`K`).
     pub last_active_indices: BTreeMap<K, u32>,

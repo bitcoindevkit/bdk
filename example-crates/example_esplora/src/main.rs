@@ -166,13 +166,9 @@ fn main() -> anyhow::Result<()> {
             // is reached. It returns a `TxGraph` update (`graph_update`) and a structure that
             // represents the last active spk derivation indices of keychains
             // (`keychain_indices_update`).
-            let mut update = client
+            let update = client
                 .full_scan(request, *stop_gap, scan_options.parallel_requests)
                 .context("scanning for transactions")?;
-
-            // We want to keep track of the latest time a transaction was seen unconfirmed.
-            let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-            let _ = update.graph_update.update_last_seen_unconfirmed(now);
 
             let mut graph = graph.lock().expect("mutex must not be poisoned");
             let mut chain = chain.lock().expect("mutex must not be poisoned");
@@ -265,11 +261,7 @@ fn main() -> anyhow::Result<()> {
                 }
             }
 
-            let mut update = client.sync(request, scan_options.parallel_requests)?;
-
-            // Update last seen unconfirmed
-            let now = std::time::UNIX_EPOCH.elapsed().unwrap().as_secs();
-            let _ = update.graph_update.update_last_seen_unconfirmed(now);
+            let update = client.sync(request, scan_options.parallel_requests)?;
 
             (
                 chain

@@ -132,7 +132,7 @@ pub struct Update {
     pub last_active_indices: BTreeMap<KeychainKind, u32>,
 
     /// Update for the wallet's internal [`TxGraph`].
-    pub graph: TxGraph<ConfirmationBlockTime>,
+    pub graph: chain::tx_graph::Update<ConfirmationBlockTime>,
 
     /// Update for the wallet's internal [`LocalChain`].
     ///
@@ -2277,7 +2277,34 @@ impl Wallet {
     /// to persist staged wallet changes see [`Wallet::reveal_next_address`]. `
     ///
     /// [`commit`]: Self::commit
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn apply_update(&mut self, update: impl Into<Update>) -> Result<(), CannotConnectError> {
+        use std::time::*;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time now must surpass epoch anchor");
+        self.apply_update_at(update, Some(now.as_secs()))
+    }
+
+    /// Applies an `update` alongside an optional `seen_at` timestamp and stages the changes.
+    ///
+    /// `seen_at` represents when the update is seen (in unix seconds). It is used to determine the
+    /// `last_seen`s for all transactions in the update which have no corresponding anchor(s). The
+    /// `last_seen` value is used internally to determine precedence of conflicting unconfirmed
+    /// transactions (where the transaction with the lower `last_seen` value is omitted from the
+    /// canonical history).
+    ///
+    /// Not setting a `seen_at` value means unconfirmed transactions introduced by this update will
+    /// not be part of the canonical history of transactions.
+    ///
+    /// Use [`apply_update`](Wallet::apply_update) to have the `seen_at` value automatically set to
+    /// the current time.
+    pub fn apply_update_at(
+        &mut self,
+        update: impl Into<Update>,
+        seen_at: Option<u64>,
+    ) -> Result<(), CannotConnectError> {
         let update = update.into();
         let mut changeset = match update.chain {
             Some(chain_update) => ChangeSet::from(self.chain.apply_update(chain_update)?),
@@ -2289,7 +2316,11 @@ impl Wallet {
             .index
             .reveal_to_target_multi(&update.last_active_indices);
         changeset.merge(index_changeset.into());
-        changeset.merge(self.indexed_graph.apply_update(update.graph).into());
+        changeset.merge(
+            self.indexed_graph
+                .apply_update_at(update.graph, seen_at)
+                .into(),
+        );
         self.stage.merge(changeset);
         Ok(())
     }
@@ -2562,7 +2593,7 @@ macro_rules! floating_rate {
 macro_rules! doctest_wallet {
     () => {{
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
-        use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph};
+        use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph, tx_graph};
         use $crate::{Update, KeychainKind, Wallet};
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
@@ -2590,9 +2621,13 @@ macro_rules! doctest_wallet {
             confirmation_time: 50_000,
             block_id,
         };
-        let mut graph = TxGraph::default();
-        let _ = graph.insert_anchor(txid, anchor);
-        let update = Update { graph, ..Default::default() };
+        let update = Update {
+            graph: tx_graph::Update {
+                anchors: [(anchor, txid)].into_iter().collect(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         wallet.apply_update(update).unwrap();
         wallet
     }}

@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use bdk_chain::COINBASE_MATURITY;
+use bdk_chain::{tx_graph, COINBASE_MATURITY};
 use bdk_chain::{BlockId, ConfirmationTime};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
@@ -81,11 +81,12 @@ fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
 
 fn insert_seen_at(wallet: &mut Wallet, txid: Txid, seen_at: u64) {
     use bdk_wallet::Update;
-    let mut graph = bdk_chain::TxGraph::default();
-    let _ = graph.insert_seen_at(txid, seen_at);
     wallet
         .apply_update(Update {
-            graph,
+            graph: tx_graph::Update {
+                seen_ats: [(txid, seen_at)].into_iter().collect(),
+                ..Default::default()
+            },
             ..Default::default()
         })
         .unwrap();
