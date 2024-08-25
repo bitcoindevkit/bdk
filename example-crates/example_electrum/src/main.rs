@@ -136,7 +136,7 @@ fn main() -> anyhow::Result<()> {
             .map(|tx_node| tx_node.tx),
     );
 
-    let (chain_update, graph_update, keychain_update) = match electrum_cmd.clone() {
+    let (chain_update, tx_update, keychain_update) = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
             stop_gap,
             scan_options,
@@ -182,7 +182,7 @@ fn main() -> anyhow::Result<()> {
                 .context("scanning the blockchain")?;
             (
                 res.chain_update,
-                res.graph_update,
+                res.tx_update,
                 Some(res.last_active_indices),
             )
         }
@@ -251,7 +251,7 @@ fn main() -> anyhow::Result<()> {
             // drop lock on graph and chain
             drop((graph, chain));
 
-            (res.chain_update, res.graph_update, None)
+            (res.chain_update, res.tx_update, None)
         }
     };
 
@@ -267,7 +267,7 @@ fn main() -> anyhow::Result<()> {
             let keychain_changeset = graph.index.reveal_to_target_multi(&keychain_update);
             indexed_tx_graph_changeset.merge(keychain_changeset.into());
         }
-        indexed_tx_graph_changeset.merge(graph.apply_update(graph_update));
+        indexed_tx_graph_changeset.merge(graph.apply_update(tx_update));
 
         ChangeSet {
             local_chain: chain_changeset,

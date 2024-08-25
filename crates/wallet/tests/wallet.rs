@@ -83,7 +83,7 @@ fn insert_seen_at(wallet: &mut Wallet, txid: Txid, seen_at: u64) {
     use bdk_wallet::Update;
     wallet
         .apply_update(Update {
-            graph: tx_graph::Update {
+            tx_update: tx_graph::TxUpdate {
                 seen_ats: [(txid, seen_at)].into_iter().collect(),
                 ..Default::default()
             },

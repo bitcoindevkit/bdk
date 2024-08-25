@@ -90,10 +90,10 @@ where
 
     /// Apply an `update` directly.
     ///
-    /// `update` is a [`tx_graph::Update<A>`] and the resultant changes is returned as [`ChangeSet`].
+    /// `update` is a [`tx_graph::TxUpdate<A>`] and the resultant changes is returned as [`ChangeSet`].
     #[cfg(feature = "std")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn apply_update(&mut self, update: tx_graph::Update<A>) -> ChangeSet<A, I::ChangeSet> {
+    pub fn apply_update(&mut self, update: tx_graph::TxUpdate<A>) -> ChangeSet<A, I::ChangeSet> {
         let tx_graph = self.graph.apply_update(update);
         let indexer = self.index_tx_graph_changeset(&tx_graph);
         ChangeSet { tx_graph, indexer }
@@ -114,7 +114,7 @@ where
     /// set to the current time.
     pub fn apply_update_at(
         &mut self,
-        update: tx_graph::Update<A>,
+        update: tx_graph::TxUpdate<A>,
         seen_at: Option<u64>,
     ) -> ChangeSet<A, I::ChangeSet> {
         let tx_graph = self.graph.apply_update_at(update, seen_at);

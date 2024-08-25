@@ -78,7 +78,7 @@
 //! # let tx_b = tx_from_hex(RAW_TX_2);
 //! let mut graph: TxGraph = TxGraph::default();
 //!
-//! let mut update = tx_graph::Update::default();
+//! let mut update = tx_graph::TxUpdate::default();
 //! update.txs.push(Arc::new(tx_a));
 //! update.txs.push(Arc::new(tx_b));
 //!
@@ -98,7 +98,7 @@ use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-pub use bdk_core::tx_graph::Update;
+pub use bdk_core::TxUpdate;
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::{
@@ -106,7 +106,7 @@ use core::{
     ops::{Deref, RangeInclusive},
 };
 
-impl<A> From<TxGraph<A>> for Update<A> {
+impl<A> From<TxGraph<A>> for TxUpdate<A> {
     fn from(graph: TxGraph<A>) -> Self {
         Self {
             txs: graph.full_txs().map(|tx_node| tx_node.tx).collect(),
@@ -120,8 +120,8 @@ impl<A> From<TxGraph<A>> for Update<A> {
     }
 }
 
-impl<A: Ord + Clone> From<Update<A>> for TxGraph<A> {
-    fn from(update: Update<A>) -> Self {
+impl<A: Ord + Clone> From<TxUpdate<A>> for TxGraph<A> {
+    fn from(update: TxUpdate<A>) -> Self {
         let mut graph = TxGraph::<A>::default();
         let _ = graph.apply_update_at(update, None);
         graph
@@ -655,7 +655,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// exist in `update` but not in `self`).
     #[cfg(feature = "std")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn apply_update(&mut self, update: Update<A>) -> ChangeSet<A> {
+    pub fn apply_update(&mut self, update: TxUpdate<A>) -> ChangeSet<A> {
         use std::time::*;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -676,7 +676,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// Use [`apply_update`](TxGraph::apply_update) to have the `seen_at` value automatically set
     /// to the current time.
-    pub fn apply_update_at(&mut self, update: Update<A>, seen_at: Option<u64>) -> ChangeSet<A> {
+    pub fn apply_update_at(&mut self, update: TxUpdate<A>, seen_at: Option<u64>) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         let mut unanchored_txs = HashSet::<Txid>::new();
         for tx in update.txs {

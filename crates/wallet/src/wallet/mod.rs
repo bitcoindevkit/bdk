@@ -33,7 +33,7 @@ use bdk_chain::{
         FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
         SyncResult,
     },
-    tx_graph::{CanonicalTx, TxGraph, TxNode},
+    tx_graph::{CanonicalTx, TxGraph, TxNode, TxUpdate},
     BlockId, ChainPosition, ConfirmationBlockTime, ConfirmationTime, DescriptorExt, FullTxOut,
     Indexed, IndexedTxGraph, Merge,
 };
@@ -132,7 +132,7 @@ pub struct Update {
     pub last_active_indices: BTreeMap<KeychainKind, u32>,
 
     /// Update for the wallet's internal [`TxGraph`].
-    pub graph: chain::tx_graph::Update<ConfirmationBlockTime>,
+    pub tx_update: TxUpdate<ConfirmationBlockTime>,
 
     /// Update for the wallet's internal [`LocalChain`].
     ///
@@ -144,7 +144,7 @@ impl From<FullScanResult<KeychainKind>> for Update {
     fn from(value: FullScanResult<KeychainKind>) -> Self {
         Self {
             last_active_indices: value.last_active_indices,
-            graph: value.graph_update,
+            tx_update: value.tx_update,
             chain: value.chain_update,
         }
     }
@@ -154,7 +154,7 @@ impl From<SyncResult> for Update {
     fn from(value: SyncResult) -> Self {
         Self {
             last_active_indices: BTreeMap::new(),
-            graph: value.graph_update,
+            tx_update: value.tx_update,
             chain: value.chain_update,
         }
     }
@@ -2318,7 +2318,7 @@ impl Wallet {
         changeset.merge(index_changeset.into());
         changeset.merge(
             self.indexed_graph
-                .apply_update_at(update.graph, seen_at)
+                .apply_update_at(update.tx_update, seen_at)
                 .into(),
         );
         self.stage.merge(changeset);
@@ -2624,7 +2624,7 @@ macro_rules! doctest_wallet {
             block_id,
         };
         let update = Update {
-            graph: tx_graph::Update {
+            tx_update: tx_graph::TxUpdate {
                 anchors: [(anchor, txid)].into_iter().collect(),
                 ..Default::default()
             },

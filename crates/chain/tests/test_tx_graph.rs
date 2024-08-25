@@ -88,7 +88,7 @@ fn insert_txouts() {
 
     // Make the update graph
     let update = {
-        let mut update = tx_graph::Update::default();
+        let mut update = tx_graph::TxUpdate::default();
         for (outpoint, txout) in &update_ops {
             // Insert partials transactions.
             update.txouts.insert(*outpoint, txout.clone());
@@ -1137,12 +1137,12 @@ fn call_map_anchors_with_non_deterministic_anchor() {
     );
 }
 
-/// Tests `From` impls for conversion between [`TxGraph`] and [`tx_graph::Update`].
+/// Tests `From` impls for conversion between [`TxGraph`] and [`tx_graph::TxUpdate`].
 #[test]
 fn tx_graph_update_conversion() {
-    use tx_graph::Update;
+    use tx_graph::TxUpdate;
 
-    type TestCase = (&'static str, Update<ConfirmationBlockTime>);
+    type TestCase = (&'static str, TxUpdate<ConfirmationBlockTime>);
 
     fn make_tx(v: i32) -> Transaction {
         Transaction {
@@ -1161,24 +1161,24 @@ fn tx_graph_update_conversion() {
     }
 
     let test_cases: &[TestCase] = &[
-        ("empty_update", Update::default()),
+        ("empty_update", TxUpdate::default()),
         (
             "single_tx",
-            Update {
+            TxUpdate {
                 txs: vec![make_tx(0).into()],
                 ..Default::default()
             },
         ),
         (
             "two_txs",
-            Update {
+            TxUpdate {
                 txs: vec![make_tx(0).into(), make_tx(1).into()],
                 ..Default::default()
             },
         ),
         (
             "with_floating_txouts",
-            Update {
+            TxUpdate {
                 txs: vec![make_tx(0).into(), make_tx(1).into()],
                 txouts: [
                     (OutPoint::new(h!("a"), 0), make_txout(0)),
@@ -1191,7 +1191,7 @@ fn tx_graph_update_conversion() {
         ),
         (
             "with_anchors",
-            Update {
+            TxUpdate {
                 txs: vec![make_tx(0).into(), make_tx(1).into()],
                 txouts: [
                     (OutPoint::new(h!("a"), 0), make_txout(0)),
@@ -1209,7 +1209,7 @@ fn tx_graph_update_conversion() {
         ),
         (
             "with_seen_ats",
-            Update {
+            TxUpdate {
                 txs: vec![make_tx(0).into(), make_tx(1).into()],
                 txouts: [
                     (OutPoint::new(h!("a"), 0), make_txout(0)),
@@ -1230,7 +1230,7 @@ fn tx_graph_update_conversion() {
     for (test_name, update) in test_cases {
         let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
         let _ = tx_graph.apply_update_at(update.clone(), None);
-        let update_from_tx_graph: Update<ConfirmationBlockTime> = tx_graph.into();
+        let update_from_tx_graph: TxUpdate<ConfirmationBlockTime> = tx_graph.into();
 
         assert_eq!(
             update

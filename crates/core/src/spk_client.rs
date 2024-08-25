@@ -323,18 +323,16 @@ impl<I> SyncRequest<I> {
 #[must_use]
 #[derive(Debug)]
 pub struct SyncResult<A = ConfirmationBlockTime> {
-    /// The update to apply to the receiving
-    /// [`TxGraph`](../../bdk_chain/tx_graph/struct.TxGraph.html).
-    pub graph_update: crate::tx_graph::Update<A>,
-    /// The update to apply to the receiving
-    /// [`LocalChain`](../../bdk_chain/local_chain/struct.LocalChain.html).
+    /// Relevant transaction data discovered during the scan.
+    pub tx_update: crate::TxUpdate<A>,
+    /// Changes to the chain discovered during the scan.
     pub chain_update: Option<CheckPoint>,
 }
 
 impl<A> Default for SyncResult<A> {
     fn default() -> Self {
         Self {
-            graph_update: Default::default(),
+            tx_update: Default::default(),
             chain_update: Default::default(),
         }
     }
@@ -462,19 +460,19 @@ impl<K: Ord + Clone> FullScanRequest<K> {
 #[must_use]
 #[derive(Debug)]
 pub struct FullScanResult<K, A = ConfirmationBlockTime> {
-    /// The update to apply to the receiving
-    /// [`LocalChain`](../../bdk_chain/local_chain/struct.LocalChain.html).
-    pub graph_update: crate::tx_graph::Update<A>,
-    /// The update to apply to the receiving [`TxGraph`](../../bdk_chain/tx_graph/struct.TxGraph.html).
-    pub chain_update: Option<CheckPoint>,
-    /// Last active indices for the corresponding keychains (`K`).
+    /// Relevant transaction data discovered during the scan.
+    pub tx_update: crate::TxUpdate<A>,
+    /// Last active indices for the corresponding keychains (`K`). An index is active if it had a
+    /// transaction associated with the script pubkey at that index.
     pub last_active_indices: BTreeMap<K, u32>,
+    /// Changes to the chain discovered during the scan.
+    pub chain_update: Option<CheckPoint>,
 }
 
 impl<K, A> Default for FullScanResult<K, A> {
     fn default() -> Self {
         Self {
-            graph_update: Default::default(),
+            tx_update: Default::default(),
             chain_update: Default::default(),
             last_active_indices: Default::default(),
         }

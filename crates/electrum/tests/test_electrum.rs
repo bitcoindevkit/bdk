@@ -49,7 +49,7 @@ where
             .apply_update(chain_update)
             .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
     }
-    let _ = graph.apply_update(update.graph_update.clone());
+    let _ = graph.apply_update(update.tx_update.clone());
 
     Ok(update)
 }
@@ -120,15 +120,15 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         "update should not alter original checkpoint tip since we already started with all checkpoints",
     );
 
-    let graph_update = sync_update.graph_update;
+    let tx_update = sync_update.tx_update;
     let updated_graph = {
         let mut graph = TxGraph::<ConfirmationBlockTime>::default();
-        let _ = graph.apply_update(graph_update.clone());
+        let _ = graph.apply_update(tx_update.clone());
         graph
     };
     // Check to see if we have the floating txouts available from our two created transactions'
     // previous outputs in order to calculate transaction fees.
-    for tx in &graph_update.txs {
+    for tx in &tx_update.txs {
         // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
         // floating txouts available from the transactions' previous outputs.
         let fee = updated_graph.calculate_fee(tx).expect("Fee must exist");
@@ -150,7 +150,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     }
 
     assert_eq!(
-        graph_update
+        tx_update
             .txs
             .iter()
             .map(|tx| tx.compute_txid())
@@ -217,7 +217,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 3, 1, false)?
     };
-    assert!(full_scan_update.graph_update.txs.is_empty());
+    assert!(full_scan_update.tx_update.txs.is_empty());
     assert!(full_scan_update.last_active_indices.is_empty());
     let full_scan_update = {
         let request = FullScanRequest::builder()
@@ -227,7 +227,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     };
     assert_eq!(
         full_scan_update
-            .graph_update
+            .tx_update
             .txs
             .first()
             .unwrap()
@@ -259,7 +259,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         client.full_scan(request, 5, 1, false)?
     };
     let txs: HashSet<_> = full_scan_update
-        .graph_update
+        .tx_update
         .txs
         .iter()
         .map(|tx| tx.compute_txid())
@@ -274,7 +274,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         client.full_scan(request, 6, 1, false)?
     };
     let txs: HashSet<_> = full_scan_update
-        .graph_update
+        .tx_update
         .txs
         .iter()
         .map(|tx| tx.compute_txid())
@@ -478,7 +478,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     )?;
 
     // Retain a snapshot of all anchors before reorg process.
-    let initial_anchors = update.graph_update.anchors.clone();
+    let initial_anchors = update.tx_update.anchors.clone();
     assert_eq!(initial_anchors.len(), REORG_COUNT);
     for i in 0..REORG_COUNT {
         let (anchor, txid) = initial_anchors.iter().nth(i).unwrap();
@@ -509,7 +509,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         )?;
 
         // Check that no new anchors are added during current reorg.
-        assert!(initial_anchors.is_superset(&update.graph_update.anchors));
+        assert!(initial_anchors.is_superset(&update.tx_update.anchors));
 
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,

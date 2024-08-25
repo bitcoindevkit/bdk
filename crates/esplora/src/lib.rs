@@ -21,7 +21,7 @@
 //! [`esplora_client::AsyncClient`].
 
 use bdk_core::bitcoin::{Amount, OutPoint, TxOut, Txid};
-use bdk_core::{tx_graph, BlockId, ConfirmationBlockTime};
+use bdk_core::{BlockId, ConfirmationBlockTime, TxUpdate};
 use esplora_client::TxStatus;
 
 pub use esplora_client;
@@ -37,7 +37,7 @@ mod async_ext;
 pub use async_ext::*;
 
 fn insert_anchor_from_status(
-    update: &mut tx_graph::Update<ConfirmationBlockTime>,
+    update: &mut TxUpdate<ConfirmationBlockTime>,
     txid: Txid,
     status: TxStatus,
 ) {
@@ -59,7 +59,7 @@ fn insert_anchor_from_status(
 /// Inserts floating txouts into `tx_graph` using [`Vin`](esplora_client::api::Vin)s returned by
 /// Esplora.
 fn insert_prevouts(
-    update: &mut tx_graph::Update<ConfirmationBlockTime>,
+    update: &mut TxUpdate<ConfirmationBlockTime>,
     esplora_inputs: impl IntoIterator<Item = esplora_client::api::Vin>,
 ) {
     let prevouts = esplora_inputs

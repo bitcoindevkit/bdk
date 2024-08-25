@@ -255,7 +255,7 @@ mod test {
         };
         wallet
             .apply_update(Update {
-                graph: tx_graph::Update {
+                tx_update: tx_graph::TxUpdate {
                     anchors: [(anchor, txid)].into_iter().collect(),
                     ..Default::default()
                 },
