@@ -6,6 +6,7 @@ use std::{
 
 use bdk_chain::{
     bitcoin::Network,
+    keychain_txout::FullScanRequestBuilderExt,
     spk_client::{FullScanRequest, SyncRequest},
     Merge,
 };
@@ -163,7 +164,7 @@ fn main() -> anyhow::Result<()> {
             };
 
             // The client scans keychain spks for transaction histories, stopping after `stop_gap`
-            // is reached. It returns a `TxGraph` update (`graph_update`) and a structure that
+            // is reached. It returns a `TxGraph` update (`tx_update`) and a structure that
             // represents the last active spk derivation indices of keychains
             // (`keychain_indices_update`).
             let update = client
@@ -182,7 +183,7 @@ fn main() -> anyhow::Result<()> {
                     let index_changeset = graph
                         .index
                         .reveal_to_target_multi(&update.last_active_indices);
-                    let mut indexed_tx_graph_changeset = graph.apply_update(update.graph_update);
+                    let mut indexed_tx_graph_changeset = graph.apply_update(update.tx_update);
                     indexed_tx_graph_changeset.merge(index_changeset.into());
                     indexed_tx_graph_changeset
                 },
@@ -268,7 +269,7 @@ fn main() -> anyhow::Result<()> {
                     .lock()
                     .unwrap()
                     .apply_update(update.chain_update.expect("request has chain tip"))?,
-                graph.lock().unwrap().apply_update(update.graph_update),
+                graph.lock().unwrap().apply_update(update.tx_update),
             )
         }
     };

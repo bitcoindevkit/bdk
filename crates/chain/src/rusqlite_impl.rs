@@ -157,15 +157,15 @@ impl ToSql for Impl<bitcoin::Amount> {
     }
 }
 
-impl<A: Anchor + serde::de::DeserializeOwned> FromSql for Impl<A> {
+impl<A: Anchor + serde::de::DeserializeOwned> FromSql for AnchorImpl<A> {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         serde_json::from_str(value.as_str()?)
-            .map(Impl)
+            .map(AnchorImpl)
             .map_err(from_sql_error)
     }
 }
 
-impl<A: Anchor + serde::Serialize> ToSql for Impl<A> {
+impl<A: Anchor + serde::Serialize> ToSql for AnchorImpl<A> {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         serde_json::to_string(&self.0)
             .map(Into::into)
@@ -319,12 +319,12 @@ where
         ))?;
         let row_iter = statement.query_map([], |row| {
             Ok((
-                row.get::<_, Impl<A>>("json(anchor)")?,
+                row.get::<_, AnchorImpl<A>>("json(anchor)")?,
                 row.get::<_, Impl<bitcoin::Txid>>("txid")?,
             ))
         })?;
         for row in row_iter {
-            let (Impl(anchor), Impl(txid)) = row?;
+            let (AnchorImpl(anchor), Impl(txid)) = row?;
             changeset.anchors.insert((anchor, txid));
         }
 
@@ -381,7 +381,7 @@ where
                 ":txid": Impl(*txid),
                 ":block_height": anchor_block.height,
                 ":block_hash": Impl(anchor_block.hash),
-                ":anchor": Impl(anchor.clone()),
+                ":anchor": AnchorImpl(anchor.clone()),
             })?;
         }
 

@@ -10,11 +10,12 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.17.0" }
+bdk_core = { path = "../core", version = "0.1" }
 electrum-client = { version = "0.21", features = ["proxy"], default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", default-features = false }
+bdk_chain = { path = "../chain", version = "0.17.0" }
 
 [features]
 default = ["use-rustls"]

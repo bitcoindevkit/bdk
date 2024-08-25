@@ -78,15 +78,15 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         "update should not alter original checkpoint tip since we already started with all checkpoints",
     );
 
-    let graph_update = sync_update.graph_update;
+    let tx_update = sync_update.tx_update;
     let updated_graph = {
         let mut graph = TxGraph::<ConfirmationBlockTime>::default();
-        let _ = graph.apply_update(graph_update.clone());
+        let _ = graph.apply_update(tx_update.clone());
         graph
     };
     // Check to see if we have the floating txouts available from our two created transactions'
     // previous outputs in order to calculate transaction fees.
-    for tx in &graph_update.txs {
+    for tx in &tx_update.txs {
         // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
         // floating txouts available from the transactions' previous outputs.
         let fee = updated_graph.calculate_fee(tx).expect("Fee must exist");
@@ -108,7 +108,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     }
 
     assert_eq!(
-        graph_update
+        tx_update
             .txs
             .iter()
             .map(|tx| tx.compute_txid())
@@ -177,7 +177,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 3, 1)?
     };
-    assert!(full_scan_update.graph_update.txs.is_empty());
+    assert!(full_scan_update.tx_update.txs.is_empty());
     assert!(full_scan_update.last_active_indices.is_empty());
     let full_scan_update = {
         let request = FullScanRequest::builder()
@@ -187,7 +187,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     };
     assert_eq!(
         full_scan_update
-            .graph_update
+            .tx_update
             .txs
             .first()
             .unwrap()
@@ -221,7 +221,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         client.full_scan(request, 5, 1)?
     };
     let txs: HashSet<_> = full_scan_update
-        .graph_update
+        .tx_update
         .txs
         .iter()
         .map(|tx| tx.compute_txid())
@@ -236,7 +236,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         client.full_scan(request, 6, 1)?
     };
     let txs: HashSet<_> = full_scan_update
-        .graph_update
+        .tx_update
         .txs
         .iter()
         .map(|tx| tx.compute_txid())

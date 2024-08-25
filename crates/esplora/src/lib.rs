@@ -19,14 +19,9 @@
 //! Just like how [`EsploraExt`] extends the functionality of an
 //! [`esplora_client::BlockingClient`], [`EsploraAsyncExt`] is the async version which extends
 //! [`esplora_client::AsyncClient`].
-//!
-//! [`TxGraph`]: bdk_chain::tx_graph::TxGraph
-//! [`LocalChain`]: bdk_chain::local_chain::LocalChain
-//! [`ChainOracle`]: bdk_chain::ChainOracle
-//! [`example_esplora`]: https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_esplora
 
-use bdk_chain::bitcoin::{Amount, OutPoint, TxOut, Txid};
-use bdk_chain::{tx_graph, BlockId, ConfirmationBlockTime};
+use bdk_core::bitcoin::{Amount, OutPoint, TxOut, Txid};
+use bdk_core::{BlockId, ConfirmationBlockTime, TxUpdate};
 use esplora_client::TxStatus;
 
 pub use esplora_client;
@@ -42,7 +37,7 @@ mod async_ext;
 pub use async_ext::*;
 
 fn insert_anchor_from_status(
-    update: &mut tx_graph::Update<ConfirmationBlockTime>,
+    update: &mut TxUpdate<ConfirmationBlockTime>,
     txid: Txid,
     status: TxStatus,
 ) {
@@ -64,7 +59,7 @@ fn insert_anchor_from_status(
 /// Inserts floating txouts into `tx_graph` using [`Vin`](esplora_client::api::Vin)s returned by
 /// Esplora.
 fn insert_prevouts(
-    update: &mut tx_graph::Update<ConfirmationBlockTime>,
+    update: &mut TxUpdate<ConfirmationBlockTime>,
     esplora_inputs: impl IntoIterator<Item = esplora_client::api::Vin>,
 ) {
     let prevouts = esplora_inputs

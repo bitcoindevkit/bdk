@@ -4,6 +4,7 @@
 use crate::{
     collections::*,
     miniscript::{Descriptor, DescriptorPublicKey},
+    spk_client::{FullScanRequestBuilder, SyncRequestBuilder},
     spk_iter::BIP32_MAX_INDEX,
     spk_txout::SpkTxOutIndex,
     DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
@@ -873,5 +874,45 @@ impl Merge for ChangeSet {
     /// Returns whether the changeset are empty.
     fn is_empty(&self) -> bool {
         self.last_revealed.is_empty()
+    }
+}
+
+/// Trait to extend [`SyncRequestBuilder`].
+pub trait SyncRequestBuilderExt<K> {
+    /// Add [`Script`](bitcoin::Script)s that are revealed by the `indexer` of the given `spk_range`
+    /// that will be synced against.
+    fn revealed_spks_from_indexer<R>(self, indexer: &KeychainTxOutIndex<K>, spk_range: R) -> Self
+    where
+        R: core::ops::RangeBounds<K>;
+
+    /// Add [`Script`](bitcoin::Script)s that are revealed by the `indexer` but currently unused.
+    fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self;
+}
+
+impl<K: Clone + Ord + core::fmt::Debug> SyncRequestBuilderExt<K> for SyncRequestBuilder<(K, u32)> {
+    fn revealed_spks_from_indexer<R>(self, indexer: &KeychainTxOutIndex<K>, spk_range: R) -> Self
+    where
+        R: core::ops::RangeBounds<K>,
+    {
+        self.spks_with_indexes(indexer.revealed_spks(spk_range))
+    }
+
+    fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self {
+        self.spks_with_indexes(indexer.unused_spks())
+    }
+}
+
+/// Trait to extend [`FullScanRequestBuilder`].
+pub trait FullScanRequestBuilderExt<K> {
+    /// Add spk iterators for each keychain tracked in `indexer`.
+    fn spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self;
+}
+
+impl<K: Clone + Ord + core::fmt::Debug> FullScanRequestBuilderExt<K> for FullScanRequestBuilder<K> {
+    fn spks_from_indexer(mut self, indexer: &KeychainTxOutIndex<K>) -> Self {
+        for (keychain, spks) in indexer.all_unbounded_spk_iters() {
+            self = self.spks_for_keychain(keychain, spks);
+        }
+        self
     }
 }

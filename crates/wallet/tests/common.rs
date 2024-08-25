@@ -220,7 +220,7 @@ pub fn insert_anchor_from_conf(wallet: &mut Wallet, txid: Txid, position: Confir
 
         wallet
             .apply_update(Update {
-                graph: tx_graph::Update {
+                tx_update: tx_graph::TxUpdate {
                     anchors: [(anchor, txid)].into(),
                     ..Default::default()
                 },

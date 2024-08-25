@@ -1,10 +1,8 @@
-use bdk_chain::{
+use bdk_core::{
     bitcoin::{block::Header, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     collections::{BTreeMap, HashMap},
-    local_chain::CheckPoint,
     spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
-    tx_graph::{self, TxGraph},
-    Anchor, BlockId, ConfirmationBlockTime,
+    BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::{
@@ -39,14 +37,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
     /// Inserts transactions into the transaction cache so that the client will not fetch these
     /// transactions.
-    pub fn populate_tx_cache<A>(&self, tx_graph: impl AsRef<TxGraph<A>>) {
-        let txs = tx_graph
-            .as_ref()
-            .full_txs()
-            .map(|tx_node| (tx_node.txid, tx_node.tx));
-
+    pub fn populate_tx_cache(&self, txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>) {
         let mut tx_cache = self.tx_cache.lock().unwrap();
-        for (txid, tx) in txs {
+        for tx in txs {
+            let tx = tx.into();
+            let txid = tx.compute_txid();
             tx_cache.insert(txid, tx);
         }
     }
@@ -121,9 +116,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ///                        [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not
     ///                        present in the transaction graph.
     ///
-    /// [`CalculateFeeError::MissingTxOut`]: bdk_chain::tx_graph::CalculateFeeError::MissingTxOut
-    /// [`Wallet.calculate_fee`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee
-    /// [`Wallet.calculate_fee_rate`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
+    /// [`bdk_chain`]: ../bdk_chain/index.html
+    /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
+    /// [`Wallet.calculate_fee`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee
+    /// [`Wallet.calculate_fee_rate`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
     pub fn full_scan<K: Ord + Clone>(
         &self,
         request: impl Into<FullScanRequest<K>>,
@@ -138,12 +134,12 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             None => None,
         };
 
-        let mut graph_update = tx_graph::Update::<ConfirmationBlockTime>::default();
+        let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         let mut last_active_indices = BTreeMap::<K, u32>::default();
         for keychain in request.keychains() {
             let spks = request.iter_spks(keychain.clone());
             if let Some(last_active_index) =
-                self.populate_with_spks(&mut graph_update, spks, stop_gap, batch_size)?
+                self.populate_with_spks(&mut tx_update, spks, stop_gap, batch_size)?
             {
                 last_active_indices.insert(keychain, last_active_index);
             }
@@ -151,20 +147,20 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
-            self.fetch_prev_txout(&mut graph_update)?;
+            self.fetch_prev_txout(&mut tx_update)?;
         }
 
         let chain_update = match tip_and_latest_blocks {
             Some((chain_tip, latest_blocks)) => Some(chain_update(
                 chain_tip,
                 &latest_blocks,
-                graph_update.anchors.iter().cloned(),
+                tx_update.anchors.iter().cloned(),
             )?),
             _ => None,
         };
 
         Ok(FullScanResult {
-            graph_update,
+            tx_update,
             chain_update,
             last_active_indices,
         })
@@ -189,9 +185,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
     ///
     /// [`full_scan`]: Self::full_scan
-    /// [`CalculateFeeError::MissingTxOut`]: bdk_chain::tx_graph::CalculateFeeError::MissingTxOut
-    /// [`Wallet.calculate_fee`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee
-    /// [`Wallet.calculate_fee_rate`]: https://docs.rs/bdk_wallet/latest/bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
+    /// [`bdk_chain`]: ../bdk_chain/index.html
+    /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
+    /// [`Wallet.calculate_fee`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee
+    /// [`Wallet.calculate_fee_rate`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
     pub fn sync<I: 'static>(
         &self,
         request: impl Into<SyncRequest<I>>,
@@ -205,9 +202,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             None => None,
         };
 
-        let mut graph_update = tx_graph::Update::<ConfirmationBlockTime>::default();
+        let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         self.populate_with_spks(
-            &mut graph_update,
+            &mut tx_update,
             request
                 .iter_spks()
                 .enumerate()
@@ -215,37 +212,37 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             usize::MAX,
             batch_size,
         )?;
-        self.populate_with_txids(&mut graph_update, request.iter_txids())?;
-        self.populate_with_outpoints(&mut graph_update, request.iter_outpoints())?;
+        self.populate_with_txids(&mut tx_update, request.iter_txids())?;
+        self.populate_with_outpoints(&mut tx_update, request.iter_outpoints())?;
 
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
-            self.fetch_prev_txout(&mut graph_update)?;
+            self.fetch_prev_txout(&mut tx_update)?;
         }
 
         let chain_update = match tip_and_latest_blocks {
             Some((chain_tip, latest_blocks)) => Some(chain_update(
                 chain_tip,
                 &latest_blocks,
-                graph_update.anchors.iter().cloned(),
+                tx_update.anchors.iter().cloned(),
             )?),
             None => None,
         };
 
         Ok(SyncResult {
-            graph_update,
+            tx_update,
             chain_update,
         })
     }
 
-    /// Populate the `graph_update` with transactions/anchors associated with the given `spks`.
+    /// Populate the `tx_update` with transactions/anchors associated with the given `spks`.
     ///
     /// Transactions that contains an output with requested spk, or spends form an output with
-    /// requested spk will be added to `graph_update`. Anchors of the aforementioned transactions are
+    /// requested spk will be added to `tx_update`. Anchors of the aforementioned transactions are
     /// also included.
     fn populate_with_spks(
         &self,
-        graph_update: &mut tx_graph::Update<ConfirmationBlockTime>,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         mut spks: impl Iterator<Item = (u32, ScriptBuf)>,
         stop_gap: usize,
         batch_size: usize,
@@ -278,20 +275,20 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 }
 
                 for tx_res in spk_history {
-                    graph_update.txs.push(self.fetch_tx(tx_res.tx_hash)?);
-                    self.validate_merkle_for_anchor(graph_update, tx_res.tx_hash, tx_res.height)?;
+                    tx_update.txs.push(self.fetch_tx(tx_res.tx_hash)?);
+                    self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, tx_res.height)?;
                 }
             }
         }
     }
 
-    /// Populate the `graph_update` with associated transactions/anchors of `outpoints`.
+    /// Populate the `tx_update` with associated transactions/anchors of `outpoints`.
     ///
     /// Transactions in which the outpoint resides, and transactions that spend from the outpoint are
     /// included. Anchors of the aforementioned transactions are included.
     fn populate_with_outpoints(
         &self,
-        graph_update: &mut tx_graph::Update<ConfirmationBlockTime>,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
     ) -> Result<(), Error> {
         for outpoint in outpoints {
@@ -314,8 +311,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
                 if !has_residing && res.tx_hash == op_txid {
                     has_residing = true;
-                    graph_update.txs.push(Arc::clone(&op_tx));
-                    self.validate_merkle_for_anchor(graph_update, res.tx_hash, res.height)?;
+                    tx_update.txs.push(Arc::clone(&op_tx));
+                    self.validate_merkle_for_anchor(tx_update, res.tx_hash, res.height)?;
                 }
 
                 if !has_spending && res.tx_hash != op_txid {
@@ -328,18 +325,18 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     if !has_spending {
                         continue;
                     }
-                    graph_update.txs.push(Arc::clone(&res_tx));
-                    self.validate_merkle_for_anchor(graph_update, res.tx_hash, res.height)?;
+                    tx_update.txs.push(Arc::clone(&res_tx));
+                    self.validate_merkle_for_anchor(tx_update, res.tx_hash, res.height)?;
                 }
             }
         }
         Ok(())
     }
 
-    /// Populate the `graph_update` with transactions/anchors of the provided `txids`.
+    /// Populate the `tx_update` with transactions/anchors of the provided `txids`.
     fn populate_with_txids(
         &self,
-        graph_update: &mut tx_graph::Update<ConfirmationBlockTime>,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
     ) -> Result<(), Error> {
         for txid in txids {
@@ -363,10 +360,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .into_iter()
                 .find(|r| r.tx_hash == txid)
             {
-                self.validate_merkle_for_anchor(graph_update, txid, r.height)?;
+                self.validate_merkle_for_anchor(tx_update, txid, r.height)?;
             }
 
-            graph_update.txs.push(tx);
+            tx_update.txs.push(tx);
         }
         Ok(())
     }
@@ -375,7 +372,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     // An anchor is inserted if the transaction is validated to be in a confirmed block.
     fn validate_merkle_for_anchor(
         &self,
-        graph_update: &mut tx_graph::Update<ConfirmationBlockTime>,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txid: Txid,
         confirmation_height: i32,
     ) -> Result<(), Error> {
@@ -402,7 +399,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             }
 
             if is_confirmed_tx {
-                graph_update.anchors.insert((
+                tx_update.anchors.insert((
                     ConfirmationBlockTime {
                         confirmation_time: header.time as u64,
                         block_id: BlockId {
@@ -421,17 +418,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     // which we do not have by default. This data is needed to calculate the transaction fee.
     fn fetch_prev_txout(
         &self,
-        graph_update: &mut tx_graph::Update<ConfirmationBlockTime>,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
     ) -> Result<(), Error> {
         let mut no_dup = HashSet::<Txid>::new();
-        for tx in &graph_update.txs {
+        for tx in &tx_update.txs {
             if no_dup.insert(tx.compute_txid()) {
                 for vin in &tx.input {
                     let outpoint = vin.previous_output;
                     let vout = outpoint.vout;
                     let prev_tx = self.fetch_tx(outpoint.txid)?;
                     let txout = prev_tx.output[vout as usize].clone();
-                    let _ = graph_update.txouts.insert(outpoint, txout);
+                    let _ = tx_update.txouts.insert(outpoint, txout);
                 }
             }
         }
@@ -514,20 +511,20 @@ fn fetch_tip_and_latest_blocks(
 
 // Add a corresponding checkpoint per anchor height if it does not yet exist. Checkpoints should not
 // surpass `latest_blocks`.
-fn chain_update<A: Anchor>(
+fn chain_update(
     mut tip: CheckPoint,
     latest_blocks: &BTreeMap<u32, BlockHash>,
-    anchors: impl Iterator<Item = (A, Txid)>,
+    anchors: impl Iterator<Item = (ConfirmationBlockTime, Txid)>,
 ) -> Result<CheckPoint, Error> {
-    for anchor in anchors {
-        let height = anchor.0.anchor_block().height;
+    for (anchor, _txid) in anchors {
+        let height = anchor.block_id.height;
 
         // Checkpoint uses the `BlockHash` from `latest_blocks` so that the hash will be consistent
         // in case of a re-org.
         if tip.get(height).is_none() && height <= tip.height() {
             let hash = match latest_blocks.get(&height) {
                 Some(&hash) => hash,
-                None => anchor.0.anchor_block().hash,
+                None => anchor.block_id.hash,
             };
             tip = tip.insert(BlockId { hash, height });
         }

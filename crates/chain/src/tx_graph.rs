@@ -78,7 +78,7 @@
 //! # let tx_b = tx_from_hex(RAW_TX_2);
 //! let mut graph: TxGraph = TxGraph::default();
 //!
-//! let mut update = tx_graph::Update::default();
+//! let mut update = tx_graph::TxUpdate::default();
 //! update.txs.push(Arc::new(tx_a));
 //! update.txs.push(Arc::new(tx_b));
 //!
@@ -92,12 +92,13 @@
 //! [`try_get_chain_position`]: TxGraph::try_get_chain_position
 //! [`insert_txout`]: TxGraph::insert_txout
 
-use crate::{
-    collections::*, Anchor, Balance, BlockId, ChainOracle, ChainPosition, FullTxOut, Merge,
-};
+use crate::collections::*;
+use crate::BlockId;
+use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+pub use bdk_core::TxUpdate;
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::{
@@ -105,31 +106,7 @@ use core::{
     ops::{Deref, RangeInclusive},
 };
 
-/// Data object used to update the [`TxGraph`] with.
-#[derive(Debug, Clone)]
-pub struct Update<A = ()> {
-    /// Full transactions.
-    pub txs: Vec<Arc<Transaction>>,
-    /// Floating txouts.
-    pub txouts: BTreeMap<OutPoint, TxOut>,
-    /// Transaction anchors.
-    pub anchors: BTreeSet<(A, Txid)>,
-    /// Seen at times for transactions.
-    pub seen_ats: HashMap<Txid, u64>,
-}
-
-impl<A> Default for Update<A> {
-    fn default() -> Self {
-        Self {
-            txs: Default::default(),
-            txouts: Default::default(),
-            anchors: Default::default(),
-            seen_ats: Default::default(),
-        }
-    }
-}
-
-impl<A> From<TxGraph<A>> for Update<A> {
+impl<A> From<TxGraph<A>> for TxUpdate<A> {
     fn from(graph: TxGraph<A>) -> Self {
         Self {
             txs: graph.full_txs().map(|tx_node| tx_node.tx).collect(),
@@ -143,21 +120,11 @@ impl<A> From<TxGraph<A>> for Update<A> {
     }
 }
 
-impl<A: Ord + Clone> From<Update<A>> for TxGraph<A> {
-    fn from(update: Update<A>) -> Self {
+impl<A: Ord + Clone> From<TxUpdate<A>> for TxGraph<A> {
+    fn from(update: TxUpdate<A>) -> Self {
         let mut graph = TxGraph::<A>::default();
         let _ = graph.apply_update_at(update, None);
         graph
-    }
-}
-
-impl<A: Ord> Update<A> {
-    /// Extend this update with `other`.
-    pub fn extend(&mut self, other: Update<A>) {
-        self.txs.extend(other.txs);
-        self.txouts.extend(other.txouts);
-        self.anchors.extend(other.anchors);
-        self.seen_ats.extend(other.seen_ats);
     }
 }
 
@@ -688,7 +655,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// exist in `update` but not in `self`).
     #[cfg(feature = "std")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn apply_update(&mut self, update: Update<A>) -> ChangeSet<A> {
+    pub fn apply_update(&mut self, update: TxUpdate<A>) -> ChangeSet<A> {
         use std::time::*;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -709,7 +676,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// Use [`apply_update`](TxGraph::apply_update) to have the `seen_at` value automatically set
     /// to the current time.
-    pub fn apply_update_at(&mut self, update: Update<A>, seen_at: Option<u64>) -> ChangeSet<A> {
+    pub fn apply_update_at(&mut self, update: TxUpdate<A>, seen_at: Option<u64>) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         let mut unanchored_txs = HashSet::<Txid>::new();
         for tx in update.txs {
