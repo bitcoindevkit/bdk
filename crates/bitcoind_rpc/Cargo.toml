@@ -1,6 +1,6 @@
 [package]
 name = "bdk_bitcoind_rpc"
-version = "0.13.0"
+version = "0.14.0"
 edition = "2021"
 rust-version = "1.63"
 homepage = "https://bitcoindevkit.org"
@@ -19,7 +19,7 @@ bdk_core = { path = "../core", version = "0.1", default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", default-features = false }
-bdk_chain = { path = "../chain", version = "0.17" }
+bdk_chain = { path = "../chain", version = "0.18" }
 
 [features]
 default = ["std"]

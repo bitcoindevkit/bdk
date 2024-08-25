@@ -1,6 +1,6 @@
 [package]
 name = "bdk_testenv"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 rust-version = "1.63"
 homepage = "https://bitcoindevkit.org"
@@ -13,8 +13,8 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.17", default-features = false }
-electrsd = { version = "0.28.0", features = ["bitcoind_25_0", "esplora_a33e97e1", "legacy"] }
+bdk_chain = { path = "../chain", version = "0.18", default-features = false }
+electrsd = { version = "0.28.0", features = [ "bitcoind_25_0", "esplora_a33e97e1", "legacy" ] }
 
 [features]
 default = ["std"]
