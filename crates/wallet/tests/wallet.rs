@@ -1393,6 +1393,127 @@ fn test_create_tx_global_xpubs_with_origin() {
 }
 
 #[test]
+fn test_create_tx_increment_change_index() {
+    // Test derivation index and unused index of change keychain when creating a transaction
+    // Cases include wildcard and non-wildcard descriptors with and without an internal keychain
+    // note the test assumes that the first external address is revealed since we're using
+    // `receive_output`
+    struct TestCase {
+        name: &'static str,
+        descriptor: &'static str,
+        change_descriptor: Option<&'static str>,
+        // amount to send
+        to_send: u64,
+        // (derivation index, next unused index) of *change keychain*
+        expect: (Option<u32>, u32),
+    }
+    // total wallet funds
+    let amount = 10_000;
+    let recipient = Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
+        .unwrap()
+        .assume_checked()
+        .script_pubkey();
+    let (desc, change_desc) = get_test_tr_single_sig_xprv_with_change_desc();
+    [
+        TestCase {
+            name: "two wildcard, builder error",
+            descriptor: desc,
+            change_descriptor: Some(change_desc),
+            to_send: amount + 1,
+            // should not use or derive change index
+            expect: (None, 0),
+        },
+        TestCase {
+            name: "two wildcard, create change",
+            descriptor: desc,
+            change_descriptor: Some(change_desc),
+            to_send: 5_000,
+            // should use change index
+            expect: (Some(0), 1),
+        },
+        TestCase {
+            name: "two wildcard, no change",
+            descriptor: desc,
+            change_descriptor: Some(change_desc),
+            to_send: 9_850,
+            // should not use change index
+            expect: (None, 0),
+        },
+        TestCase {
+            name: "one wildcard, create change",
+            descriptor: desc,
+            change_descriptor: None,
+            to_send: 5_000,
+            // should use change index of external keychain
+            expect: (Some(1), 2),
+        },
+        TestCase {
+            name: "one wildcard, no change",
+            descriptor: desc,
+            change_descriptor: None,
+            to_send: 9_850,
+            // should not use change index
+            expect: (Some(0), 1),
+        },
+        TestCase {
+            name: "single key, create change",
+            descriptor: get_test_tr_single_sig(),
+            change_descriptor: None,
+            to_send: 5_000,
+            // single key only has one derivation index (0)
+            expect: (Some(0), 0),
+        },
+        TestCase {
+            name: "single key, no change",
+            descriptor: get_test_tr_single_sig(),
+            change_descriptor: None,
+            to_send: 9_850,
+            expect: (Some(0), 0),
+        },
+    ]
+    .into_iter()
+    .for_each(|test| {
+        // create wallet
+        let (params, change_keychain) = match test.change_descriptor {
+            Some(change_desc) => (
+                Wallet::create(test.descriptor, change_desc),
+                KeychainKind::Internal,
+            ),
+            None => (
+                Wallet::create_single(test.descriptor),
+                KeychainKind::External,
+            ),
+        };
+        let mut wallet = params
+            .network(Network::Regtest)
+            .create_wallet_no_persist()
+            .unwrap();
+        // fund wallet
+        receive_output(&mut wallet, amount, ConfirmationTime::unconfirmed(0));
+        // create tx
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(recipient.clone(), Amount::from_sat(test.to_send));
+        let res = builder.finish();
+        if !test.name.contains("error") {
+            assert!(res.is_ok());
+        }
+        let (exp_derivation_index, exp_next_unused) = test.expect;
+        assert_eq!(
+            wallet.derivation_index(change_keychain),
+            exp_derivation_index,
+            "derivation index test {}",
+            test.name,
+        );
+        assert_eq!(
+            wallet.next_unused_address(change_keychain).index,
+            exp_next_unused,
+            "next unused index test {}",
+            test.name,
+        );
+    });
+}
+
+#[test]
 fn test_add_foreign_utxo() {
     let (mut wallet1, _) = get_funded_wallet_wpkh();
     let (wallet2, _) =
