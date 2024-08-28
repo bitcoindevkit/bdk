@@ -89,7 +89,7 @@ pub enum CreateTxError {
     /// Output created is under the dust limit, 546 satoshis
     OutputBelowDustLimit(usize),
     /// There was an error with coin selection
-    CoinSelection(coin_selection::Error),
+    CoinSelection(coin_selection::InsufficientFunds),
     /// Cannot build a tx without recipients
     NoRecipients,
     /// Partially signed bitcoin transaction error
@@ -204,8 +204,8 @@ impl From<psbt::Error> for CreateTxError {
     }
 }
 
-impl From<coin_selection::Error> for CreateTxError {
-    fn from(err: coin_selection::Error) -> Self {
+impl From<coin_selection::InsufficientFunds> for CreateTxError {
+    fn from(err: coin_selection::InsufficientFunds) -> Self {
         CreateTxError::CoinSelection(err)
     }
 }
