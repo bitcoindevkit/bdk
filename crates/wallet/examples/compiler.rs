@@ -31,6 +31,7 @@ use bdk_wallet::{KeychainKind, Wallet};
 ///
 /// This example demonstrates the interaction between a bdk wallet and miniscript policy.
 
+#[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn Error>> {
     // We start with a miniscript policy string
     let policy_str = "or(

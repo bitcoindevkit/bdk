@@ -12,6 +12,9 @@ readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lints]
+workspace = true
+
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.18", default-features = false }
 electrsd = { version = "0.28.0", features = [ "bitcoind_25_0", "esplora_a33e97e1", "legacy" ] }

@@ -34,7 +34,6 @@ enum ExpectedResult<'a> {
 
 impl<'a> TestLocalChain<'a> {
     fn run(mut self) {
-        println!("[TestLocalChain] test: {}", self.name);
         let got_changeset = match self.chain.apply_update(self.update) {
             Ok(changeset) => changeset,
             Err(got_err) => {
@@ -255,7 +254,7 @@ fn update_local_chain() {
                     (4, None)
                 ],
                 init_changeset: &[
-                    (0, Some(h!("_"))), 
+                    (0, Some(h!("_"))),
                     (1, Some(h!("B'"))),
                     (2, Some(h!("C'"))),
                     (3, Some(h!("D"))),
@@ -437,8 +436,6 @@ fn local_chain_disconnect_from() {
     ];
 
     for (i, t) in test_cases.into_iter().enumerate() {
-        println!("Case {}: {}", i, t.name);
-
         let mut chain = t.original;
         let result = chain.disconnect_from(t.disconnect_from.into());
         assert_eq!(
@@ -491,7 +488,6 @@ fn checkpoint_from_block_ids() {
     ];
 
     for (i, t) in test_cases.into_iter().enumerate() {
-        println!("running test case {}: '{}'", i, t.name);
         let result = CheckPoint::from_block_ids(
             t.blocks
                 .iter()
@@ -583,6 +579,7 @@ fn checkpoint_query() {
 fn checkpoint_insert() {
     struct TestCase<'a> {
         /// The name of the test.
+        #[allow(dead_code)]
         name: &'a str,
         /// The original checkpoint chain to call [`CheckPoint::insert`] on.
         chain: &'a [(u32, BlockHash)],
@@ -629,9 +626,7 @@ fn checkpoint_insert() {
         core::iter::once((0, h!("_"))).map(BlockId::from)
     }
 
-    for (i, t) in test_cases.into_iter().enumerate() {
-        println!("Running [{}] '{}'", i, t.name);
-
+    for t in test_cases.into_iter() {
         let chain = CheckPoint::from_block_ids(
             genesis_block().chain(t.chain.iter().copied().map(BlockId::from)),
         )
@@ -792,7 +787,6 @@ fn local_chain_apply_header_connected_to() {
     ];
 
     for (i, t) in test_cases.into_iter().enumerate() {
-        println!("running test case {}: '{}'", i, t.name);
         let mut chain = t.chain;
         let result = chain.apply_header_connected_to(&t.header, t.height, t.connected_to);
         let exp_result = t

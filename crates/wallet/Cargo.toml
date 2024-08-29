@@ -12,6 +12,9 @@ authors = ["Bitcoin Dev Kit Developers"]
 edition = "2021"
 rust-version = "1.63"
 
+[lints]
+workspace = true
+
 [dependencies]
 rand_core = { version = "0.6.0" }
 miniscript = { version = "12.0.0", features = [ "serde" ], default-features = false }

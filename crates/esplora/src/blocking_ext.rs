@@ -495,6 +495,7 @@ mod test {
     #[test]
     pub fn test_finalize_chain_update() -> anyhow::Result<()> {
         struct TestCase<'a> {
+            #[allow(dead_code)]
             name: &'a str,
             /// Initial blockchain height to start the env with.
             initial_env_height: u32,
@@ -531,9 +532,7 @@ mod test {
             },
         ];
 
-        for (i, t) in test_cases.into_iter().enumerate() {
-            println!("[{}] running test case: {}", i, t.name);
-
+        for t in test_cases.into_iter() {
             let env = TestEnv::new()?;
             let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
             let client = Builder::new(base_url.as_str()).build_blocking();
@@ -578,7 +577,6 @@ mod test {
                 chain.apply_update(update)?;
                 chain
             };
-            println!("local chain height: {}", local_chain.tip().height());
 
             // extend env chain
             if let Some(to_mine) = t
@@ -620,10 +618,6 @@ mod test {
             // apply update
             let mut updated_local_chain = local_chain.clone();
             updated_local_chain.apply_update(update)?;
-            println!(
-                "updated local chain height: {}",
-                updated_local_chain.tip().height()
-            );
 
             assert!(
                 {
@@ -784,7 +778,6 @@ mod test {
         ];
 
         for (i, t) in test_cases.into_iter().enumerate() {
-            println!("Case {}: {}", i, t.name);
             let mut chain = t.chain;
 
             let mock_anchors = t
