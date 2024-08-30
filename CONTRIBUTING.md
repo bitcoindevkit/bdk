@@ -46,10 +46,10 @@ Every new feature should be covered by functional tests where possible.
 When refactoring, structure your PR to make it easy to review and don't
 hesitate to split it into multiple small, focused PRs.
 
-The Minimal Supported Rust Version is **1.57.0** (enforced by our CI).
+The Minimum Supported Rust Version is **1.63.0** (enforced by our CI).
 
 Commits should cover both the issue fixed and the solution's rationale.
-These [guidelines](https://chris.beams.io/posts/git-commit/) should be kept in mind. Commit messages should follow the ["Conventional Commits 1.0.0"](https://www.conventionalcommits.org/en/v1.0.0/) to make commit histories easier to read by humans and automated tools. 
+These [guidelines](https://chris.beams.io/posts/git-commit/) should be kept in mind. Commit messages follow the ["Conventional Commits 1.0.0"](https://www.conventionalcommits.org/en/v1.0.0/) to make commit histories easier to read by humans and automated tools. All commits must be [GPG signed](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
 
 To facilitate communication with other contributors, the project is making use
 of GitHub's "assignee" field. First check that no one is assigned and then
@@ -81,12 +81,19 @@ well as test out the patch set and opine on the technical merits of the patch.
 PR should be reviewed first on the conceptual level before focusing on code
 style or grammar fixes.
 
+To merge a PR we require all CI tests to pass, the PR has at least one approving review by a maintainer with write access, and reasonable criticisms have been addressed.
+
 Coding Conventions
 ------------------
 
 This codebase uses spaces, not tabs.
 Use `cargo fmt` with the default settings to format code before committing.
 This is also enforced by the CI.
+All public items must be documented. We adhere to the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/about.html) with respect to documentation.
+
+The library is written using safe rust. Special consideration must be given to code which proposes an exception to the rule.
+
+All new features require testing. Tests should be unique and self-describing. If a test is in development or is broken or no longer useful, then a reason should be given for adding the `#[ignore]` attribute.
 
 Security
 --------
