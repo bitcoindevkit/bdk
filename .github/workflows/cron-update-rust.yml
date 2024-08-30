@@ -10,6 +10,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: tibdex/github-app-token@v1
+        id: generate-token
+        with:
+          app_id: ${{ secrets.APP_ID }}
+          private_key: ${{ secrets.APP_PRIVATE_KEY }}
+      - uses: crazy-max/ghaction-import-gpg@v5
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          git_user_signingkey: true
+          git_commit_gpgsign: true
       - name: Update rust-version to use latest stable
         run: |
           set -x
@@ -30,9 +40,9 @@ jobs:
         if: env.changes_made == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          author: Update Rustc Bot <bot@example.com>
-          committer: Update Rustc Bot <bot@example.com>
+          token: ${{ steps.generate-token.outputs.token }}
+          author: Github Action <github@bitcoindevkit.org>
+          committer: Github Action <github@bitcoindevkit.org>
           branch: create-pull-request/update-rust-version
           title: |
             ci: automated update to rustc ${{ env.rust_version }}
