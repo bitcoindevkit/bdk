@@ -223,9 +223,9 @@ async fn fetch_block<S: Sleeper>(
 async fn chain_update<S: Sleeper>(
     client: &esplora_client::AsyncClient<S>,
     latest_blocks: &BTreeMap<u32, BlockHash>,
-    local_tip: &CheckPoint,
+    local_tip: &CheckPoint<BlockHash>,
     anchors: &BTreeSet<(ConfirmationBlockTime, Txid)>,
-) -> Result<CheckPoint, Error> {
+) -> Result<CheckPoint<BlockHash>, Error> {
     let mut point_of_agreement = None;
     let mut conflicts = vec![];
     for local_cp in local_tip.iter() {
@@ -250,7 +250,7 @@ async fn chain_update<S: Sleeper>(
     let mut tip = point_of_agreement.expect("remote esplora should have same genesis block");
 
     tip = tip
-        .extend(conflicts.into_iter().rev())
+        .extend(conflicts.into_iter().rev().map(|b| (b.height, b.hash)))
         .expect("evicted are in order");
 
     for (anchor, _txid) in anchors {
@@ -260,14 +260,14 @@ async fn chain_update<S: Sleeper>(
                 Some(hash) => hash,
                 None => continue,
             };
-            tip = tip.insert(BlockId { height, hash });
+            tip = tip.insert(height, hash);
         }
     }
 
     // insert the most recent blocks at the tip to make sure we update the tip and make the update
     // robust.
     for (&height, &hash) in latest_blocks.iter() {
-        tip = tip.insert(BlockId { height, hash });
+        tip = tip.insert(height, hash);
     }
 
     Ok(tip)
@@ -617,7 +617,7 @@ mod test {
 
             // craft initial `local_chain`
             let local_chain = {
-                let (mut chain, _) = LocalChain::from_genesis_hash(env.genesis_hash()?);
+                let (mut chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
                 // force `chain_update_blocking` to add all checkpoints in `t.initial_cps`
                 let anchors = t
                     .initial_cps
