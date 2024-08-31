@@ -30,7 +30,7 @@ pub struct FilterIter<'c, C> {
     // SPK inventory
     spks: Vec<ScriptBuf>,
     // local cp
-    cp: Option<CheckPoint>,
+    cp: Option<CheckPoint<BlockHash>>,
     // blocks map
     blocks: BTreeMap<Height, BlockHash>,
     // best height counter
@@ -53,7 +53,7 @@ impl<'c, C: RpcApi> FilterIter<'c, C> {
     }
 
     /// Construct [`FilterIter`] from a given `client` and [`CheckPoint`].
-    pub fn new_with_checkpoint(client: &'c C, cp: CheckPoint) -> Self {
+    pub fn new_with_checkpoint(client: &'c C, cp: CheckPoint<BlockHash>) -> Self {
         let mut filter_iter = Self::new_with_height(client, cp.height());
         filter_iter.cp = Some(cp);
         filter_iter
@@ -199,7 +199,7 @@ impl<C: RpcApi> Iterator for FilterIter<'_, C> {
 
 impl<C: RpcApi> FilterIter<'_, C> {
     /// Returns the point of agreement between `self` and the given `cp`.
-    fn find_base_with(&mut self, mut cp: CheckPoint) -> Result<BlockId, Error> {
+    fn find_base_with(&mut self, mut cp: CheckPoint<BlockHash>) -> Result<BlockId, Error> {
         loop {
             let height = cp.height();
             let fetched_hash = match self.blocks.get(&height) {
@@ -222,7 +222,7 @@ impl<C: RpcApi> FilterIter<'_, C> {
     ///
     /// Returns `None` if this [`FilterIter`] was not constructed using a [`CheckPoint`], or
     /// if no blocks have been fetched for example by using [`get_tip`](Self::get_tip).
-    pub fn chain_update(&mut self) -> Option<CheckPoint> {
+    pub fn chain_update(&mut self) -> Option<CheckPoint<BlockHash>> {
         if self.cp.is_none() || self.blocks.is_empty() {
             return None;
         }

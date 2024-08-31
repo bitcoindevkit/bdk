@@ -826,7 +826,7 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
             let chain = Mutex::new({
                 let (mut chain, _) =
                     LocalChain::from_genesis_hash(constants::genesis_block(network).block_hash());
-                chain.apply_changeset(&changeset.local_chain)?;
+                chain.apply_blockhash_changeset(&changeset.local_chain)?;
                 chain
             });
 

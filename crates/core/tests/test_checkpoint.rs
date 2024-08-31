@@ -22,7 +22,7 @@ fn checkpoint_insert_existing() {
                 .get(j as u32)
                 .expect("cp of height must exist")
                 .block_id();
-            let new_cp_chain = cp_chain.clone().insert(block_to_insert);
+            let new_cp_chain = cp_chain.clone().insert_block_id(block_to_insert);
 
             assert_eq!(
                 new_cp_chain, cp_chain,
@@ -47,7 +47,7 @@ fn checkpoint_destruction_is_sound() {
     for height in 1u32..end {
         let hash = bitcoin::hashes::Hash::hash(height.to_be_bytes().as_slice());
         let block = BlockId { height, hash };
-        cp = cp.push(block).unwrap();
+        cp = cp.push_block_id(block).unwrap();
     }
     assert_eq!(cp.iter().count() as u32, end);
 }

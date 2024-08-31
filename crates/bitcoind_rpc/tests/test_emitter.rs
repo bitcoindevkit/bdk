@@ -289,7 +289,10 @@ fn process_block(
     block: Block,
     block_height: u32,
 ) -> anyhow::Result<()> {
-    recv_chain.apply_update(CheckPoint::from_header(&block.header, block_height))?;
+    recv_chain.apply_update(CheckPoint::blockhash_checkpoint_from_header(
+        &block.header,
+        block_height,
+    ))?;
     let _ = recv_graph.apply_block(block, block_height);
     Ok(())
 }
@@ -808,7 +811,10 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     let mut emitter = Emitter::new(env.rpc_client(), chain.tip(), 1, HashSet::from([txid_1]));
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
-        chain.apply_update(CheckPoint::from_header(&emission.block.header, height))?;
+        chain.apply_update(CheckPoint::blockhash_checkpoint_from_header(
+            &emission.block.header,
+            height,
+        ))?;
     }
 
     let changeset = graph.batch_insert_unconfirmed(emitter.mempool()?.new_txs);
