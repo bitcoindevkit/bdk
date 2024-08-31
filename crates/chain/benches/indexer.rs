@@ -50,7 +50,12 @@ fn setup<F: Fn(&mut KeychainTxGraph, &LocalChain)>(f: F) -> (KeychainTxGraph, Lo
         .unwrap()
         .0;
 
-    let cp = CheckPoint::from_block_ids([genesis_block_id(), tip_block_id()]).unwrap();
+    let cp = CheckPoint::from_blocks(
+        [genesis_block_id(), tip_block_id()]
+            .into_iter()
+            .map(|block_id| (block_id.height, block_id.hash)),
+    )
+    .unwrap();
     let chain = LocalChain::from_tip(cp).unwrap();
 
     let mut index = KeychainTxOutIndex::new(LOOKAHEAD, USE_SPK_CACHE);
