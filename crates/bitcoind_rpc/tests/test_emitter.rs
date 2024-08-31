@@ -280,7 +280,10 @@ fn process_block(
     block: Block,
     block_height: u32,
 ) -> anyhow::Result<()> {
-    recv_chain.apply_update(CheckPoint::from_header(&block.header, block_height))?;
+    recv_chain.apply_update(CheckPoint::blockhash_checkpoint_from_header(
+        &block.header,
+        block_height,
+    ))?;
     let _ = recv_graph.apply_block(block, block_height);
     Ok(())
 }
