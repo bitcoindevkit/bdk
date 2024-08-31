@@ -28,7 +28,7 @@ pub struct Emitter<'c, C> {
 
     /// The checkpoint of the last-emitted block that is in the best chain. If it is later found
     /// that the block is no longer in the best chain, it will be popped off from here.
-    last_cp: CheckPoint,
+    last_cp: CheckPoint<BlockHash>,
 
     /// The block result returned from rpc of the last-emitted block. As this result contains the
     /// next block's block hash (which we use to fetch the next block), we set this to `None`
@@ -53,7 +53,7 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     ///
     /// `start_height` starts emission from a given height (if there are no conflicts with the
     /// original chain).
-    pub fn new(client: &'c C, last_cp: CheckPoint, start_height: u32) -> Self {
+    pub fn new(client: &'c C, last_cp: CheckPoint<BlockHash>, start_height: u32) -> Self {
         Self {
             client,
             start_height,
@@ -158,7 +158,7 @@ pub struct BlockEvent<B> {
     ///
     /// This is important as BDK structures require block-to-apply to be connected with another
     /// block in the original chain.
-    pub checkpoint: CheckPoint,
+    pub checkpoint: CheckPoint<BlockHash>,
 }
 
 impl<B> BlockEvent<B> {
@@ -192,7 +192,7 @@ enum PollResponse {
     NoMoreBlocks,
     /// Fetched block is not in the best chain.
     BlockNotInBestChain,
-    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint),
+    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint<BlockHash>),
     /// Force the genesis checkpoint down the receiver's throat.
     AgreementPointNotFound(BlockHash),
 }
@@ -253,7 +253,7 @@ where
 fn poll<C, V, F>(
     emitter: &mut Emitter<C>,
     get_item: F,
-) -> Result<Option<(CheckPoint, V)>, bitcoincore_rpc::Error>
+) -> Result<Option<(CheckPoint<BlockHash>, V)>, bitcoincore_rpc::Error>
 where
     C: bitcoincore_rpc::RpcApi,
     F: Fn(&BlockHash) -> Result<V, bitcoincore_rpc::Error>,
@@ -268,7 +268,7 @@ where
                 let new_cp = emitter
                     .last_cp
                     .clone()
-                    .push(BlockId { height, hash })
+                    .push_block_id(BlockId { height, hash })
                     .expect("must push");
                 emitter.last_cp = new_cp.clone();
                 emitter.last_block = Some(res);

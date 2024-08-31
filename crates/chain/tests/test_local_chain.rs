@@ -17,7 +17,7 @@ use proptest::prelude::*;
 struct TestLocalChain<'a> {
     name: &'static str,
     chain: LocalChain,
-    update: CheckPoint,
+    update: CheckPoint<BlockHash>,
     exp: ExpectedResult<'a>,
 }
 
@@ -651,7 +651,7 @@ fn checkpoint_insert() {
         .expect("test formed incorrectly, must construct checkpoint chain");
 
         assert_eq!(
-            chain.insert(t.to_insert.into()),
+            chain.insert_block_id(t.to_insert.into()),
             exp_final_chain,
             "unexpected final chain"
         );
@@ -825,7 +825,10 @@ fn generate_height_range_bounds(
     )
 }
 
-fn generate_checkpoints(max_height: u32, max_count: usize) -> impl Strategy<Value = CheckPoint> {
+fn generate_checkpoints(
+    max_height: u32,
+    max_count: usize,
+) -> impl Strategy<Value = CheckPoint<BlockHash>> {
     proptest::collection::btree_set(1..max_height, 0..max_count).prop_map(|mut heights| {
         heights.insert(0); // must have genesis
         CheckPoint::from_block_ids(heights.into_iter().map(|height| {
