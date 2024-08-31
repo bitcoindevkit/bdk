@@ -212,9 +212,9 @@ fn fetch_block(
 fn chain_update(
     client: &esplora_client::BlockingClient,
     latest_blocks: &BTreeMap<u32, BlockHash>,
-    local_tip: &CheckPoint,
+    local_tip: &CheckPoint<BlockHash>,
     anchors: &BTreeSet<(ConfirmationBlockTime, Txid)>,
-) -> Result<CheckPoint, Error> {
+) -> Result<CheckPoint<BlockHash>, Error> {
     let mut point_of_agreement = None;
     let mut local_cp_hash = local_tip.hash();
     let mut conflicts = vec![];
@@ -248,7 +248,7 @@ fn chain_update(
     };
 
     tip = tip
-        .extend(conflicts.into_iter().rev())
+        .extend(conflicts.into_iter().rev().map(|b| (b.height, b.hash)))
         .expect("evicted are in order");
 
     for (anchor, _) in anchors {
@@ -258,14 +258,14 @@ fn chain_update(
                 Some(hash) => hash,
                 None => continue,
             };
-            tip = tip.insert(BlockId { height, hash });
+            tip = tip.insert(height, hash);
         }
     }
 
     // insert the most recent blocks at the tip to make sure we update the tip and make the update
     // robust.
     for (&height, &hash) in latest_blocks.iter() {
-        tip = tip.insert(BlockId { height, hash });
+        tip = tip.insert(height, hash);
     }
 
     Ok(tip)
@@ -556,10 +556,7 @@ mod test {
 
         let genesis_hash =
             bitcoin::constants::genesis_block(bitcoin::Network::Testnet4).block_hash();
-        let cp = bdk_chain::CheckPoint::new(BlockId {
-            height: 0,
-            hash: genesis_hash,
-        });
+        let cp = bdk_chain::CheckPoint::new(0, genesis_hash);
 
         let anchors = BTreeSet::new();
         let res = chain_update(&client, &latest_blocks, &cp, &anchors);
@@ -632,7 +629,7 @@ mod test {
 
             // craft initial `local_chain`
             let local_chain = {
-                let (mut chain, _) = LocalChain::from_genesis_hash(env.genesis_hash()?);
+                let (mut chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
                 // force `chain_update_blocking` to add all checkpoints in `t.initial_cps`
                 let anchors = t
                     .initial_cps
