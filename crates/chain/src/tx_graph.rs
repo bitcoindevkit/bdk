@@ -1325,11 +1325,11 @@ impl<A: Anchor> TxGraph<A> {
     /// # use bdk_chain::tx_graph::TxGraph;
     /// # use bdk_chain::{local_chain::LocalChain, CanonicalizationParams, ConfirmationBlockTime};
     /// # use bdk_testenv::{hash, utils::new_tx};
-    /// # use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+    /// # use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
     ///
     /// # let spk = ScriptBuf::from_hex("0014c692ecf13534982a9a2834565cbd37add8027140").unwrap();
     /// # let chain =
-    /// #     LocalChain::from_blocks((0..=15).map(|i| (i as u32, hash!("h"))).collect()).unwrap();
+    /// #     LocalChain::<BlockHash>::from_blocks((0..=15).map(|i| (i as u32, hash!("h"))).collect()).unwrap();
     /// # let mut graph: TxGraph = TxGraph::default();
     /// # let coinbase_tx = Transaction {
     /// #     input: vec![TxIn {

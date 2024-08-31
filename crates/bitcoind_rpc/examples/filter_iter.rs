@@ -7,7 +7,7 @@ use bdk_chain::bitcoin::{constants::genesis_block, secp256k1::Secp256k1, Network
 use bdk_chain::indexer::keychain_txout::KeychainTxOutIndex;
 use bdk_chain::local_chain::LocalChain;
 use bdk_chain::miniscript::Descriptor;
-use bdk_chain::{BlockId, ConfirmationBlockTime, IndexedTxGraph, SpkIterator};
+use bdk_chain::{ConfirmationBlockTime, IndexedTxGraph, SpkIterator};
 use bdk_testenv::anyhow;
 
 // This example shows how BDK chain and tx-graph structures are updated using compact
@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
     let secp = Secp256k1::new();
     let (descriptor, _) = Descriptor::parse_descriptor(&secp, EXTERNAL)?;
     let (change_descriptor, _) = Descriptor::parse_descriptor(&secp, INTERNAL)?;
-    let (mut chain, _) = LocalChain::from_genesis_hash(genesis_block(NETWORK).block_hash());
+    let (mut chain, _) = LocalChain::from_genesis(genesis_block(NETWORK).block_hash());
 
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<&str>>::new({
         let mut index = KeychainTxOutIndex::default();
@@ -39,11 +39,7 @@ fn main() -> anyhow::Result<()> {
     });
 
     // Assume a minimum birthday height
-    let block = BlockId {
-        height: START_HEIGHT,
-        hash: START_HASH.parse()?,
-    };
-    let _ = chain.insert_block(block)?;
+    let _ = chain.insert_block(START_HEIGHT, START_HASH.parse()?)?;
 
     // Configure RPC client
     let url = std::env::var("RPC_URL").context("must set RPC_URL")?;

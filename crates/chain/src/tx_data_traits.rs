@@ -20,8 +20,9 @@ use crate::{BlockId, ConfirmationBlockTime};
 /// # use bdk_chain::ConfirmationBlockTime;
 /// # use bdk_chain::example_utils::*;
 /// # use bitcoin::hashes::Hash;
+/// # use bitcoin::BlockHash;
 /// // Initialize the local chain with two blocks.
-/// let chain = LocalChain::from_blocks(
+/// let chain = LocalChain::<BlockHash>::from_blocks(
 ///     [
 ///         (1, Hash::hash("first".as_bytes())),
 ///         (2, Hash::hash("second".as_bytes())),
