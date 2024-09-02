@@ -157,7 +157,7 @@ fn main() -> anyhow::Result<()> {
             }
             Emission::Mempool(mempool_emission) => {
                 let start_apply_mempool = Instant::now();
-                wallet.apply_unconfirmed_txs(mempool_emission.iter().map(|(tx, time)| (tx, *time)));
+                wallet.apply_unconfirmed_txs(mempool_emission);
                 wallet.persist(&mut db)?;
                 println!(
                     "Applied unconfirmed transactions in {}s",

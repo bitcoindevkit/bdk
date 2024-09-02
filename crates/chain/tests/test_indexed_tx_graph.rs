@@ -81,7 +81,7 @@ fn insert_relevant_txs() {
     };
 
     assert_eq!(
-        graph.batch_insert_relevant(txs.iter().map(|tx| (tx, None))),
+        graph.batch_insert_relevant(txs.iter().cloned().map(|tx| (tx, None))),
         changeset,
     );
 
@@ -237,10 +237,10 @@ fn test_list_owned_txouts() {
     // Insert unconfirmed txs with a last_seen timestamp
 
     let _ =
-        graph.batch_insert_relevant([&tx1, &tx2, &tx3, &tx6].iter().enumerate().map(|(i, tx)| {
+        graph.batch_insert_relevant([&tx1, &tx2, &tx3, &tx6].iter().enumerate().map(|(i, &tx)| {
             let height = i as u32;
             (
-                *tx,
+                tx.clone(),
                 local_chain
                     .get(height)
                     .map(|cp| cp.block_id())
@@ -251,7 +251,8 @@ fn test_list_owned_txouts() {
             )
         }));
 
-    let _ = graph.batch_insert_relevant_unconfirmed([&tx4, &tx5].iter().map(|tx| (*tx, 100)));
+    let _ =
+        graph.batch_insert_relevant_unconfirmed([&tx4, &tx5].iter().map(|&tx| (tx.clone(), 100)));
 
     // A helper lambda to extract and filter data from the graph.
     let fetch =

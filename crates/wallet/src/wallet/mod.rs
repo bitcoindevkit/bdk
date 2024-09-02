@@ -2441,9 +2441,9 @@ impl Wallet {
     /// **WARNING**: You must persist the changes resulting from one or more calls to this method
     /// if you need the applied unconfirmed transactions to be reloaded after closing the wallet.
     /// See [`Wallet::reveal_next_address`].
-    pub fn apply_unconfirmed_txs<'t>(
+    pub fn apply_unconfirmed_txs<T: Into<Arc<Transaction>>>(
         &mut self,
-        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, u64)>,
+        unconfirmed_txs: impl IntoIterator<Item = (T, u64)>,
     ) {
         let indexed_graph_changeset = self
             .indexed_graph
