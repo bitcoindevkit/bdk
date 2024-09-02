@@ -606,12 +606,13 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// Items of `txs` are tuples containing the transaction and a *last seen* timestamp. The
     /// *last seen* communicates when the transaction is last seen in mempool which is used for
     /// conflict-resolution (refer to [`TxGraph::insert_seen_at`] for details).
-    pub fn batch_insert_unconfirmed(
+    pub fn batch_insert_unconfirmed<T: Into<Arc<Transaction>>>(
         &mut self,
-        txs: impl IntoIterator<Item = (Transaction, u64)>,
+        txs: impl IntoIterator<Item = (T, u64)>,
     ) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         for (tx, seen_at) in txs {
+            let tx: Arc<Transaction> = tx.into();
             changeset.merge(self.insert_seen_at(tx.compute_txid(), seen_at));
             changeset.merge(self.insert_tx(tx));
         }

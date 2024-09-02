@@ -2,7 +2,7 @@
 //! [`IndexedTxGraph`] documentation for more.
 use core::fmt::Debug;
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
@@ -133,13 +133,10 @@ where
     }
 
     /// Insert and index a transaction into the graph.
-    pub fn insert_tx(&mut self, tx: Transaction) -> ChangeSet<A, I::ChangeSet> {
-        let graph = self.graph.insert_tx(tx);
-        let indexer = self.index_tx_graph_changeset(&graph);
-        ChangeSet {
-            tx_graph: graph,
-            indexer,
-        }
+    pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A, I::ChangeSet> {
+        let tx_graph = self.graph.insert_tx(tx);
+        let indexer = self.index_tx_graph_changeset(&tx_graph);
+        ChangeSet { tx_graph, indexer }
     }
 
     /// Insert an `anchor` for a given transaction.
@@ -239,9 +236,9 @@ where
     /// To filter out irrelevant transactions, use [`batch_insert_relevant_unconfirmed`] instead.
     ///
     /// [`batch_insert_relevant_unconfirmed`]: IndexedTxGraph::batch_insert_relevant_unconfirmed
-    pub fn batch_insert_unconfirmed(
+    pub fn batch_insert_unconfirmed<T: Into<Arc<Transaction>>>(
         &mut self,
-        txs: impl IntoIterator<Item = (Transaction, u64)>,
+        txs: impl IntoIterator<Item = (T, u64)>,
     ) -> ChangeSet<A, I::ChangeSet> {
         let graph = self.graph.batch_insert_unconfirmed(txs);
         let indexer = self.index_tx_graph_changeset(&graph);
