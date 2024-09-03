@@ -33,6 +33,23 @@ impl<A> Default for TxUpdate<A> {
 }
 
 impl<A: Ord> TxUpdate<A> {
+    /// Transforms the [`TxUpdate`] to have `anchors` (`A`) of another type (`A2`).
+    ///
+    /// This takes in a closure with signature `FnMut(A) -> A2` which is called for each anchor to
+    /// transform it.
+    pub fn map_anchors<A2: Ord, F: FnMut(A) -> A2>(self, mut map: F) -> TxUpdate<A2> {
+        TxUpdate {
+            txs: self.txs,
+            txouts: self.txouts,
+            anchors: self
+                .anchors
+                .into_iter()
+                .map(|(a, txid)| (map(a), txid))
+                .collect(),
+            seen_ats: self.seen_ats,
+        }
+    }
+
     /// Extend this update with `other`.
     pub fn extend(&mut self, other: TxUpdate<A>) {
         self.txs.extend(other.txs);
