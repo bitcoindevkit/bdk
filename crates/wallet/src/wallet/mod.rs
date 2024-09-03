@@ -1093,7 +1093,7 @@ impl Wallet {
     /// By default the inserted `tx` won't be considered "canonical" because it's not known
     /// whether the transaction exists in the best chain. To know whether it exists, the tx
     /// must be broadcast to the network and the wallet synced via a chain source.
-    pub fn insert_tx(&mut self, tx: Transaction) -> bool {
+    pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> bool {
         let mut changeset = ChangeSet::default();
         changeset.merge(self.indexed_graph.insert_tx(tx).into());
         let ret = !changeset.is_empty();
