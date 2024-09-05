@@ -32,10 +32,10 @@ where
             }
         }
 
-        for (&height, &hash) in &changeset.blocks {
-            match hash {
-                Some(hash) => {
-                    extension.insert(height, hash);
+        for (&height, &data) in &changeset.blocks {
+            match data {
+                Some(data) => {
+                    extension.insert(height, data);
                 }
                 None => {
                     extension.remove(&height);
@@ -47,7 +47,7 @@ where
             Some(base) => base
                 .extend(extension)
                 .expect("extension is strictly greater than base"),
-            None => LocalChain::from_blocks(extension)?.tip(),
+            None => LocalChain::from_data(extension)?.tip(),
         };
         init_cp = new_tip;
     }
@@ -98,18 +98,13 @@ where
     }
 }
 
-impl LocalChain {
-    /// Get the genesis hash.
-    pub fn genesis_hash(&self) -> BlockHash {
-        self.tip.get(0).expect("genesis must exist").hash()
-    }
-
+impl LocalChain<BlockHash> {
     /// Construct [`LocalChain`] from genesis `hash`.
     #[must_use]
     pub fn from_genesis_hash(hash: BlockHash) -> (Self, ChangeSet) {
         let height = 0;
         let chain = Self {
-            tip: CheckPoint::new(BlockId { height, hash }),
+            tip: CheckPoint::from_data(height, hash),
         };
         let changeset = chain.initial_changeset();
         (chain, changeset)
@@ -131,45 +126,12 @@ impl LocalChain {
         Ok(chain)
     }
 
-    /// Construct a [`LocalChain`] from a given `checkpoint` tip.
-    pub fn from_tip(tip: CheckPoint) -> Result<Self, MissingGenesisError> {
-        let genesis_cp = tip.iter().last().expect("must have at least one element");
-        if genesis_cp.height() != 0 {
-            return Err(MissingGenesisError);
-        }
-        Ok(Self { tip })
-    }
-
     /// Constructs a [`LocalChain`] from a [`BTreeMap`] of height to [`BlockHash`].
     ///
     /// The [`BTreeMap`] enforces the height order. However, the caller must ensure the blocks are
     /// all of the same chain.
     pub fn from_blocks(blocks: BTreeMap<u32, BlockHash>) -> Result<Self, MissingGenesisError> {
-        if !blocks.contains_key(&0) {
-            return Err(MissingGenesisError);
-        }
-
-        let mut tip: Option<CheckPoint> = None;
-        for block in &blocks {
-            match tip {
-                Some(curr) => {
-                    tip = Some(
-                        curr.push(BlockId::from(block))
-                            .expect("BTreeMap is ordered"),
-                    )
-                }
-                None => tip = Some(CheckPoint::new(BlockId::from(block))),
-            }
-        }
-
-        Ok(Self {
-            tip: tip.expect("already checked to have genesis"),
-        })
-    }
-
-    /// Get the highest checkpoint.
-    pub fn tip(&self) -> CheckPoint {
-        self.tip.clone()
+        LocalChain::from_data(blocks)
     }
 
     /// Applies the given `update` to the chain.
@@ -296,29 +258,7 @@ impl LocalChain {
     ///
     /// Replacing the block hash of an existing checkpoint will result in an error.
     pub fn insert_block(&mut self, block_id: BlockId) -> Result<ChangeSet, AlterCheckPointError> {
-        if let Some(original_cp) = self.tip.get(block_id.height) {
-            let original_hash = original_cp.hash();
-            if original_hash != block_id.hash {
-                return Err(AlterCheckPointError {
-                    height: block_id.height,
-                    original_hash,
-                    update_hash: Some(block_id.hash),
-                });
-            }
-            return Ok(ChangeSet::default());
-        }
-
-        let mut changeset = ChangeSet::default();
-        changeset
-            .blocks
-            .insert(block_id.height, Some(block_id.hash));
-        self.apply_changeset(&changeset)
-            .map_err(|_| AlterCheckPointError {
-                height: 0,
-                original_hash: self.genesis_hash(),
-                update_hash: changeset.blocks.get(&0).cloned().flatten(),
-            })?;
-        Ok(changeset)
+        self.insert_data(block_id.height, block_id.hash)
     }
 
     /// Removes blocks from (and inclusive of) the given `block_id`.
@@ -528,7 +468,7 @@ where
 }
 
 /// The [`ChangeSet`] represents changes to [`LocalChain`].
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ChangeSet<H = BlockHash> {
     /// Changes to the [`LocalChain`] blocks.
