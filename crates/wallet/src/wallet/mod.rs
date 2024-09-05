@@ -45,6 +45,7 @@ use bitcoin::{
 use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
 use bitcoin::{constants::genesis_block, Amount};
 use bitcoin::{secp256k1::Secp256k1, Weight};
+use core::cmp::Ordering;
 use core::fmt;
 use core::mem;
 use core::ops::Deref;
@@ -290,6 +291,9 @@ impl fmt::Display for ApplyBlockError {
 
 #[cfg(feature = "std")]
 impl std::error::Error for ApplyBlockError {}
+
+/// A `CanonicalTx` managed by a `Wallet`.
+pub type WalletTx<'a> = CanonicalTx<'a, Arc<Transaction>, ConfirmationBlockTime>;
 
 impl Wallet {
     /// Build a new single descriptor [`Wallet`].
@@ -1002,9 +1006,9 @@ impl Wallet {
         self.indexed_graph.index.sent_and_received(tx, ..)
     }
 
-    /// Get a single transaction from the wallet as a [`CanonicalTx`] (if the transaction exists).
+    /// Get a single transaction from the wallet as a [`WalletTx`] (if the transaction exists).
     ///
-    /// `CanonicalTx` contains the full transaction alongside meta-data such as:
+    /// `WalletTx` contains the full transaction alongside meta-data such as:
     /// * Blocks that the transaction is [`Anchor`]ed in. These may or may not be blocks that exist
     ///   in the best chain.
     /// * The [`ChainPosition`] of the transaction in the best chain - whether the transaction is
@@ -1018,13 +1022,13 @@ impl Wallet {
     /// # let wallet: Wallet = todo!();
     /// # let my_txid: bitcoin::Txid = todo!();
     ///
-    /// let canonical_tx = wallet.get_tx(my_txid).expect("panic if tx does not exist");
+    /// let wallet_tx = wallet.get_tx(my_txid).expect("panic if tx does not exist");
     ///
     /// // get reference to full transaction
-    /// println!("my tx: {:#?}", canonical_tx.tx_node.tx);
+    /// println!("my tx: {:#?}", wallet_tx.tx_node.tx);
     ///
     /// // list all transaction anchors
-    /// for anchor in canonical_tx.tx_node.anchors {
+    /// for anchor in wallet_tx.tx_node.anchors {
     ///     println!(
     ///         "tx is anchored by block of hash {}",
     ///         anchor.anchor_block().hash
@@ -1032,7 +1036,7 @@ impl Wallet {
     /// }
     ///
     /// // get confirmation status of transaction
-    /// match canonical_tx.chain_position {
+    /// match wallet_tx.chain_position {
     ///     ChainPosition::Confirmed(anchor) => println!(
     ///         "tx is confirmed at height {}, we know this since {}:{} is in the best chain",
     ///         anchor.block_id.height, anchor.block_id.height, anchor.block_id.hash,
@@ -1045,13 +1049,10 @@ impl Wallet {
     /// ```
     ///
     /// [`Anchor`]: bdk_chain::Anchor
-    pub fn get_tx(
-        &self,
-        txid: Txid,
-    ) -> Option<CanonicalTx<'_, Arc<Transaction>, ConfirmationBlockTime>> {
+    pub fn get_tx(&self, txid: Txid) -> Option<WalletTx> {
         let graph = self.indexed_graph.graph();
 
-        Some(CanonicalTx {
+        Some(WalletTx {
             chain_position: graph.get_chain_position(
                 &self.chain,
                 self.chain.tip().block_id(),
@@ -1102,12 +1103,31 @@ impl Wallet {
     }
 
     /// Iterate over the transactions in the wallet.
-    pub fn transactions(
-        &self,
-    ) -> impl Iterator<Item = CanonicalTx<'_, Arc<Transaction>, ConfirmationBlockTime>> + '_ {
+    pub fn transactions(&self) -> impl Iterator<Item = WalletTx> + '_ {
         self.indexed_graph
             .graph()
             .list_canonical_txs(&self.chain, self.chain.tip().block_id())
+    }
+
+    /// Array of transactions in the wallet sorted with a comparator function.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use bdk_wallet::{LoadParams, Wallet, WalletTx};
+    /// # let mut wallet:Wallet = todo!();
+    /// // Transactions by chain position: first unconfirmed then descending by confirmed height.
+    /// let sorted_txs: Vec<WalletTx> =
+    ///     wallet.transactions_sort_by(|tx1, tx2| tx2.chain_position.cmp(&tx1.chain_position));
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    pub fn transactions_sort_by<F>(&self, compare: F) -> Vec<WalletTx>
+    where
+        F: FnMut(&WalletTx, &WalletTx) -> Ordering,
+    {
+        let mut txs: Vec<WalletTx> = self.transactions().collect();
+        txs.sort_unstable_by(compare);
+        txs
     }
 
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
