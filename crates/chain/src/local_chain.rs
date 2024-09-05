@@ -10,29 +10,32 @@ use bitcoin::block::Header;
 use bitcoin::BlockHash;
 
 /// Apply `changeset` to the checkpoint.
-fn apply_changeset_to_checkpoint(
-    mut init_cp: CheckPoint,
-    changeset: &ChangeSet,
-) -> Result<CheckPoint, MissingGenesisError> {
+fn apply_changeset_to_checkpoint<B>(
+    mut init_cp: CheckPoint<B>,
+    changeset: &ChangeSet<B>,
+) -> Result<CheckPoint<B>, MissingGenesisError>
+where
+    B: Copy + core::fmt::Debug + bdk_core::ToBlockHash,
+{
     if let Some(start_height) = changeset.blocks.keys().next().cloned() {
         // changes after point of agreement
         let mut extension = BTreeMap::default();
         // point of agreement
-        let mut base: Option<CheckPoint> = None;
+        let mut base: Option<CheckPoint<B>> = None;
 
         for cp in init_cp.iter() {
             if cp.height() >= start_height {
-                extension.insert(cp.height(), cp.hash());
+                extension.insert(cp.height(), *cp.data());
             } else {
                 base = Some(cp);
                 break;
             }
         }
 
-        for (&height, &hash) in &changeset.blocks {
-            match hash {
-                Some(hash) => {
-                    extension.insert(height, hash);
+        for (&height, &data) in &changeset.blocks {
+            match data {
+                Some(data) => {
+                    extension.insert(height, data);
                 }
                 None => {
                     extension.remove(&height);
@@ -42,9 +45,9 @@ fn apply_changeset_to_checkpoint(
 
         let new_tip = match base {
             Some(base) => base
-                .extend(extension.into_iter().map(BlockId::from))
+                .extend_data(extension)
                 .expect("extension is strictly greater than base"),
-            None => LocalChain::from_blocks(extension)?.tip(),
+            None => LocalChain::from_data(extension)?.tip(),
         };
         init_cp = new_tip;
     }
@@ -53,12 +56,24 @@ fn apply_changeset_to_checkpoint(
 }
 
 /// This is a local implementation of [`ChainOracle`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct LocalChain {
-    tip: CheckPoint,
+#[derive(Debug, Clone)]
+pub struct LocalChain<B = BlockHash> {
+    tip: CheckPoint<B>,
 }
 
-impl ChainOracle for LocalChain {
+impl<B> PartialEq for LocalChain<B>
+where
+    B: Copy + core::cmp::PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.tip == other.tip
+    }
+}
+
+impl<B> ChainOracle for LocalChain<B>
+where
+    B: Copy,
+{
     type Error = Infallible;
 
     fn is_block_in_chain(
@@ -83,18 +98,13 @@ impl ChainOracle for LocalChain {
     }
 }
 
-impl LocalChain {
-    /// Get the genesis hash.
-    pub fn genesis_hash(&self) -> BlockHash {
-        self.tip.get(0).expect("genesis must exist").hash()
-    }
-
+impl LocalChain<BlockHash> {
     /// Construct [`LocalChain`] from genesis `hash`.
     #[must_use]
     pub fn from_genesis_hash(hash: BlockHash) -> (Self, ChangeSet) {
         let height = 0;
         let chain = Self {
-            tip: CheckPoint::new(BlockId { height, hash }),
+            tip: CheckPoint::from_data(height, hash),
         };
         let changeset = chain.initial_changeset();
         (chain, changeset)
@@ -116,45 +126,12 @@ impl LocalChain {
         Ok(chain)
     }
 
-    /// Construct a [`LocalChain`] from a given `checkpoint` tip.
-    pub fn from_tip(tip: CheckPoint) -> Result<Self, MissingGenesisError> {
-        let genesis_cp = tip.iter().last().expect("must have at least one element");
-        if genesis_cp.height() != 0 {
-            return Err(MissingGenesisError);
-        }
-        Ok(Self { tip })
-    }
-
     /// Constructs a [`LocalChain`] from a [`BTreeMap`] of height to [`BlockHash`].
     ///
     /// The [`BTreeMap`] enforces the height order. However, the caller must ensure the blocks are
     /// all of the same chain.
     pub fn from_blocks(blocks: BTreeMap<u32, BlockHash>) -> Result<Self, MissingGenesisError> {
-        if !blocks.contains_key(&0) {
-            return Err(MissingGenesisError);
-        }
-
-        let mut tip: Option<CheckPoint> = None;
-        for block in &blocks {
-            match tip {
-                Some(curr) => {
-                    tip = Some(
-                        curr.push(BlockId::from(block))
-                            .expect("BTreeMap is ordered"),
-                    )
-                }
-                None => tip = Some(CheckPoint::new(BlockId::from(block))),
-            }
-        }
-
-        Ok(Self {
-            tip: tip.expect("already checked to have genesis"),
-        })
-    }
-
-    /// Get the highest checkpoint.
-    pub fn tip(&self) -> CheckPoint {
-        self.tip.clone()
+        LocalChain::from_data(blocks)
     }
 
     /// Applies the given `update` to the chain.
@@ -266,11 +243,7 @@ impl LocalChain {
 
     /// Apply the given `changeset`.
     pub fn apply_changeset(&mut self, changeset: &ChangeSet) -> Result<(), MissingGenesisError> {
-        let old_tip = self.tip.clone();
-        let new_tip = apply_changeset_to_checkpoint(old_tip, changeset)?;
-        self.tip = new_tip;
-        debug_assert!(self._check_changeset_is_applied(changeset));
-        Ok(())
+        self.apply_data_changeset(changeset)
     }
 
     /// Insert a [`BlockId`].
@@ -279,29 +252,7 @@ impl LocalChain {
     ///
     /// Replacing the block hash of an existing checkpoint will result in an error.
     pub fn insert_block(&mut self, block_id: BlockId) -> Result<ChangeSet, AlterCheckPointError> {
-        if let Some(original_cp) = self.tip.get(block_id.height) {
-            let original_hash = original_cp.hash();
-            if original_hash != block_id.hash {
-                return Err(AlterCheckPointError {
-                    height: block_id.height,
-                    original_hash,
-                    update_hash: Some(block_id.hash),
-                });
-            }
-            return Ok(ChangeSet::default());
-        }
-
-        let mut changeset = ChangeSet::default();
-        changeset
-            .blocks
-            .insert(block_id.height, Some(block_id.hash));
-        self.apply_changeset(&changeset)
-            .map_err(|_| AlterCheckPointError {
-                height: 0,
-                original_hash: self.genesis_hash(),
-                update_hash: changeset.blocks.get(&0).cloned().flatten(),
-            })?;
-        Ok(changeset)
+        self.insert_data(block_id.height, block_id.hash)
     }
 
     /// Removes blocks from (and inclusive of) the given `block_id`.
@@ -360,23 +311,28 @@ impl LocalChain {
     }
 
     fn _check_changeset_is_applied(&self, changeset: &ChangeSet) -> bool {
-        let mut curr_cp = self.tip.clone();
-        for (height, exp_hash) in changeset.blocks.iter().rev() {
-            match curr_cp.get(*height) {
-                Some(query_cp) => {
-                    if query_cp.height() != *height || Some(query_cp.hash()) != *exp_hash {
-                        return false;
-                    }
-                    curr_cp = query_cp;
-                }
-                None => {
-                    if exp_hash.is_some() {
-                        return false;
-                    }
-                }
-            }
+        self._check_data_changeset_is_applied(changeset)
+    }
+}
+
+impl<B> LocalChain<B> {
+    /// Get the highest checkpoint.
+    pub fn tip(&self) -> CheckPoint<B> {
+        self.tip.clone()
+    }
+
+    /// Get the genesis hash.
+    pub fn genesis_hash(&self) -> BlockHash {
+        self.tip.get(0).expect("genesis must exist").block_id().hash
+    }
+
+    /// Construct a [`LocalChain`] from a given `checkpoint` tip.
+    pub fn from_tip(tip: CheckPoint<B>) -> Result<Self, MissingGenesisError> {
+        let genesis_cp = tip.iter().last().expect("must have at least one element");
+        if genesis_cp.height() != 0 {
+            return Err(MissingGenesisError);
         }
-        true
+        Ok(Self { tip })
     }
 
     /// Get checkpoint at given `height` (if it exists).
@@ -384,7 +340,7 @@ impl LocalChain {
     /// This is a shorthand for calling [`CheckPoint::get`] on the [`tip`].
     ///
     /// [`tip`]: LocalChain::tip
-    pub fn get(&self, height: u32) -> Option<CheckPoint> {
+    pub fn get(&self, height: u32) -> Option<CheckPoint<B>> {
         self.tip.get(height)
     }
 
@@ -396,7 +352,7 @@ impl LocalChain {
     /// This is a shorthand for calling [`CheckPoint::range`] on the [`tip`].
     ///
     /// [`tip`]: LocalChain::tip
-    pub fn range<R>(&self, range: R) -> impl Iterator<Item = CheckPoint>
+    pub fn range<R>(&self, range: R) -> impl Iterator<Item = CheckPoint<B>>
     where
         R: RangeBounds<u32>,
     {
@@ -404,18 +360,132 @@ impl LocalChain {
     }
 }
 
+impl<B> LocalChain<B>
+where
+    B: Copy + core::fmt::Debug + bdk_core::ToBlockHash,
+{
+    /// Apply the given `changeset`.
+    pub fn apply_data_changeset(
+        &mut self,
+        changeset: &ChangeSet<B>,
+    ) -> Result<(), MissingGenesisError> {
+        let old_tip = self.tip.clone();
+        let new_tip = apply_changeset_to_checkpoint(old_tip, changeset)?;
+        self.tip = new_tip;
+        debug_assert!(self._check_data_changeset_is_applied(changeset));
+        Ok(())
+    }
+
+    fn _check_data_changeset_is_applied(&self, changeset: &ChangeSet<B>) -> bool {
+        let mut curr_cp = self.tip.clone();
+        for (height, data) in changeset.blocks.iter().rev() {
+            match curr_cp.get(*height) {
+                Some(query_cp) => {
+                    if let Some(data) = data {
+                        if query_cp.height() != *height || query_cp.hash() != data.to_blockhash() {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                    curr_cp = query_cp;
+                }
+                None => {
+                    if data.is_some() {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Insert data into a [`LocalChain`].
+    ///
+    /// # Errors
+    ///
+    /// Replacing the block hash of an existing checkpoint will result in an error.
+    pub fn insert_data(
+        &mut self,
+        height: u32,
+        data: B,
+    ) -> Result<ChangeSet<B>, AlterCheckPointError> {
+        if let Some(original_cp) = self.tip.get(height) {
+            let original_hash = original_cp.hash();
+            if original_hash != data.to_blockhash() {
+                return Err(AlterCheckPointError {
+                    height,
+                    original_hash,
+                    update_hash: Some(data.to_blockhash()),
+                });
+            }
+            return Ok(ChangeSet::default());
+        }
+
+        let mut changeset = ChangeSet::<B>::default();
+        changeset.blocks.insert(height, Some(data));
+        self.apply_data_changeset(&changeset)
+            .map_err(|_| AlterCheckPointError {
+                height: 0,
+                original_hash: self.genesis_hash(),
+                update_hash: Some(
+                    changeset
+                        .blocks
+                        .get(&0)
+                        .cloned()
+                        .flatten()
+                        .unwrap()
+                        .to_blockhash(),
+                ),
+            })?;
+        Ok(changeset)
+    }
+
+    /// Constructs a [`LocalChain`] from a [`BTreeMap`] of height and data.
+    ///
+    /// The [`BTreeMap`] enforces the height order. However, the caller must ensure the blocks are
+    /// all of the same chain.
+    pub fn from_data(blocks: BTreeMap<u32, B>) -> Result<Self, MissingGenesisError> {
+        if !blocks.contains_key(&0) {
+            return Err(MissingGenesisError);
+        }
+
+        let mut tip: Option<CheckPoint<B>> = None;
+        for (height, data) in &blocks {
+            match tip {
+                Some(curr) => {
+                    tip = Some(curr.push_data(*height, *data).expect("BTreeMap is ordered"))
+                }
+                None => tip = Some(CheckPoint::from_data(*height, *data)),
+            }
+        }
+
+        Ok(Self {
+            tip: tip.expect("already checked to have genesis"),
+        })
+    }
+}
+
 /// The [`ChangeSet`] represents changes to [`LocalChain`].
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-pub struct ChangeSet {
+pub struct ChangeSet<B = BlockHash> {
     /// Changes to the [`LocalChain`] blocks.
     ///
     /// The key represents the block height, and the value either represents added a new [`CheckPoint`]
     /// (if [`Some`]), or removing a [`CheckPoint`] (if [`None`]).
-    pub blocks: BTreeMap<u32, Option<BlockHash>>,
+    pub blocks: BTreeMap<u32, Option<B>>,
 }
 
-impl Merge for ChangeSet {
+impl<B> Default for ChangeSet<B> {
+    fn default() -> Self {
+        ChangeSet {
+            blocks: BTreeMap::default(),
+        }
+    }
+}
+
+impl<B> Merge for ChangeSet<B> {
     fn merge(&mut self, other: Self) {
         Merge::merge(&mut self.blocks, other.blocks)
     }
@@ -425,24 +495,24 @@ impl Merge for ChangeSet {
     }
 }
 
-impl<B: IntoIterator<Item = (u32, Option<BlockHash>)>> From<B> for ChangeSet {
-    fn from(blocks: B) -> Self {
+impl<B, I: IntoIterator<Item = (u32, Option<B>)>> From<I> for ChangeSet<B> {
+    fn from(blocks: I) -> Self {
         Self {
             blocks: blocks.into_iter().collect(),
         }
     }
 }
 
-impl FromIterator<(u32, Option<BlockHash>)> for ChangeSet {
-    fn from_iter<T: IntoIterator<Item = (u32, Option<BlockHash>)>>(iter: T) -> Self {
+impl<B> FromIterator<(u32, Option<B>)> for ChangeSet<B> {
+    fn from_iter<T: IntoIterator<Item = (u32, Option<B>)>>(iter: T) -> Self {
         Self {
             blocks: iter.into_iter().collect(),
         }
     }
 }
 
-impl FromIterator<(u32, BlockHash)> for ChangeSet {
-    fn from_iter<T: IntoIterator<Item = (u32, BlockHash)>>(iter: T) -> Self {
+impl<B> FromIterator<(u32, B)> for ChangeSet<B> {
+    fn from_iter<T: IntoIterator<Item = (u32, B)>>(iter: T) -> Self {
         Self {
             blocks: iter
                 .into_iter()
