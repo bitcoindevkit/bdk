@@ -75,6 +75,7 @@ cargo update -p proptest --precise "1.2.0"
 cargo update -p url --precise "2.5.0"
 cargo update -p cc --precise "1.0.105"
 cargo update -p tokio --precise "1.38.1"
+cargo update -p tokio-util --precise "0.7.11"
 ```
 
 ## License
