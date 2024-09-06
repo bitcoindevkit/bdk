@@ -229,7 +229,7 @@ fn retry_script_with_429(client: &BlockingClient, script: &Script) -> Result<Vec
                 }
                 if let esplora_client::Error::HttpResponse(status) = e {
                     if status == 429 {
-                        let wait_for = 1 >> attempts;
+                        let wait_for = 1 << attempts;
                         log::warn!("Hit 429, waiting for {wait_for}s");
                         attempts += 1;
                         std::thread::sleep(std::time::Duration::from_secs(wait_for))
