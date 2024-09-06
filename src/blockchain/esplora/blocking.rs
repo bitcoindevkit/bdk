@@ -34,7 +34,6 @@ use crate::FeeRate;
 pub struct EsploraBlockchain {
     url_client: BlockingClient,
     stop_gap: usize,
-    concurrency: u8,
 }
 
 impl EsploraBlockchain {
@@ -51,15 +50,8 @@ impl EsploraBlockchain {
     pub fn from_client(url_client: BlockingClient, stop_gap: usize) -> Self {
         EsploraBlockchain {
             url_client,
-            concurrency: super::DEFAULT_CONCURRENT_REQUESTS,
             stop_gap,
         }
-    }
-
-    /// Set the number of parallel requests the client can make.
-    pub fn with_concurrency(mut self, concurrency: u8) -> Self {
-        self.concurrency = concurrency;
-        self
     }
 }
 
@@ -129,44 +121,35 @@ impl WalletSync for EsploraBlockchain {
         let batch_update = loop {
             request = match request {
                 Request::Script(script_req) => {
-                    let scripts = script_req
-                        .request()
-                        .take(self.concurrency as usize)
-                        .map(bitcoin::ScriptBuf::from);
+                    let scripts = script_req.request().map(bitcoin::ScriptBuf::from);
 
-                    let mut handles = vec![];
+                    let mut txs_per_script: Vec<Vec<Tx>> = vec![];
                     for script in scripts {
-                        let client = self.url_client.clone();
                         // make each request in its own thread.
-                        handles.push(std::thread::spawn(move || {
-                            let mut related_txs: Vec<Tx> = client.scripthash_txs(&script, None)?;
+                        let mut related_txs: Vec<Tx> =
+                            self.url_client.scripthash_txs(&script, None)?;
 
-                            let n_confirmed =
-                                related_txs.iter().filter(|tx| tx.status.confirmed).count();
-                            // esplora pages on 25 confirmed transactions. If there's 25 or more we
-                            // keep requesting to see if there's more.
-                            if n_confirmed >= 25 {
-                                loop {
-                                    let new_related_txs: Vec<Tx> = client.scripthash_txs(
-                                        &script,
-                                        Some(related_txs.last().unwrap().txid),
-                                    )?;
-                                    let n = new_related_txs.len();
-                                    related_txs.extend(new_related_txs);
-                                    // we've reached the end
-                                    if n < 25 {
-                                        break;
-                                    }
+                        let n_confirmed =
+                            related_txs.iter().filter(|tx| tx.status.confirmed).count();
+                        // esplora pages on 25 confirmed transactions. If there's 25 or more we
+                        // keep requesting to see if there's more.
+                        if n_confirmed >= 25 {
+                            loop {
+                                let new_related_txs: Vec<Tx> = self.url_client.scripthash_txs(
+                                    &script,
+                                    Some(related_txs.last().unwrap().txid),
+                                )?;
+                                let n = new_related_txs.len();
+                                related_txs.extend(new_related_txs);
+                                // we've reached the end
+                                if n < 25 {
+                                    break;
                                 }
                             }
-                            Result::<_, Error>::Ok(related_txs)
-                        }));
+                        }
+                        txs_per_script.push(related_txs);
                     }
 
-                    let txs_per_script: Vec<Vec<Tx>> = handles
-                        .into_iter()
-                        .map(|handle| handle.join().unwrap())
-                        .collect::<Result<_, _>>()?;
                     let mut satisfaction = vec![];
 
                     for txs in txs_per_script {
@@ -229,12 +212,7 @@ impl ConfigurableBlockchain for EsploraBlockchain {
             builder = builder.proxy(proxy);
         }
 
-        let mut blockchain =
-            EsploraBlockchain::from_client(builder.build_blocking()?, config.stop_gap);
-
-        if let Some(concurrency) = config.concurrency {
-            blockchain = blockchain.with_concurrency(concurrency);
-        }
+        let blockchain = EsploraBlockchain::from_client(builder.build_blocking()?, config.stop_gap);
 
         Ok(blockchain)
     }

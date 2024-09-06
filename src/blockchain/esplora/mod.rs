@@ -88,8 +88,6 @@ crate::bdk_blockchain_tests! {
     }
 }
 
-const DEFAULT_CONCURRENT_REQUESTS: u8 = 4;
-
 #[cfg(test)]
 mod test {
     #[test]
