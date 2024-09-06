@@ -107,7 +107,12 @@ impl CreateParams {
         self
     }
 
-    /// Use custom lookahead value.
+    /// Use a custom `lookahead` value.
+    ///
+    /// The `lookahead` defines a number of script pubkeys to derive over and above the last
+    /// revealed index. Without a lookahead the indexer will miss outputs you own when processing
+    /// transactions whose output script pubkeys lie beyond the last revealed index. In most cases
+    /// the default value [`DEFAULT_LOOKAHEAD`] is sufficient.
     pub fn lookahead(mut self, lookahead: u32) -> Self {
         self.lookahead = lookahead;
         self
@@ -211,7 +216,12 @@ impl LoadParams {
         self
     }
 
-    /// Use custom lookahead value.
+    /// Use a custom `lookahead` value.
+    ///
+    /// The `lookahead` defines a number of script pubkeys to derive over and above the last
+    /// revealed index. Without a lookahead the indexer will miss outputs you own when processing
+    /// transactions whose output script pubkeys lie beyond the last revealed index. In most cases
+    /// the default value [`DEFAULT_LOOKAHEAD`] is sufficient.
     pub fn lookahead(mut self, lookahead: u32) -> Self {
         self.lookahead = lookahead;
         self
