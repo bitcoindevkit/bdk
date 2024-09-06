@@ -17,7 +17,7 @@ use std::ops::DerefMut;
 #[allow(unused_imports)]
 use log::{debug, error, info, trace};
 
-use bitcoin::{Transaction, Txid};
+use bitcoin::{Script, Transaction, Txid};
 
 use esplora_client::{convert_fee_rate, BlockingClient, Builder, Tx};
 
@@ -126,8 +126,7 @@ impl WalletSync for EsploraBlockchain {
                     let mut txs_per_script: Vec<Vec<Tx>> = vec![];
                     for script in scripts {
                         // make each request in its own thread.
-                        let mut related_txs: Vec<Tx> =
-                            self.url_client.scripthash_txs(&script, None)?;
+                        let mut related_txs: Vec<Tx> = retry_with_429(&self.url_client, &script)?;
 
                         let n_confirmed =
                             related_txs.iter().filter(|tx| tx.status.confirmed).count();
@@ -215,5 +214,29 @@ impl ConfigurableBlockchain for EsploraBlockchain {
         let blockchain = EsploraBlockchain::from_client(builder.build_blocking()?, config.stop_gap);
 
         Ok(blockchain)
+    }
+}
+
+fn retry_with_429(client: &BlockingClient, script: &Script) -> Result<Vec<Tx>, Error> {
+    let mut attempts = 0;
+    loop {
+        match client.scripthash_txs(&script, None) {
+            Ok(val) => return Ok(val),
+            Err(e) => {
+                if attempts > 6 {
+                    return Err(e.into());
+                }
+                if let esplora_client::Error::Ureq(ureq::Error::Status(status, _)) = e {
+                    if status == 429 {
+                        let wait_for = 1 >> attempts;
+                        log::warn!("Hit 429, waiting for {wait_for}s");
+                        attempts += 1;
+                        std::thread::sleep(std::time::Duration::from_secs(wait_for))
+                    }
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
     }
 }
