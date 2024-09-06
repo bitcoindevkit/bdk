@@ -126,7 +126,8 @@ impl WalletSync for EsploraBlockchain {
                     let mut txs_per_script: Vec<Vec<Tx>> = vec![];
                     for script in scripts {
                         // make each request in its own thread.
-                        let mut related_txs: Vec<Tx> = retry_with_429(&self.url_client, &script)?;
+                        let mut related_txs: Vec<Tx> =
+                            retry_script_with_429(&self.url_client, &script)?;
 
                         let n_confirmed =
                             related_txs.iter().filter(|tx| tx.status.confirmed).count();
@@ -217,7 +218,7 @@ impl ConfigurableBlockchain for EsploraBlockchain {
     }
 }
 
-fn retry_with_429(client: &BlockingClient, script: &Script) -> Result<Vec<Tx>, Error> {
+fn retry_script_with_429(client: &BlockingClient, script: &Script) -> Result<Vec<Tx>, Error> {
     let mut attempts = 0;
     loop {
         match client.scripthash_txs(&script, None) {
@@ -226,7 +227,7 @@ fn retry_with_429(client: &BlockingClient, script: &Script) -> Result<Vec<Tx>, E
                 if attempts > 6 {
                     return Err(e.into());
                 }
-                if let esplora_client::Error::Ureq(ureq::Error::Status(status, _)) = e {
+                if let esplora_client::Error::HttpResponse(status) = e {
                     if status == 429 {
                         let wait_for = 1 >> attempts;
                         log::warn!("Hit 429, waiting for {wait_for}s");
