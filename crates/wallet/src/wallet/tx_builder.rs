@@ -122,7 +122,7 @@ pub struct TxBuilder<'a, Cs> {
 //TODO: TxParams should eventually be exposed publicly.
 #[derive(Default, Debug, Clone)]
 pub(crate) struct TxParams {
-    pub(crate) recipients: Vec<(ScriptBuf, u64)>,
+    pub(crate) recipients: Vec<(ScriptBuf, Amount)>,
     pub(crate) drain_wallet: bool,
     pub(crate) drain_to: Option<ScriptBuf>,
     pub(crate) fee_policy: Option<FeePolicy>,
@@ -147,14 +147,14 @@ pub(crate) struct TxParams {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PreviousFee {
-    pub absolute: u64,
+    pub absolute: Amount,
     pub rate: FeeRate,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FeePolicy {
     FeeRate(FeeRate),
-    FeeAmount(u64),
+    FeeAmount(Amount),
 }
 
 impl Default for FeePolicy {
@@ -200,7 +200,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// overshoot it slightly since adding a change output to drain the remaining
     /// excess might not be viable.
     pub fn fee_absolute(&mut self, fee_amount: Amount) -> &mut Self {
-        self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount.to_sat()));
+        self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
     }
 
@@ -601,18 +601,13 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
 
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(ScriptBuf, Amount)>) -> &mut Self {
-        self.params.recipients = recipients
-            .into_iter()
-            .map(|(script, amount)| (script, amount.to_sat()))
-            .collect();
+        self.params.recipients = recipients;
         self
     }
 
     /// Add a recipient to the internal list
     pub fn add_recipient(&mut self, script_pubkey: ScriptBuf, amount: Amount) -> &mut Self {
-        self.params
-            .recipients
-            .push((script_pubkey, amount.to_sat()));
+        self.params.recipients.push((script_pubkey, amount));
         self
     }
 

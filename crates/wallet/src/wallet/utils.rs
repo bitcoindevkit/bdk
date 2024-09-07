@@ -10,7 +10,7 @@
 // licenses.
 
 use bitcoin::secp256k1::{All, Secp256k1};
-use bitcoin::{absolute, relative, Script, Sequence};
+use bitcoin::{absolute, relative, Amount, Script, Sequence};
 
 use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
 
@@ -26,9 +26,15 @@ pub trait IsDust {
     fn is_dust(&self, script: &Script) -> bool;
 }
 
+impl IsDust for Amount {
+    fn is_dust(&self, script: &Script) -> bool {
+        *self < script.minimal_non_dust()
+    }
+}
+
 impl IsDust for u64 {
     fn is_dust(&self, script: &Script) -> bool {
-        *self < script.minimal_non_dust().to_sat()
+        Amount::from_sat(*self).is_dust(script)
     }
 }
 
