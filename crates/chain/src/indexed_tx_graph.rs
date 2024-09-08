@@ -7,7 +7,7 @@ use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
     tx_graph::{self, TxGraph},
-    Anchor, AnchorFromBlockPosition, BlockId, Indexer, Merge,
+    Anchor, BlockId, Indexer, Merge, TxPosInBlock,
 };
 
 /// The [`IndexedTxGraph`] combines a [`TxGraph`] and an [`Indexer`] implementation.
@@ -252,17 +252,17 @@ where
     }
 }
 
-/// Methods are available if the anchor (`A`) implements [`AnchorFromBlockPosition`].
-impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
+/// Methods are available if the anchor (`A`) can be created from [`TxPosInBlock`].
+impl<A, I> IndexedTxGraph<A, I>
 where
     I::ChangeSet: Default + Merge,
-    A: AnchorFromBlockPosition,
+    for<'b> A: Anchor + From<TxPosInBlock<'b>>,
+    I: Indexer,
 {
     /// Batch insert all transactions of the given `block` of `height`, filtering out those that are
     /// irrelevant.
     ///
-    /// Each inserted transaction's anchor will be constructed from
-    /// [`AnchorFromBlockPosition::from_block_position`].
+    /// Each inserted transaction's anchor will be constructed using [`TxPosInBlock`].
     ///
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
     /// Irrelevant transactions in `txs` will be ignored.
@@ -280,7 +280,12 @@ where
             changeset.indexer.merge(self.index.index_tx(tx));
             if self.index.is_tx_relevant(tx) {
                 let txid = tx.compute_txid();
-                let anchor = A::from_block_position(block, block_id, tx_pos);
+                let anchor = TxPosInBlock {
+                    block,
+                    block_id,
+                    tx_pos,
+                }
+                .into();
                 changeset.tx_graph.merge(self.graph.insert_tx(tx.clone()));
                 changeset
                     .tx_graph
@@ -292,8 +297,7 @@ where
 
     /// Batch insert all transactions of the given `block` of `height`.
     ///
-    /// Each inserted transaction's anchor will be constructed from
-    /// [`AnchorFromBlockPosition::from_block_position`].
+    /// Each inserted transaction's anchor will be constructed using [`TxPosInBlock`].
     ///
     /// To only insert relevant transactions, use [`apply_block_relevant`] instead.
     ///
@@ -305,7 +309,12 @@ where
         };
         let mut graph = tx_graph::ChangeSet::default();
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
-            let anchor = A::from_block_position(&block, block_id, tx_pos);
+            let anchor = TxPosInBlock {
+                block: &block,
+                block_id,
+                tx_pos,
+            }
+            .into();
             graph.merge(self.graph.insert_anchor(tx.compute_txid(), anchor));
             graph.merge(self.graph.insert_tx(tx.clone()));
         }
