@@ -1405,7 +1405,7 @@ impl Wallet {
                 if let Some(previous_fee) = params.bumping_fee {
                     if fee < previous_fee.absolute {
                         return Err(CreateTxError::FeeTooLow {
-                            required: Amount::from_sat(previous_fee.absolute),
+                            required: previous_fee.absolute,
                         });
                     }
                 }
@@ -1423,7 +1423,7 @@ impl Wallet {
                         });
                     }
                 }
-                (rate, 0)
+                (rate, Amount::ZERO)
             }
         };
 
@@ -1449,20 +1449,20 @@ impl Wallet {
             }
 
             if self.is_mine(script_pubkey.clone()) {
-                received += Amount::from_sat(value);
+                received += value;
             }
 
             let new_out = TxOut {
                 script_pubkey: script_pubkey.clone(),
-                value: Amount::from_sat(value),
+                value,
             };
 
             tx.output.push(new_out);
 
-            outgoing += Amount::from_sat(value);
+            outgoing += value;
         }
 
-        fee_amount += (fee_rate * tx.weight()).to_sat();
+        fee_amount += fee_rate * tx.weight();
 
         let (required_utxos, optional_utxos) =
             self.preselect_utxos(&params, Some(current_height.to_consensus_u32()));
@@ -1501,7 +1501,7 @@ impl Wallet {
             required_utxos.clone(),
             optional_utxos.clone(),
             fee_rate,
-            outgoing.to_sat() + fee_amount,
+            outgoing.to_sat() + fee_amount.to_sat(),
             &drain_script,
         ) {
             Ok(res) => res,
@@ -1514,7 +1514,7 @@ impl Wallet {
                     coin_selection::single_random_draw(
                         required_utxos,
                         optional_utxos,
-                        outgoing.to_sat() + fee_amount,
+                        outgoing.to_sat() + fee_amount.to_sat(),
                         &drain_script,
                         fee_rate,
                         rng,
@@ -1522,7 +1522,7 @@ impl Wallet {
                 }
             },
         };
-        fee_amount += coin_selection.fee_amount;
+        fee_amount += Amount::from_sat(coin_selection.fee_amount);
         let excess = &coin_selection.excess;
 
         tx.input = coin_selection
@@ -1564,12 +1564,12 @@ impl Wallet {
         match excess {
             NoChange {
                 remaining_amount, ..
-            } => fee_amount += remaining_amount,
+            } => fee_amount += Amount::from_sat(*remaining_amount),
             Change { amount, fee } => {
                 if self.is_mine(drain_script.clone()) {
                     received += Amount::from_sat(*amount);
                 }
-                fee_amount += fee;
+                fee_amount += Amount::from_sat(*fee);
 
                 // create drain output
                 let drain_output = TxOut {
@@ -1763,11 +1763,11 @@ impl Wallet {
             recipients: tx
                 .output
                 .into_iter()
-                .map(|txout| (txout.script_pubkey, txout.value.to_sat()))
+                .map(|txout| (txout.script_pubkey, txout.value))
                 .collect(),
             utxos: original_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
-                absolute: fee.to_sat(),
+                absolute: fee,
                 rate: fee_rate,
             }),
             ..Default::default()

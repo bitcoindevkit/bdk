@@ -40,7 +40,7 @@ async fn main() -> Result<(), anyhow::Error> {
     println!("Next unused address: ({}) {}", address.index, address);
 
     let balance = wallet.balance();
-    println!("Wallet balance before syncing: {} sats", balance.total());
+    println!("Wallet balance before syncing: {}", balance.total());
 
     print!("Syncing...");
     let client = esplora_client::Builder::new(ESPLORA_URL).build_async()?;
@@ -66,11 +66,11 @@ async fn main() -> Result<(), anyhow::Error> {
     println!();
 
     let balance = wallet.balance();
-    println!("Wallet balance after syncing: {} sats", balance.total());
+    println!("Wallet balance after syncing: {}", balance.total());
 
     if balance.total() < SEND_AMOUNT {
         println!(
-            "Please send at least {} sats to the receiving address",
+            "Please send at least {} to the receiving address",
             SEND_AMOUNT
         );
         std::process::exit(0);

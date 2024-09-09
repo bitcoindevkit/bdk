@@ -1,12 +1,11 @@
 use bdk_wallet::file_store::Store;
 use bdk_wallet::Wallet;
 use std::io::Write;
-use std::str::FromStr;
 
 use bdk_electrum::electrum_client;
 use bdk_electrum::BdkElectrumClient;
+use bdk_wallet::bitcoin::Amount;
 use bdk_wallet::bitcoin::Network;
-use bdk_wallet::bitcoin::{Address, Amount};
 use bdk_wallet::chain::collections::HashSet;
 use bdk_wallet::{KeychainKind, SignOptions};
 
@@ -43,7 +42,7 @@ fn main() -> Result<(), anyhow::Error> {
     println!("Generated Address: {}", address);
 
     let balance = wallet.balance();
-    println!("Wallet balance before syncing: {} sats", balance.total());
+    println!("Wallet balance before syncing: {}", balance.total());
 
     print!("Syncing...");
     let client = BdkElectrumClient::new(electrum_client::Client::new(ELECTRUM_URL)?);
@@ -72,22 +71,19 @@ fn main() -> Result<(), anyhow::Error> {
     wallet.persist(&mut db)?;
 
     let balance = wallet.balance();
-    println!("Wallet balance after syncing: {} sats", balance.total());
+    println!("Wallet balance after syncing: {}", balance.total());
 
     if balance.total() < SEND_AMOUNT {
         println!(
-            "Please send at least {} sats to the receiving address",
+            "Please send at least {} to the receiving address",
             SEND_AMOUNT
         );
         std::process::exit(0);
     }
 
-    let faucet_address = Address::from_str("mkHS9ne12qx9pS9VojpwU5xtRd4T7X7ZUt")?
-        .require_network(Network::Testnet)?;
-
     let mut tx_builder = wallet.build_tx();
     tx_builder
-        .add_recipient(faucet_address.script_pubkey(), SEND_AMOUNT)
+        .add_recipient(address.script_pubkey(), SEND_AMOUNT)
         .enable_rbf();
 
     let mut psbt = tx_builder.finish()?;

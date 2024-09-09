@@ -42,7 +42,7 @@ fn main() -> Result<(), anyhow::Error> {
     );
 
     let balance = wallet.balance();
-    println!("Wallet balance before syncing: {} sats", balance.total());
+    println!("Wallet balance before syncing: {}", balance.total());
 
     print!("Syncing...");
     let client = esplora_client::Builder::new(ESPLORA_URL).build_blocking();
@@ -62,17 +62,15 @@ fn main() -> Result<(), anyhow::Error> {
     let update = client.full_scan(request, STOP_GAP, PARALLEL_REQUESTS)?;
 
     wallet.apply_update(update)?;
-    if let Some(changeset) = wallet.take_staged() {
-        db.append_changeset(&changeset)?;
-    }
+    wallet.persist(&mut db)?;
     println!();
 
     let balance = wallet.balance();
-    println!("Wallet balance after syncing: {} sats", balance.total());
+    println!("Wallet balance after syncing: {}", balance.total());
 
     if balance.total() < SEND_AMOUNT {
         println!(
-            "Please send at least {} sats to the receiving address",
+            "Please send at least {} to the receiving address",
             SEND_AMOUNT
         );
         std::process::exit(0);
