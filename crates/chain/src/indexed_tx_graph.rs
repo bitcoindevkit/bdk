@@ -2,7 +2,7 @@
 //! [`IndexedTxGraph`] documentation for more.
 use core::fmt::Debug;
 
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
@@ -133,13 +133,10 @@ where
     }
 
     /// Insert and index a transaction into the graph.
-    pub fn insert_tx(&mut self, tx: Transaction) -> ChangeSet<A, I::ChangeSet> {
-        let graph = self.graph.insert_tx(tx);
-        let indexer = self.index_tx_graph_changeset(&graph);
-        ChangeSet {
-            tx_graph: graph,
-            indexer,
-        }
+    pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A, I::ChangeSet> {
+        let tx_graph = self.graph.insert_tx(tx);
+        let indexer = self.index_tx_graph_changeset(&tx_graph);
+        ChangeSet { tx_graph, indexer }
     }
 
     /// Insert an `anchor` for a given transaction.
@@ -159,9 +156,9 @@ where
     ///
     /// Relevancy is determined by the [`Indexer::is_tx_relevant`] implementation of `I`. Irrelevant
     /// transactions in `txs` will be ignored. `txs` do not need to be in topological order.
-    pub fn batch_insert_relevant<'t>(
+    pub fn batch_insert_relevant<T: Into<Arc<Transaction>>>(
         &mut self,
-        txs: impl IntoIterator<Item = (&'t Transaction, impl IntoIterator<Item = A>)>,
+        txs: impl IntoIterator<Item = (T, impl IntoIterator<Item = A>)>,
     ) -> ChangeSet<A, I::ChangeSet> {
         // The algorithm below allows for non-topologically ordered transactions by using two loops.
         // This is achieved by:
@@ -169,28 +166,28 @@ where
         //    not store anything about them.
         // 2. decide whether to insert them into the graph depending on whether `is_tx_relevant`
         //    returns true or not. (in a second loop).
-        let txs = txs.into_iter().collect::<Vec<_>>();
+        let txs = txs
+            .into_iter()
+            .map(|(tx, anchors)| (<T as Into<Arc<Transaction>>>::into(tx), anchors))
+            .collect::<Vec<_>>();
 
         let mut indexer = I::ChangeSet::default();
         for (tx, _) in &txs {
             indexer.merge(self.index.index_tx(tx));
         }
 
-        let mut graph = tx_graph::ChangeSet::default();
+        let mut tx_graph = tx_graph::ChangeSet::default();
         for (tx, anchors) in txs {
-            if self.index.is_tx_relevant(tx) {
+            if self.index.is_tx_relevant(&tx) {
                 let txid = tx.compute_txid();
-                graph.merge(self.graph.insert_tx(tx.clone()));
+                tx_graph.merge(self.graph.insert_tx(tx.clone()));
                 for anchor in anchors {
-                    graph.merge(self.graph.insert_anchor(txid, anchor));
+                    tx_graph.merge(self.graph.insert_anchor(txid, anchor));
                 }
             }
         }
 
-        ChangeSet {
-            tx_graph: graph,
-            indexer,
-        }
+        ChangeSet { tx_graph, indexer }
     }
 
     /// Batch insert unconfirmed transactions, filtering out those that are irrelevant.
@@ -201,9 +198,9 @@ where
     /// Items of `txs` are tuples containing the transaction and a *last seen* timestamp. The
     /// *last seen* communicates when the transaction is last seen in the mempool which is used for
     /// conflict-resolution in [`TxGraph`] (refer to [`TxGraph::insert_seen_at`] for details).
-    pub fn batch_insert_relevant_unconfirmed<'t>(
+    pub fn batch_insert_relevant_unconfirmed<T: Into<Arc<Transaction>>>(
         &mut self,
-        unconfirmed_txs: impl IntoIterator<Item = (&'t Transaction, u64)>,
+        unconfirmed_txs: impl IntoIterator<Item = (T, u64)>,
     ) -> ChangeSet<A, I::ChangeSet> {
         // The algorithm below allows for non-topologically ordered transactions by using two loops.
         // This is achieved by:
@@ -211,7 +208,10 @@ where
         //    not store anything about them.
         // 2. decide whether to insert them into the graph depending on whether `is_tx_relevant`
         //    returns true or not. (in a second loop).
-        let txs = unconfirmed_txs.into_iter().collect::<Vec<_>>();
+        let txs = unconfirmed_txs
+            .into_iter()
+            .map(|(tx, last_seen)| (<T as Into<Arc<Transaction>>>::into(tx), last_seen))
+            .collect::<Vec<_>>();
 
         let mut indexer = I::ChangeSet::default();
         for (tx, _) in &txs {
@@ -239,9 +239,9 @@ where
     /// To filter out irrelevant transactions, use [`batch_insert_relevant_unconfirmed`] instead.
     ///
     /// [`batch_insert_relevant_unconfirmed`]: IndexedTxGraph::batch_insert_relevant_unconfirmed
-    pub fn batch_insert_unconfirmed(
+    pub fn batch_insert_unconfirmed<T: Into<Arc<Transaction>>>(
         &mut self,
-        txs: impl IntoIterator<Item = (Transaction, u64)>,
+        txs: impl IntoIterator<Item = (T, u64)>,
     ) -> ChangeSet<A, I::ChangeSet> {
         let graph = self.graph.batch_insert_unconfirmed(txs);
         let indexer = self.index_tx_graph_changeset(&graph);
