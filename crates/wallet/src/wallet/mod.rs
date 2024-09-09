@@ -88,7 +88,7 @@ use crate::descriptor::{
 use crate::psbt::PsbtUtils;
 use crate::signer::SignerError;
 use crate::types::*;
-use crate::wallet::coin_selection::Excess::{Change, NoChange};
+use crate::wallet::coin_selection::Excess::{self, Change, NoChange};
 use crate::wallet::error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError};
 
 use self::coin_selection::Error;
@@ -1468,17 +1468,28 @@ impl Wallet {
             self.preselect_utxos(&params, Some(current_height.to_consensus_u32()));
 
         // get drain script
+        let mut drain_index = Option::<(KeychainKind, u32)>::None;
         let drain_script = match params.drain_to {
             Some(ref drain_recipient) => drain_recipient.clone(),
             None => {
                 let change_keychain = self.map_keychain(KeychainKind::Internal);
-                let ((index, spk), index_changeset) = self
+                let (index, spk) = self
                     .indexed_graph
                     .index
-                    .next_unused_spk(change_keychain)
-                    .expect("keychain must exist");
-                self.indexed_graph.index.mark_used(change_keychain, index);
-                self.stage.merge(index_changeset.into());
+                    .unused_keychain_spks(change_keychain)
+                    .next()
+                    .unwrap_or_else(|| {
+                        let (next_index, _) = self
+                            .indexed_graph
+                            .index
+                            .next_index(change_keychain)
+                            .expect("keychain must exist");
+                        let spk = self
+                            .peek_address(change_keychain, next_index)
+                            .script_pubkey();
+                        (next_index, spk)
+                    });
+                drain_index = Some((change_keychain, index));
                 spk
             }
         };
@@ -1577,6 +1588,18 @@ impl Wallet {
         params.ordering.sort_tx_with_aux_rand(&mut tx, rng);
 
         let psbt = self.complete_transaction(tx, coin_selection.selected, params)?;
+
+        // recording changes to the change keychain
+        if let (Excess::Change { .. }, Some((keychain, index))) = (excess, drain_index) {
+            let (_, index_changeset) = self
+                .indexed_graph
+                .index
+                .reveal_to_target(keychain, index)
+                .expect("must not be None");
+            self.stage.merge(index_changeset.into());
+            self.mark_used(keychain, index);
+        }
+
         Ok(psbt)
     }
 
