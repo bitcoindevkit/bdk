@@ -2377,7 +2377,7 @@ impl Wallet {
         }
     }
 
-    /// Get a mutable reference of the staged [`ChangeSet`] that is yet to be commited (if any).
+    /// Get a mutable reference of the staged [`ChangeSet`] that is yet to be committed (if any).
     pub fn staged_mut(&mut self) -> Option<&mut ChangeSet> {
         if self.stage.is_empty() {
             None

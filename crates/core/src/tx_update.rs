@@ -2,7 +2,7 @@ use crate::collections::{BTreeMap, BTreeSet, HashMap};
 use alloc::{sync::Arc, vec::Vec};
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 
-/// Data object used to communicate updates about relevant transactions from some chain data soruce
+/// Data object used to communicate updates about relevant transactions from some chain data source
 /// to the core model (usually a `bdk_chain::TxGraph`).
 #[derive(Debug, Clone)]
 pub struct TxUpdate<A = ()> {

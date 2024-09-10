@@ -169,7 +169,7 @@ impl CheckPoint {
     /// The effect of `insert` depends on whether a height already exists. If it doesn't the
     /// `block_id` we inserted and all pre-existing blocks higher than it will be re-inserted after
     /// it. If the height already existed and has a conflicting block hash then it will be purged
-    /// along with all block followin it. The returned chain will have a tip of the `block_id`
+    /// along with all block following it. The returned chain will have a tip of the `block_id`
     /// passed in. Of course, if the `block_id` was already present then this just returns `self`.
     #[must_use]
     pub fn insert(self, block_id: BlockId) -> Self {
