@@ -1,5 +1,6 @@
 #![cfg(feature = "miniscript")]
 
+use std::collections::BTreeMap;
 use std::ops::{Bound, RangeBounds};
 
 use bdk_chain::{
@@ -372,6 +373,88 @@ fn local_chain_insert_block() {
         let mut chain = t.original;
         assert_eq!(
             chain.insert_block(t.insert.into()),
+            t.expected_result,
+            "[{}] unexpected result when inserting block",
+            i,
+        );
+        assert_eq!(chain, t.expected_final, "[{}] unexpected final chain", i,);
+    }
+}
+
+#[test]
+fn local_chain_insert_header() {
+    fn header(prev_blockhash: BlockHash) -> Header {
+        Header {
+            version: bitcoin::block::Version::default(),
+            prev_blockhash,
+            merkle_root: bitcoin::hash_types::TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: bitcoin::CompactTarget::default(),
+            nonce: 0,
+        }
+    }
+
+    fn local_chain(data: Vec<(u32, Header)>) -> LocalChain<Header> {
+        bdk_chain::local_chain::LocalChain::from_data(data.into_iter().collect::<BTreeMap<_, _>>())
+            .expect("chain must have genesis block")
+    }
+
+    struct TestCase {
+        original: LocalChain<Header>,
+        insert: (u32, Header),
+        expected_result: Result<ChangeSet<Header>, AlterCheckPointError>,
+        expected_final: LocalChain<Header>,
+    }
+
+    let test_cases = [
+        TestCase {
+            original: local_chain(vec![(0, header(h!("_")))]),
+            insert: (5, header(h!("block5"))),
+            expected_result: Ok([(5, Some(header(h!("block5"))))].into()),
+            expected_final: local_chain(vec![(0, header(h!("_"))), (5, header(h!("block5")))]),
+        },
+        TestCase {
+            original: local_chain(vec![(0, header(h!("_"))), (3, header(h!("A")))]),
+            insert: (4, header(h!("B"))),
+            expected_result: Ok([(4, Some(header(h!("B"))))].into()),
+            expected_final: local_chain(vec![
+                (0, header(h!("_"))),
+                (3, header(h!("A"))),
+                (4, header(h!("B"))),
+            ]),
+        },
+        TestCase {
+            original: local_chain(vec![(0, header(h!("_"))), (4, header(h!("B")))]),
+            insert: (3, header(h!("A"))),
+            expected_result: Ok([(3, Some(header(h!("A"))))].into()),
+            expected_final: local_chain(vec![
+                (0, header(h!("_"))),
+                (3, header(h!("A"))),
+                (4, header(h!("B"))),
+            ]),
+        },
+        TestCase {
+            original: local_chain(vec![(0, header(h!("_"))), (2, header(h!("K")))]),
+            insert: (2, header(h!("K"))),
+            expected_result: Ok([].into()),
+            expected_final: local_chain(vec![(0, header(h!("_"))), (2, header(h!("K")))]),
+        },
+        TestCase {
+            original: local_chain(vec![(0, header(h!("_"))), (2, header(h!("K")))]),
+            insert: (2, header(h!("J"))),
+            expected_result: Err(AlterCheckPointError {
+                height: 2,
+                original_hash: header(h!("K")).block_hash(),
+                update_hash: Some(header(h!("J")).block_hash()),
+            }),
+            expected_final: local_chain(vec![(0, header(h!("_"))), (2, header(h!("K")))]),
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        let mut chain = t.original;
+        assert_eq!(
+            chain.insert_data(t.insert.0, t.insert.1),
             t.expected_result,
             "[{}] unexpected result when inserting block",
             i,
