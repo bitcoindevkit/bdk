@@ -1,9 +1,0 @@
-# Taken from bitcoindevkit/rust-hwi
-FROM ghcr.io/ledgerhq/speculos
-
-RUN apt-get update
-RUN apt-get install wget -y
-RUN wget "https://github.com/LedgerHQ/speculos/blob/master/apps/nanos%23btc%232.1%231c8db8da.elf?raw=true" -O /speculos/btc.elf
-ADD automation.json /speculos/automation.json
-
-ENTRYPOINT ["python", "./speculos.py", "--automation", "file:automation.json", "--model", "nanos", "--display", "headless", "--vnc-port", "41000", "btc.elf"]
