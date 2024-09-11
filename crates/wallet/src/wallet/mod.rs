@@ -390,6 +390,7 @@ impl Wallet {
         let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
 
         let (descriptor, mut descriptor_keymap) = (params.descriptor)(&secp, network)?;
+        check_wallet_descriptor(&descriptor)?;
         descriptor_keymap.extend(params.descriptor_keymap);
 
         let signers = Arc::new(SignersContainer::build(
@@ -401,6 +402,7 @@ impl Wallet {
         let (change_descriptor, change_signers) = match params.change_descriptor {
             Some(make_desc) => {
                 let (change_descriptor, mut internal_keymap) = make_desc(&secp, network)?;
+                check_wallet_descriptor(&change_descriptor)?;
                 internal_keymap.extend(params.change_descriptor_keymap);
                 let change_signers = Arc::new(SignersContainer::build(
                     internal_keymap,
@@ -582,6 +584,7 @@ impl Wallet {
                 }
                 // parameters must match
                 Some(make_desc) => {
+                    check_wallet_descriptor(&desc).map_err(LoadError::Descriptor)?;
                     let (exp_desc, keymap) =
                         make_desc(&secp, network).map_err(LoadError::Descriptor)?;
                     if desc.descriptor_id() != exp_desc.descriptor_id() {
