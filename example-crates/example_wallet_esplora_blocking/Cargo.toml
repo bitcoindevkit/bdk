@@ -1,14 +1,12 @@
 [package]
-name = "wallet_rpc"
-version = "0.1.0"
+name = "example_wallet_esplora_blocking"
+version = "0.2.0"
 edition = "2021"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 bdk_wallet = { path = "../../crates/wallet", features = ["file_store"] }
-bdk_bitcoind_rpc = { path = "../../crates/bitcoind_rpc" }
-
+bdk_esplora = { path = "../../crates/esplora", features = ["blocking"] }
 anyhow = "1"
-clap = { version = "3.2.25", features = ["derive", "env"] }
-ctrlc = "2.0.1"

@@ -1,5 +1,5 @@
 [package]
-name = "wallet_esplora_async"
+name = "example_wallet_esplora_async"
 version = "0.2.0"
 edition = "2021"
 
