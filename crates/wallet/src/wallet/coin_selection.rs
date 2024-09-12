@@ -36,15 +36,14 @@
 //! struct AlwaysSpendEverything;
 //!
 //! impl CoinSelectionAlgorithm for AlwaysSpendEverything {
-//!     fn coin_select<R: RngCore>(
-//!         &self,
+//!     fn coin_select(
+//!         &mut self,
 //!         required_utxos: Vec<WeightedUtxo>,
 //!         optional_utxos: Vec<WeightedUtxo>,
 //!         fee_rate: FeeRate,
 //!         target_amount: u64,
 //!         drain_script: &Script,
-//!         rand: &mut R,
-//!     ) -> Result<CoinSelectionResult, coin_selection::InsufficientFunds> {
+//!     ) -> Result<CoinSelectionResult, coin_selection::Error> {
 //!         let mut selected_amount = 0;
 //!         let mut additional_weight = Weight::ZERO;
 //!         let all_utxos_selected = required_utxos
@@ -65,7 +64,7 @@
 //!         let additional_fees = (fee_rate * additional_weight).to_sat();
 //!         let amount_needed_with_fees = additional_fees + target_amount;
 //!         if selected_amount < amount_needed_with_fees {
-//!             return Err(coin_selection::InsufficientFunds {
+//!             return Err(coin_selection::Error::InsufficientFunds {
 //!                 needed: amount_needed_with_fees,
 //!                 available: selected_amount,
 //!             });
@@ -113,40 +112,56 @@ use bitcoin::OutPoint;
 use bitcoin::TxIn;
 use bitcoin::{Script, Weight};
 
-use core::convert::TryInto;
-use core::fmt::{self, Formatter};
-use rand_core::RngCore;
-
 use super::utils::shuffle_slice;
+#[cfg(feature = "std")]
+use bitcoin::secp256k1::rand::rngs::StdRng;
+use core::convert::TryInto;
+use core::fmt::{self, Debug, Display, Formatter};
+use rand_core::RngCore;
+#[cfg(feature = "std")]
+use rand_core::SeedableRng;
+
 /// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
 /// overridden
-pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection<SingleRandomDraw>;
+#[cfg(feature = "std")]
+pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection<SingleRandomDraw<StdRng>>;
 
-/// Wallet's UTXO set is not enough to cover recipient's requested plus fee.
-///
-/// This is thrown by [`CoinSelectionAlgorithm`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InsufficientFunds {
-    /// Sats needed for some transaction
-    pub needed: u64,
-    /// Sats available for spending
-    pub available: u64,
+/// Default coin selection algorithm used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
+/// overridden. No fallback [`SingleRandomDraw`] coin selection algorithm is provided.
+#[cfg(not(feature = "std"))]
+pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection<()>;
+
+/// Error thrown by [`CoinSelectionAlgorithm`].
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Error {
+    /// Wallet's UTXO set is not enough to cover recipient's requested plus fee.
+    InsufficientFunds {
+        /// Sats needed for some transaction
+        needed: u64,
+        /// Sats available for spending
+        available: u64,
+    },
+    /// Errors specific to the [`BranchAndBoundCoinSelection`] algorithm.
+    BranchAndBound(BnbError),
 }
 
-impl fmt::Display for InsufficientFunds {
+impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Insufficient funds: {} sat available of {} sat needed",
-            self.available, self.needed
-        )
+        match self {
+            Error::InsufficientFunds { needed, available } => write!(
+                f,
+                "Insufficient funds: {} sat available of {} sat needed",
+                available, needed
+            ),
+            Error::BranchAndBound(e) => write!(f, "{:?}", e),
+        }
     }
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for InsufficientFunds {}
+impl std::error::Error for Error {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 /// Remaining amount after performing coin selection
 pub enum Excess {
     /// It's not possible to create spendable output from excess using the current drain output
@@ -168,7 +183,7 @@ pub enum Excess {
 }
 
 /// Result of a successful coin selection
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CoinSelectionResult {
     /// List of outputs selected for use as inputs
     pub selected: Vec<Utxo>,
@@ -202,7 +217,7 @@ impl CoinSelectionResult {
 /// selection algorithm when it creates transactions.
 ///
 /// For an example see [this module](crate::wallet::coin_selection)'s documentation.
-pub trait CoinSelectionAlgorithm: core::fmt::Debug {
+pub trait CoinSelectionAlgorithm: Debug {
     /// Perform the coin selection
     ///
     /// - `required_utxos`: the utxos that must be spent regardless of `target_amount` with their
@@ -213,16 +228,14 @@ pub trait CoinSelectionAlgorithm: core::fmt::Debug {
     /// - `target_amount`: the outgoing amount in satoshis and the fees already
     ///                    accumulated from added outputs and transaction’s header.
     /// - `drain_script`: the script to use in case of change
-    /// - `rand`: random number generated used by some coin selection algorithms such as [`SingleRandomDraw`]
-    fn coin_select<R: RngCore>(
-        &self,
+    fn coin_select(
+        &mut self,
         required_utxos: Vec<WeightedUtxo>,
         optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         target_amount: u64,
         drain_script: &Script,
-        rand: &mut R,
-    ) -> Result<CoinSelectionResult, InsufficientFunds>;
+    ) -> Result<CoinSelectionResult, Error>;
 }
 
 /// Simple and dumb coin selection
@@ -233,15 +246,14 @@ pub trait CoinSelectionAlgorithm: core::fmt::Debug {
 pub struct LargestFirstCoinSelection;
 
 impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
-    fn coin_select<R: RngCore>(
-        &self,
+    fn coin_select(
+        &mut self,
         required_utxos: Vec<WeightedUtxo>,
         mut optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         target_amount: u64,
         drain_script: &Script,
-        _: &mut R,
-    ) -> Result<CoinSelectionResult, InsufficientFunds> {
+    ) -> Result<CoinSelectionResult, Error> {
         // We put the "required UTXOs" first and make sure the optional UTXOs are sorted,
         // initially smallest to largest, before being reversed with `.rev()`.
         let utxos = {
@@ -264,15 +276,14 @@ impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
 pub struct OldestFirstCoinSelection;
 
 impl CoinSelectionAlgorithm for OldestFirstCoinSelection {
-    fn coin_select<R: RngCore>(
-        &self,
+    fn coin_select(
+        &mut self,
         required_utxos: Vec<WeightedUtxo>,
         mut optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         target_amount: u64,
         drain_script: &Script,
-        _: &mut R,
-    ) -> Result<CoinSelectionResult, InsufficientFunds> {
+    ) -> Result<CoinSelectionResult, Error> {
         // We put the "required UTXOs" first and make sure the optional UTXOs are sorted from
         // oldest to newest according to blocktime
         // For utxo that doesn't exist in DB, they will have lowest priority to be selected
@@ -324,7 +335,7 @@ fn select_sorted_utxos(
     fee_rate: FeeRate,
     target_amount: u64,
     drain_script: &Script,
-) -> Result<CoinSelectionResult, InsufficientFunds> {
+) -> Result<CoinSelectionResult, Error> {
     let mut selected_amount = 0;
     let mut fee_amount = 0;
     let selected = utxos
@@ -349,7 +360,7 @@ fn select_sorted_utxos(
 
     let amount_needed_with_fees = target_amount + fee_amount;
     if selected_amount < amount_needed_with_fees {
-        return Err(InsufficientFunds {
+        return Err(Error::InsufficientFunds {
             needed: amount_needed_with_fees,
             available: selected_amount,
         });
@@ -397,14 +408,14 @@ impl OutputGroup {
 ///
 /// Code adapted from Bitcoin Core's implementation and from Mark Erhardt Master's Thesis: <http://murch.one/wp-content/uploads/2016/11/erhardt2016coinselection.pdf>
 #[derive(Debug, Clone)]
-pub struct BranchAndBoundCoinSelection<Cs = SingleRandomDraw> {
+pub struct BranchAndBoundCoinSelection<Cs> {
     size_of_change: u64,
-    fallback_algorithm: Cs,
+    fallback_algorithm: Option<Cs>,
 }
 
-/// Error returned by branch and bond coin selection.
-#[derive(Debug)]
-enum BnbError {
+/// Error returned by branch and bound coin selection.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum BnbError {
     /// Branch and bound coin selection tries to avoid needing a change by finding the right inputs for
     /// the desired outputs plus fee, if there is not such combination this error is thrown
     NoExactMatch,
@@ -413,38 +424,116 @@ enum BnbError {
     TotalTriesExceeded,
 }
 
-impl<Cs: Default> Default for BranchAndBoundCoinSelection<Cs> {
-    fn default() -> Self {
-        Self {
-            // P2WPKH cost of change -> value (8 bytes) + script len (1 bytes) + script (22 bytes)
-            size_of_change: 8 + 1 + 22,
-            fallback_algorithm: Cs::default(),
+impl Display for BnbError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            BnbError::NoExactMatch => write!(f, "bnb: no exact, change free match found"),
+            BnbError::TotalTriesExceeded => write!(f, "bnb: total tries exceeded"),
         }
     }
 }
 
-impl<Cs> BranchAndBoundCoinSelection<Cs> {
-    /// Create new instance with a target `size_of_change` and `fallback_algorithm`.
+#[cfg(feature = "std")]
+impl Default for BranchAndBoundCoinSelection<SingleRandomDraw<StdRng>> {
+    fn default() -> Self {
+        Self {
+            // P2WPKH cost of change -> value (8 bytes) + script len (1 bytes) + script (22 bytes)
+            size_of_change: 8 + 1 + 22,
+            fallback_algorithm: Some(SingleRandomDraw::default()),
+        }
+    }
+}
+
+#[cfg(not(feature = "std"))]
+impl<Cs> Default for BranchAndBoundCoinSelection<Cs> {
+    fn default() -> Self {
+        Self {
+            // P2WPKH cost of change -> value (8 bytes) + script len (1 bytes) + script (22 bytes)
+            size_of_change: 8 + 1 + 22,
+            fallback_algorithm: None,
+        }
+    }
+}
+
+impl<Cs: CoinSelectionAlgorithm> BranchAndBoundCoinSelection<Cs> {
+    /// Create new instance with a target `size_of_change` with optional `fallback_algorithm`.
     pub fn new(size_of_change: u64, fallback_algorithm: Cs) -> Self {
         Self {
             size_of_change,
-            fallback_algorithm,
+            fallback_algorithm: Some(fallback_algorithm),
         }
+    }
+}
+
+impl BranchAndBoundCoinSelection<()> {
+    /// Create new instance with a target `size_of_change` and no fallback_algorithm.
+    pub fn new_no_fallback(size_of_change: u64) -> Self {
+        Self {
+            size_of_change,
+            fallback_algorithm: None,
+        }
+    }
+
+    #[allow(dead_code)] // not really dead code
+    fn coin_select(
+        &mut self,
+        required_utxos: Vec<WeightedUtxo>,
+        optional_utxos: Vec<WeightedUtxo>,
+        fee_rate: FeeRate,
+        target_amount: u64,
+        drain_script: &Script,
+    ) -> Result<CoinSelectionResult, Error> {
+        self.bnb_coin_select(
+            &required_utxos,
+            &optional_utxos,
+            fee_rate,
+            target_amount,
+            drain_script,
+        )
     }
 }
 
 const BNB_TOTAL_TRIES: usize = 100_000;
 
 impl<Cs: CoinSelectionAlgorithm> CoinSelectionAlgorithm for BranchAndBoundCoinSelection<Cs> {
-    fn coin_select<R: RngCore>(
-        &self,
+    fn coin_select(
+        &mut self,
         required_utxos: Vec<WeightedUtxo>,
         optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         target_amount: u64,
         drain_script: &Script,
-        rand: &mut R,
-    ) -> Result<CoinSelectionResult, InsufficientFunds> {
+    ) -> Result<CoinSelectionResult, Error> {
+        let result = self.bnb_coin_select(
+            &required_utxos,
+            &optional_utxos,
+            fee_rate,
+            target_amount,
+            drain_script,
+        );
+        match (result, &mut self.fallback_algorithm) {
+            (Ok(r), _) => Ok(r),
+            (Err(_), Some(fa)) => fa.coin_select(
+                required_utxos,
+                optional_utxos,
+                fee_rate,
+                target_amount,
+                drain_script,
+            ),
+            (Err(e), None) => Err(e),
+        }
+    }
+}
+
+impl<Cs> BranchAndBoundCoinSelection<Cs> {
+    fn bnb_coin_select(
+        &mut self,
+        required_utxos: &[WeightedUtxo],
+        optional_utxos: &[WeightedUtxo],
+        fee_rate: FeeRate,
+        target_amount: u64,
+        drain_script: &Script,
+    ) -> Result<CoinSelectionResult, Error> {
         // Mapping every (UTXO, usize) to an output group
         let required_ogs: Vec<OutputGroup> = required_utxos
             .iter()
@@ -498,7 +587,7 @@ impl<Cs: CoinSelectionAlgorithm> CoinSelectionAlgorithm for BranchAndBoundCoinSe
                 );
 
                 // Add to the target the fee cost of the UTXOs
-                return Err(InsufficientFunds {
+                return Err(Error::InsufficientFunds {
                     needed: target_amount + utxo_fees,
                     available: utxo_value,
                 });
@@ -519,31 +608,22 @@ impl<Cs: CoinSelectionAlgorithm> CoinSelectionAlgorithm for BranchAndBoundCoinSe
 
             return Ok(calculate_cs_result(vec![], required_ogs, excess));
         }
-
-        match self.bnb(
-            required_ogs.clone(),
-            optional_ogs.clone(),
+        let result = self.bnb(
+            required_ogs,
+            optional_ogs,
             curr_value,
             curr_available_value,
             signed_target_amount,
             cost_of_change,
             drain_script,
             fee_rate,
-        ) {
+        );
+        match result {
             Ok(r) => Ok(r),
-            Err(_) => self.fallback_algorithm.coin_select(
-                required_utxos,
-                optional_utxos,
-                fee_rate,
-                target_amount,
-                drain_script,
-                rand,
-            ),
+            Err(e) => Err(Error::BranchAndBound(e)),
         }
     }
-}
 
-impl<Cs> BranchAndBoundCoinSelection<Cs> {
     // TODO: make this more Rust-onic :)
     // (And perhaps refactor with less arguments?)
     #[allow(clippy::too_many_arguments)]
@@ -664,80 +744,45 @@ impl<Cs> BranchAndBoundCoinSelection<Cs> {
 }
 
 /// Pull UTXOs at random until we have enough to meet the target.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SingleRandomDraw;
+#[derive(Debug, Clone, Copy)]
+pub struct SingleRandomDraw<R>(pub R);
 
-impl CoinSelectionAlgorithm for SingleRandomDraw {
-    fn coin_select<R: RngCore>(
-        &self,
+#[cfg(feature = "std")]
+impl Default for SingleRandomDraw<StdRng> {
+    fn default() -> Self {
+        Self(StdRng::from_entropy())
+    }
+}
+
+impl<R: RngCore + Debug> CoinSelectionAlgorithm for SingleRandomDraw<R> {
+    fn coin_select(
+        &mut self,
         required_utxos: Vec<WeightedUtxo>,
         optional_utxos: Vec<WeightedUtxo>,
         fee_rate: FeeRate,
         target_amount: u64,
         drain_script: &Script,
-        rand: &mut R,
-    ) -> Result<CoinSelectionResult, InsufficientFunds> {
-        Ok(single_random_draw(
-            required_utxos,
-            optional_utxos,
-            target_amount,
-            drain_script,
-            fee_rate,
-            rand,
-        ))
-    }
-}
-
-// Pull UTXOs at random until we have enough to meet the target
-pub(crate) fn single_random_draw(
-    required_utxos: Vec<WeightedUtxo>,
-    optional_utxos: Vec<WeightedUtxo>,
-    target_amount: u64,
-    drain_script: &Script,
-    fee_rate: FeeRate,
-    rng: &mut impl RngCore,
-) -> CoinSelectionResult {
-    let target_amount = target_amount
-        .try_into()
-        .expect("Bitcoin amount to fit into i64");
-
-    let required_utxos: Vec<OutputGroup> = required_utxos
-        .into_iter()
-        .map(|u| OutputGroup::new(u, fee_rate))
-        .collect();
-
-    let mut optional_utxos: Vec<OutputGroup> = optional_utxos
-        .into_iter()
-        .map(|u| OutputGroup::new(u, fee_rate))
-        .collect();
-
-    let curr_value = required_utxos
-        .iter()
-        .fold(0, |acc, x| acc + x.effective_value);
-
-    shuffle_slice(&mut optional_utxos, rng);
-
-    let selected_utxos =
-        optional_utxos
+    ) -> Result<CoinSelectionResult, Error> {
+        // randomize required utxos (required = true, weighted utxo)
+        let mut utxos: Vec<(bool, WeightedUtxo)> = required_utxos
+            .clone()
             .into_iter()
-            .fold((curr_value, vec![]), |(mut amount, mut utxos), utxo| {
-                if amount >= target_amount {
-                    (amount, utxos)
-                } else {
-                    amount += utxo.effective_value;
-                    utxos.push(utxo);
-                    (amount, utxos)
-                }
-            });
+            .map(|utxo| (true, utxo))
+            .collect();
+        shuffle_slice(&mut utxos, &mut self.0);
+        // randomize optional utxos (required = false, weighted utxo)
+        let mut optional_utxos: Vec<(bool, WeightedUtxo)> = optional_utxos
+            .clone()
+            .into_iter()
+            .map(|utxo| (false, utxo))
+            .collect();
+        shuffle_slice(&mut optional_utxos, &mut self.0);
+        // append optional utxos to list of required utxos
+        utxos.append(&mut optional_utxos);
 
-    // remaining_amount can't be negative as that would mean the
-    // selection wasn't successful
-    // target_amount = amount_needed + (fee_amount - vin_fees)
-    let remaining_amount = (selected_utxos.0 - target_amount) as u64;
-
-    let excess = decide_change(remaining_amount, fee_rate, drain_script);
-
-    calculate_cs_result(selected_utxos.1, required_utxos, excess)
+        // select random required UTXOs first and then random optional UTXOs.
+        select_sorted_utxos(utxos.into_iter(), fee_rate, target_amount, drain_script)
+    }
 }
 
 fn calculate_cs_result(
@@ -792,7 +837,7 @@ mod test {
     use crate::wallet::coin_selection::filter_duplicates;
 
     use rand::prelude::SliceRandom;
-    use rand::{thread_rng, Rng, RngCore, SeedableRng};
+    use rand::{Rng, RngCore, SeedableRng};
 
     // signature len (1WU) + signature and sighash (72WU)
     // + pubkey len (1WU) + pubkey (33WU)
@@ -949,7 +994,6 @@ mod test {
                 FeeRate::from_sat_per_vb_unchecked(1),
                 target_amount,
                 &drain_script,
-                &mut thread_rng(),
             )
             .unwrap();
 
@@ -971,7 +1015,6 @@ mod test {
                 FeeRate::from_sat_per_vb_unchecked(1),
                 target_amount,
                 &drain_script,
-                &mut thread_rng(),
             )
             .unwrap();
 
@@ -993,7 +1036,6 @@ mod test {
                 FeeRate::from_sat_per_vb_unchecked(1),
                 target_amount,
                 &drain_script,
-                &mut thread_rng(),
             )
             .unwrap();
 
@@ -1003,41 +1045,35 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
     fn test_largest_first_coin_selection_insufficient_funds() {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
         let target_amount = 500_000 + FEE_AMOUNT;
 
-        LargestFirstCoinSelection
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb_unchecked(1),
-                target_amount,
-                &drain_script,
-                &mut thread_rng(),
-            )
-            .unwrap();
+        let result = LargestFirstCoinSelection.coin_select(
+            vec![],
+            utxos,
+            FeeRate::from_sat_per_vb_unchecked(1),
+            target_amount,
+            &drain_script,
+        );
+        assert!(matches!(result, Err(Error::InsufficientFunds { .. })));
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
     fn test_largest_first_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
         let target_amount = 250_000 + FEE_AMOUNT;
 
-        LargestFirstCoinSelection
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb_unchecked(1000),
-                target_amount,
-                &drain_script,
-                &mut thread_rng(),
-            )
-            .unwrap();
+        let result = LargestFirstCoinSelection.coin_select(
+            vec![],
+            utxos,
+            FeeRate::from_sat_per_vb_unchecked(1000),
+            target_amount,
+            &drain_script,
+        );
+        assert!(matches!(result, Err(Error::InsufficientFunds { .. })));
     }
 
     #[test]
@@ -1053,7 +1089,6 @@ mod test {
                 FeeRate::from_sat_per_vb_unchecked(1),
                 target_amount,
                 &drain_script,
-                &mut thread_rng(),
             )
             .unwrap();
 
@@ -1075,7 +1110,6 @@ mod test {
                 FeeRate::from_sat_per_vb_unchecked(1),
                 target_amount,
                 &drain_script,
-                &mut thread_rng(),
             )
             .unwrap();
 
@@ -1097,7 +1131,6 @@ mod test {
                 FeeRate::from_sat_per_vb_unchecked(1),
                 target_amount,
                 &drain_script,
-                &mut thread_rng(),
             )
             .unwrap();
 
@@ -1107,26 +1140,22 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
     fn test_oldest_first_coin_selection_insufficient_funds() {
         let utxos = get_oldest_first_test_utxos();
         let drain_script = ScriptBuf::default();
         let target_amount = 600_000 + FEE_AMOUNT;
 
-        OldestFirstCoinSelection
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb_unchecked(1),
-                target_amount,
-                &drain_script,
-                &mut thread_rng(),
-            )
-            .unwrap();
+        let result = OldestFirstCoinSelection.coin_select(
+            vec![],
+            utxos,
+            FeeRate::from_sat_per_vb_unchecked(1),
+            target_amount,
+            &drain_script,
+        );
+        assert!(matches!(result, Err(Error::InsufficientFunds { .. })));
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
     fn test_oldest_first_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_oldest_first_test_utxos();
 
@@ -1137,16 +1166,14 @@ mod test {
             - 50;
         let drain_script = ScriptBuf::default();
 
-        OldestFirstCoinSelection
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb_unchecked(1000),
-                target_amount,
-                &drain_script,
-                &mut thread_rng(),
-            )
-            .unwrap();
+        let result = OldestFirstCoinSelection.coin_select(
+            vec![],
+            utxos,
+            FeeRate::from_sat_per_vb_unchecked(1000),
+            target_amount,
+            &drain_script,
+        );
+        assert!(matches!(result, Err(Error::InsufficientFunds { .. })));
     }
 
     #[test]
@@ -1157,14 +1184,13 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 250_000 + FEE_AMOUNT;
 
-        let result = BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
+        let result = BranchAndBoundCoinSelection::default()
             .coin_select(
                 vec![],
                 utxos,
                 FeeRate::from_sat_per_vb_unchecked(1),
                 target_amount,
                 &drain_script,
-                &mut thread_rng(),
             )
             .unwrap();
 
@@ -1179,14 +1205,13 @@ mod test {
         let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
 
-        let result = BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
+        let result = BranchAndBoundCoinSelection::default()
             .coin_select(
                 utxos.clone(),
                 utxos,
                 FeeRate::from_sat_per_vb_unchecked(1),
                 target_amount,
                 &drain_script,
-                &mut thread_rng(),
             )
             .unwrap();
 
@@ -1203,15 +1228,8 @@ mod test {
         // first and third utxo's effective value
         let target_amount = calc_target_amount(&[utxos[0].clone(), utxos[2].clone()], fee_rate);
 
-        let result = BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
-            .coin_select(
-                vec![],
-                utxos,
-                fee_rate,
-                target_amount,
-                &drain_script,
-                &mut thread_rng(),
-            )
+        let result = BranchAndBoundCoinSelection::default()
+            .coin_select(vec![], utxos, fee_rate, target_amount, &drain_script)
             .unwrap();
 
         assert_eq!(result.selected.len(), 2);
@@ -1223,20 +1241,43 @@ mod test {
     fn test_single_random_draw_function_success() {
         let seed = [0; 32];
         let mut rng: StdRng = SeedableRng::from_seed(seed);
+
         let mut utxos = generate_random_utxos(&mut rng, 300);
         let target_amount = sum_random_utxos(&mut rng, &mut utxos) + FEE_AMOUNT;
         let fee_rate = FeeRate::from_sat_per_vb_unchecked(1);
         let drain_script = ScriptBuf::default();
-        let result = single_random_draw(
-            vec![],
-            utxos,
-            target_amount,
-            &drain_script,
-            fee_rate,
-            &mut rng,
+
+        let mut single_random_draw = SingleRandomDraw(rng);
+        let result =
+            single_random_draw.coin_select(vec![], utxos, fee_rate, target_amount, &drain_script);
+
+        assert!(
+            matches!(result, Ok(CoinSelectionResult {selected, fee_amount, ..})
+                if selected.iter().map(|u| u.txout().value.to_sat()).sum::<u64>() > target_amount
+                && fee_amount == ((selected.len() * 68) as u64)
+            )
         );
-        assert!(result.selected_amount() > target_amount);
-        assert_eq!(result.fee_amount, (result.selected.len() * 68) as u64);
+    }
+
+    #[test]
+    fn test_single_random_draw_function_error() {
+        let seed = [0; 32];
+        let rng: StdRng = SeedableRng::from_seed(seed);
+
+        // 100_000, 10, 200_000
+        let utxos = get_test_utxos();
+        let target_amount = 300_000 + FEE_AMOUNT;
+        let fee_rate = FeeRate::from_sat_per_vb_unchecked(1);
+        let drain_script = ScriptBuf::default();
+
+        let mut single_random_draw = SingleRandomDraw(rng);
+        let result =
+            single_random_draw.coin_select(vec![], utxos, fee_rate, target_amount, &drain_script);
+
+        assert!(
+            matches!(result, Err(Error::InsufficientFunds {needed, available})
+                if needed == 300_254 && available == 300_010)
+        );
     }
 
     #[test]
@@ -1262,15 +1303,8 @@ mod test {
         // first and third utxo's effective value
         let target_amount = calc_target_amount(&[utxos[0].clone(), utxos[2].clone()], fee_rate);
 
-        let result = BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
-            .coin_select(
-                required,
-                optional,
-                fee_rate,
-                target_amount,
-                &drain_script,
-                &mut thread_rng(),
-            )
+        let result = BranchAndBoundCoinSelection::default()
+            .coin_select(required, optional, fee_rate, target_amount, &drain_script)
             .unwrap();
 
         assert_eq!(result.selected.len(), 2);
@@ -1279,41 +1313,36 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
     fn test_bnb_coin_selection_insufficient_funds() {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
         let target_amount = 500_000 + FEE_AMOUNT;
 
-        BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb_unchecked(1),
-                target_amount,
-                &drain_script,
-                &mut thread_rng(),
-            )
-            .unwrap();
+        let result = BranchAndBoundCoinSelection::default().coin_select(
+            vec![],
+            utxos,
+            FeeRate::from_sat_per_vb_unchecked(1),
+            target_amount,
+            &drain_script,
+        );
+
+        assert!(matches!(result, Err(Error::InsufficientFunds { .. })));
     }
 
     #[test]
-    #[should_panic(expected = "InsufficientFunds")]
     fn test_bnb_coin_selection_insufficient_funds_high_fees() {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
         let target_amount = 250_000 + FEE_AMOUNT;
 
-        BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
-            .coin_select(
-                vec![],
-                utxos,
-                FeeRate::from_sat_per_vb_unchecked(1000),
-                target_amount,
-                &drain_script,
-                &mut thread_rng(),
-            )
-            .unwrap();
+        let result = BranchAndBoundCoinSelection::default().coin_select(
+            vec![],
+            utxos,
+            FeeRate::from_sat_per_vb_unchecked(1000),
+            target_amount,
+            &drain_script,
+        );
+        assert!(matches!(result, Err(Error::InsufficientFunds { .. })));
     }
 
     #[test]
@@ -1324,15 +1353,8 @@ mod test {
         // first utxo's effective value
         let target_amount = calc_target_amount(&utxos[0..1], fee_rate);
 
-        let result = BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
-            .coin_select(
-                vec![],
-                utxos,
-                fee_rate,
-                target_amount,
-                &drain_script,
-                &mut thread_rng(),
-            )
+        let result = BranchAndBoundCoinSelection::default()
+            .coin_select(vec![], utxos, fee_rate, target_amount, &drain_script)
             .unwrap();
 
         assert_eq!(result.selected.len(), 1);
@@ -1353,14 +1375,13 @@ mod test {
             let mut optional_utxos = generate_random_utxos(&mut rng, 16);
             let target_amount = sum_random_utxos(&mut rng, &mut optional_utxos);
             let drain_script = ScriptBuf::default();
-            let result = BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
+            let result = BranchAndBoundCoinSelection::default()
                 .coin_select(
                     vec![],
                     optional_utxos,
                     FeeRate::ZERO,
                     target_amount,
                     &drain_script,
-                    &mut thread_rng(),
                 )
                 .unwrap();
             assert_eq!(result.selected_amount(), target_amount);
@@ -1368,37 +1389,19 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "NoExactMatch")]
     fn test_bnb_function_no_exact_match() {
         let fee_rate = FeeRate::from_sat_per_vb_unchecked(10);
-        let utxos: Vec<OutputGroup> = get_test_utxos()
-            .into_iter()
-            .map(|u| OutputGroup::new(u, fee_rate))
-            .collect();
-
-        let curr_available_value = utxos.iter().fold(0, |acc, x| acc + x.effective_value);
-
-        let size_of_change = 31;
-        let cost_of_change = (Weight::from_vb_unchecked(size_of_change) * fee_rate).to_sat();
-
+        let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
         let target_amount = 20_000 + FEE_AMOUNT;
-        BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
-            .bnb(
-                vec![],
-                utxos,
-                0,
-                curr_available_value,
-                target_amount as i64,
-                cost_of_change,
-                &drain_script,
-                fee_rate,
-            )
-            .unwrap();
+
+        let mut bnb_no_fallback = BranchAndBoundCoinSelection::new_no_fallback(8 + 1 + 22);
+        let result =
+            bnb_no_fallback.coin_select(vec![], utxos, fee_rate, target_amount, &drain_script);
+        assert!(matches!(result, Err(Error::BranchAndBound(e)) if e == BnbError::NoExactMatch));
     }
 
     #[test]
-    #[should_panic(expected = "TotalTriesExceeded")]
     fn test_bnb_function_tries_exceeded() {
         let fee_rate = FeeRate::from_sat_per_vb_unchecked(10);
         let utxos: Vec<OutputGroup> = generate_same_value_utxos(100_000, 100_000)
@@ -1414,18 +1417,17 @@ mod test {
 
         let drain_script = ScriptBuf::default();
 
-        BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
-            .bnb(
-                vec![],
-                utxos,
-                0,
-                curr_available_value,
-                target_amount as i64,
-                cost_of_change,
-                &drain_script,
-                fee_rate,
-            )
-            .unwrap();
+        let result = BranchAndBoundCoinSelection::default().bnb(
+            vec![],
+            utxos,
+            0,
+            curr_available_value,
+            target_amount as i64,
+            cost_of_change,
+            &drain_script,
+            fee_rate,
+        );
+        assert!(matches!(result, Err(BnbError::TotalTriesExceeded)));
     }
 
     // The match won't be exact but still in the range
@@ -1450,7 +1452,7 @@ mod test {
 
         let drain_script = ScriptBuf::default();
 
-        let result = BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
+        let result = BranchAndBoundCoinSelection::default()
             .bnb(
                 vec![],
                 utxos,
@@ -1490,7 +1492,7 @@ mod test {
 
             let drain_script = ScriptBuf::default();
 
-            let result = BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
+            let result = BranchAndBoundCoinSelection::default()
                 .bnb(
                     vec![],
                     optional_utxos,
@@ -1511,19 +1513,18 @@ mod test {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
 
-        let selection = BranchAndBoundCoinSelection::<SingleRandomDraw>::default().coin_select(
+        let selection = BranchAndBoundCoinSelection::default().coin_select(
             vec![],
             utxos,
             FeeRate::from_sat_per_vb_unchecked(10),
             500_000,
             &drain_script,
-            &mut thread_rng(),
         );
 
         assert_matches!(
             selection,
-            Err(InsufficientFunds {
-                available: 300_000,
+            Err(Error::InsufficientFunds {
+                available: 300_010,
                 ..
             })
         );
@@ -1538,18 +1539,17 @@ mod test {
             |u| matches!(u, WeightedUtxo { utxo, .. } if utxo.txout().value.to_sat() < 1000),
         );
 
-        let selection = BranchAndBoundCoinSelection::<SingleRandomDraw>::default().coin_select(
+        let selection = BranchAndBoundCoinSelection::default().coin_select(
             required,
             optional,
             FeeRate::from_sat_per_vb_unchecked(10),
             500_000,
             &drain_script,
-            &mut thread_rng(),
         );
 
         assert_matches!(
             selection,
-            Err(InsufficientFunds {
+            Err(Error::InsufficientFunds {
                 available: 300_010,
                 ..
             })
@@ -1561,18 +1561,17 @@ mod test {
         let utxos = get_test_utxos();
         let drain_script = ScriptBuf::default();
 
-        let selection = BranchAndBoundCoinSelection::<SingleRandomDraw>::default().coin_select(
+        let selection = BranchAndBoundCoinSelection::default().coin_select(
             utxos,
             vec![],
             FeeRate::from_sat_per_vb_unchecked(10_000),
             500_000,
             &drain_script,
-            &mut thread_rng(),
         );
 
         assert_matches!(
             selection,
-            Err(InsufficientFunds {
+            Err(Error::InsufficientFunds {
                 available: 300_010,
                 ..
             })
@@ -1588,14 +1587,15 @@ mod test {
         let target_amount = 190_000;
         let drain_script = ScriptBuf::new();
         // bnb won't find exact match and should select oldest first
-        let res = BranchAndBoundCoinSelection::<OldestFirstCoinSelection>::default()
+        let mut bnb_with_oldest_first =
+            BranchAndBoundCoinSelection::new(8 + 1 + 22, OldestFirstCoinSelection);
+        let res = bnb_with_oldest_first
             .coin_select(
                 vec![],
                 optional_utxos,
                 feerate,
                 target_amount,
                 &drain_script,
-                &mut thread_rng(),
             )
             .unwrap();
         assert_eq!(res.selected_amount(), 200_000);
@@ -1735,23 +1735,14 @@ mod test {
             let optional = optional.clone();
 
             let result = match tc.coin_selection_algo {
-                CoinSelectionAlgo::BranchAndBound => {
-                    BranchAndBoundCoinSelection::<SingleRandomDraw>::default().coin_select(
-                        vec![],
-                        optional,
-                        fee_rate,
-                        target_amount,
-                        &drain_script,
-                        &mut thread_rng(),
-                    )
-                }
+                CoinSelectionAlgo::BranchAndBound => BranchAndBoundCoinSelection::default()
+                    .coin_select(vec![], optional, fee_rate, target_amount, &drain_script),
                 CoinSelectionAlgo::OldestFirst => OldestFirstCoinSelection.coin_select(
                     vec![],
                     optional,
                     fee_rate,
                     target_amount,
                     &drain_script,
-                    &mut thread_rng(),
                 ),
                 CoinSelectionAlgo::LargestFirst => LargestFirstCoinSelection.coin_select(
                     vec![],
@@ -1759,7 +1750,6 @@ mod test {
                     fee_rate,
                     target_amount,
                     &drain_script,
-                    &mut thread_rng(),
                 ),
             };
 

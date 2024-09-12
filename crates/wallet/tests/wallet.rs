@@ -730,7 +730,7 @@ fn test_create_tx_change_policy() {
     assert!(matches!(
         builder.finish(),
         Err(CreateTxError::CoinSelection(
-            coin_selection::InsufficientFunds { .. }
+            coin_selection::Error::InsufficientFunds { .. }
         )),
     ));
 }
@@ -3943,7 +3943,7 @@ fn test_spend_coinbase() {
     assert!(matches!(
         builder.finish(),
         Err(CreateTxError::CoinSelection(
-            coin_selection::InsufficientFunds {
+            coin_selection::Error::InsufficientFunds {
                 needed: _,
                 available: 0
             }
@@ -3958,7 +3958,7 @@ fn test_spend_coinbase() {
     assert_matches!(
         builder.finish(),
         Err(CreateTxError::CoinSelection(
-            coin_selection::InsufficientFunds {
+            coin_selection::Error::InsufficientFunds {
                 needed: _,
                 available: 0
             }

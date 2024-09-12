@@ -695,10 +695,11 @@ impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs> {
     ///
     /// **WARNING**: To avoid change address reuse you must persist the changes resulting from one
     /// or more calls to this method before closing the wallet. See [`Wallet::reveal_next_address`].
-    pub fn finish_with_aux_rand(self, rng: &mut impl RngCore) -> Result<Psbt, CreateTxError> {
+    pub fn finish_with_aux_rand(mut self, rng: &mut impl RngCore) -> Result<Psbt, CreateTxError> {
+        //let coin_selection = &mut self.coin_selection;
         self.wallet
             .borrow_mut()
-            .create_tx(self.coin_selection, self.params, rng)
+            .create_tx(&mut self.coin_selection, self.params, rng)
     }
 }
 

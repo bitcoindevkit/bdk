@@ -75,7 +75,7 @@ pub mod error;
 
 pub use utils::IsDust;
 
-use coin_selection::{DefaultCoinSelectionAlgorithm, InsufficientFunds};
+use coin_selection::DefaultCoinSelectionAlgorithm;
 use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
 use tx_builder::{FeePolicy, TxBuilder, TxParams};
 use utils::{check_nsequence_rbf, After, Older, SecpCtx};
@@ -1244,7 +1244,7 @@ impl Wallet {
 
     pub(crate) fn create_tx<Cs: coin_selection::CoinSelectionAlgorithm>(
         &mut self,
-        coin_selection: Cs,
+        coin_selection: &mut Cs,
         params: TxParams,
         rng: &mut impl RngCore,
     ) -> Result<Psbt, CreateTxError> {
@@ -1505,7 +1505,6 @@ impl Wallet {
                 fee_rate,
                 outgoing.to_sat() + fee_amount.to_sat(),
                 &drain_script,
-                rng,
             )
             .map_err(CreateTxError::CoinSelection)?;
         fee_amount += Amount::from_sat(coin_selection.fee_amount);
@@ -1537,10 +1536,12 @@ impl Wallet {
                     change_fee,
                 } = excess
                 {
-                    return Err(CreateTxError::CoinSelection(InsufficientFunds {
-                        needed: *dust_threshold,
-                        available: remaining_amount.saturating_sub(*change_fee),
-                    }));
+                    return Err(CreateTxError::CoinSelection(
+                        coin_selection::Error::InsufficientFunds {
+                            needed: *dust_threshold,
+                            available: remaining_amount.saturating_sub(*change_fee),
+                        },
+                    ));
                 }
             } else {
                 return Err(CreateTxError::NoRecipients);
