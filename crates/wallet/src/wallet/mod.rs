@@ -75,7 +75,7 @@ pub mod error;
 
 pub use utils::IsDust;
 
-use coin_selection::DefaultCoinSelectionAlgorithm;
+use coin_selection::{DefaultCoinSelectionAlgorithm, InsufficientFunds};
 use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
 use tx_builder::{FeePolicy, TxBuilder, TxParams};
 use utils::{check_nsequence_rbf, After, Older, SecpCtx};
@@ -90,8 +90,6 @@ use crate::signer::SignerError;
 use crate::types::*;
 use crate::wallet::coin_selection::Excess::{self, Change, NoChange};
 use crate::wallet::error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError};
-
-use self::coin_selection::Error;
 
 const COINBASE_MATURITY: u32 = 100;
 
@@ -1500,31 +1498,16 @@ impl Wallet {
         let (required_utxos, optional_utxos) =
             coin_selection::filter_duplicates(required_utxos, optional_utxos);
 
-        let coin_selection = match coin_selection.coin_select(
-            required_utxos.clone(),
-            optional_utxos.clone(),
-            fee_rate,
-            outgoing.to_sat() + fee_amount.to_sat(),
-            &drain_script,
-        ) {
-            Ok(res) => res,
-            Err(e) => match e {
-                coin_selection::Error::InsufficientFunds { .. } => {
-                    return Err(CreateTxError::CoinSelection(e));
-                }
-                coin_selection::Error::BnBNoExactMatch
-                | coin_selection::Error::BnBTotalTriesExceeded => {
-                    coin_selection::single_random_draw(
-                        required_utxos,
-                        optional_utxos,
-                        outgoing.to_sat() + fee_amount.to_sat(),
-                        &drain_script,
-                        fee_rate,
-                        rng,
-                    )
-                }
-            },
-        };
+        let coin_selection = coin_selection
+            .coin_select(
+                required_utxos.clone(),
+                optional_utxos.clone(),
+                fee_rate,
+                outgoing.to_sat() + fee_amount.to_sat(),
+                &drain_script,
+                rng,
+            )
+            .map_err(CreateTxError::CoinSelection)?;
         fee_amount += Amount::from_sat(coin_selection.fee_amount);
         let excess = &coin_selection.excess;
 
@@ -1554,7 +1537,7 @@ impl Wallet {
                     change_fee,
                 } = excess
                 {
-                    return Err(CreateTxError::CoinSelection(Error::InsufficientFunds {
+                    return Err(CreateTxError::CoinSelection(InsufficientFunds {
                         needed: *dust_threshold,
                         available: remaining_amount.saturating_sub(*change_fee),
                     }));
@@ -2660,7 +2643,7 @@ macro_rules! doctest_wallet {
                 script_pubkey: address.script_pubkey(),
             }],
         };
-        let txid = tx.txid();
+        let txid = tx.compute_txid();
         let block_id = BlockId { height: 500, hash: BlockHash::all_zeros() };
         let _ = wallet.insert_checkpoint(block_id);
         let _ = wallet.insert_checkpoint(BlockId { height: 1_000, hash: BlockHash::all_zeros() });
