@@ -173,8 +173,6 @@ impl CheckPoint {
     /// passed in. Of course, if the `block_id` was already present then this just returns `self`.
     #[must_use]
     pub fn insert(self, block_id: BlockId) -> Self {
-        assert_ne!(block_id.height, 0, "cannot insert the genesis block");
-
         let mut cp = self.clone();
         let mut tail = vec![];
         let base = loop {
@@ -182,6 +180,7 @@ impl CheckPoint {
                 if cp.hash() == block_id.hash {
                     return self;
                 }
+                assert_ne!(cp.height(), 0, "cannot replace genesis block");
                 // if we have a conflict we just return the inserted block because the tail is by
                 // implication invalid.
                 tail = vec![];
