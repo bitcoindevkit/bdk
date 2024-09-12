@@ -50,9 +50,9 @@ jobs:
           cargo update -p tokio --precise "1.38.1"
           cargo update -p tokio-util --precise "0.7.11"
       - name: Build
-        run: cargo build ${{ matrix.features }}
+        run: cargo build --workspace --exclude 'example_*' ${{ matrix.features }}
       - name: Test
-        run: cargo test ${{ matrix.features }}
+        run: cargo test --workspace --exclude 'example_*' ${{ matrix.features }}
 
   check-no-std:
     name: Check no_std
@@ -145,7 +145,7 @@ jobs:
           args: --all-features --all-targets -- -D warnings
 
   build-examples:
-    name: Build Examples
+    name: Build & Test Examples
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -154,10 +154,10 @@ jobs:
           - example_bitcoind_rpc_polling
           - example_electrum
           - example_esplora
-          - wallet_electrum
-          - wallet_esplora_async
-          - wallet_esplora_blocking
-          - wallet_rpc
+          - example_wallet_electrum
+          - example_wallet_esplora_async
+          - example_wallet_esplora_blocking
+          - example_wallet_rpc
     steps:
       - name: checkout
         uses: actions/checkout@v2
