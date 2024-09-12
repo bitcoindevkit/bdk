@@ -171,6 +171,10 @@ impl CheckPoint {
     /// it. If the height already existed and has a conflicting block hash then it will be purged
     /// along with all block followin it. The returned chain will have a tip of the `block_id`
     /// passed in. Of course, if the `block_id` was already present then this just returns `self`.
+    ///
+    /// # Panics
+    ///
+    /// This panics if called with a genesis block that differs from that of `self`.
     #[must_use]
     pub fn insert(self, block_id: BlockId) -> Self {
         let mut cp = self.clone();
