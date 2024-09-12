@@ -19,7 +19,7 @@ fn checkpoint_insert_existing() {
         let cp_chain = CheckPoint::from_block_ids(blocks[..=i].iter().copied())
             .expect("must construct valid chain");
 
-        for j in 0..i {
+        for j in 0..=i {
             let block_to_insert = cp_chain
                 .get(j as u32)
                 .expect("cp of height must exist")
