@@ -1,7 +1,7 @@
 [package]
 name = "bdk_wallet"
 homepage = "https://bitcoindevkit.org"
-version = "1.0.0-beta.2"
+version = "1.0.0-beta.3"
 repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk"
 description = "A modern, lightweight, descriptor-based wallet library"
