@@ -21,6 +21,7 @@ bitcoincore-rpc = { version = "0.19.0" }
 bdk_core = { path = "../core", version = "0.4.1", default-features = false }
 
 [dev-dependencies]
+bdk_bitcoind_rpc = { path = "." }
 bdk_testenv = { path = "../testenv" }
 bdk_chain = { path = "../chain" }
 
@@ -28,3 +29,7 @@ bdk_chain = { path = "../chain" }
 default = ["std"]
 std = ["bitcoin/std", "bdk_core/std"]
 serde = ["bitcoin/serde", "bdk_core/serde"]
+
+[[example]]
+name = "filter_iter"
+required-features = ["std"]
