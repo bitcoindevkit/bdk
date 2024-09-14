@@ -49,10 +49,13 @@ where
                 self.db_file.seek(io::SeekFrom::Start(start))?;
             }
 
+            let mut changeset_size: u64 = 0;
             let mut pos_before_read = self.db_file.stream_position()?;
             bincode_options()
                 .deserialize_from::<_, u64>(&mut self.db_file)
                 .and_then(|size| {
+                    // Save changeset size to use in case a partial read is needed
+                    changeset_size = size;
                     pos_before_read = self.db_file.stream_position()?;
                     bincode_options()
                         .with_limit(size)
@@ -76,17 +79,40 @@ where
                             // risen when actual_index > max_variant_index
                             if actual_index > max_variant_index {
                                 pos_before_read = self.db_file.stream_position()?;
-                                return bincode_options()
+                                let fallback_decoded_value = bincode_options()
                                     .deserialize_from::<_, T2>(&mut self.db_file)
                                     .map(Into::into);
+
+                                if let Ok(v) = &fallback_decoded_value {
+                                    let actual_read_size = bincode_options().serialized_size(v)?;
+                                    let remaining_bytes_to_read =
+                                        (changeset_size - actual_read_size) as i64;
+                                    // Ignore remaining bytes
+                                    self.db_file
+                                        .seek(io::SeekFrom::Current(remaining_bytes_to_read))?;
+                                }
+
+                                return fallback_decoded_value;
                             }
                         }
                         bincode::ErrorKind::InvalidTagEncoding(index) => {
                             if *index as u64 > max_variant_index {
                                 pos_before_read = self.db_file.stream_position()?;
-                                return bincode_options()
+
+                                let fallback_decoded_value = bincode_options()
                                     .deserialize_from::<_, T2>(&mut self.db_file)
                                     .map(Into::into);
+
+                                if let Ok(v) = &fallback_decoded_value {
+                                    let actual_read_size = bincode_options().serialized_size(v)?;
+                                    let remaining_bytes_to_read =
+                                        (changeset_size - actual_read_size) as i64;
+                                    // Ignore remaining bytes
+                                    self.db_file
+                                        .seek(io::SeekFrom::Current(remaining_bytes_to_read))?;
+                                }
+
+                                return fallback_decoded_value;
                             }
                         }
                         _ => (),

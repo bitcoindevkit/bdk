@@ -465,7 +465,7 @@ mod test {
     }
 
     #[test]
-    fn deserialize_newer_changeset_version_with_old_code() {
+    fn decode_multiple_vw_enum_variant_index_not_in_vr_with_cr_when_cw_adds_any_kind_of_field() {
         #[derive(PartialEq, Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
         struct TestChangeSetV1 {
             field_a: BTreeSet<String>,
@@ -483,31 +483,22 @@ mod test {
         #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
         struct TestChangeSetV2 {
             field_a: BTreeSet<String>,
-            field_b: Option<BTreeSet<String>>,
+            field_b: BTreeSet<String>,
         }
 
         impl Merge for TestChangeSetV2 {
             fn merge(&mut self, other: Self) {
                 self.field_a.extend(other.field_a);
-                if let Some(ref mut field_b) = self.field_b {
-                    if let Some(other_field_b) = other.field_b {
-                        field_b.extend(other_field_b)
-                    }
-                }
+                self.field_b.extend(other.field_b);
             }
 
             fn is_empty(&self) -> bool {
-                if self.field_b.is_none() {
-                    false
-                } else {
-                    self.field_a.is_empty()
-                }
+                self.field_a.is_empty() && self.field_b.is_empty()
             }
         }
 
         let temp_dir = tempfile::tempdir().unwrap();
         let file_path = temp_dir.path().join("20.dat");
-        println!("Test file: {:?}", file_path);
 
         let new_code_aggregation = {
             #[derive(serde::Serialize, serde::Deserialize)]
@@ -549,10 +540,10 @@ mod test {
                 }
             }
 
-            let changesets = (0..2)
+            let changesets = (0..4)
                 .map(|n| TestChangeSetV2 {
                     field_a: BTreeSet::from([format!("{}", n)]),
-                    field_b: None,
+                    field_b: BTreeSet::from([format!("{}", n)]),
                 })
                 .collect::<Vec<_>>();
 
@@ -574,6 +565,7 @@ mod test {
                     acc
                 })
         };
+
         let old_code_aggregation = {
             #[derive(serde::Serialize, serde::Deserialize)]
             enum VersionedTestChangeSet {
@@ -600,21 +592,9 @@ mod test {
                 }
             }
 
-            impl From<VersionedTestChangeSet> for TestChangeSetV2 {
-                fn from(_: VersionedTestChangeSet) -> Self {
-                    Self::default()
-                }
-            }
-
-            impl From<TestChangeSetV2> for VersionedTestChangeSet {
-                fn from(_: TestChangeSetV2) -> Self {
-                    VersionedTestChangeSet::default()
-                }
-            }
-
             // We re-open the file and read all the versioned changesets using the "old"
             // VersionedTestChangeSet
-            let mut db = Store::<TestChangeSetV2, VersionedTestChangeSet>::open(
+            let mut db = Store::<TestChangeSetV1, VersionedTestChangeSet>::open(
                 &TEST_MAGIC_BYTES,
                 &file_path,
             )
@@ -622,7 +602,7 @@ mod test {
             // Merge all versioned changesets in the aggregated correct changeset
             db.iter_changesets()
                 .map(|r| r.expect("must read valid changeset"))
-                .fold(TestChangeSetV2::default(), |mut acc, v| {
+                .fold(TestChangeSetV1::default(), |mut acc, v| {
                     Merge::merge(&mut acc, v);
                     acc
                 })
