@@ -311,7 +311,7 @@ impl Wallet {
     /// Additionally because this wallet has no internal (change) keychain, all methods that
     /// require a [`KeychainKind`] as input, e.g. [`reveal_next_address`] should only be called
     /// using the [`External`] variant. In most cases passing [`Internal`] is treated as the
-    /// equivalent of [`External`] but can lead to confusing results.
+    /// equivalent of [`External`] but this behavior must not be relied on.
     ///
     /// # Example
     ///
@@ -1071,8 +1071,6 @@ impl Wallet {
     /// **WARNING**: You must persist the changes resulting from one or more calls to this method
     /// if you need the inserted checkpoint data to be reloaded after closing the wallet.
     /// See [`Wallet::reveal_next_address`].
-    ///
-    /// [`commit`]: Self::commit
     pub fn insert_checkpoint(
         &mut self,
         block_id: BlockId,
@@ -2303,9 +2301,7 @@ impl Wallet {
     /// transactions related to your wallet into it.
     ///
     /// After applying updates you should persist the staged wallet changes. For an example of how
-    /// to persist staged wallet changes see [`Wallet::reveal_next_address`]. `
-    ///
-    /// [`commit`]: Self::commit
+    /// to persist staged wallet changes see [`Wallet::reveal_next_address`].
     #[cfg(feature = "std")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn apply_update(&mut self, update: impl Into<Update>) -> Result<(), CannotConnectError> {
