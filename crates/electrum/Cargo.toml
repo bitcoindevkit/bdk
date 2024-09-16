@@ -24,3 +24,8 @@ bdk_chain = { path = "../chain" }
 default = ["use-rustls"]
 use-rustls = ["electrum-client/use-rustls"]
 use-rustls-ring = ["electrum-client/use-rustls-ring"]
+
+[[test]]
+name = "use-rustls"
+path = "tests/test_electrum.rs"
+required-features = ["use-rustls"]
