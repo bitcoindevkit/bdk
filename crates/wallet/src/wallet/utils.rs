@@ -52,20 +52,20 @@ impl After {
     }
 }
 
-pub(crate) fn check_nsequence_rbf(rbf: Sequence, csv: Sequence) -> bool {
-    // The RBF value must enable relative timelocks
-    if !rbf.is_relative_lock_time() {
+pub(crate) fn check_nsequence_rbf(sequence: Sequence, csv: Sequence) -> bool {
+    // The nSequence value must enable relative timelocks
+    if !sequence.is_relative_lock_time() {
         return false;
     }
 
     // Both values should be represented in the same unit (either time-based or
     // block-height based)
-    if rbf.is_time_locked() != csv.is_time_locked() {
+    if sequence.is_time_locked() != csv.is_time_locked() {
         return false;
     }
 
     // The value should be at least `csv`
-    if rbf < csv {
+    if sequence < csv {
         return false;
     }
 
