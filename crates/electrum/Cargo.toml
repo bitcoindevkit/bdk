@@ -26,6 +26,5 @@ use-rustls = ["electrum-client/use-rustls"]
 use-rustls-ring = ["electrum-client/use-rustls-ring"]
 
 [[test]]
-name = "use-rustls"
-path = "tests/test_electrum.rs"
+name = "test_electrum"
 required-features = ["use-rustls"]

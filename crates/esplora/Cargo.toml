@@ -39,11 +39,9 @@ blocking-https-rustls = ["blocking", "esplora-client/blocking-https-rustls"]
 blocking-https-native = ["blocking", "esplora-client/blocking-https-native"]
 
 [[test]]
-name = "blocking"
-path = "tests/blocking_ext.rs"
+name = "blocking_ext"
 required-features = ["blocking"]
 
 [[test]]
-name = "async"
-path = "tests/async_ext.rs"
+name = "async_ext"
 required-features = ["async"]
