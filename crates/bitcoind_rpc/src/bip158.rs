@@ -155,13 +155,21 @@ pub enum Event {
     /// Block
     Block(EventInner),
     /// No match
-    NoMatch,
+    NoMatch(Height),
 }
 
 impl Event {
     /// Whether this event contains a matching block.
     pub fn is_match(&self) -> bool {
         matches!(self, Event::Block(_))
+    }
+
+    /// Get the height of this event.
+    pub fn height(&self) -> Height {
+        match self {
+            Self::Block(EventInner { height, .. }) => *height,
+            Self::NoMatch(h) => *h,
+        }
     }
 }
 
@@ -177,7 +185,7 @@ impl<'c, C: RpcApi> Iterator for FilterIter<'c, C> {
             let height = block.height;
             let hash = block.hash;
             let event = if self.spks.is_empty() {
-                Event::NoMatch
+                Event::NoMatch(height)
             } else if filter
                 .match_any(&hash, self.spks.iter().map(|script| script.as_bytes()))
                 .map_err(Error::Bip158)?
@@ -187,7 +195,7 @@ impl<'c, C: RpcApi> Iterator for FilterIter<'c, C> {
                 let inner = EventInner { height, block };
                 Event::Block(inner)
             } else {
-                Event::NoMatch
+                Event::NoMatch(height)
             };
 
             self.next_filter = self.next_filter()?;
