@@ -1,4 +1,6 @@
 #![allow(clippy::print_stdout)]
+use std::time::Instant;
+
 use bdk_bitcoind_rpc::bip158::{Event, EventInner, FilterIter};
 use bdk_chain::bitcoin::{constants::genesis_block, secp256k1::Secp256k1, Network};
 use bdk_chain::indexer::keychain_txout::KeychainTxOutIndex;
@@ -8,13 +10,13 @@ use bdk_chain::{BlockId, ConfirmationBlockTime, IndexedTxGraph, SpkIterator};
 use bdk_testenv::anyhow;
 
 // This example shows how BDK chain and tx-graph structures are updated using compact filters syncing.
-// assumes a local Signet node, and "RPC_COOKIE" set in environment.
+// Assumes a local Signet node, and "RPC_COOKIE" set in environment.
 
 // Usage: `cargo run -p bdk_bitcoind_rpc --example bip158`
 
-const EXTERNAL: &str = "tr([83737d5e/86h/1h/0h]tpubDDR5GgtoxS8fJyjjvdahN4VzV5DV6jtbcyvVXhEKq2XtpxjxBXmxH3r8QrNbQqHg4bJM1EGkxi7Pjfkgnui9jQWqS7kxHvX6rhUeriLDKxz/0/*)";
-const INTERNAL: &str = "tr([83737d5e/86h/1h/0h]tpubDDR5GgtoxS8fJyjjvdahN4VzV5DV6jtbcyvVXhEKq2XtpxjxBXmxH3r8QrNbQqHg4bJM1EGkxi7Pjfkgnui9jQWqS7kxHvX6rhUeriLDKxz/1/*)";
-const SPK_COUNT: u32 = 10;
+const EXTERNAL: &str = "tr([7d94197e]tprv8ZgxMBicQKsPe1chHGzaa84k1inY2nAXUL8iPSyWESPrEst4E5oCFXhPATqj5fvw34LDknJz7rtXyEC4fKoXryUdc9q87pTTzfQyv61cKdE/86'/1'/0'/0/*)#uswl2jj7";
+const INTERNAL: &str = "tr([7d94197e]tprv8ZgxMBicQKsPe1chHGzaa84k1inY2nAXUL8iPSyWESPrEst4E5oCFXhPATqj5fvw34LDknJz7rtXyEC4fKoXryUdc9q87pTTzfQyv61cKdE/86'/1'/0'/1/*)#dyt7h8zx";
+const SPK_COUNT: u32 = 25;
 const NETWORK: Network = Network::Signet;
 
 fn main() -> anyhow::Result<()> {
@@ -23,17 +25,17 @@ fn main() -> anyhow::Result<()> {
     let (descriptor, _) = Descriptor::parse_descriptor(&secp, EXTERNAL)?;
     let (change_descriptor, _) = Descriptor::parse_descriptor(&secp, INTERNAL)?;
     let (mut chain, _) = LocalChain::from_genesis_hash(genesis_block(NETWORK).block_hash());
-    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<usize>>::new({
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<&str>>::new({
         let mut index = KeychainTxOutIndex::default();
-        index.insert_descriptor(0, descriptor.clone())?;
-        index.insert_descriptor(1, change_descriptor.clone())?;
+        index.insert_descriptor("external", descriptor.clone())?;
+        index.insert_descriptor("internal", change_descriptor.clone())?;
         index
     });
 
     // Assume a minimum birthday height
     let block = BlockId {
-        height: 205_000,
-        hash: "0000002bd0f82f8c0c0f1e19128f84c938763641dba85c44bdb6aed1678d16cb".parse()?,
+        height: 170_000,
+        hash: "00000041c812a89f084f633e4cf47e819a2f6b1c0a15162355a930410522c99d".parse()?,
     };
     let _ = chain.insert_block(block)?;
 
@@ -44,18 +46,31 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     // Initialize block emitter
-    let mut emitter = FilterIter::new_with_checkpoint(&rpc_client, chain.tip());
+    let cp = chain.tip();
+    let start_height = cp.height();
+    let mut emitter = FilterIter::new_with_checkpoint(&rpc_client, cp);
     for (_, desc) in graph.index.keychains() {
         let spks = SpkIterator::new_with_range(desc, 0..SPK_COUNT).map(|(_, spk)| spk);
         emitter.add_spks(spks);
     }
 
+    let start = Instant::now();
+
     // Sync
-    if emitter.get_tip()?.is_some() {
-        // apply relevant blocks
+    if let Some(tip) = emitter.get_tip()? {
+        let blocks_to_scan = tip.height - start_height;
+
         for event in emitter.by_ref() {
-            if let Event::Block(EventInner { height, block }) = event? {
-                let _ = graph.apply_block_relevant(&block, height);
+            let event = event?;
+            let curr = event.height();
+            // apply relevant blocks
+            if let Event::Block(EventInner { height, ref block }) = event {
+                let _ = graph.apply_block_relevant(block, height);
+                println!("Matched block {}", curr);
+            }
+            if curr % 1000 == 0 {
+                let progress = (curr - start_height) as f32 / blocks_to_scan as f32;
+                println!("[{:.2}%]", progress * 100.0);
             }
         }
         // update chain
@@ -64,11 +79,22 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    println!("\ntook: {}s", start.elapsed().as_secs());
     println!("Local tip: {}", chain.tip().height());
-
-    println!("Unspent");
-    for (_, outpoint) in graph.index.outpoints() {
-        println!("{outpoint}");
+    let unspent: Vec<_> = graph
+        .graph()
+        .filter_chain_unspents(
+            &chain,
+            chain.tip().block_id(),
+            graph.index.outpoints().clone(),
+        )
+        .collect();
+    if !unspent.is_empty() {
+        println!("\nUnspent");
+        for (index, utxo) in unspent {
+            // (k, index) | value | outpoint |
+            println!("{:?} | {} | {}", index, utxo.txout.value, utxo.outpoint,);
+        }
     }
 
     Ok(())
