@@ -10,13 +10,12 @@ use anyhow::bail;
 use anyhow::Context;
 use bdk_chain::bitcoin::{
     absolute, address::NetworkUnchecked, bip32, consensus, constants, hex::DisplayHex, relative,
-    secp256k1::Secp256k1, transaction, Address, Amount, Network, NetworkKind, PrivateKey, Psbt,
+    secp256k1::Secp256k1, transaction, Address, Amount, Network, NetworkKind, PrivateKey,
     PublicKey, Sequence, Transaction, TxIn, TxOut,
 };
 use bdk_chain::miniscript::{
     descriptor::{DescriptorSecretKey, SinglePubKey},
     plan::{Assets, Plan},
-    psbt::PsbtExt,
     Descriptor, DescriptorPublicKey,
 };
 use bdk_chain::ConfirmationBlockTime;
@@ -33,6 +32,7 @@ use bdk_coin_select::{
 use bdk_file_store::Store;
 use clap::{Parser, Subcommand};
 use rand::prelude::*;
+use psbt_v0::{Psbt, miniscript::PsbtExt};
 
 pub use anyhow;
 pub use clap;
@@ -402,7 +402,7 @@ where
     let mut psbt = Psbt::from_unsigned_tx(unsigned_tx)?;
     for (i, (plan, utxo)) in selected.iter().enumerate() {
         let psbt_input = &mut psbt.inputs[i];
-        plan.update_psbt_input(psbt_input);
+        psbt_v0::miniscript::plan::update_psbt_input(&plan, psbt_input);
         psbt_input.witness_utxo = Some(utxo.txout.clone());
     }
 

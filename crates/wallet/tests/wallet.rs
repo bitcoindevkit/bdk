@@ -18,7 +18,6 @@ use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
 use bitcoin::constants::ChainHash;
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
-use bitcoin::psbt;
 use bitcoin::script::PushBytesBuf;
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::taproot::TapNodeHash;
@@ -1528,7 +1527,7 @@ fn test_add_foreign_utxo() {
         .max_weight_to_satisfy()
         .unwrap();
 
-    let psbt_input = psbt::Input {
+    let psbt_input = psbt_v0::Input {
         witness_utxo: Some(utxo.txout.clone()),
         ..Default::default()
     };
@@ -1604,7 +1603,7 @@ fn test_calculate_fee_with_missing_foreign_utxo() {
         .max_weight_to_satisfy()
         .unwrap();
 
-    let psbt_input = psbt::Input {
+    let psbt_input = psbt_v0::Input {
         witness_utxo: Some(utxo.txout.clone()),
         ..Default::default()
     };
@@ -1631,7 +1630,7 @@ fn test_add_foreign_utxo_invalid_psbt_input() {
 
     let mut builder = wallet.build_tx();
     let result =
-        builder.add_foreign_utxo(outpoint, psbt::Input::default(), foreign_utxo_satisfaction);
+        builder.add_foreign_utxo(outpoint, psbt_v0::Input::default(), foreign_utxo_satisfaction);
     assert!(matches!(result, Err(AddForeignUtxoError::MissingUtxo)));
 }
 
@@ -1655,7 +1654,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
         builder
             .add_foreign_utxo(
                 utxo2.outpoint,
-                psbt::Input {
+                psbt_v0::Input {
                     non_witness_utxo: Some(tx1.as_ref().clone()),
                     ..Default::default()
                 },
@@ -1668,7 +1667,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
         builder
             .add_foreign_utxo(
                 utxo2.outpoint,
-                psbt::Input {
+                psbt_v0::Input {
                     non_witness_utxo: Some(tx2.as_ref().clone()),
                     ..Default::default()
                 },
@@ -1699,7 +1698,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
 
     {
         let mut builder = builder.clone();
-        let psbt_input = psbt::Input {
+        let psbt_input = psbt_v0::Input {
             witness_utxo: Some(utxo2.txout.clone()),
             ..Default::default()
         };
@@ -1714,7 +1713,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
 
     {
         let mut builder = builder.clone();
-        let psbt_input = psbt::Input {
+        let psbt_input = psbt_v0::Input {
             witness_utxo: Some(utxo2.txout.clone()),
             ..Default::default()
         };
@@ -1731,7 +1730,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
     {
         let mut builder = builder.clone();
         let tx2 = wallet2.get_tx(txid2).unwrap().tx_node.tx;
-        let psbt_input = psbt::Input {
+        let psbt_input = psbt_v0::Input {
             non_witness_utxo: Some(tx2.as_ref().clone()),
             ..Default::default()
         };
@@ -2864,7 +2863,7 @@ fn test_signing_only_one_of_multiple_inputs() {
     let mut psbt = builder.finish().unwrap();
 
     // add another input to the psbt that is at least passable.
-    let dud_input = bitcoin::psbt::Input {
+    let dud_input = psbt_v0::Input {
         witness_utxo: Some(TxOut {
             value: Amount::from_sat(100_000),
             script_pubkey: miniscript::Descriptor::<bitcoin::PublicKey>::from_str(

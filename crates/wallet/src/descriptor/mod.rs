@@ -20,7 +20,7 @@ use alloc::vec::Vec;
 
 use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, KeySource, Xpub};
 use bitcoin::{key::XOnlyPublicKey, secp256k1, PublicKey};
-use bitcoin::{psbt, taproot};
+use bitcoin::taproot;
 use bitcoin::{Network, TxOut};
 
 use miniscript::descriptor::{
@@ -55,18 +55,12 @@ pub type ExtendedDescriptor = Descriptor<DescriptorPublicKey>;
 /// Alias for a [`Descriptor`] that contains extended **derived** keys
 pub type DerivedDescriptor = Descriptor<DefiniteDescriptorKey>;
 
-/// Alias for the type of maps that represent derivation paths in a [`psbt::Input`] or
-/// [`psbt::Output`]
-///
-/// [`psbt::Input`]: bitcoin::psbt::Input
-/// [`psbt::Output`]: bitcoin::psbt::Output
+/// Alias for the type of maps that represent derivation paths in a [`psbt_v0::Input`] or
+/// [`psbt_v0::Output`]
 pub type HdKeyPaths = BTreeMap<secp256k1::PublicKey, KeySource>;
 
-/// Alias for the type of maps that represent taproot key origins in a [`psbt::Input`] or
-/// [`psbt::Output`]
-///
-/// [`psbt::Input`]: bitcoin::psbt::Input
-/// [`psbt::Output`]: bitcoin::psbt::Output
+/// Alias for the type of maps that represent taproot key origins in a [`psbt_v0::Input`] or
+/// [`psbt_v0::Output`]
 pub type TapKeyOrigins = BTreeMap<XOnlyPublicKey, (Vec<taproot::TapLeafHash>, KeySource)>;
 
 /// Trait for types which can be converted into an [`ExtendedDescriptor`] and a [`KeyMap`] usable by a wallet in a specific [`Network`]
@@ -399,7 +393,7 @@ pub(crate) trait DescriptorMeta {
     ) -> Option<DerivedDescriptor>;
     fn derive_from_psbt_input(
         &self,
-        psbt_input: &psbt::Input,
+        psbt_input: &psbt_v0::Input,
         utxo: Option<TxOut>,
         secp: &SecpCtx,
     ) -> Option<DerivedDescriptor>;
@@ -553,7 +547,7 @@ impl DescriptorMeta for ExtendedDescriptor {
 
     fn derive_from_psbt_input(
         &self,
-        psbt_input: &psbt::Input,
+        psbt_input: &psbt_v0::Input,
         utxo: Option<TxOut>,
         secp: &SecpCtx,
     ) -> Option<DerivedDescriptor> {
@@ -610,7 +604,8 @@ mod test {
     use assert_matches::assert_matches;
     use bitcoin::hex::FromHex;
     use bitcoin::secp256k1::Secp256k1;
-    use bitcoin::{bip32, Psbt};
+    use bitcoin::bip32;
+    use psbt_v0::Psbt;
     use bitcoin::{NetworkKind, ScriptBuf};
 
     use super::*;
@@ -890,7 +885,7 @@ mod test {
 
     #[test]
     fn test_sh_wsh_sortedmulti_redeemscript() {
-        use miniscript::psbt::PsbtInputExt;
+        use psbt_v0::miniscript::PsbtInputExt;
 
         let secp = Secp256k1::new();
 
@@ -904,7 +899,7 @@ mod test {
 
         let script = ScriptBuf::from_hex("5321022f533b667e2ea3b36e21961c9fe9dca340fbe0af5210173a83ae0337ab20a57621026bb53a98e810bd0ee61a0ed1164ba6c024786d76554e793e202dc6ce9c78c4ea2102d5b8a7d66a41ffdb6f4c53d61994022e886b4f45001fb158b95c9164d45f8ca3210324b75eead2c1f9c60e8adeb5e7009fec7a29afcdb30d829d82d09562fe8bae8521032d34f8932200833487bd294aa219dcbe000b9f9b3d824799541430009f0fa55121037468f8ea99b6c64788398b5ad25480cad08f4b0d65be54ce3a55fd206b5ae4722103f72d3d96663b0ea99b0aeb0d7f273cab11a8de37885f1dddc8d9112adb87169357ae").unwrap();
 
-        let mut psbt_input = psbt::Input::default();
+        let mut psbt_input = psbt_v0::Input::default();
         psbt_input
             .update_with_descriptor_unchecked(&descriptor)
             .unwrap();

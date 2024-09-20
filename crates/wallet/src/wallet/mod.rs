@@ -39,10 +39,10 @@ use bdk_chain::{
 };
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
-    absolute, psbt, Address, Block, FeeRate, Network, OutPoint, ScriptBuf, Sequence, Transaction,
+    absolute, Address, Block, FeeRate, Network, OutPoint, ScriptBuf, Sequence, Transaction,
     TxOut, Txid, Witness,
 };
-use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
+use bitcoin::{consensus::encode::serialize, transaction, BlockHash};
 use bitcoin::{constants::genesis_block, Amount};
 use bitcoin::{secp256k1::Secp256k1, Weight};
 use core::cmp::Ordering;
@@ -50,12 +50,13 @@ use core::fmt;
 use core::mem;
 use core::ops::Deref;
 use rand_core::RngCore;
+use psbt_v0::Psbt;
 
 use descriptor::error::Error as DescriptorError;
 use miniscript::{
     descriptor::KeyMap,
-    psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier},
 };
+use psbt_v0::miniscript::{PsbtExt, PsbtInputExt, PsbtInputSatisfier};
 
 use bdk_chain::tx_graph::CalculateFeeError;
 
@@ -935,7 +936,7 @@ impl Wallet {
     /// ```
     ///
     /// ```rust, no_run
-    /// # use bitcoin::Psbt;
+    /// # use psbt_v0::Psbt;
     /// # use bdk_wallet::Wallet;
     /// # let mut wallet: Wallet = todo!();
     /// # let mut psbt: Psbt = todo!();
@@ -966,7 +967,7 @@ impl Wallet {
     /// ```
     ///
     /// ```rust, no_run
-    /// # use bitcoin::Psbt;
+    /// # use psbt_v0::Psbt;
     /// # use bdk_wallet::Wallet;
     /// # let mut wallet: Wallet = todo!();
     /// # let mut psbt: Psbt = todo!();
@@ -996,7 +997,7 @@ impl Wallet {
     /// ```
     ///
     /// ```rust, no_run
-    /// # use bitcoin::Psbt;
+    /// # use psbt_v0::Psbt;
     /// # use bdk_wallet::Wallet;
     /// # let mut wallet: Wallet = todo!();
     /// # let mut psbt: Psbt = todo!();
@@ -1709,7 +1710,7 @@ impl Wallet {
                             utxo: Utxo::Foreign {
                                 outpoint: txin.previous_output,
                                 sequence: Some(txin.sequence),
-                                psbt_input: Box::new(psbt::Input {
+                                psbt_input: Box::new(psbt_v0::Input {
                                     witness_utxo: Some(txout.clone()),
                                     non_witness_utxo: Some(prev_tx.as_ref().clone()),
                                     ..Default::default()
@@ -2171,9 +2172,9 @@ impl Wallet {
                         match self.get_psbt_input(utxo, params.sighash, params.only_witness_utxo) {
                             Ok(psbt_input) => psbt_input,
                             Err(e) => match e {
-                                CreateTxError::UnknownUtxo => psbt::Input {
+                                CreateTxError::UnknownUtxo => psbt_v0::Input {
                                     sighash_type: params.sighash,
-                                    ..psbt::Input::default()
+                                    ..psbt_v0::Input::default()
                                 },
                                 _ => return Err(e),
                             },
@@ -2209,9 +2210,9 @@ impl Wallet {
     pub fn get_psbt_input(
         &self,
         utxo: LocalOutput,
-        sighash_type: Option<psbt::PsbtSighashType>,
+        sighash_type: Option<psbt_v0::PsbtSighashType>,
         only_witness_utxo: bool,
-    ) -> Result<psbt::Input, CreateTxError> {
+    ) -> Result<psbt_v0::Input, CreateTxError> {
         // Try to find the prev_script in our db to figure out if this is internal or external,
         // and the derivation index
         let &(keychain, child) = self
@@ -2220,9 +2221,9 @@ impl Wallet {
             .index_of_spk(utxo.txout.script_pubkey)
             .ok_or(CreateTxError::UnknownUtxo)?;
 
-        let mut psbt_input = psbt::Input {
+        let mut psbt_input = psbt_v0::Input {
             sighash_type,
-            ..psbt::Input::default()
+            ..psbt_v0::Input::default()
         };
 
         let desc = self.public_descriptor(keychain);

@@ -67,8 +67,8 @@ use crate::wallet::utils::{After, Older, SecpCtx};
 use super::checksum::calc_checksum;
 use super::error::Error;
 use super::XKeyUtils;
-use bitcoin::psbt::{self, Psbt};
-use miniscript::psbt::PsbtInputSatisfier;
+use psbt_v0::Psbt;
+use psbt_v0::miniscript::PsbtInputSatisfier;
 
 /// A unique identifier for a key
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -785,9 +785,9 @@ fn make_generic_signature<M: Fn() -> SatisfiableItem, F: Fn(&Psbt) -> bool>(
 fn generic_sig_in_psbt<
     // C is for "check", it's a closure we use to *check* if a psbt input contains the signature
     // for a specific key
-    C: Fn(&psbt::Input, &SinglePubKey) -> bool,
+    C: Fn(&psbt_v0::Input, &SinglePubKey) -> bool,
     // E is for "extract", it extracts a key from the bip32 derivations found in the psbt input
-    E: Fn(&psbt::Input, Fingerprint) -> Option<SinglePubKey>,
+    E: Fn(&psbt_v0::Input, Fingerprint) -> Option<SinglePubKey>,
 >(
     psbt: &Psbt,
     key: &DescriptorPublicKey,

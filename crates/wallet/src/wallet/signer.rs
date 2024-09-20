@@ -93,15 +93,16 @@ use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, Xpriv};
 use bitcoin::hashes::hash160;
 use bitcoin::secp256k1::Message;
 use bitcoin::sighash::{EcdsaSighashType, TapSighash, TapSighashType};
-use bitcoin::{ecdsa, psbt, sighash, taproot};
+use bitcoin::{ecdsa, sighash, taproot};
 use bitcoin::{key::TapTweak, key::XOnlyPublicKey, secp256k1};
-use bitcoin::{PrivateKey, Psbt, PublicKey};
+use bitcoin::{PrivateKey, PublicKey};
 
 use miniscript::descriptor::{
     Descriptor, DescriptorMultiXKey, DescriptorPublicKey, DescriptorSecretKey, DescriptorXKey,
     InnerXKey, KeyMap, SinglePriv, SinglePubKey,
 };
 use miniscript::{SigType, ToPublicKey};
+use psbt_v0::Psbt;
 
 use super::utils::SecpCtx;
 use crate::descriptor::{DescriptorMeta, XKeyUtils};
@@ -164,7 +165,7 @@ pub enum SignerError {
     /// Error while computing the hash to sign a Taproot input.
     SighashTaproot(sighash::TaprootError),
     /// PSBT sign error.
-    Psbt(psbt::SignError),
+    Psbt(psbt_v0::SignError),
     /// Miniscript PSBT error
     MiniscriptPsbt(MiniscriptPsbtError),
     /// To be used only by external libraries implementing [`InputSigner`] or
@@ -542,7 +543,7 @@ impl InputSigner for SignerWrapper<PrivateKey> {
 fn sign_psbt_ecdsa(
     secret_key: &secp256k1::SecretKey,
     pubkey: PublicKey,
-    psbt_input: &mut psbt::Input,
+    psbt_input: &mut psbt_v0::Input,
     msg: &Message,
     sighash_type: EcdsaSighashType,
     secp: &SecpCtx,
@@ -568,7 +569,7 @@ fn sign_psbt_schnorr(
     secret_key: &secp256k1::SecretKey,
     pubkey: XOnlyPublicKey,
     leaf_hash: Option<taproot::TapLeafHash>,
-    psbt_input: &mut psbt::Input,
+    psbt_input: &mut psbt_v0::Input,
     sighash: TapSighash,
     sighash_type: TapSighashType,
     secp: &SecpCtx,
@@ -851,7 +852,7 @@ fn compute_tap_sighash(
     let mut all_witness_utxos = vec![];
 
     let mut cache = sighash::SighashCache::new(&psbt.unsigned_tx);
-    let is_anyone_can_pay = psbt::PsbtSighashType::from(sighash_type).to_u32() & 0x80 != 0;
+    let is_anyone_can_pay = psbt_v0::PsbtSighashType::from(sighash_type).to_u32() & 0x80 != 0;
     let prevouts = if is_anyone_can_pay {
         sighash::Prevouts::One(
             input_index,

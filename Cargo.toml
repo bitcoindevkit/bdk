@@ -25,3 +25,6 @@ authors = ["Bitcoin Dev Kit Developers"]
 [workspace.lints.clippy]
 print_stdout = "deny"
 print_stderr = "deny"
+
+[patch.crates-io.miniscript]
+path = "/home/tobin/build/github.com/tcharding/rust-miniscript/master"

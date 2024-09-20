@@ -44,7 +44,7 @@ use core::fmt;
 
 use alloc::sync::Arc;
 
-use bitcoin::psbt::{self, Psbt};
+use psbt_v0::Psbt;
 use bitcoin::script::PushBytes;
 use bitcoin::{
     absolute, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid,
@@ -131,7 +131,7 @@ pub(crate) struct TxParams {
     pub(crate) utxos: Vec<WeightedUtxo>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
-    pub(crate) sighash: Option<psbt::PsbtSighashType>,
+    pub(crate) sighash: Option<psbt_v0::PsbtSighashType>,
     pub(crate) ordering: TxOrdering,
     pub(crate) locktime: Option<absolute::LockTime>,
     pub(crate) rbf: Option<RbfValue>,
@@ -368,7 +368,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     pub fn add_foreign_utxo(
         &mut self,
         outpoint: OutPoint,
-        psbt_input: psbt::Input,
+        psbt_input: psbt_v0::Input,
         satisfaction_weight: Weight,
     ) -> Result<&mut Self, AddForeignUtxoError> {
         self.add_foreign_utxo_with_sequence(
@@ -383,7 +383,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     pub fn add_foreign_utxo_with_sequence(
         &mut self,
         outpoint: OutPoint,
-        psbt_input: psbt::Input,
+        psbt_input: psbt_v0::Input,
         satisfaction_weight: Weight,
         sequence: Sequence,
     ) -> Result<&mut Self, AddForeignUtxoError> {
@@ -450,7 +450,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// Sign with a specific sig hash
     ///
     /// **Use this option very carefully**
-    pub fn sighash(&mut self, sighash: psbt::PsbtSighashType) -> &mut Self {
+    pub fn sighash(&mut self, sighash: psbt_v0::PsbtSighashType) -> &mut Self {
         self.params.sighash = Some(sighash);
         self
     }
@@ -506,7 +506,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         self
     }
 
-    /// Only Fill-in the [`psbt::Input::witness_utxo`](bitcoin::psbt::Input::witness_utxo) field when spending from
+    /// Only Fill-in the [`psbt_v0::Input::witness_utxo`](bitcoin::psbt_v0::Input::witness_utxo) field when spending from
     /// SegWit descriptors.
     ///
     /// This reduces the size of the PSBT, but some signers might reject them due to the lack of
@@ -516,8 +516,8 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         self
     }
 
-    /// Fill-in the [`psbt::Output::redeem_script`](bitcoin::psbt::Output::redeem_script) and
-    /// [`psbt::Output::witness_script`](bitcoin::psbt::Output::witness_script) fields.
+    /// Fill-in the [`psbt_v0::Output::redeem_script`](bitcoin::psbt_v0::Output::redeem_script) and
+    /// [`psbt_v0::Output::witness_script`](bitcoin::psbt_v0::Output::witness_script) fields.
     ///
     /// This is useful for signers which always require it, like ColdCard hardware wallets.
     pub fn include_output_redeem_witness_script(&mut self) -> &mut Self {

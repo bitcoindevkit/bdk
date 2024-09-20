@@ -1,5 +1,6 @@
-use bdk_wallet::bitcoin::{Amount, FeeRate, Psbt, TxIn};
+use bdk_wallet::bitcoin::{Amount, FeeRate, TxIn};
 use bdk_wallet::{psbt, KeychainKind, SignOptions};
+use psbt_v0::Psbt;
 use core::str::FromStr;
 mod common;
 use common::*;

@@ -14,7 +14,7 @@ use core::convert::AsRef;
 
 use bdk_chain::ConfirmationTime;
 use bitcoin::transaction::{OutPoint, Sequence, TxOut};
-use bitcoin::{psbt, Weight};
+use bitcoin::Weight;
 
 use serde::{Deserialize, Serialize};
 
@@ -90,7 +90,7 @@ pub enum Utxo {
         sequence: Option<Sequence>,
         /// The information about the input we require to add it to a PSBT.
         // Box it to stop the type being too big.
-        psbt_input: Box<psbt::Input>,
+        psbt_input: Box<psbt_v0::Input>,
     },
 }
 

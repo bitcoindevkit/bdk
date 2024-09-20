@@ -14,7 +14,7 @@
 use alloc::vec::Vec;
 use bitcoin::Amount;
 use bitcoin::FeeRate;
-use bitcoin::Psbt;
+use psbt_v0::Psbt;
 use bitcoin::TxOut;
 
 // TODO upstream the functions here to `rust-bitcoin`?

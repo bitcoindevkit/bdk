@@ -16,7 +16,7 @@ use crate::descriptor::DescriptorError;
 use crate::wallet::coin_selection;
 use crate::{descriptor, KeychainKind};
 use alloc::string::String;
-use bitcoin::{absolute, psbt, Amount, OutPoint, Sequence, Txid};
+use bitcoin::{absolute, Amount, OutPoint, Sequence, Txid};
 use core::fmt;
 
 /// Errors returned by miniscript when updating inconsistent PSBTs
@@ -25,9 +25,9 @@ pub enum MiniscriptPsbtError {
     /// Descriptor key conversion error
     Conversion(miniscript::descriptor::ConversionError),
     /// Return error type for PsbtExt::update_input_with_descriptor
-    UtxoUpdate(miniscript::psbt::UtxoUpdateError),
+    UtxoUpdate(psbt_v0::miniscript::UtxoUpdateError),
     /// Return error type for PsbtExt::update_output_with_descriptor
-    OutputUpdate(miniscript::psbt::OutputUpdateError),
+    OutputUpdate(psbt_v0::miniscript::OutputUpdateError),
 }
 
 impl fmt::Display for MiniscriptPsbtError {
@@ -93,7 +93,7 @@ pub enum CreateTxError {
     /// Cannot build a tx without recipients
     NoRecipients,
     /// Partially signed bitcoin transaction error
-    Psbt(psbt::Error),
+    Psbt(psbt_v0::Error),
     /// In order to use the [`TxBuilder::add_global_xpubs`] option every extended
     /// key in the descriptor must either be a master key itself (having depth = 0) or have an
     /// explicit origin provided
@@ -198,8 +198,8 @@ impl From<MiniscriptPsbtError> for CreateTxError {
     }
 }
 
-impl From<psbt::Error> for CreateTxError {
-    fn from(err: psbt::Error) -> Self {
+impl From<psbt_v0::Error> for CreateTxError {
+    fn from(err: psbt_v0::Error) -> Self {
         CreateTxError::Psbt(err)
     }
 }
