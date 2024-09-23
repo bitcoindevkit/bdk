@@ -177,6 +177,10 @@ impl<'c, C: RpcApi> Iterator for FilterIter<'c, C> {
     type Item = Result<Event, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.spks.is_empty() {
+            return None;
+        }
+
         let (block, filter) = self.next_filter.clone()?;
 
         (|| -> Result<_, Error> {
@@ -184,9 +188,7 @@ impl<'c, C: RpcApi> Iterator for FilterIter<'c, C> {
             // and return it, inserting relevant block ids along the way
             let height = block.height;
             let hash = block.hash;
-            let event = if self.spks.is_empty() {
-                Event::NoMatch(height)
-            } else if filter
+            let event = if filter
                 .match_any(&hash, self.spks.iter().map(|script| script.as_bytes()))
                 .map_err(Error::Bip158)?
             {
