@@ -8,7 +8,6 @@ type IndexedTxGraphChangeSet =
 
 /// A changeset for [`Wallet`](crate::Wallet).
 #[derive(Default, Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
-#[non_exhaustive]
 pub struct ChangeSet {
     /// Descriptor for recipient addresses.
     pub descriptor: Option<Descriptor<DescriptorPublicKey>>,
