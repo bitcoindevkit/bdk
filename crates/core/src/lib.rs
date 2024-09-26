@@ -68,4 +68,7 @@ pub use checkpoint::*;
 mod tx_update;
 pub use tx_update::*;
 
+mod merge;
+pub use merge::*;
+
 pub mod spk_client;
