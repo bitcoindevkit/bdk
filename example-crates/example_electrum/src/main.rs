@@ -87,7 +87,7 @@ impl ElectrumArgs {
     }
 }
 
-#[derive(Parser, Debug, Clone, PartialEq)]
+#[derive(Parser, Debug, Clone, PartialEq, Eq)]
 pub struct ScanOptions {
     /// Set batch size for each script_history call to electrum client.
     #[clap(long, default_value = "25")]

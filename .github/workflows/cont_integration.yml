@@ -3,149 +3,133 @@ on: [push, pull_request]
 name: CI
 
 jobs:
-
-  prepare:
+  self-care:
+    name: Flake self-check
     runs-on: ubuntu-latest
-    outputs:
-      rust_version: ${{ steps.read_toolchain.outputs.rust_version }}
     steps:
-      - name: "Checkout repo"
+      - uses: actions/checkout@v4
+      - name: Check Nix flake inputs
+        uses: DeterminateSystems/flake-checker-action@v9
+        with:
+          fail-mode: true
+
+  pre-commit-checks:
+    name: "Pre-commit checks: cargo fmt, typos, pgp-signed and conventional commits"
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
         uses: actions/checkout@v4
-      - name: "Read rust version"
-        id: read_toolchain
-        run: echo "rust_version=$(cat rust-version)" >> $GITHUB_OUTPUT
-  
-  build-test:
-    name: Build and test
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v14
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Pre-commit checks
+        run: nix flake check
+
+  clippy:
+    name: "Stable build, clippy and test"
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        rust:
-          - version: stable
-            clippy: true
-          - version: 1.63.0 # MSRV
         features:
           - --no-default-features
           - --all-features
     steps:
       - name: checkout
-        uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: ${{ matrix.rust.version }}
-            override: true
-            profile: minimal
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v14
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
-      - name: Pin dependencies for MSRV
-        if: matrix.rust.version == '1.63.0'
-        run: |
-          cargo update -p zstd-sys --precise "2.0.8+zstd.1.5.5"
-          cargo update -p time --precise "0.3.20"
-          cargo update -p home --precise "0.5.5"
-          cargo update -p proptest --precise "1.2.0"
-          cargo update -p url --precise "2.5.0"
-          cargo update -p cc --precise "1.0.105"
-          cargo update -p tokio --precise "1.38.1"
-          cargo update -p tokio-util --precise "0.7.11"
+        uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build ${{ matrix.features }}
+        run: nix develop -i -L .#stable --command cargo build ${{ matrix.features }}
+      - name: Clippy
+        run: nix develop -i -L .#stable --command cargo clippy ${{ matrix.features }} -- -D warnings
       - name: Test
-        run: cargo test ${{ matrix.features }}
+        run: nix develop -i -L .#stable --command cargo test ${{ matrix.features }}
+
+  build-test:
+    name: "MSRV build and test"
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features:
+          - --no-default-features
+          - --all-features
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v14
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: nix develop -i -L .#msrv --command cargo build ${{ matrix.features }}
+      - name: Test
+        run: nix develop -i -L .#msrv --command cargo test ${{ matrix.features }}
 
   check-no-std:
     name: Check no_std
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - msrv
+          - stable
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          profile: minimal
-          # target: "thumbv6m-none-eabi"
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v14
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
+        uses: Swatinem/rust-cache@v2
+      # TODO "--target thumbv6m-none-eabi" should work but currently does not
       - name: Check bdk_chain
         working-directory: ./crates/chain
-        # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features miniscript/no-std,hashbrown
-      - name: Check bdk wallet
+        run: nix develop -i -L ".#${{ matrix.rust }}" --command cargo check --no-default-features --features miniscript/no-std,hashbrown
+      - name: Check bdk_wallet
         working-directory: ./crates/wallet
-        # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
-      - name: Check esplora
+        run: nix develop -i -L ".#${{ matrix.rust }}" --command cargo check --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
+      - name: Check bdk_esplora
         working-directory: ./crates/esplora
-        # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
+        run: nix develop -i -L ".#${{ matrix.rust }}" --command cargo check --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
 
   check-wasm:
     name: Check WASM
-    runs-on: ubuntu-20.04
-    env:
-      CC: clang-10
-      CFLAGS: -I/usr/include
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - msrv
+          - stable
+        target:
+          - wasm32-unknown-unknown
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        # Install a recent version of clang that supports wasm32
-      - run: wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - || exit 1
-      - run: sudo apt-get update || exit 1
-      - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            override: true
-            profile: minimal
-            target: "wasm32-unknown-unknown"
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v14
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
-      - name: Check bdk wallet
+        uses: Swatinem/rust-cache@v2
+      - name: Check bdk_wallet
         working-directory: ./crates/wallet
-        run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
-      - name: Check esplora
+        run: nix develop -i -L ".#${{ matrix.rust }}" --command cargo check --target ${{ matrix.target }} --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
+      - name: Check bdk_esplora
         working-directory: ./crates/esplora
-        run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown,async
-
-  fmt:
-    name: Rust fmt
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-            toolchain: stable
-            override: true
-            profile: minimal
-            components: rustfmt
-      - name: Check fmt
-        run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
-
-  clippy_check:
-    needs: prepare
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-            toolchain: ${{ needs.prepare.outputs.rust_version }}
-            components: clippy
-            override: true
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
-      - uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
+        run: nix develop -i -L ".#${{ matrix.rust }}" --command cargo check --target ${{ matrix.target }} --no-default-features --features miniscript/no-std,bdk_chain/hashbrown,async
 
   build-examples:
-    name: Build Examples
+    name: Build examples
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -160,15 +144,13 @@ jobs:
           - wallet_rpc
     steps:
       - name: checkout
-        uses: actions/checkout@v2
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          profile: minimal
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v14
+      - name: Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v8
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
-      - name: Build
+        uses: Swatinem/rust-cache@v2
+      - name: Build examples
         working-directory: example-crates/${{ matrix.example-dir }}
-        run: cargo build
+        run: nix develop -i -L .#stable --command cargo build

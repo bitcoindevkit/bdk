@@ -31,8 +31,8 @@ facilitates social contribution, easy testing and peer review.
 To contribute a patch, the workflow is as follows:
 
   1. Fork Repository
-  2. Create topic branch
-  3. Commit patches
+  1. Create topic branch
+  1. Commit patches
 
 In general commits should be atomic and diffs should be easy to read.
 For this reason do not mix any formatting fixes or code moves with actual code
@@ -49,13 +49,43 @@ hesitate to split it into multiple small, focused PRs.
 The Minimum Supported Rust Version is **1.63.0** (enforced by our CI).
 
 Commits should cover both the issue fixed and the solution's rationale.
-These [guidelines](https://chris.beams.io/posts/git-commit/) should be kept in mind. Commit messages follow the ["Conventional Commits 1.0.0"](https://www.conventionalcommits.org/en/v1.0.0/) to make commit histories easier to read by humans and automated tools. All commits must be [GPG signed](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
 
 To facilitate communication with other contributors, the project is making use
 of GitHub's "assignee" field. First check that no one is assigned and then
 comment suggesting that you're working on it. If someone is already assigned,
 don't hesitate to ask if the assigned party or previous commenter are still
 working on it if it has been awhile.
+
+Our CI can be replicated locally with Nix.
+Just run `nix flake check`.
+Our Nix setup can greatly increase developer experience
+and onboarding of new contributors.
+Please check the [`Nix.md`](Nix.md) for details
+on how to install Nix and why we use it.
+
+We also provide [`just`](https://just.systems/) recipes that facilitate
+the development workflow for common tasks such as formatting,
+clippy lints, building and running tests.
+These work flawlessly either in a Nix shell or in a regular environment.
+To check which recipes are available, run `just` to list them.
+Note that you need to have `just` installed.
+
+Commit policy
+-------------
+
+Commits should cover both the issue fixed and the solution's rationale.
+These [guidelines](https://chris.beams.io/posts/git-commit/) should be kept in mind.
+
+We enforce two commit styles in our CI:
+
+1. Commits should be signed with GPG using a key with a valid email address.
+1. Commit messages should follow the ["Conventional Commits 1.0.0"](https://www.conventionalcommits.org/en/v1.0.0/)
+   to make commit histories easier to read by humans and automated tools.
+   Commits starting with `Merge ...` which GitHub automatically generates
+   are exempt from this rule.
+
+You can use Nix to automatically and easily check locally these rules before commit and push events.
+Please check the [`Nix.md`](Nix.md) for details.
 
 Deprecation policy
 ------------------
@@ -89,7 +119,8 @@ Coding Conventions
 This codebase uses spaces, not tabs.
 Use `cargo fmt` with the default settings to format code before committing.
 This is also enforced by the CI.
-All public items must be documented. We adhere to the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/about.html) with respect to documentation.
+All public items must be documented.
+We adhere to the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/about.html) with respect to documentation.
 
 The library is written using safe rust. Special consideration must be given to code which proposes an exception to the rule.
 

@@ -6,6 +6,11 @@ BDK Esplora extends [`esplora-client`] (with extension traits: [`EsploraExt`] an
 The extension traits are primarily intended to satisfy [`SyncRequest`]s with [`sync`] and
 [`FullScanRequest`]s with [`full_scan`].
 
+## Dependencies
+
+`esplora` depends on [Blockstream's version of `electrs`](https://github.com/Blockstream/electrs)
+being installed and available in `PATH` or in the `ELECTRS_EXEC` ENV variable.
+
 ## Usage
 
 For blocking-only:
