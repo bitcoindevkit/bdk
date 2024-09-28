@@ -416,7 +416,43 @@ impl<A> TxGraph<A> {
             .range(start..=end)
             .map(|(outpoint, spends)| (outpoint.vout, spends))
     }
+
+    /// Verify the given transaction is able to spend its inputs.
+    ///
+    /// This method uses [`rust-bitcoinconsensus`][0] to verify a transaction, guaranteeing
+    /// that if the method succeeds the transaction meets consensus criteria as defined in
+    /// Bitcoin's `libbitcoinconsensus`.
+    ///
+    /// # Errors
+    ///
+    /// If the previous output isn't found for one or more `tx` inputs.
+    ///
+    /// If Bitcoin Script verification fails.
+    ///
+    /// [0]: https://docs.rs/bitcoinconsensus/latest/bitcoinconsensus/
+    #[cfg(feature = "bitcoinconsensus")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "bitcoinconsensus")))]
+    pub fn verify_tx(&self, tx: &Transaction) -> Result<(), VerifyTxError> {
+        tx.verify(|op: &OutPoint| -> Option<TxOut> { self.get_txout(*op).cloned() })
+            .map_err(VerifyTxError)
+    }
 }
+
+/// Error returned by [`TxGraph::verify_tx`].
+#[cfg(feature = "bitcoinconsensus")]
+#[derive(Debug)]
+pub struct VerifyTxError(pub bitcoin::transaction::TxVerifyError);
+
+#[cfg(feature = "bitcoinconsensus")]
+impl fmt::Display for VerifyTxError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+#[cfg(feature = "std")]
+#[cfg(feature = "bitcoinconsensus")]
+impl std::error::Error for VerifyTxError {}
 
 impl<A: Clone + Ord> TxGraph<A> {
     /// Creates an iterator that filters and maps ancestor transactions.
