@@ -1263,3 +1263,57 @@ fn tx_graph_update_conversion() {
         );
     }
 }
+
+#[test]
+#[allow(unused)]
+#[cfg(feature = "bitcoinconsensus")]
+fn test_verify_tx() {
+    use bdk_chain::tx_graph::VerifyTxError;
+    use bitcoin::consensus;
+    use bitcoin::transaction::TxVerifyError;
+
+    // spent tx
+    // txid: 95da344585fcf2e5f7d6cbf2c3df2dcce84f9196f7a7bb901a43275cd6eb7c3f
+    let spent: Transaction = consensus::deserialize(hex!("020000000101192dea5e66d444380e106f8e53acb171703f00d43fb6b3ae88ca5644bdb7e1000000006b48304502210098328d026ce138411f957966c1cf7f7597ccbb170f5d5655ee3e9f47b18f6999022017c3526fc9147830e1340e04934476a3d1521af5b4de4e98baf49ec4c072079e01210276f847f77ec8dd66d78affd3c318a0ed26d89dab33fa143333c207402fcec352feffffff023d0ac203000000001976a9144bfbaf6afb76cc5771bc6404810d1cc041a6933988aca4b956050000000017a91494d5543c74a3ee98e0cf8e8caef5dc813a0f34b48768cb0700")
+        .unwrap()
+        .as_slice())
+        .unwrap();
+    let spent_prevout: OutPoint =
+        "e1b7bd4456ca88aeb3b63fd4003f7071b1ac538e6f100e3844d4665eea2d1901:0"
+            .parse()
+            .unwrap();
+    // spending tx
+    // txid: aca326a724eda9a461c10a876534ecd5ae7b27f10f26c3862fb996f80ea2d45d
+    let spending: Transaction = consensus::deserialize(hex!("02000000013f7cebd65c27431a90bba7f796914fe8cc2ddfc3f2cbd6f7e5f2fc854534da95000000006b483045022100de1ac3bcdfb0332207c4a91f3832bd2c2915840165f876ab47c5f8996b971c3602201c6c053d750fadde599e6f5c4e1963df0f01fc0d97815e8157e3d59fe09ca30d012103699b464d1d8bc9e47d4fb1cdaa89a1c5783d68363c4dbc4b524ed3d857148617feffffff02836d3c01000000001976a914fc25d6d5c94003bf5b0c7b640a248e2c637fcfb088ac7ada8202000000001976a914fbed3d9b11183209a57999d54d59f67c019e756c88ac6acb0700")
+        .unwrap()
+        .as_slice())
+        .unwrap();
+    let spending_prevout: OutPoint =
+        "95da344585fcf2e5f7d6cbf2c3df2dcce84f9196f7a7bb901a43275cd6eb7c3f:0"
+            .parse()
+            .unwrap();
+
+    // First insert the spending tx. neither verify because we don't have prevouts
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.insert_tx(spending.clone());
+    assert!(matches!(
+        graph.verify_tx(&spending).unwrap_err(),
+        VerifyTxError(TxVerifyError::UnknownSpentOutput(outpoint))
+        if outpoint == spending_prevout
+    ));
+    assert!(matches!(
+        graph.verify_tx(&spent).unwrap_err(),
+        VerifyTxError(TxVerifyError::UnknownSpentOutput(outpoint))
+        if outpoint == spent_prevout
+    ));
+    // Now insert the spent parent. spending tx verifies
+    let _ = graph.insert_tx(spent);
+    graph.verify_tx(&spending).unwrap();
+    // Verification fails for malformed input
+    let mut tx = spending.clone();
+    tx.input[0].script_sig = ScriptBuf::from_bytes(vec![0x00; 3]);
+    assert!(matches!(
+        graph.verify_tx(&tx).unwrap_err(),
+        VerifyTxError(TxVerifyError::ScriptVerification(_))
+    ));
+}
