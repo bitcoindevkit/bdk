@@ -1,13 +1,13 @@
 # Wallet RPC Example 
 
 ```
-$ cargo run --bin wallet_rpc -- --help
+$ cargo run --bin example_wallet_rpc -- --help
 
-wallet_rpc 0.1.0
+example_wallet_rpc 0.1.0
 Bitcoind RPC example using `bdk_wallet::Wallet`
 
 USAGE:
-    wallet_rpc [OPTIONS] <DESCRIPTOR> [CHANGE_DESCRIPTOR]
+    example_wallet_rpc [OPTIONS] <DESCRIPTOR> [CHANGE_DESCRIPTOR]
 
 ARGS:
     <DESCRIPTOR>           Wallet descriptor [env: DESCRIPTOR=]

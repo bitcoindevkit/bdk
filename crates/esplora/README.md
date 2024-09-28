@@ -26,8 +26,11 @@ bdk_esplora = { version = "0.3", features = ["async-https"] }
 To use the extension traits:
 ```rust
 // for blocking
+#[cfg(feature = "blocking")]
 use bdk_esplora::EsploraExt;
+
 // for async
+#[cfg(feature = "async")]
 use bdk_esplora::EsploraAsyncExt;
 ```
 

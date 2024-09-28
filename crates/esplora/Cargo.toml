@@ -27,10 +27,21 @@ bdk_testenv = { path = "../testenv", default-features = false }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]
-default = ["std", "async-https", "blocking-https-rustls"]
+default = ["std", "async-https", "blocking-https"]
 std = ["bdk_chain/std", "miniscript?/std"]
 async = ["async-trait", "futures", "esplora-client/async"]
 async-https = ["async", "esplora-client/async-https"]
 async-https-rustls = ["async", "esplora-client/async-https-rustls"]
+async-https-native = ["async", "esplora-client/async-https-native"]
 blocking = ["esplora-client/blocking"]
-blocking-https-rustls = ["esplora-client/blocking-https-rustls"]
+blocking-https = ["blocking", "esplora-client/blocking-https"]
+blocking-https-rustls = ["blocking", "esplora-client/blocking-https-rustls"]
+blocking-https-native = ["blocking", "esplora-client/blocking-https-native"]
+
+[[test]]
+name = "blocking_ext"
+required-features = ["blocking"]
+
+[[test]]
+name = "async_ext"
+required-features = ["async"]
