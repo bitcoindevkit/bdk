@@ -2487,6 +2487,45 @@ impl Wallet {
             keychain
         }
     }
+
+    /// Verify the given transaction is able to spend its inputs.
+    ///
+    /// This method uses [`rust-bitcoinconsensus`][0] to verify a transaction, guaranteeing
+    /// that if the method succeeds the transaction meets consensus criteria as defined in
+    /// Bitcoin's `libbitcoinconsensus`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use bitcoin::Amount;
+    /// # use bdk_wallet::{KeychainKind, SignOptions};
+    /// # let mut wallet = bdk_wallet::doctest_wallet!();
+    /// # let address = wallet.reveal_next_address(KeychainKind::External);
+    /// let mut builder = wallet.build_tx();
+    /// builder.add_recipient(address.script_pubkey(), Amount::from_sat(100_000));
+    /// let mut psbt = builder.finish().unwrap();
+    /// let _ = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+    /// let tx = psbt.extract_tx().unwrap();
+    /// assert!(wallet.verify_tx(&tx).is_ok());
+    /// ```
+    ///
+    /// Note that validation by the Bitcoin network can ultimately fail in other ways, for
+    /// example if a timelock wasn't met. Also verifying that a transaction can spend its
+    /// inputs doesn't guarantee it will be accepted to mempools or propagated by nodes on
+    /// the peer-to-peer network.
+    ///
+    /// # Errors
+    ///
+    /// If the previous output isn't found for one or more `tx` inputs.
+    ///
+    /// If Bitcoin Script verification fails.
+    ///
+    /// [0]: https://docs.rs/bitcoinconsensus/latest/bitcoinconsensus/
+    #[cfg(feature = "bitcoinconsensus")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "bitcoinconsensus")))]
+    pub fn verify_tx(&self, tx: &Transaction) -> Result<(), chain::tx_graph::VerifyTxError> {
+        self.tx_graph().verify_tx(tx)
+    }
 }
 
 /// Methods to construct sync/full-scan requests for spk-based chain sources.
@@ -2619,7 +2658,7 @@ macro_rules! floating_rate {
 /// Macro for getting a wallet for use in a doctest
 macro_rules! doctest_wallet {
     () => {{
-        use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
+        use $crate::bitcoin::{transaction, BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
         use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph, tx_graph};
         use $crate::{Update, KeychainKind, Wallet};
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
