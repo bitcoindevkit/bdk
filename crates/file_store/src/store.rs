@@ -1,4 +1,4 @@
-use crate::{bincode_options, EntryIter, FileError, IterError};
+use crate::{bincode_options, EntryIter, FileError, IterError, StoreError};
 use bdk_chain::Merge;
 use bincode::Options;
 use std::{
@@ -90,6 +90,62 @@ where
             db_file: f,
             marker: Default::default(),
         })
+    }
+
+    /// Open an existing [`Store`], read its content, and return it ready to start receiving new
+    /// changesets.
+    ///
+    /// Use [`create_new`] to create a new `Store`.
+    ///
+    /// # Errors
+    ///
+    /// If the prefixed bytes of the opened file does not match the provided `magic`, the
+    /// [`StoreError::InvalidMagicBytes`] error variant will be returned.
+    ///
+    /// If there is an error while decoding the changesets stored, the [`StoreError::EntryIter`]
+    /// error variant will be returned, with the index of the failing changeset and the error it
+    /// caused.
+    ///
+    /// [`create_new`]: Store::create_new
+    pub fn reopen<P>(magic: &[u8], file_path: P) -> Result<Self, StoreError>
+    where
+        P: AsRef<Path>,
+    {
+        let mut f = OpenOptions::new().read(true).write(true).open(file_path)?;
+
+        let mut magic_buf = vec![0_u8; magic.len()];
+        f.read_exact(&mut magic_buf)?;
+        if magic_buf != magic {
+            return Err(StoreError::InvalidMagicBytes {
+                got: magic_buf,
+                expected: magic.to_vec(),
+            });
+        }
+
+        let mut store = Self {
+            magic_len: magic.len(),
+            db_file: f,
+            marker: Default::default(),
+        };
+
+        let mut index: usize = 0;
+        let mut error: Option<IterError> = None;
+        for (idx, next_changeset) in store.iter_changesets().enumerate() {
+            if let Err(iter_error) = next_changeset {
+                index = idx;
+                error = Some(iter_error);
+            };
+        }
+
+        if let Some(iter) = error {
+            return Err(StoreError::EntryIter {
+                index,
+                iter,
+                bytes_read: store.db_file.stream_position()?,
+            });
+        }
+
+        Ok(store)
     }
 
     /// Attempt to open existing [`Store`] file; create it if the file is non-existent.
