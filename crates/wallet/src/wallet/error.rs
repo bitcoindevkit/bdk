@@ -65,12 +65,10 @@ pub enum CreateTxError {
         /// Required `LockTime`
         required: absolute::LockTime,
     },
-    /// Cannot enable RBF with a `Sequence` >= 0xFFFFFFFE
-    RbfSequence,
     /// Cannot enable RBF with `Sequence` given a required OP_CSV
     RbfSequenceCsv {
         /// Given RBF `Sequence`
-        rbf: Sequence,
+        sequence: Sequence,
         /// Required OP_CSV `Sequence`
         csv: Sequence,
     },
@@ -131,14 +129,11 @@ impl fmt::Display for CreateTxError {
             } => {
                 write!(f, "TxBuilder requested timelock of `{:?}`, but at least `{:?}` is required to spend from this script", required, requested)
             }
-            CreateTxError::RbfSequence => {
-                write!(f, "Cannot enable RBF with a nSequence >= 0xFFFFFFFE")
-            }
-            CreateTxError::RbfSequenceCsv { rbf, csv } => {
+            CreateTxError::RbfSequenceCsv { sequence, csv } => {
                 write!(
                     f,
                     "Cannot enable RBF with nSequence `{:?}` given a required OP_CSV of `{:?}`",
-                    rbf, csv
+                    sequence, csv
                 )
             }
             CreateTxError::FeeTooLow { required } => {

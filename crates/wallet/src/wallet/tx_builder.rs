@@ -31,9 +31,7 @@
 //!     // With a custom fee rate of 5.0 satoshi/vbyte
 //!     .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"))
 //!     // Only spend non-change outputs
-//!     .do_not_spend_change()
-//!     // Turn on RBF signaling
-//!     .enable_rbf();
+//!     .do_not_spend_change();
 //! let psbt = tx_builder.finish()?;
 //! # Ok::<(), anyhow::Error>(())
 //! ```
@@ -134,7 +132,7 @@ pub(crate) struct TxParams {
     pub(crate) sighash: Option<psbt::PsbtSighashType>,
     pub(crate) ordering: TxOrdering,
     pub(crate) locktime: Option<absolute::LockTime>,
-    pub(crate) rbf: Option<RbfValue>,
+    pub(crate) sequence: Option<Sequence>,
     pub(crate) version: Option<Version>,
     pub(crate) change_policy: ChangeSpendPolicy,
     pub(crate) only_witness_utxo: bool,
@@ -554,23 +552,12 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         }
     }
 
-    /// Enable signaling RBF
+    /// Set an exact nSequence value
     ///
-    /// This will use the default nSequence value of `0xFFFFFFFD`.
-    pub fn enable_rbf(&mut self) -> &mut Self {
-        self.params.rbf = Some(RbfValue::Default);
-        self
-    }
-
-    /// Enable signaling RBF with a specific nSequence value
-    ///
-    /// This can cause conflicts if the wallet's descriptors contain an "older" (OP_CSV) operator
-    /// and the given `nsequence` is lower than the CSV value.
-    ///
-    /// If the `nsequence` is higher than `0xFFFFFFFD` an error will be thrown, since it would not
-    /// be a valid nSequence to signal RBF.
-    pub fn enable_rbf_with_sequence(&mut self, nsequence: Sequence) -> &mut Self {
-        self.params.rbf = Some(RbfValue::Value(nsequence));
+    /// This can cause conflicts if the wallet's descriptors contain an
+    /// "older" (OP_CSV) operator and the given `nsequence` is lower than the CSV value.
+    pub fn set_exact_sequence(&mut self, n_sequence: Sequence) -> &mut Self {
+        self.params.sequence = Some(n_sequence);
         self
     }
 
@@ -654,8 +641,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     ///     .drain_wallet()
     ///     // Send the excess (which is all the coins minus the fee) to this address.
     ///     .drain_to(to_address.script_pubkey())
-    ///     .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"))
-    ///     .enable_rbf();
+    ///     .fee_rate(FeeRate::from_sat_per_vb(5).expect("valid feerate"));
     /// let psbt = tx_builder.finish()?;
     /// # Ok::<(), anyhow::Error>(())
     /// ```
@@ -832,24 +818,6 @@ pub(crate) struct Version(pub(crate) i32);
 impl Default for Version {
     fn default() -> Self {
         Version(1)
-    }
-}
-
-/// RBF nSequence value
-///
-/// Has a default value of `0xFFFFFFFD`
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
-pub(crate) enum RbfValue {
-    Default,
-    Value(Sequence),
-}
-
-impl RbfValue {
-    pub(crate) fn get_value(&self) -> Sequence {
-        match self {
-            RbfValue::Default => Sequence::ENABLE_RBF_NO_LOCKTIME,
-            RbfValue::Value(v) => *v,
-        }
     }
 }
 

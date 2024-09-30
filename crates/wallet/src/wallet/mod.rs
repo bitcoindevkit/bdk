@@ -1366,36 +1366,20 @@ impl Wallet {
             }
         };
 
-        // The nSequence to be by default for inputs unless an explicit sequence is specified.
-        let n_sequence = match (params.rbf, requirements.csv) {
-            // No RBF or CSV but there's an nLockTime, so the nSequence cannot be final
-            (None, None) if lock_time != absolute::LockTime::ZERO => {
-                Sequence::ENABLE_LOCKTIME_NO_RBF
-            }
-            // No RBF, CSV or nLockTime, make the transaction final
-            (None, None) => Sequence::MAX,
-
-            // No RBF requested, use the value from CSV. Note that this value is by definition
-            // non-final, so even if a timelock is enabled this nSequence is fine, hence why we
-            // don't bother checking for it here. The same is true for all the other branches below
+        // nSequence value for inputs
+        // When not explicitly specified, defaults to 0xFFFFFFFD,
+        // meaning RBF signaling is enabled
+        let n_sequence = match (params.sequence, requirements.csv) {
+            // Enable RBF by default
+            (None, None) => Sequence::ENABLE_RBF_NO_LOCKTIME,
+            // None requested, use required
             (None, Some(csv)) => csv,
-
-            // RBF with a specific value but that value is too high
-            (Some(tx_builder::RbfValue::Value(rbf)), _) if !rbf.is_rbf() => {
-                return Err(CreateTxError::RbfSequence)
+            // Requested sequence is incompatible with requirements
+            (Some(sequence), Some(csv)) if !check_nsequence_rbf(sequence, csv) => {
+                return Err(CreateTxError::RbfSequenceCsv { sequence, csv })
             }
-            // RBF with a specific value requested, but the value is incompatible with CSV
-            (Some(tx_builder::RbfValue::Value(rbf)), Some(csv))
-                if !check_nsequence_rbf(rbf, csv) =>
-            {
-                return Err(CreateTxError::RbfSequenceCsv { rbf, csv })
-            }
-
-            // RBF enabled with the default value with CSV also enabled. CSV takes precedence
-            (Some(tx_builder::RbfValue::Default), Some(csv)) => csv,
-            // Valid RBF, either default or with a specific value. We ignore the `CSV` value
-            // because we've already checked it before
-            (Some(rbf), _) => rbf.get_value(),
+            // Use requested nSequence value
+            (Some(sequence), _) => sequence,
         };
 
         let (fee_rate, mut fee_amount) = match params.fee_policy.unwrap_or_default() {
@@ -1609,8 +1593,7 @@ impl Wallet {
     /// let mut psbt = {
     ///     let mut builder = wallet.build_tx();
     ///     builder
-    ///         .add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000))
-    ///         .enable_rbf();
+    ///         .add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000));
     ///     builder.finish()?
     /// };
     /// let _ = wallet.sign(&mut psbt, SignOptions::default())?;

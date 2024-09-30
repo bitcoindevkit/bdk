@@ -77,9 +77,7 @@ async fn main() -> Result<(), anyhow::Error> {
     }
 
     let mut tx_builder = wallet.build_tx();
-    tx_builder
-        .add_recipient(address.script_pubkey(), SEND_AMOUNT)
-        .enable_rbf();
+    tx_builder.add_recipient(address.script_pubkey(), SEND_AMOUNT);
 
     let mut psbt = tx_builder.finish()?;
     let finalized = wallet.sign(&mut psbt, SignOptions::default())?;

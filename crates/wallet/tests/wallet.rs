@@ -639,6 +639,20 @@ fn test_create_tx_custom_locktime_incompatible_with_cltv() {
 }
 
 #[test]
+fn test_create_tx_custom_csv() {
+    // desc: wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(6)))
+    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
+    let addr = wallet.next_unused_address(KeychainKind::External);
+    let mut builder = wallet.build_tx();
+    builder
+        .set_exact_sequence(Sequence(42))
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
+    let psbt = builder.finish().unwrap();
+    // we allow setting a sequence higher than required
+    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(42));
+}
+
+#[test]
 fn test_create_tx_no_rbf_csv() {
     let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
     let addr = wallet.next_unused_address(KeychainKind::External);
@@ -650,30 +664,28 @@ fn test_create_tx_no_rbf_csv() {
 }
 
 #[test]
+fn test_create_tx_incompatible_csv() {
+    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
+    let addr = wallet.next_unused_address(KeychainKind::External);
+    let mut builder = wallet.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
+        .set_exact_sequence(Sequence(3));
+    assert!(matches!(builder.finish(),
+        Err(CreateTxError::RbfSequenceCsv { sequence, csv })
+        if sequence.to_consensus_u32() == 3 && csv.to_consensus_u32() == 6));
+}
+
+#[test]
 fn test_create_tx_with_default_rbf_csv() {
     let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
     let psbt = builder.finish().unwrap();
     // When CSV is enabled it takes precedence over the rbf value (unless forced by the user).
     // It will be set to the OP_CSV value, in this case 6
     assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(6));
-}
-
-#[test]
-fn test_create_tx_with_custom_rbf_csv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
-    let addr = wallet.next_unused_address(KeychainKind::External);
-    let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .enable_rbf_with_sequence(Sequence(3));
-    assert!(matches!(builder.finish(),
-        Err(CreateTxError::RbfSequenceCsv { rbf, csv })
-        if rbf.to_consensus_u32() == 3 && csv.to_consensus_u32() == 6));
 }
 
 #[test]
@@ -682,20 +694,10 @@ fn test_create_tx_no_rbf_cltv() {
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
+    builder.set_exact_sequence(Sequence(0xFFFFFFFE));
     let psbt = builder.finish().unwrap();
 
     assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFE));
-}
-
-#[test]
-fn test_create_tx_invalid_rbf_sequence() {
-    let (mut wallet, _) = get_funded_wallet_wpkh();
-    let addr = wallet.next_unused_address(KeychainKind::External);
-    let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .enable_rbf_with_sequence(Sequence(0xFFFFFFFE));
-    assert!(matches!(builder.finish(), Err(CreateTxError::RbfSequence)));
 }
 
 #[test]
@@ -705,7 +707,7 @@ fn test_create_tx_custom_rbf_sequence() {
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .enable_rbf_with_sequence(Sequence(0xDEADBEEF));
+        .set_exact_sequence(Sequence(0xDEADBEEF));
     let psbt = builder.finish().unwrap();
 
     assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xDEADBEEF));
@@ -743,7 +745,7 @@ fn test_create_tx_default_sequence() {
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
     let psbt = builder.finish().unwrap();
 
-    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFE));
+    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFD));
 }
 
 macro_rules! check_fee {
@@ -1328,7 +1330,7 @@ fn test_create_tx_policy_path_no_csv() {
         .policy_path(path, KeychainKind::External);
     let psbt = builder.finish().unwrap();
 
-    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFF));
+    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFD));
 }
 
 #[test]
@@ -1370,7 +1372,7 @@ fn test_create_tx_policy_path_ignored_subtree_with_csv() {
         .policy_path(path, KeychainKind::External);
     let psbt = builder.finish().unwrap();
 
-    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFE));
+    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFD));
 }
 
 #[test]
@@ -1797,6 +1799,7 @@ fn test_bump_fee_irreplaceable_tx() {
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
+    builder.set_exact_sequence(Sequence(0xFFFFFFFE));
     let psbt = builder.finish().unwrap();
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
@@ -1836,9 +1839,8 @@ fn test_bump_fee_low_fee_rate() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
+
     let psbt = builder.finish().unwrap();
     let feerate = psbt.fee_rate().unwrap();
 
@@ -1869,9 +1871,7 @@ fn test_bump_fee_low_abs() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
     let psbt = builder.finish().unwrap();
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
@@ -1891,9 +1891,7 @@ fn test_bump_fee_zero_abs() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
     let psbt = builder.finish().unwrap();
 
     let tx = psbt.extract_tx().expect("failed to extract tx");
@@ -1913,9 +1911,7 @@ fn test_bump_fee_reduce_change() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
     let psbt = builder.finish().unwrap();
     let original_sent_received =
         wallet.sent_and_received(&psbt.clone().extract_tx().expect("failed to extract tx"));
@@ -1928,7 +1924,7 @@ fn test_bump_fee_reduce_change() {
 
     let feerate = FeeRate::from_sat_per_kwu(625); // 2.5 sat/vb
     let mut builder = wallet.build_fee_bump(txid).unwrap();
-    builder.fee_rate(feerate).enable_rbf();
+    builder.fee_rate(feerate);
     let psbt = builder.finish().unwrap();
     let sent_received =
         wallet.sent_and_received(&psbt.clone().extract_tx().expect("failed to extract tx"));
@@ -1964,7 +1960,6 @@ fn test_bump_fee_reduce_change() {
 
     let mut builder = wallet.build_fee_bump(txid).unwrap();
     builder.fee_absolute(Amount::from_sat(200));
-    builder.enable_rbf();
     let psbt = builder.finish().unwrap();
     let sent_received =
         wallet.sent_and_received(&psbt.clone().extract_tx().expect("failed to extract tx"));
@@ -2011,10 +2006,7 @@ fn test_bump_fee_reduce_single_recipient() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx();
-    builder
-        .drain_to(addr.script_pubkey())
-        .drain_wallet()
-        .enable_rbf();
+    builder.drain_to(addr.script_pubkey()).drain_wallet();
     let psbt = builder.finish().unwrap();
     let tx = psbt.clone().extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
@@ -2058,10 +2050,7 @@ fn test_bump_fee_absolute_reduce_single_recipient() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx();
-    builder
-        .drain_to(addr.script_pubkey())
-        .drain_wallet()
-        .enable_rbf();
+    builder.drain_to(addr.script_pubkey()).drain_wallet();
     let psbt = builder.finish().unwrap();
     let original_fee = check_fee!(wallet, psbt);
     let tx = psbt.extract_tx().expect("failed to extract tx");
@@ -2135,8 +2124,7 @@ fn test_bump_fee_drain_wallet() {
             vout: 0,
         })
         .unwrap()
-        .manually_selected_only()
-        .enable_rbf();
+        .manually_selected_only();
     let psbt = builder.finish().unwrap();
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
@@ -2201,8 +2189,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
         .drain_to(addr.script_pubkey())
         .add_utxo(outpoint)
         .unwrap()
-        .manually_selected_only()
-        .enable_rbf();
+        .manually_selected_only();
     let psbt = builder.finish().unwrap();
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
@@ -2247,9 +2234,7 @@ fn test_bump_fee_add_input() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(45_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(45_000));
     let psbt = builder.finish().unwrap();
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let original_details = wallet.sent_and_received(&tx);
@@ -2303,9 +2288,7 @@ fn test_bump_fee_absolute_add_input() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(45_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(45_000));
     let psbt = builder.finish().unwrap();
     let tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
@@ -2366,8 +2349,7 @@ fn test_bump_fee_no_change_add_input_and_change() {
         .drain_to(addr.script_pubkey())
         .add_utxo(op)
         .unwrap()
-        .manually_selected_only()
-        .enable_rbf();
+        .manually_selected_only();
     let psbt = builder.finish().unwrap();
     let original_sent_received =
         wallet.sent_and_received(&psbt.clone().extract_tx().expect("failed to extract tx"));
@@ -2428,9 +2410,7 @@ fn test_bump_fee_add_input_change_dust() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(45_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(45_000));
     let psbt = builder.finish().unwrap();
     let original_sent_received =
         wallet.sent_and_received(&psbt.clone().extract_tx().expect("failed to extract tx"));
@@ -2504,9 +2484,7 @@ fn test_bump_fee_force_add_input() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(45_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(45_000));
     let psbt = builder.finish().unwrap();
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
@@ -2569,9 +2547,7 @@ fn test_bump_fee_absolute_force_add_input() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(45_000))
-        .enable_rbf();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(45_000));
     let psbt = builder.finish().unwrap();
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
     let original_sent_received = wallet.sent_and_received(&tx);
@@ -2641,10 +2617,7 @@ fn test_bump_fee_unconfirmed_inputs_only() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx();
-    builder
-        .drain_wallet()
-        .drain_to(addr.script_pubkey())
-        .enable_rbf();
+    builder.drain_wallet().drain_to(addr.script_pubkey());
     let psbt = builder.finish().unwrap();
     // Now we receive one transaction with 0 confirmations. We won't be able to use that for
     // fee bumping, as it's still unconfirmed!
@@ -2680,10 +2653,7 @@ fn test_bump_fee_unconfirmed_input() {
     // in the drain tx.
     receive_output(&mut wallet, 25_000, ConfirmationTime::unconfirmed(0));
     let mut builder = wallet.build_tx();
-    builder
-        .drain_wallet()
-        .drain_to(addr.script_pubkey())
-        .enable_rbf();
+    builder.drain_wallet().drain_to(addr.script_pubkey());
     let psbt = builder.finish().unwrap();
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
     let txid = tx.compute_txid();
@@ -2727,7 +2697,6 @@ fn test_fee_amount_negative_drain_val() {
         .add_recipient(send_to.script_pubkey(), Amount::from_sat(8630))
         .add_utxo(incoming_op)
         .unwrap()
-        .enable_rbf()
         .fee_rate(fee_rate);
     let psbt = builder.finish().unwrap();
     let fee = check_fee!(wallet, psbt);
