@@ -25,7 +25,7 @@ jobs:
             clippy: true
           - version: 1.63.0 # MSRV
         features:
-          - --no-default-features
+          - --no-default-features --features miniscript/no-std
           - --all-features
     steps:
       - name: checkout
