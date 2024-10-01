@@ -1,5 +1,5 @@
 use crate::{bincode_options, EntryIter, FileError, IterError};
-use bdk_chain::Merge;
+use bdk_core::Merge;
 use bincode::Options;
 use std::{
     fmt::{self, Debug},
