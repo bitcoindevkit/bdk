@@ -446,7 +446,7 @@ pub struct Policy {
 
 /// An extra condition that must be satisfied but that is out of control of the user
 /// TODO: use `bitcoin::LockTime` and `bitcoin::Sequence`
-#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Default, Serialize)]
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, Default, Serialize)]
 pub struct Condition {
     /// Optional CheckSequenceVerify condition
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -454,6 +454,18 @@ pub struct Condition {
     /// Optional timelock condition
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timelock: Option<absolute::LockTime>,
+}
+
+impl PartialOrd for Condition {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Condition {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.partial_cmp(other).expect("Sequence is Ord")
+    }
 }
 
 impl Condition {
