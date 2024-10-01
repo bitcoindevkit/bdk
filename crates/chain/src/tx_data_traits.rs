@@ -98,24 +98,31 @@ impl Anchor for ConfirmationBlockTime {
     }
 }
 
-/// An [`Anchor`] that can be constructed from a given block, block height and transaction position
-/// within the block.
-pub trait AnchorFromBlockPosition: Anchor {
-    /// Construct the anchor from a given `block`, block height and `tx_pos` within the block.
-    fn from_block_position(block: &bitcoin::Block, block_id: BlockId, tx_pos: usize) -> Self;
+/// Set of parameters sufficient to construct an [`Anchor`].
+///
+/// Typically used as an additional constraint on anchor:
+/// `for<'b> A: Anchor + From<TxPosInBlock<'b>>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TxPosInBlock<'b> {
+    /// Block in which the transaction appeared.
+    pub block: &'b bitcoin::Block,
+    /// Block's [`BlockId`].
+    pub block_id: BlockId,
+    /// Position in the block on which the transaction appeared.
+    pub tx_pos: usize,
 }
 
-impl AnchorFromBlockPosition for BlockId {
-    fn from_block_position(_block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
-        block_id
+impl<'b> From<TxPosInBlock<'b>> for BlockId {
+    fn from(pos: TxPosInBlock) -> Self {
+        pos.block_id
     }
 }
 
-impl AnchorFromBlockPosition for ConfirmationBlockTime {
-    fn from_block_position(block: &bitcoin::Block, block_id: BlockId, _tx_pos: usize) -> Self {
+impl<'b> From<TxPosInBlock<'b>> for ConfirmationBlockTime {
+    fn from(pos: TxPosInBlock) -> Self {
         Self {
-            block_id,
-            confirmation_time: block.header.time as _,
+            block_id: pos.block_id,
+            confirmation_time: pos.block.header.time as _,
         }
     }
 }
