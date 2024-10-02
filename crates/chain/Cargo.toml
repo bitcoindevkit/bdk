@@ -1,6 +1,6 @@
 [package]
 name = "bdk_chain"
-version = "0.19.0"
+version = "0.20.0"
 edition = "2021"
 rust-version = "1.63"
 homepage = "https://bitcoindevkit.org"
@@ -17,7 +17,7 @@ workspace = true
 
 [dependencies]
 bitcoin = { version = "0.32.0", default-features = false }
-bdk_core = { path = "../core", version = "0.2.0", default-features = false }
+bdk_core = { path = "../core", version = "0.3.0", default-features = false }
 serde = { version = "1", optional = true, features = ["derive", "rc"] }
 miniscript = { version = "12.0.0", optional = true, default-features = false }
 
