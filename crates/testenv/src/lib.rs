@@ -1,3 +1,5 @@
+pub mod utils;
+
 use bdk_chain::{
     bitcoin::{
         address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash,

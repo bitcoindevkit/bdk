@@ -5,12 +5,15 @@ mod common;
 
 use std::{collections::BTreeSet, sync::Arc};
 
-use crate::common::DESCRIPTORS;
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
     tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt,
+};
+use bdk_testenv::{
+    block_id, hash,
+    utils::{new_tx, DESCRIPTORS},
 };
 use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
@@ -49,7 +52,7 @@ fn insert_relevant_txs() {
                 script_pubkey: spk_1,
             },
         ],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     let tx_b = Transaction {
@@ -57,7 +60,7 @@ fn insert_relevant_txs() {
             previous_output: OutPoint::new(tx_a.compute_txid(), 0),
             ..Default::default()
         }],
-        ..common::new_tx(1)
+        ..new_tx(1)
     };
 
     let tx_c = Transaction {
@@ -65,7 +68,7 @@ fn insert_relevant_txs() {
             previous_output: OutPoint::new(tx_a.compute_txid(), 1),
             ..Default::default()
         }],
-        ..common::new_tx(2)
+        ..new_tx(2)
     };
 
     let txs = [tx_c, tx_b, tx_a];
@@ -126,15 +129,16 @@ fn insert_relevant_txs() {
 #[test]
 fn test_list_owned_txouts() {
     // Create Local chains
-    let local_chain = LocalChain::from_blocks((0..150).map(|i| (i as u32, h!("random"))).collect())
-        .expect("must have genesis hash");
+    let local_chain =
+        LocalChain::from_blocks((0..150).map(|i| (i as u32, hash!("random"))).collect())
+            .expect("must have genesis hash");
 
     // Initiate IndexedTxGraph
 
     let (desc_1, _) =
-        Descriptor::parse_descriptor(&Secp256k1::signing_only(), common::DESCRIPTORS[2]).unwrap();
+        Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[2]).unwrap();
     let (desc_2, _) =
-        Descriptor::parse_descriptor(&Secp256k1::signing_only(), common::DESCRIPTORS[3]).unwrap();
+        Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[3]).unwrap();
 
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<String>>::new(
         KeychainTxOutIndex::new(10),
@@ -187,7 +191,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(70000),
             script_pubkey: trusted_spks[0].to_owned(),
         }],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx2 is an incoming transaction received at untrusted keychain at block 1.
@@ -196,7 +200,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(30000),
             script_pubkey: untrusted_spks[0].to_owned(),
         }],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx3 spends tx2 and gives a change back in trusted keychain. Confirmed at Block 2.
@@ -209,7 +213,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(10000),
             script_pubkey: trusted_spks[1].to_owned(),
         }],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx4 is an external transaction receiving at untrusted keychain, unconfirmed.
@@ -218,7 +222,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(20000),
             script_pubkey: untrusted_spks[1].to_owned(),
         }],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx5 is an external transaction receiving at trusted keychain, unconfirmed.
@@ -227,11 +231,11 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(15000),
             script_pubkey: trusted_spks[2].to_owned(),
         }],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx6 is an unrelated transaction confirmed at 3.
-    let tx6 = common::new_tx(0);
+    let tx6 = new_tx(0);
 
     // Insert transactions into graph with respective anchors
     // Insert unconfirmed txs with a last_seen timestamp
@@ -597,7 +601,7 @@ fn test_get_chain_position() {
                     value: Amount::ONE_BTC,
                     script_pubkey: spk.clone(),
                 }],
-                ..common::new_tx(0)
+                ..new_tx(0)
             },
             anchor: None,
             last_seen: None,
@@ -610,7 +614,7 @@ fn test_get_chain_position() {
                     value: Amount::ONE_BTC,
                     script_pubkey: spk.clone(),
                 }],
-                ..common::new_tx(1)
+                ..new_tx(1)
             },
             anchor: None,
             last_seen: Some(2),
@@ -623,7 +627,7 @@ fn test_get_chain_position() {
                     value: Amount::ONE_BTC,
                     script_pubkey: spk.clone(),
                 }],
-                ..common::new_tx(2)
+                ..new_tx(2)
             },
             anchor: Some(blocks[1]),
             last_seen: None,
@@ -636,7 +640,7 @@ fn test_get_chain_position() {
                     value: Amount::ONE_BTC,
                     script_pubkey: spk.clone(),
                 }],
-                ..common::new_tx(3)
+                ..new_tx(3)
             },
             anchor: Some(block_id!(2, "B'")),
             last_seen: Some(2),
@@ -649,7 +653,7 @@ fn test_get_chain_position() {
                     value: Amount::ONE_BTC,
                     script_pubkey: spk.clone(),
                 }],
-                ..common::new_tx(4)
+                ..new_tx(4)
             },
             anchor: Some(block_id!(2, "B'")),
             last_seen: None,

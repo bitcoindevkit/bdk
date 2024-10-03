@@ -1,7 +1,5 @@
-#[macro_use]
-mod common;
-
 use bdk_core::CheckPoint;
+use bdk_testenv::block_id;
 
 /// Inserting a block that already exists in the checkpoint chain must always succeed.
 #[test]

@@ -22,3 +22,4 @@ serde = ["dep:serde", "bitcoin/serde", "hashbrown?/serde"]
 
 [dev-dependencies]
 bdk_chain = { path = "../chain" }
+bdk_testenv = { path = "../testenv", default-features = false }

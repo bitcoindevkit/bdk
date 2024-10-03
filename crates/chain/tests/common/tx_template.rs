@@ -1,5 +1,6 @@
 #![cfg(feature = "miniscript")]
 
+use bdk_testenv::utils::DESCRIPTORS;
 use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 
@@ -55,7 +56,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
     tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
 ) -> (TxGraph<A>, SpkTxOutIndex<u32>, HashMap<&'a str, Txid>) {
     let (descriptor, _) =
-        Descriptor::parse_descriptor(&Secp256k1::signing_only(), super::DESCRIPTORS[2]).unwrap();
+        Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[2]).unwrap();
     let mut graph = TxGraph::<A>::default();
     let mut spk_index = SpkTxOutIndex::default();
     (0..10).for_each(|index| {

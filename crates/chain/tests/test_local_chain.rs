@@ -9,11 +9,9 @@ use bdk_chain::{
     },
     BlockId,
 };
+use bdk_testenv::{chain_update, hash, local_chain};
 use bitcoin::{block::Header, hashes::Hash, BlockHash};
 use proptest::prelude::*;
-
-#[macro_use]
-mod common;
 
 #[derive(Debug)]
 struct TestLocalChain<'a> {
@@ -78,45 +76,45 @@ fn update_local_chain() {
     [
         TestLocalChain {
             name: "add first tip",
-            chain: local_chain![(0, h!("A"))],
-            update: chain_update![(0, h!("A"))],
+            chain: local_chain![(0, hash!("A"))],
+            update: chain_update![(0, hash!("A"))],
             exp: ExpectedResult::Ok {
                 changeset: &[],
-                init_changeset: &[(0, Some(h!("A")))],
+                init_changeset: &[(0, Some(hash!("A")))],
             },
         },
         TestLocalChain {
             name: "add second tip",
-            chain: local_chain![(0, h!("A"))],
-            update: chain_update![(0, h!("A")), (1, h!("B"))],
+            chain: local_chain![(0, hash!("A"))],
+            update: chain_update![(0, hash!("A")), (1, hash!("B"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(1, Some(h!("B")))],
-                init_changeset: &[(0, Some(h!("A"))), (1, Some(h!("B")))],
+                changeset: &[(1, Some(hash!("B")))],
+                init_changeset: &[(0, Some(hash!("A"))), (1, Some(hash!("B")))],
             },
         },
         TestLocalChain {
             name: "two disjoint chains cannot merge",
-            chain: local_chain![(0, h!("_")), (1, h!("A"))],
-            update: chain_update![(0, h!("_")), (2, h!("B"))],
+            chain: local_chain![(0, hash!("_")), (1, hash!("A"))],
+            update: chain_update![(0, hash!("_")), (2, hash!("B"))],
             exp: ExpectedResult::Err(CannotConnectError {
                 try_include_height: 1,
             }),
         },
         TestLocalChain {
             name: "two disjoint chains cannot merge (existing chain longer)",
-            chain: local_chain![(0, h!("_")), (2, h!("A"))],
-            update: chain_update![(0, h!("_")), (1, h!("B"))],
+            chain: local_chain![(0, hash!("_")), (2, hash!("A"))],
+            update: chain_update![(0, hash!("_")), (1, hash!("B"))],
             exp: ExpectedResult::Err(CannotConnectError {
                 try_include_height: 2,
             }),
         },
         TestLocalChain {
             name: "duplicate chains should merge",
-            chain: local_chain![(0, h!("A"))],
-            update: chain_update![(0, h!("A"))],
+            chain: local_chain![(0, hash!("A"))],
+            update: chain_update![(0, hash!("A"))],
             exp: ExpectedResult::Ok {
                 changeset: &[],
-                init_changeset: &[(0, Some(h!("A")))],
+                init_changeset: &[(0, Some(hash!("A")))],
             },
         },
         // Introduce an older checkpoint (B)
@@ -125,11 +123,11 @@ fn update_local_chain() {
         // update | _   B   C
         TestLocalChain {
             name: "can introduce older checkpoint",
-            chain: local_chain![(0, h!("_")), (2, h!("C")), (3, h!("D"))],
-            update: chain_update![(0, h!("_")), (1, h!("B")), (2, h!("C"))],
+            chain: local_chain![(0, hash!("_")), (2, hash!("C")), (3, hash!("D"))],
+            update: chain_update![(0, hash!("_")), (1, hash!("B")), (2, hash!("C"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(1, Some(h!("B")))],
-                init_changeset: &[(0, Some(h!("_"))), (1, Some(h!("B"))), (2, Some(h!("C"))), (3, Some(h!("D")))],
+                changeset: &[(1, Some(hash!("B")))],
+                init_changeset: &[(0, Some(hash!("_"))), (1, Some(hash!("B"))), (2, Some(hash!("C"))), (3, Some(hash!("D")))],
             },
         },
         // Introduce an older checkpoint (A) that is not directly behind PoA
@@ -138,11 +136,11 @@ fn update_local_chain() {
         // update | _   A       C
         TestLocalChain {
             name: "can introduce older checkpoint 2",
-            chain: local_chain![(0, h!("_")), (3, h!("B")), (4, h!("C"))],
-            update: chain_update![(0, h!("_")), (2, h!("A")), (4, h!("C"))],
+            chain: local_chain![(0, hash!("_")), (3, hash!("B")), (4, hash!("C"))],
+            update: chain_update![(0, hash!("_")), (2, hash!("A")), (4, hash!("C"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(2, Some(h!("A")))],
-                init_changeset: &[(0, Some(h!("_"))), (2, Some(h!("A"))), (3, Some(h!("B"))), (4, Some(h!("C")))],
+                changeset: &[(2, Some(hash!("A")))],
+                init_changeset: &[(0, Some(hash!("_"))), (2, Some(hash!("A"))), (3, Some(hash!("B"))), (4, Some(hash!("C")))],
             }
         },
         // Introduce an older checkpoint (B) that is not the oldest checkpoint
@@ -151,11 +149,11 @@ fn update_local_chain() {
         // update | _       B   C
         TestLocalChain {
             name: "can introduce older checkpoint 3",
-            chain: local_chain![(0, h!("_")), (1, h!("A")), (3, h!("C"))],
-            update: chain_update![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
+            chain: local_chain![(0, hash!("_")), (1, hash!("A")), (3, hash!("C"))],
+            update: chain_update![(0, hash!("_")), (2, hash!("B")), (3, hash!("C"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(2, Some(h!("B")))],
-                init_changeset: &[(0, Some(h!("_"))), (1, Some(h!("A"))), (2, Some(h!("B"))), (3, Some(h!("C")))],
+                changeset: &[(2, Some(hash!("B")))],
+                init_changeset: &[(0, Some(hash!("_"))), (1, Some(hash!("A"))), (2, Some(hash!("B"))), (3, Some(hash!("C")))],
             }
         },
         // Introduce two older checkpoints below the PoA
@@ -164,20 +162,20 @@ fn update_local_chain() {
         // update | _   A   B   C
         TestLocalChain {
             name: "introduce two older checkpoints below PoA",
-            chain: local_chain![(0, h!("_")), (3, h!("C"))],
-            update: chain_update![(0, h!("_")), (1, h!("A")), (2, h!("B")), (3, h!("C"))],
+            chain: local_chain![(0, hash!("_")), (3, hash!("C"))],
+            update: chain_update![(0, hash!("_")), (1, hash!("A")), (2, hash!("B")), (3, hash!("C"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(1, Some(h!("A"))), (2, Some(h!("B")))],
-                init_changeset: &[(0, Some(h!("_"))), (1, Some(h!("A"))), (2, Some(h!("B"))), (3, Some(h!("C")))],
+                changeset: &[(1, Some(hash!("A"))), (2, Some(hash!("B")))],
+                init_changeset: &[(0, Some(hash!("_"))), (1, Some(hash!("A"))), (2, Some(hash!("B"))), (3, Some(hash!("C")))],
             },
         },
         TestLocalChain {
             name: "fix blockhash before agreement point",
-            chain: local_chain![(0, h!("im-wrong")), (1, h!("we-agree"))],
-            update: chain_update![(0, h!("fix")), (1, h!("we-agree"))],
+            chain: local_chain![(0, hash!("im-wrong")), (1, hash!("we-agree"))],
+            update: chain_update![(0, hash!("fix")), (1, hash!("we-agree"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(0, Some(h!("fix")))],
-                init_changeset: &[(0, Some(h!("fix"))), (1, Some(h!("we-agree")))],
+                changeset: &[(0, Some(hash!("fix")))],
+                init_changeset: &[(0, Some(hash!("fix"))), (1, Some(hash!("we-agree")))],
             },
         },
         // B and C are in both chain and update
@@ -187,16 +185,16 @@ fn update_local_chain() {
         // This should succeed with the point of agreement being C and A should be added in addition.
         TestLocalChain {
             name: "two points of agreement",
-            chain: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
-            update: chain_update![(0, h!("_")), (1, h!("A")), (2, h!("B")), (3, h!("C")), (4, h!("D"))],
+            chain: local_chain![(0, hash!("_")), (2, hash!("B")), (3, hash!("C"))],
+            update: chain_update![(0, hash!("_")), (1, hash!("A")), (2, hash!("B")), (3, hash!("C")), (4, hash!("D"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(1, Some(h!("A"))), (4, Some(h!("D")))],
+                changeset: &[(1, Some(hash!("A"))), (4, Some(hash!("D")))],
                 init_changeset: &[
-                    (0, Some(h!("_"))),
-                    (1, Some(h!("A"))),
-                    (2, Some(h!("B"))),
-                    (3, Some(h!("C"))),
-                    (4, Some(h!("D"))),
+                    (0, Some(hash!("_"))),
+                    (1, Some(hash!("A"))),
+                    (2, Some(hash!("B"))),
+                    (3, Some(hash!("C"))),
+                    (4, Some(hash!("D"))),
                 ],
             },
         },
@@ -207,8 +205,8 @@ fn update_local_chain() {
         // This should fail as we cannot figure out whether C & D are on the same chain
         TestLocalChain {
             name: "update and chain does not connect",
-            chain: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
-            update: chain_update![(0, h!("_")), (1, h!("A")), (2, h!("B")), (4, h!("D"))],
+            chain: local_chain![(0, hash!("_")), (2, hash!("B")), (3, hash!("C"))],
+            update: chain_update![(0, hash!("_")), (1, hash!("A")), (2, hash!("B")), (4, hash!("D"))],
             exp: ExpectedResult::Err(CannotConnectError {
                 try_include_height: 3,
             }),
@@ -220,20 +218,20 @@ fn update_local_chain() {
         // This should succeed and invalidate B,C and E with point of agreement being A.
         TestLocalChain {
             name: "transitive invalidation applies to checkpoints higher than invalidation",
-            chain: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C")), (5, h!("E"))],
-            update: chain_update![(0, h!("_")), (2, h!("B'")), (3, h!("C'")), (4, h!("D"))],
+            chain: local_chain![(0, hash!("_")), (2, hash!("B")), (3, hash!("C")), (5, hash!("E"))],
+            update: chain_update![(0, hash!("_")), (2, hash!("B'")), (3, hash!("C'")), (4, hash!("D"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
-                    (2, Some(h!("B'"))),
-                    (3, Some(h!("C'"))),
-                    (4, Some(h!("D"))),
+                    (2, Some(hash!("B'"))),
+                    (3, Some(hash!("C'"))),
+                    (4, Some(hash!("D"))),
                     (5, None),
                 ],
                 init_changeset: &[
-                    (0, Some(h!("_"))),
-                    (2, Some(h!("B'"))),
-                    (3, Some(h!("C'"))),
-                    (4, Some(h!("D"))),
+                    (0, Some(hash!("_"))),
+                    (2, Some(hash!("B'"))),
+                    (3, Some(hash!("C'"))),
+                    (4, Some(hash!("D"))),
                 ],
             },
         },
@@ -244,20 +242,20 @@ fn update_local_chain() {
         // This should succeed and invalidate B, C and E with no point of agreement
         TestLocalChain {
             name: "transitive invalidation applies to checkpoints higher than invalidation no point of agreement",
-            chain: local_chain![(0, h!("_")), (1, h!("B")), (2, h!("C")), (4, h!("E"))],
-            update: chain_update![(0, h!("_")), (1, h!("B'")), (2, h!("C'")), (3, h!("D"))],
+            chain: local_chain![(0, hash!("_")), (1, hash!("B")), (2, hash!("C")), (4, hash!("E"))],
+            update: chain_update![(0, hash!("_")), (1, hash!("B'")), (2, hash!("C'")), (3, hash!("D"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
-                    (1, Some(h!("B'"))),
-                    (2, Some(h!("C'"))),
-                    (3, Some(h!("D"))),
+                    (1, Some(hash!("B'"))),
+                    (2, Some(hash!("C'"))),
+                    (3, Some(hash!("D"))),
                     (4, None)
                 ],
                 init_changeset: &[
-                    (0, Some(h!("_"))),
-                    (1, Some(h!("B'"))),
-                    (2, Some(h!("C'"))),
-                    (3, Some(h!("D"))),
+                    (0, Some(hash!("_"))),
+                    (1, Some(hash!("B'"))),
+                    (2, Some(hash!("C'"))),
+                    (3, Some(hash!("D"))),
                 ],
             },
         },
@@ -269,8 +267,8 @@ fn update_local_chain() {
         // A was invalid.
         TestLocalChain {
             name: "invalidation but no connection",
-            chain: local_chain![(0, h!("_")), (1, h!("A")), (2, h!("B")), (3, h!("C")), (5, h!("E"))],
-            update: chain_update![(0, h!("_")), (2, h!("B'")), (3, h!("C'")), (4, h!("D"))],
+            chain: local_chain![(0, hash!("_")), (1, hash!("A")), (2, hash!("B")), (3, hash!("C")), (5, hash!("E"))],
+            update: chain_update![(0, hash!("_")), (2, hash!("B'")), (3, hash!("C'")), (4, hash!("D"))],
             exp: ExpectedResult::Err(CannotConnectError { try_include_height: 1 }),
         },
         // Introduce blocks between two points of agreement
@@ -279,20 +277,20 @@ fn update_local_chain() {
         // update | A       C       E   F
         TestLocalChain {
             name: "introduce blocks between two points of agreement",
-            chain: local_chain![(0, h!("A")), (1, h!("B")), (3, h!("D")), (4, h!("E"))],
-            update: chain_update![(0, h!("A")), (2, h!("C")), (4, h!("E")), (5, h!("F"))],
+            chain: local_chain![(0, hash!("A")), (1, hash!("B")), (3, hash!("D")), (4, hash!("E"))],
+            update: chain_update![(0, hash!("A")), (2, hash!("C")), (4, hash!("E")), (5, hash!("F"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
-                    (2, Some(h!("C"))),
-                    (5, Some(h!("F"))),
+                    (2, Some(hash!("C"))),
+                    (5, Some(hash!("F"))),
                 ],
                 init_changeset: &[
-                    (0, Some(h!("A"))),
-                    (1, Some(h!("B"))),
-                    (2, Some(h!("C"))),
-                    (3, Some(h!("D"))),
-                    (4, Some(h!("E"))),
-                    (5, Some(h!("F"))),
+                    (0, Some(hash!("A"))),
+                    (1, Some(hash!("B"))),
+                    (2, Some(hash!("C"))),
+                    (3, Some(hash!("D"))),
+                    (4, Some(hash!("E"))),
+                    (5, Some(hash!("F"))),
                 ],
             },
         },
@@ -302,18 +300,18 @@ fn update_local_chain() {
         // update | A       C   D'
         TestLocalChain {
             name: "allow update that is shorter than original chain",
-            chain: local_chain![(0, h!("_")), (2, h!("C")), (3, h!("D")), (4, h!("E")), (5, h!("F"))],
-            update: chain_update![(0, h!("_")), (2, h!("C")), (3, h!("D'"))],
+            chain: local_chain![(0, hash!("_")), (2, hash!("C")), (3, hash!("D")), (4, hash!("E")), (5, hash!("F"))],
+            update: chain_update![(0, hash!("_")), (2, hash!("C")), (3, hash!("D'"))],
             exp: ExpectedResult::Ok {
                 changeset: &[
-                    (3, Some(h!("D'"))),
+                    (3, Some(hash!("D'"))),
                     (4, None),
                     (5, None),
                 ],
                 init_changeset: &[
-                    (0, Some(h!("_"))),
-                    (2, Some(h!("C"))),
-                    (3, Some(h!("D'"))),
+                    (0, Some(hash!("_"))),
+                    (2, Some(hash!("C"))),
+                    (3, Some(hash!("D'"))),
                 ],
             },
         },
@@ -333,38 +331,38 @@ fn local_chain_insert_block() {
 
     let test_cases = [
         TestCase {
-            original: local_chain![(0, h!("_"))],
-            insert: (5, h!("block5")),
-            expected_result: Ok([(5, Some(h!("block5")))].into()),
-            expected_final: local_chain![(0, h!("_")), (5, h!("block5"))],
+            original: local_chain![(0, hash!("_"))],
+            insert: (5, hash!("block5")),
+            expected_result: Ok([(5, Some(hash!("block5")))].into()),
+            expected_final: local_chain![(0, hash!("_")), (5, hash!("block5"))],
         },
         TestCase {
-            original: local_chain![(0, h!("_")), (3, h!("A"))],
-            insert: (4, h!("B")),
-            expected_result: Ok([(4, Some(h!("B")))].into()),
-            expected_final: local_chain![(0, h!("_")), (3, h!("A")), (4, h!("B"))],
+            original: local_chain![(0, hash!("_")), (3, hash!("A"))],
+            insert: (4, hash!("B")),
+            expected_result: Ok([(4, Some(hash!("B")))].into()),
+            expected_final: local_chain![(0, hash!("_")), (3, hash!("A")), (4, hash!("B"))],
         },
         TestCase {
-            original: local_chain![(0, h!("_")), (4, h!("B"))],
-            insert: (3, h!("A")),
-            expected_result: Ok([(3, Some(h!("A")))].into()),
-            expected_final: local_chain![(0, h!("_")), (3, h!("A")), (4, h!("B"))],
+            original: local_chain![(0, hash!("_")), (4, hash!("B"))],
+            insert: (3, hash!("A")),
+            expected_result: Ok([(3, Some(hash!("A")))].into()),
+            expected_final: local_chain![(0, hash!("_")), (3, hash!("A")), (4, hash!("B"))],
         },
         TestCase {
-            original: local_chain![(0, h!("_")), (2, h!("K"))],
-            insert: (2, h!("K")),
+            original: local_chain![(0, hash!("_")), (2, hash!("K"))],
+            insert: (2, hash!("K")),
             expected_result: Ok([].into()),
-            expected_final: local_chain![(0, h!("_")), (2, h!("K"))],
+            expected_final: local_chain![(0, hash!("_")), (2, hash!("K"))],
         },
         TestCase {
-            original: local_chain![(0, h!("_")), (2, h!("K"))],
-            insert: (2, h!("J")),
+            original: local_chain![(0, hash!("_")), (2, hash!("K"))],
+            insert: (2, hash!("J")),
             expected_result: Err(AlterCheckPointError {
                 height: 2,
-                original_hash: h!("K"),
-                update_hash: Some(h!("J")),
+                original_hash: hash!("K"),
+                update_hash: Some(hash!("J")),
             }),
-            expected_final: local_chain![(0, h!("_")), (2, h!("K"))],
+            expected_final: local_chain![(0, hash!("_")), (2, hash!("K"))],
         },
     ];
 
@@ -393,45 +391,50 @@ fn local_chain_disconnect_from() {
     let test_cases = [
         TestCase {
             name: "try_replace_genesis_should_fail",
-            original: local_chain![(0, h!("_"))],
-            disconnect_from: (0, h!("_")),
+            original: local_chain![(0, hash!("_"))],
+            disconnect_from: (0, hash!("_")),
             exp_result: Err(MissingGenesisError),
-            exp_final: local_chain![(0, h!("_"))],
+            exp_final: local_chain![(0, hash!("_"))],
         },
         TestCase {
             name: "try_replace_genesis_should_fail_2",
-            original: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
-            disconnect_from: (0, h!("_")),
+            original: local_chain![(0, hash!("_")), (2, hash!("B")), (3, hash!("C"))],
+            disconnect_from: (0, hash!("_")),
             exp_result: Err(MissingGenesisError),
-            exp_final: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
+            exp_final: local_chain![(0, hash!("_")), (2, hash!("B")), (3, hash!("C"))],
         },
         TestCase {
             name: "from_does_not_exist",
-            original: local_chain![(0, h!("_")), (3, h!("C"))],
-            disconnect_from: (2, h!("B")),
+            original: local_chain![(0, hash!("_")), (3, hash!("C"))],
+            disconnect_from: (2, hash!("B")),
             exp_result: Ok(ChangeSet::default()),
-            exp_final: local_chain![(0, h!("_")), (3, h!("C"))],
+            exp_final: local_chain![(0, hash!("_")), (3, hash!("C"))],
         },
         TestCase {
             name: "from_has_different_blockhash",
-            original: local_chain![(0, h!("_")), (2, h!("B"))],
-            disconnect_from: (2, h!("not_B")),
+            original: local_chain![(0, hash!("_")), (2, hash!("B"))],
+            disconnect_from: (2, hash!("not_B")),
             exp_result: Ok(ChangeSet::default()),
-            exp_final: local_chain![(0, h!("_")), (2, h!("B"))],
+            exp_final: local_chain![(0, hash!("_")), (2, hash!("B"))],
         },
         TestCase {
             name: "disconnect_one",
-            original: local_chain![(0, h!("_")), (2, h!("B"))],
-            disconnect_from: (2, h!("B")),
+            original: local_chain![(0, hash!("_")), (2, hash!("B"))],
+            disconnect_from: (2, hash!("B")),
             exp_result: Ok(ChangeSet::from_iter([(2, None)])),
-            exp_final: local_chain![(0, h!("_"))],
+            exp_final: local_chain![(0, hash!("_"))],
         },
         TestCase {
             name: "disconnect_three",
-            original: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C")), (4, h!("D"))],
-            disconnect_from: (2, h!("B")),
+            original: local_chain![
+                (0, hash!("_")),
+                (2, hash!("B")),
+                (3, hash!("C")),
+                (4, hash!("D"))
+            ],
+            disconnect_from: (2, hash!("B")),
             exp_result: Ok(ChangeSet::from_iter([(2, None), (3, None), (4, None)])),
-            exp_final: local_chain![(0, h!("_"))],
+            exp_final: local_chain![(0, hash!("_"))],
         },
     ];
 
@@ -462,18 +465,18 @@ fn checkpoint_from_block_ids() {
     let test_cases = [
         TestCase {
             name: "in_order",
-            blocks: &[(0, h!("A")), (1, h!("B")), (3, h!("D"))],
+            blocks: &[(0, hash!("A")), (1, hash!("B")), (3, hash!("D"))],
             exp_result: Ok(()),
         },
         TestCase {
             name: "with_duplicates",
-            blocks: &[(1, h!("B")), (2, h!("C")), (2, h!("C'"))],
-            exp_result: Err(Some((2, h!("C")))),
+            blocks: &[(1, hash!("B")), (2, hash!("C")), (2, hash!("C'"))],
+            exp_result: Err(Some((2, hash!("C")))),
         },
         TestCase {
             name: "not_in_order",
-            blocks: &[(1, h!("B")), (3, h!("D")), (2, h!("C"))],
-            exp_result: Err(Some((3, h!("D")))),
+            blocks: &[(1, hash!("B")), (3, hash!("D")), (2, hash!("C"))],
+            exp_result: Err(Some((3, hash!("D")))),
         },
         TestCase {
             name: "empty",
@@ -482,7 +485,7 @@ fn checkpoint_from_block_ids() {
         },
         TestCase {
             name: "single",
-            blocks: &[(21, h!("million"))],
+            blocks: &[(21, hash!("million"))],
             exp_result: Ok(()),
         },
     ];
@@ -543,11 +546,11 @@ fn checkpoint_query() {
 
     let test_cases = [
         TestCase {
-            chain: local_chain![(0, h!("_")), (1, h!("A"))],
+            chain: local_chain![(0, hash!("_")), (1, hash!("A"))],
             query_range: (0, 2),
         },
         TestCase {
-            chain: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
+            chain: local_chain![(0, hash!("_")), (2, hash!("B")), (3, hash!("C"))],
             query_range: (0, 3),
         },
     ];
@@ -592,38 +595,48 @@ fn checkpoint_insert() {
     let test_cases = [
         TestCase {
             name: "insert_above_tip",
-            chain: &[(1, h!("a")), (2, h!("b"))],
-            to_insert: (4, h!("d")),
-            exp_final_chain: &[(1, h!("a")), (2, h!("b")), (4, h!("d"))],
+            chain: &[(1, hash!("a")), (2, hash!("b"))],
+            to_insert: (4, hash!("d")),
+            exp_final_chain: &[(1, hash!("a")), (2, hash!("b")), (4, hash!("d"))],
         },
         TestCase {
             name: "insert_already_exists_expect_no_change",
-            chain: &[(1, h!("a")), (2, h!("b")), (3, h!("c"))],
-            to_insert: (2, h!("b")),
-            exp_final_chain: &[(1, h!("a")), (2, h!("b")), (3, h!("c"))],
+            chain: &[(1, hash!("a")), (2, hash!("b")), (3, hash!("c"))],
+            to_insert: (2, hash!("b")),
+            exp_final_chain: &[(1, hash!("a")), (2, hash!("b")), (3, hash!("c"))],
         },
         TestCase {
             name: "insert_in_middle",
-            chain: &[(2, h!("b")), (4, h!("d")), (5, h!("e"))],
-            to_insert: (3, h!("c")),
-            exp_final_chain: &[(2, h!("b")), (3, h!("c")), (4, h!("d")), (5, h!("e"))],
+            chain: &[(2, hash!("b")), (4, hash!("d")), (5, hash!("e"))],
+            to_insert: (3, hash!("c")),
+            exp_final_chain: &[
+                (2, hash!("b")),
+                (3, hash!("c")),
+                (4, hash!("d")),
+                (5, hash!("e")),
+            ],
         },
         TestCase {
             name: "replace_one",
-            chain: &[(3, h!("c")), (4, h!("d")), (5, h!("e"))],
-            to_insert: (5, h!("E")),
-            exp_final_chain: &[(3, h!("c")), (4, h!("d")), (5, h!("E"))],
+            chain: &[(3, hash!("c")), (4, hash!("d")), (5, hash!("e"))],
+            to_insert: (5, hash!("E")),
+            exp_final_chain: &[(3, hash!("c")), (4, hash!("d")), (5, hash!("E"))],
         },
         TestCase {
             name: "insert_conflict_should_evict",
-            chain: &[(3, h!("c")), (4, h!("d")), (5, h!("e")), (6, h!("f"))],
-            to_insert: (4, h!("D")),
-            exp_final_chain: &[(3, h!("c")), (4, h!("D"))],
+            chain: &[
+                (3, hash!("c")),
+                (4, hash!("d")),
+                (5, hash!("e")),
+                (6, hash!("f")),
+            ],
+            to_insert: (4, hash!("D")),
+            exp_final_chain: &[(3, hash!("c")), (4, hash!("D"))],
         },
     ];
 
     fn genesis_block() -> impl Iterator<Item = BlockId> {
-        core::iter::once((0, h!("_"))).map(BlockId::from)
+        core::iter::once((0, hash!("_"))).map(BlockId::from)
     }
 
     for t in test_cases.into_iter() {
@@ -669,13 +682,13 @@ fn local_chain_apply_header_connected_to() {
 
     let test_cases = [
         {
-            let header = header_from_prev_blockhash(h!("_"));
+            let header = header_from_prev_blockhash(hash!("_"));
             let hash = header.block_hash();
             let height = 1;
             let connected_to = BlockId { height, hash };
             TestCase {
                 name: "connected_to_self_header_applied_to_self",
-                chain: local_chain![(0, h!("_")), (height, hash)],
+                chain: local_chain![(0, hash!("_")), (height, hash)],
                 header,
                 height,
                 connected_to,
@@ -683,7 +696,7 @@ fn local_chain_apply_header_connected_to() {
             }
         },
         {
-            let prev_hash = h!("A");
+            let prev_hash = hash!("A");
             let prev_height = 1;
             let header = header_from_prev_blockhash(prev_hash);
             let hash = header.block_hash();
@@ -694,7 +707,7 @@ fn local_chain_apply_header_connected_to() {
             };
             TestCase {
                 name: "connected_to_prev_header_applied_to_self",
-                chain: local_chain![(0, h!("_")), (prev_height, prev_hash)],
+                chain: local_chain![(0, hash!("_")), (prev_height, prev_hash)],
                 header,
                 height,
                 connected_to,
@@ -716,34 +729,34 @@ fn local_chain_apply_header_connected_to() {
             }
         },
         {
-            let header = header_from_prev_blockhash(h!("Z"));
+            let header = header_from_prev_blockhash(hash!("Z"));
             let height = 10;
             let hash = header.block_hash();
             let prev_height = height - 1;
             let prev_hash = header.prev_blockhash;
             TestCase {
                 name: "connect_at_connected_to",
-                chain: local_chain![(0, h!("_")), (2, h!("B")), (3, h!("C"))],
+                chain: local_chain![(0, hash!("_")), (2, hash!("B")), (3, hash!("C"))],
                 header,
                 height: 10,
                 connected_to: BlockId {
                     height: 3,
-                    hash: h!("C"),
+                    hash: hash!("C"),
                 },
                 exp_result: Ok(vec![(prev_height, Some(prev_hash)), (height, Some(hash))]),
             }
         },
         {
-            let prev_hash = h!("A");
+            let prev_hash = hash!("A");
             let prev_height = 1;
             let header = header_from_prev_blockhash(prev_hash);
             let connected_to = BlockId {
                 height: prev_height,
-                hash: h!("not_prev_hash"),
+                hash: hash!("not_prev_hash"),
             };
             TestCase {
                 name: "inconsistent_prev_hash",
-                chain: local_chain![(0, h!("_")), (prev_height, h!("not_prev_hash"))],
+                chain: local_chain![(0, hash!("_")), (prev_height, hash!("not_prev_hash"))],
                 header,
                 height: prev_height + 1,
                 connected_to,
@@ -751,17 +764,17 @@ fn local_chain_apply_header_connected_to() {
             }
         },
         {
-            let prev_hash = h!("A");
+            let prev_hash = hash!("A");
             let prev_height = 1;
             let header = header_from_prev_blockhash(prev_hash);
             let height = prev_height + 1;
             let connected_to = BlockId {
                 height,
-                hash: h!("not_current_hash"),
+                hash: hash!("not_current_hash"),
             };
             TestCase {
                 name: "inconsistent_current_block",
-                chain: local_chain![(0, h!("_")), (height, h!("not_current_hash"))],
+                chain: local_chain![(0, hash!("_")), (height, hash!("not_current_hash"))],
                 header,
                 height,
                 connected_to,
@@ -769,15 +782,15 @@ fn local_chain_apply_header_connected_to() {
             }
         },
         {
-            let header = header_from_prev_blockhash(h!("B"));
+            let header = header_from_prev_blockhash(hash!("B"));
             let height = 3;
             let connected_to = BlockId {
                 height: 4,
-                hash: h!("D"),
+                hash: hash!("D"),
             };
             TestCase {
                 name: "connected_to_is_greater",
-                chain: local_chain![(0, h!("_")), (2, h!("B"))],
+                chain: local_chain![(0, hash!("_")), (2, hash!("B"))],
                 header,
                 height,
                 connected_to,
