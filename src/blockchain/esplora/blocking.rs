@@ -127,7 +127,7 @@ impl WalletSync for EsploraBlockchain {
                     for script in scripts {
                         // make each request in its own thread.
                         let mut related_txs: Vec<Tx> =
-                            retry_script_with_429(&self.url_client, &script)?;
+                            retry_script_with_429(&self.url_client, &script, None)?;
 
                         let n_confirmed =
                             related_txs.iter().filter(|tx| tx.status.confirmed).count();
@@ -135,7 +135,8 @@ impl WalletSync for EsploraBlockchain {
                         // keep requesting to see if there's more.
                         if n_confirmed >= 25 {
                             loop {
-                                let new_related_txs: Vec<Tx> = self.url_client.scripthash_txs(
+                                let new_related_txs: Vec<Tx> = retry_script_with_429(
+                                    &self.url_client,
                                     &script,
                                     Some(related_txs.last().unwrap().txid),
                                 )?;
@@ -218,10 +219,14 @@ impl ConfigurableBlockchain for EsploraBlockchain {
     }
 }
 
-fn retry_script_with_429(client: &BlockingClient, script: &Script) -> Result<Vec<Tx>, Error> {
+fn retry_script_with_429(
+    client: &BlockingClient,
+    script: &Script,
+    page: Option<Txid>,
+) -> Result<Vec<Tx>, Error> {
     let mut attempts = 0;
     loop {
-        match client.scripthash_txs(&script, None) {
+        match client.scripthash_txs(&script, page) {
             Ok(val) => return Ok(val),
             Err(e) => {
                 if attempts > 6 {
