@@ -43,6 +43,7 @@ pub mod tx_graph;
 pub use tx_graph::TxGraph;
 mod chain_oracle;
 pub use chain_oracle::*;
+pub mod pow_chain;
 
 #[doc(hidden)]
 pub mod example_utils;
