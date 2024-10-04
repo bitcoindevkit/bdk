@@ -103,7 +103,7 @@ impl GetTx for EsploraBlockchain {
 
 impl GetBlockHash for EsploraBlockchain {
     fn get_block_hash(&self, height: u64) -> Result<BlockHash, Error> {
-        Ok(self.url_client.get_block_hash(height as u32)?)
+        retry_block_hash_with_429(&self.url_client, height as u32)
     }
 }
 
@@ -251,6 +251,30 @@ fn retry_tx_with_429(client: &BlockingClient, txid: &Txid) -> Result<Option<Tran
     let mut attempts = 0;
     loop {
         match client.get_tx(txid) {
+            Ok(val) => return Ok(val),
+            Err(e) => {
+                if attempts > 6 {
+                    return Err(e.into());
+                }
+                if let esplora_client::Error::HttpResponse(status) = e {
+                    if status == 429 {
+                        let wait_for = 1 << attempts;
+                        log::warn!("Hit 429, waiting for {wait_for}s");
+                        attempts += 1;
+                        std::thread::sleep(std::time::Duration::from_secs(wait_for))
+                    }
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+}
+
+fn retry_block_hash_with_429(client: &BlockingClient, height: u32) -> Result<BlockHash, Error> {
+    let mut attempts = 0;
+    loop {
+        match client.get_block_hash(height) {
             Ok(val) => return Ok(val),
             Err(e) => {
                 if attempts > 6 {
