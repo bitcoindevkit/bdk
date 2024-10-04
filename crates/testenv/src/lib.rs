@@ -186,18 +186,45 @@ impl TestEnv {
         Ok((bt.height as usize, block.block_hash()))
     }
 
-    /// This method waits for the Electrum notification indicating that a new block has been mined.
-    /// `timeout` is the maximum [`Duration`] we want to wait for a response from Electrsd.
-    pub fn wait_until_electrum_sees_block(&self, timeout: Duration) -> anyhow::Result<()> {
-        self.electrsd.client.block_headers_subscribe()?;
+    /// Wait until Electrum is aware of a block of a given `block_height` (and optionally, matches
+    /// the given `block_hash`).
+    pub fn wait_until_electrum_sees_block(
+        &self,
+        block_height: usize,
+        block_hash: Option<BlockHash>,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
+        self.electrsd.trigger()?;
+        // NOTE: There is a reason why we use the subscribe endpoint specifically. You may think
+        // just polling Electrs via Electrum for a block header at height `block_height` and
+        // checking whether `block_hash` matches is enough. However, having the header polling call
+        // up to date does not necessarily mean the spk histories are up to date. On the other hand,
+        // getting a notification for a new block tip does mean that the confirmed spk histories
+        // are up to date up to and including the new notified tip. This is all due to the internal
+        // workings of Electrs.
+        self.electrum_client().block_headers_subscribe()?;
+
         let delay = Duration::from_millis(200);
         let start = std::time::Instant::now();
 
         while start.elapsed() < timeout {
-            self.electrsd.trigger()?;
-            self.electrsd.client.ping()?;
-            if self.electrsd.client.block_headers_pop()?.is_some() {
-                return Ok(());
+            self.electrum_client().ping()?;
+            if let Some(header_notif) = self.electrum_client().block_headers_pop()? {
+                if header_notif.height >= block_height {
+                    let header = if header_notif.height == block_height {
+                        header_notif.header
+                    } else {
+                        self.electrum_client().block_header(block_height)?
+                    };
+                    match block_hash {
+                        None => return Ok(()),
+                        Some(exp_hash) => {
+                            if exp_hash == header.block_hash() {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
             }
 
             std::thread::sleep(delay);
@@ -206,6 +233,16 @@ impl TestEnv {
         Err(anyhow::Error::msg(
             "Timed out waiting for Electrsd to get block header",
         ))
+    }
+
+    /// Wait until Electrum is aware of bitcoind's chain tip.
+    pub fn wait_until_electrum_tip_syncs_with_bitcoind(
+        &self,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
+        let chain_height = self.rpc_client().get_block_count()?;
+        let chain_hash = self.rpc_client().get_block_hash(chain_height)?;
+        self.wait_until_electrum_sees_block(chain_height as _, Some(chain_hash), timeout)
     }
 
     /// This method waits for Electrsd to see a transaction with given `txid`. `timeout` is the
@@ -321,7 +358,7 @@ mod test {
 
         // Mine some blocks.
         env.mine_blocks(101, None)?;
-        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
         let height = env.bitcoind.client.get_block_count()?;
         let blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
@@ -329,7 +366,7 @@ mod test {
 
         // Perform reorg on six blocks.
         env.reorg(6)?;
-        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
         let reorged_height = env.bitcoind.client.get_block_count()?;
         let reorged_blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
