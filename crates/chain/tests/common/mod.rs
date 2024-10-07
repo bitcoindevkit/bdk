@@ -14,6 +14,14 @@ macro_rules! block_id {
     }};
 }
 
+/// Returns `Vec<u8>` from a hex `&str`
+#[allow(unused_macros)]
+macro_rules! hex {
+    ($hex:literal) => {
+        <Vec<u8> as bitcoin::hex::FromHex>::from_hex($hex)
+    };
+}
+
 #[allow(unused_macros)]
 macro_rules! h {
     ($index:literal) => {{
