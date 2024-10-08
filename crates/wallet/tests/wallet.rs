@@ -6,7 +6,7 @@ use std::str::FromStr;
 use anyhow::Context;
 use assert_matches::assert_matches;
 use bdk_chain::{tx_graph, COINBASE_MATURITY};
-use bdk_chain::{BlockId, ConfirmationTime};
+use bdk_chain::{BlockId, ChainPosition, ConfirmationBlockTime};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
 use bdk_wallet::error::CreateTxError;
@@ -32,7 +32,11 @@ use rand::SeedableRng;
 mod common;
 use common::*;
 
-fn receive_output(wallet: &mut Wallet, value: u64, height: ConfirmationTime) -> OutPoint {
+fn receive_output(
+    wallet: &mut Wallet,
+    value: u64,
+    height: ChainPosition<ConfirmationBlockTime>,
+) -> OutPoint {
     let addr = wallet.next_unused_address(KeychainKind::External).address;
     receive_output_to_address(wallet, addr, value, height)
 }
@@ -41,7 +45,7 @@ fn receive_output_to_address(
     wallet: &mut Wallet,
     addr: Address,
     value: u64,
-    height: ConfirmationTime,
+    height: ChainPosition<ConfirmationBlockTime>,
 ) -> OutPoint {
     let tx = Transaction {
         version: transaction::Version::ONE,
@@ -57,10 +61,10 @@ fn receive_output_to_address(
     wallet.insert_tx(tx);
 
     match height {
-        ConfirmationTime::Confirmed { .. } => {
+        ChainPosition::Confirmed { .. } => {
             insert_anchor_from_conf(wallet, txid, height);
         }
-        ConfirmationTime::Unconfirmed { last_seen } => {
+        ChainPosition::Unconfirmed(last_seen) => {
             insert_seen_at(wallet, txid, last_seen);
         }
     }
@@ -72,9 +76,12 @@ fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
     let latest_cp = wallet.latest_checkpoint();
     let height = latest_cp.height();
     let anchor = if height == 0 {
-        ConfirmationTime::Unconfirmed { last_seen: 0 }
+        ChainPosition::Unconfirmed(0)
     } else {
-        ConfirmationTime::Confirmed { height, time: 0 }
+        ChainPosition::Confirmed(ConfirmationBlockTime {
+            block_id: latest_cp.block_id(),
+            confirmation_time: 0,
+        })
     };
     receive_output(wallet, value, anchor)
 }
@@ -1209,14 +1216,11 @@ fn test_create_tx_add_utxo() {
     };
     let txid = small_output_tx.compute_txid();
     wallet.insert_tx(small_output_tx);
-    insert_anchor_from_conf(
-        &mut wallet,
-        txid,
-        ConfirmationTime::Confirmed {
-            height: 2000,
-            time: 200,
-        },
-    );
+    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().get(2000).unwrap().block_id(),
+        confirmation_time: 200,
+    });
+    insert_anchor_from_conf(&mut wallet, txid, chain_position);
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -1259,14 +1263,11 @@ fn test_create_tx_manually_selected_insufficient() {
     };
     let txid = small_output_tx.compute_txid();
     wallet.insert_tx(small_output_tx.clone());
-    insert_anchor_from_conf(
-        &mut wallet,
-        txid,
-        ConfirmationTime::Confirmed {
-            height: 2000,
-            time: 200,
-        },
-    );
+    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().get(2000).unwrap().block_id(),
+        confirmation_time: 200,
+    });
+    insert_anchor_from_conf(&mut wallet, txid, chain_position);
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -1491,7 +1492,7 @@ fn test_create_tx_increment_change_index() {
             .create_wallet_no_persist()
             .unwrap();
         // fund wallet
-        receive_output(&mut wallet, amount, ConfirmationTime::unconfirmed(0));
+        receive_output(&mut wallet, amount, ChainPosition::Unconfirmed(0));
         // create tx
         let mut builder = wallet.build_tx();
         builder.add_recipient(recipient.clone(), Amount::from_sat(test.to_send));
@@ -1822,14 +1823,12 @@ fn test_bump_fee_confirmed_tx() {
     let txid = tx.compute_txid();
 
     wallet.insert_tx(tx);
-    insert_anchor_from_conf(
-        &mut wallet,
-        txid,
-        ConfirmationTime::Confirmed {
-            height: 42,
-            time: 42_000,
-        },
-    );
+
+    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().get(42).unwrap().block_id(),
+        confirmation_time: 42_000,
+    });
+    insert_anchor_from_conf(&mut wallet, txid, chain_position);
 
     wallet.build_fee_bump(txid).unwrap().finish().unwrap();
 }
@@ -2101,16 +2100,12 @@ fn test_bump_fee_drain_wallet() {
         }],
     };
     let txid = tx.compute_txid();
-    let tip = wallet.latest_checkpoint().height();
     wallet.insert_tx(tx.clone());
-    insert_anchor_from_conf(
-        &mut wallet,
-        txid,
-        ConfirmationTime::Confirmed {
-            height: tip,
-            time: 42_000,
-        },
-    );
+    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().block_id(),
+        confirmation_time: 42_000,
+    });
+    insert_anchor_from_conf(&mut wallet, txid, chain_position);
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -2166,13 +2161,12 @@ fn test_bump_fee_remove_output_manually_selected_only() {
             value: Amount::from_sat(25_000),
         }],
     };
-    let position: ConfirmationTime = wallet
+    let position: ChainPosition<ConfirmationBlockTime> = wallet
         .transactions()
         .last()
         .unwrap()
         .chain_position
-        .cloned()
-        .into();
+        .cloned();
 
     wallet.insert_tx(init_tx.clone());
     insert_anchor_from_conf(&mut wallet, init_tx.compute_txid(), position);
@@ -2220,13 +2214,12 @@ fn test_bump_fee_add_input() {
         }],
     };
     let txid = init_tx.compute_txid();
-    let pos: ConfirmationTime = wallet
+    let pos: ChainPosition<ConfirmationBlockTime> = wallet
         .transactions()
         .last()
         .unwrap()
         .chain_position
-        .cloned()
-        .into();
+        .cloned();
     wallet.insert_tx(init_tx);
     insert_anchor_from_conf(&mut wallet, txid, pos);
 
@@ -2621,11 +2614,7 @@ fn test_bump_fee_unconfirmed_inputs_only() {
     let psbt = builder.finish().unwrap();
     // Now we receive one transaction with 0 confirmations. We won't be able to use that for
     // fee bumping, as it's still unconfirmed!
-    receive_output(
-        &mut wallet,
-        25_000,
-        ConfirmationTime::Unconfirmed { last_seen: 0 },
-    );
+    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
     let txid = tx.compute_txid();
     for txin in &mut tx.input {
@@ -2651,7 +2640,7 @@ fn test_bump_fee_unconfirmed_input() {
         .assume_checked();
     // We receive a tx with 0 confirmations, which will be used as an input
     // in the drain tx.
-    receive_output(&mut wallet, 25_000, ConfirmationTime::unconfirmed(0));
+    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
     let mut builder = wallet.build_tx();
     builder.drain_wallet().drain_to(addr.script_pubkey());
     let psbt = builder.finish().unwrap();
@@ -3855,12 +3844,11 @@ fn test_spend_coinbase() {
         .unwrap();
 
     let confirmation_height = 5;
-    wallet
-        .insert_checkpoint(BlockId {
-            height: confirmation_height,
-            hash: BlockHash::all_zeros(),
-        })
-        .unwrap();
+    let confirmation_block_id = BlockId {
+        height: confirmation_height,
+        hash: BlockHash::all_zeros(),
+    };
+    wallet.insert_checkpoint(confirmation_block_id).unwrap();
     let coinbase_tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
@@ -3877,14 +3865,11 @@ fn test_spend_coinbase() {
     };
     let txid = coinbase_tx.compute_txid();
     wallet.insert_tx(coinbase_tx);
-    insert_anchor_from_conf(
-        &mut wallet,
-        txid,
-        ConfirmationTime::Confirmed {
-            height: confirmation_height,
-            time: 30_000,
-        },
-    );
+    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+        block_id: confirmation_block_id,
+        confirmation_time: 30_000,
+    });
+    insert_anchor_from_conf(&mut wallet, txid, chain_position);
 
     let not_yet_mature_time = confirmation_height + COINBASE_MATURITY - 1;
     let maturity_time = confirmation_height + COINBASE_MATURITY;
@@ -4126,15 +4111,14 @@ fn test_keychains_with_overlapping_spks() {
         .last()
         .unwrap()
         .address;
-    let _outpoint = receive_output_to_address(
-        &mut wallet,
-        addr,
-        8000,
-        ConfirmationTime::Confirmed {
-            height: 2000,
-            time: 0,
+    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+        block_id: BlockId {
+            height: 8000,
+            hash: BlockHash::all_zeros(),
         },
-    );
+        confirmation_time: 0,
+    });
+    let _outpoint = receive_output_to_address(&mut wallet, addr, 8000, chain_position);
     assert_eq!(wallet.balance().confirmed, Amount::from_sat(58000));
 }
 
@@ -4266,11 +4250,7 @@ fn single_descriptor_wallet_can_create_tx_and_receive_change() {
         .unwrap();
     assert_eq!(wallet.keychains().count(), 1);
     let amt = Amount::from_sat(5_000);
-    receive_output(
-        &mut wallet,
-        2 * amt.to_sat(),
-        ConfirmationTime::Unconfirmed { last_seen: 2 },
-    );
+    receive_output(&mut wallet, 2 * amt.to_sat(), ChainPosition::Unconfirmed(2));
     // create spend tx that produces a change output
     let addr = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")
         .unwrap()
@@ -4297,7 +4277,7 @@ fn single_descriptor_wallet_can_create_tx_and_receive_change() {
 #[test]
 fn test_transactions_sort_by() {
     let (mut wallet, _txid) = get_funded_wallet_wpkh();
-    receive_output(&mut wallet, 25_000, ConfirmationTime::unconfirmed(0));
+    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
 
     // sort by chain position, unconfirmed then confirmed by descending block height
     let sorted_txs: Vec<WalletTx> =
