@@ -1081,22 +1081,42 @@ impl Wallet {
         Ok(changed)
     }
 
-    /// Add a transaction to the wallet's internal view of the chain. This stages the change,
-    /// you must persist it later.
+    /// Insert a transaction into the wallet with the current timestamp and stages the changes.
+    /// Returns whether the transaction is newly introduced.
     ///
-    /// This method inserts the given `tx` and returns whether anything changed after insertion,
-    /// which will be false if the same transaction already exists in the wallet's transaction
-    /// graph. Any changes are staged but not committed.
+    /// This method is intended to be called after a transaction (which is created with this wallet)
+    /// is successfully broadcasted. This allows the newly broadcasted transaction to exist in the
+    /// wallet's canonical view of transactions and UTXO set.
     ///
-    /// # Note
-    ///
-    /// By default the inserted `tx` won't be considered "canonical" because it's not known
-    /// whether the transaction exists in the best chain. To know whether it exists, the tx
-    /// must be broadcast to the network and the wallet synced via a chain source.
+    /// To set the timestamp manually, use [`insert_tx_at`](Self::insert_tx_at).
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> bool {
+        use std::time::*;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time now must surpass epoch anchor");
+        self.insert_tx_at(tx, now.as_secs())
+    }
+
+    /// Insert a transaction into the wallet with the given `seen_at` and stages the changes.
+    /// Returns whether the transaction is newly introduced.
+    ///
+    /// This method is intended to be called after a transaction (which is created with this wallet)
+    /// is successfully broadcasted. This allows the newly broadcasted transaction to exist in the
+    /// wallet's canonical view of transactions and UTXO set.
+    ///
+    /// `seen_at` represents when the transaction is last seen by the mempool. This can be the time
+    /// when the transaction is broadcasted. To use the current timestamp,
+    /// [`insert_tx`](Self::insert_tx) can be called instead.
+    pub fn insert_tx_at<T: Into<Arc<Transaction>>>(&mut self, tx: T, seen_at: u64) -> bool {
+        let tx: Arc<Transaction> = tx.into();
+        let txid = tx.compute_txid();
+
         let mut changeset = ChangeSet::default();
         changeset.merge(self.indexed_graph.insert_tx(tx).into());
-        let ret = !changeset.is_empty();
+        changeset.merge(self.indexed_graph.insert_seen_at(txid, seen_at).into());
+        let ret = !changeset.tx_graph.txs.is_empty();
         self.stage.merge(changeset);
         ret
     }
