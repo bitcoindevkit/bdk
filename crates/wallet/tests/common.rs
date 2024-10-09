@@ -1,5 +1,5 @@
 #![allow(unused)]
-use bdk_chain::{tx_graph, BlockId, ConfirmationBlockTime, ConfirmationTime, TxGraph};
+use bdk_chain::{tx_graph, BlockId, ChainPosition, ConfirmationBlockTime, TxGraph};
 use bdk_wallet::{CreateParams, KeychainKind, LocalOutput, Update, Wallet};
 use bitcoin::{
     hashes::Hash, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, Transaction,
@@ -89,20 +89,26 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
     insert_anchor_from_conf(
         &mut wallet,
         tx0.compute_txid(),
-        ConfirmationTime::Confirmed {
-            height: 1_000,
-            time: 100,
-        },
+        ChainPosition::Confirmed(ConfirmationBlockTime {
+            block_id: BlockId {
+                height: 1_000,
+                hash: BlockHash::all_zeros(),
+            },
+            confirmation_time: 100,
+        }),
     );
 
     wallet.insert_tx(tx1.clone());
     insert_anchor_from_conf(
         &mut wallet,
         tx1.compute_txid(),
-        ConfirmationTime::Confirmed {
-            height: 2_000,
-            time: 200,
-        },
+        ChainPosition::Confirmed(ConfirmationBlockTime {
+            block_id: BlockId {
+                height: 2_000,
+                hash: BlockHash::all_zeros(),
+            },
+            confirmation_time: 200,
+        }),
     );
 
     (wallet, tx1.compute_txid())
@@ -205,19 +211,12 @@ pub fn feerate_unchecked(sat_vb: f64) -> FeeRate {
 /// Simulates confirming a tx with `txid` at the specified `position` by inserting an anchor
 /// at the lowest height in local chain that is greater or equal to `position`'s height,
 /// assuming the confirmation time matches `ConfirmationTime::Confirmed`.
-pub fn insert_anchor_from_conf(wallet: &mut Wallet, txid: Txid, position: ConfirmationTime) {
-    if let ConfirmationTime::Confirmed { height, time } = position {
-        // anchor tx to checkpoint with lowest height that is >= position's height
-        let anchor = wallet
-            .local_chain()
-            .range(height..)
-            .last()
-            .map(|anchor_cp| ConfirmationBlockTime {
-                block_id: anchor_cp.block_id(),
-                confirmation_time: time,
-            })
-            .expect("confirmation height cannot be greater than tip");
-
+pub fn insert_anchor_from_conf(
+    wallet: &mut Wallet,
+    txid: Txid,
+    position: ChainPosition<ConfirmationBlockTime>,
+) {
+    if let ChainPosition::Confirmed(anchor) = position {
         wallet
             .apply_update(Update {
                 tx_update: tx_graph::TxUpdate {

@@ -10,9 +10,9 @@
 // licenses.
 
 use alloc::boxed::Box;
+use chain::{ChainPosition, ConfirmationBlockTime};
 use core::convert::AsRef;
 
-use bdk_chain::ConfirmationTime;
 use bitcoin::transaction::{OutPoint, Sequence, TxOut};
 use bitcoin::{psbt, Weight};
 
@@ -61,8 +61,8 @@ pub struct LocalOutput {
     pub is_spent: bool,
     /// The derivation index for the script pubkey in the wallet
     pub derivation_index: u32,
-    /// The confirmation time for transaction containing this utxo
-    pub confirmation_time: ConfirmationTime,
+    /// The position of the output in the blockchain.
+    pub chain_position: ChainPosition<ConfirmationBlockTime>,
 }
 
 /// A [`Utxo`] with its `satisfaction_weight`.
