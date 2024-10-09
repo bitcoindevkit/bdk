@@ -33,7 +33,7 @@ use bdk_chain::{
         FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
         SyncResult,
     },
-    tx_graph::{CanonicalTx, TxGraph, TxNode, TxUpdate},
+    tx_graph::{CanonicalTx, TxGraph, TxUpdate},
     BlockId, ChainPosition, ConfirmationBlockTime, DescriptorExt, FullTxOut, Indexed,
     IndexedTxGraph, Merge,
 };
@@ -2378,14 +2378,6 @@ impl Wallet {
     /// Get a reference to the inner [`TxGraph`].
     pub fn tx_graph(&self) -> &TxGraph<ConfirmationBlockTime> {
         self.indexed_graph.graph()
-    }
-
-    /// Iterate over transactions in the wallet that are unseen and unanchored likely
-    /// because they haven't been broadcast.
-    pub fn unbroadcast_transactions(
-        &self,
-    ) -> impl Iterator<Item = TxNode<'_, Arc<Transaction>, ConfirmationBlockTime>> {
-        self.tx_graph().txs_with_no_anchor_or_last_seen()
     }
 
     /// Get a reference to the inner [`KeychainTxOutIndex`].
