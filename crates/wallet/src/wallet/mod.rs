@@ -2311,10 +2311,10 @@ impl Wallet {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time now must surpass epoch anchor");
-        self.apply_update_at(update, Some(now.as_secs()))
+        self.apply_update_at(update, now.as_secs())
     }
 
-    /// Applies an `update` alongside an optional `seen_at` timestamp and stages the changes.
+    /// Applies an `update` alongside a `seen_at` timestamp and stages the changes.
     ///
     /// `seen_at` represents when the update is seen (in unix seconds). It is used to determine the
     /// `last_seen`s for all transactions in the update which have no corresponding anchor(s). The
@@ -2322,15 +2322,12 @@ impl Wallet {
     /// transactions (where the transaction with the lower `last_seen` value is omitted from the
     /// canonical history).
     ///
-    /// Not setting a `seen_at` value means unconfirmed transactions introduced by this update will
-    /// not be part of the canonical history of transactions.
-    ///
     /// Use [`apply_update`](Wallet::apply_update) to have the `seen_at` value automatically set to
     /// the current time.
     pub fn apply_update_at(
         &mut self,
         update: impl Into<Update>,
-        seen_at: Option<u64>,
+        seen_at: u64,
     ) -> Result<(), CannotConnectError> {
         let update = update.into();
         let mut changeset = match update.chain {
@@ -2345,7 +2342,7 @@ impl Wallet {
         changeset.merge(index_changeset.into());
         changeset.merge(
             self.indexed_graph
-                .apply_update_at(update.tx_update, seen_at)
+                .apply_update_at(update.tx_update, Some(seen_at))
                 .into(),
         );
         self.stage.merge(changeset);
