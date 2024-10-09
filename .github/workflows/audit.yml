@@ -5,6 +5,8 @@ on:
     paths:
       - '**/Cargo.toml'
       - '**/Cargo.lock'
+    branches-ignore:
+      - 'dependabot/**'
   schedule:
     - cron: '0 0 * * 0' # Once per week
 
