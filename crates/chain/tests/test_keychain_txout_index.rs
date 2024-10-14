@@ -1,17 +1,16 @@
 #![cfg(feature = "miniscript")]
 
-#[macro_use]
-mod common;
 use bdk_chain::{
     collections::BTreeMap,
     indexer::keychain_txout::{ChangeSet, KeychainTxOutIndex},
     DescriptorExt, DescriptorId, Indexer, Merge,
 };
-
+use bdk_testenv::{
+    hash,
+    utils::{new_tx, DESCRIPTORS},
+};
 use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxOut};
 use miniscript::{Descriptor, DescriptorPublicKey};
-
-use crate::common::DESCRIPTORS;
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 enum TestKeychain {
@@ -253,7 +252,7 @@ fn test_lookahead() {
                     value: Amount::from_sat(10_000),
                 },
             ],
-            ..common::new_tx(external_index)
+            ..new_tx(external_index)
         };
         assert_eq!(txout_index.index_tx(&tx), ChangeSet::default());
         assert_eq!(
@@ -305,7 +304,7 @@ fn test_scan_with_lookahead() {
         .collect();
 
     for (&spk_i, spk) in &spks {
-        let op = OutPoint::new(h!("fake tx"), spk_i);
+        let op = OutPoint::new(hash!("fake tx"), spk_i);
         let txout = TxOut {
             script_pubkey: spk.clone(),
             value: Amount::ZERO,
@@ -331,7 +330,7 @@ fn test_scan_with_lookahead() {
         .at_derivation_index(41)
         .unwrap()
         .script_pubkey();
-    let op = OutPoint::new(h!("fake tx"), 41);
+    let op = OutPoint::new(hash!("fake tx"), 41);
     let txout = TxOut {
         script_pubkey: spk_41,
         value: Amount::ZERO,
@@ -656,7 +655,7 @@ fn reassigning_keychain_to_a_new_descriptor_should_error() {
 #[test]
 fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
     let mut indexer = KeychainTxOutIndex::<usize>::new(0);
-    let mut tx = common::new_tx(0);
+    let mut tx = new_tx(0);
 
     for (i, descriptor) in DESCRIPTORS.iter().enumerate() {
         let descriptor = parse_descriptor(descriptor);

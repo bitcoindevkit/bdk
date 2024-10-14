@@ -3,11 +3,11 @@
 #[macro_use]
 mod common;
 
-use std::collections::{BTreeSet, HashSet};
-
 use bdk_chain::{Balance, BlockId};
+use bdk_testenv::{block_id, hash, local_chain};
 use bitcoin::{Amount, OutPoint, ScriptBuf};
 use common::*;
+use std::collections::{BTreeSet, HashSet};
 
 #[allow(dead_code)]
 struct Scenario<'a> {
@@ -33,13 +33,13 @@ struct Scenario<'a> {
 fn test_tx_conflict_handling() {
     // Create Local chains
     let local_chain = local_chain!(
-        (0, h!("A")),
-        (1, h!("B")),
-        (2, h!("C")),
-        (3, h!("D")),
-        (4, h!("E")),
-        (5, h!("F")),
-        (6, h!("G"))
+        (0, hash!("A")),
+        (1, hash!("B")),
+        (2, hash!("C")),
+        (3, hash!("D")),
+        (4, hash!("E")),
+        (5, hash!("F")),
+        (6, hash!("G"))
     );
     let chain_tip = local_chain.tip().block_id();
 

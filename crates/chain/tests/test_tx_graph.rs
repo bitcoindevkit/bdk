@@ -9,6 +9,7 @@ use bdk_chain::{
     tx_graph::{ChangeSet, TxGraph},
     Anchor, ChainOracle, ChainPosition, Merge,
 };
+use bdk_testenv::{block_id, hash, utils::new_tx};
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,
     Transaction, TxIn, TxOut, Txid,
@@ -24,14 +25,14 @@ fn insert_txouts() {
     // 2 (Outpoint, TxOut) tuples that denotes original data in the graph, as partial transactions.
     let original_ops = [
         (
-            OutPoint::new(h!("tx1"), 1),
+            OutPoint::new(hash!("tx1"), 1),
             TxOut {
                 value: Amount::from_sat(10_000),
                 script_pubkey: ScriptBuf::new(),
             },
         ),
         (
-            OutPoint::new(h!("tx1"), 2),
+            OutPoint::new(hash!("tx1"), 2),
             TxOut {
                 value: Amount::from_sat(20_000),
                 script_pubkey: ScriptBuf::new(),
@@ -41,7 +42,7 @@ fn insert_txouts() {
 
     // Another (OutPoint, TxOut) tuple to be used as update as partial transaction.
     let update_ops = [(
-        OutPoint::new(h!("tx2"), 0),
+        OutPoint::new(hash!("tx2"), 0),
         TxOut {
             value: Amount::from_sat(20_000),
             script_pubkey: ScriptBuf::new(),
@@ -65,7 +66,7 @@ fn insert_txouts() {
     // Conf anchor used to mark the full transaction as confirmed.
     let conf_anchor = BlockId {
         height: 100,
-        hash: h!("random blockhash"),
+        hash: hash!("random blockhash"),
     };
 
     // Unconfirmed seen_at timestamp to mark the partial transactions as unconfirmed.
@@ -114,7 +115,7 @@ fn insert_txouts() {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.clone().into(),
             anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
-            last_seen: [(h!("tx2"), 1000000)].into()
+            last_seen: [(hash!("tx2"), 1000000)].into()
         }
     );
 
@@ -126,7 +127,7 @@ fn insert_txouts() {
 
     // Check TxOuts are fetched correctly from the graph.
     assert_eq!(
-        graph.tx_outputs(h!("tx1")).expect("should exists"),
+        graph.tx_outputs(hash!("tx1")).expect("should exists"),
         [
             (
                 1u32,
@@ -167,7 +168,7 @@ fn insert_txouts() {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
             anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
-            last_seen: [(h!("tx2"), 1000000)].into()
+            last_seen: [(hash!("tx2"), 1000000)].into()
         }
     );
 }
@@ -361,7 +362,7 @@ fn test_calculate_fee() {
 
     let intxout1 = (
         OutPoint {
-            txid: h!("dangling output"),
+            txid: hash!("dangling output"),
             vout: 0,
         },
         TxOut {
@@ -415,7 +416,7 @@ fn test_calculate_fee() {
 
     // If we have an unknown outpoint, fee should return CalculateFeeError::MissingTxOut.
     let outpoint = OutPoint {
-        txid: h!("unknown_txid"),
+        txid: hash!("unknown_txid"),
         vout: 0,
     };
     tx.input.push(TxIn {
@@ -470,11 +471,11 @@ fn test_walk_ancestors() {
 
     let tx_a0 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(h!("op0"), 0),
+            previous_output: OutPoint::new(hash!("op0"), 0),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL, TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx_b0 spends tx_a0
@@ -484,7 +485,7 @@ fn test_walk_ancestors() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL, TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx_b1 spends tx_a0
@@ -494,16 +495,16 @@ fn test_walk_ancestors() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     let tx_b2 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(h!("op1"), 0),
+            previous_output: OutPoint::new(hash!("op1"), 0),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx_c0 spends tx_b0
@@ -513,7 +514,7 @@ fn test_walk_ancestors() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx_c1 spends tx_b0
@@ -523,7 +524,7 @@ fn test_walk_ancestors() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx_c2 spends tx_b1 and tx_b2
@@ -539,16 +540,16 @@ fn test_walk_ancestors() {
             },
         ],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     let tx_c3 = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(h!("op2"), 0),
+            previous_output: OutPoint::new(hash!("op2"), 0),
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx_d0 spends tx_c1
@@ -558,7 +559,7 @@ fn test_walk_ancestors() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx_d1 spends tx_c2 and tx_c3
@@ -574,7 +575,7 @@ fn test_walk_ancestors() {
             },
         ],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx_e0 spends tx_d1
@@ -584,7 +585,7 @@ fn test_walk_ancestors() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     let mut graph = TxGraph::<BlockId>::new([
@@ -658,7 +659,7 @@ fn test_walk_ancestors() {
 
 #[test]
 fn test_conflicting_descendants() {
-    let previous_output = OutPoint::new(h!("op"), 2);
+    let previous_output = OutPoint::new(hash!("op"), 2);
 
     // tx_a spends previous_output
     let tx_a = Transaction {
@@ -667,7 +668,7 @@ fn test_conflicting_descendants() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // tx_a2 spends previous_output and conflicts with tx_a
@@ -677,7 +678,7 @@ fn test_conflicting_descendants() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL, TxOut::NULL],
-        ..common::new_tx(1)
+        ..new_tx(1)
     };
 
     // tx_b spends tx_a
@@ -687,7 +688,7 @@ fn test_conflicting_descendants() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(2)
+        ..new_tx(2)
     };
 
     let txid_a = tx_a.compute_txid();
@@ -709,7 +710,7 @@ fn test_conflicting_descendants() {
 fn test_descendants_no_repeat() {
     let tx_a = Transaction {
         output: vec![TxOut::NULL, TxOut::NULL, TxOut::NULL],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     let txs_b = (0..3)
@@ -719,7 +720,7 @@ fn test_descendants_no_repeat() {
                 ..TxIn::default()
             }],
             output: vec![TxOut::NULL],
-            ..common::new_tx(1)
+            ..new_tx(1)
         })
         .collect::<Vec<_>>();
 
@@ -730,7 +731,7 @@ fn test_descendants_no_repeat() {
                 ..TxIn::default()
             }],
             output: vec![TxOut::NULL],
-            ..common::new_tx(2)
+            ..new_tx(2)
         })
         .collect::<Vec<_>>();
 
@@ -746,7 +747,7 @@ fn test_descendants_no_repeat() {
             },
         ],
         output: vec![TxOut::NULL],
-        ..common::new_tx(3)
+        ..new_tx(3)
     };
 
     let tx_e = Transaction {
@@ -755,17 +756,17 @@ fn test_descendants_no_repeat() {
             ..TxIn::default()
         }],
         output: vec![TxOut::NULL],
-        ..common::new_tx(4)
+        ..new_tx(4)
     };
 
     let txs_not_connected = (10..20)
         .map(|v| Transaction {
             input: vec![TxIn {
-                previous_output: OutPoint::new(h!("tx_does_not_exist"), v),
+                previous_output: OutPoint::new(hash!("tx_does_not_exist"), v),
                 ..TxIn::default()
             }],
             output: vec![TxOut::NULL],
-            ..common::new_tx(v)
+            ..new_tx(v)
         })
         .collect::<Vec<_>>();
 
@@ -819,7 +820,7 @@ fn test_chain_spends() {
                 script_pubkey: ScriptBuf::new(),
             },
         ],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // The first confirmed transaction spends vout: 0. And is confirmed at block 98.
@@ -838,7 +839,7 @@ fn test_chain_spends() {
                 script_pubkey: ScriptBuf::new(),
             },
         ],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // The second transactions spends vout:1, and is unconfirmed.
@@ -857,7 +858,7 @@ fn test_chain_spends() {
                 script_pubkey: ScriptBuf::new(),
             },
         ],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     let mut graph = TxGraph::<ConfirmationBlockTime>::default();
@@ -929,7 +930,7 @@ fn test_chain_spends() {
             previous_output: OutPoint::new(tx_0.compute_txid(), 0),
             ..Default::default()
         }],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
     let _ = graph.insert_tx(tx_1_conflict.clone());
 
@@ -944,7 +945,7 @@ fn test_chain_spends() {
             previous_output: OutPoint::new(tx_0.compute_txid(), 1),
             ..Default::default()
         }],
-        ..common::new_tx(0)
+        ..new_tx(0)
     };
 
     // Insert in graph and mark it as seen.
@@ -983,7 +984,7 @@ fn test_chain_spends() {
 /// Ensure that `last_seen` values only increase during [`Merge::merge`].
 #[test]
 fn test_changeset_last_seen_merge() {
-    let txid: Txid = h!("test txid");
+    let txid: Txid = hash!("test txid");
 
     let test_cases: &[(Option<u64>, Option<u64>)] = &[
         (Some(5), Some(6)),
@@ -1026,7 +1027,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     assert_eq!(unseen_txs.len(), 2);
 
     // chain
-    let blocks: BTreeMap<u32, BlockHash> = [(0, h!("g")), (1, h!("A")), (2, h!("B"))]
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("g")), (1, hash!("A")), (2, hash!("B"))]
         .into_iter()
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
@@ -1181,9 +1182,9 @@ fn tx_graph_update_conversion() {
             TxUpdate {
                 txs: vec![make_tx(0).into(), make_tx(1).into()],
                 txouts: [
-                    (OutPoint::new(h!("a"), 0), make_txout(0)),
-                    (OutPoint::new(h!("a"), 1), make_txout(1)),
-                    (OutPoint::new(h!("b"), 0), make_txout(2)),
+                    (OutPoint::new(hash!("a"), 0), make_txout(0)),
+                    (OutPoint::new(hash!("a"), 1), make_txout(1)),
+                    (OutPoint::new(hash!("b"), 0), make_txout(2)),
                 ]
                 .into(),
                 ..Default::default()
@@ -1194,14 +1195,14 @@ fn tx_graph_update_conversion() {
             TxUpdate {
                 txs: vec![make_tx(0).into(), make_tx(1).into()],
                 txouts: [
-                    (OutPoint::new(h!("a"), 0), make_txout(0)),
-                    (OutPoint::new(h!("a"), 1), make_txout(1)),
-                    (OutPoint::new(h!("b"), 0), make_txout(2)),
+                    (OutPoint::new(hash!("a"), 0), make_txout(0)),
+                    (OutPoint::new(hash!("a"), 1), make_txout(1)),
+                    (OutPoint::new(hash!("b"), 0), make_txout(2)),
                 ]
                 .into(),
                 anchors: [
-                    (ConfirmationBlockTime::default(), h!("a")),
-                    (ConfirmationBlockTime::default(), h!("b")),
+                    (ConfirmationBlockTime::default(), hash!("a")),
+                    (ConfirmationBlockTime::default(), hash!("b")),
                 ]
                 .into(),
                 ..Default::default()
@@ -1212,17 +1213,17 @@ fn tx_graph_update_conversion() {
             TxUpdate {
                 txs: vec![make_tx(0).into(), make_tx(1).into()],
                 txouts: [
-                    (OutPoint::new(h!("a"), 0), make_txout(0)),
-                    (OutPoint::new(h!("a"), 1), make_txout(1)),
-                    (OutPoint::new(h!("d"), 0), make_txout(2)),
+                    (OutPoint::new(hash!("a"), 0), make_txout(0)),
+                    (OutPoint::new(hash!("a"), 1), make_txout(1)),
+                    (OutPoint::new(hash!("d"), 0), make_txout(2)),
                 ]
                 .into(),
                 anchors: [
-                    (ConfirmationBlockTime::default(), h!("a")),
-                    (ConfirmationBlockTime::default(), h!("b")),
+                    (ConfirmationBlockTime::default(), hash!("a")),
+                    (ConfirmationBlockTime::default(), hash!("b")),
                 ]
                 .into(),
-                seen_ats: [(h!("c"), 12346)].into_iter().collect(),
+                seen_ats: [(hash!("c"), 12346)].into_iter().collect(),
             },
         ),
     ];
