@@ -1,0 +1,12 @@
+[package]
+name = "example_migrate_wallet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+# TODO: Release bdk 0.30 to enable sqlite feature
+#bdk = { version = "0.30", features = ["sqlite"] }
+bdk = { git = "https://github.com/ValuedMammal/bdk", branch = "release/0.29-deps-rusqlite", features = ["sqlite"] }
+bdk_wallet = { path = "../../crates/wallet", features = ["rusqlite"] }
+bdk_electrum = { path = "../../crates/electrum" }
