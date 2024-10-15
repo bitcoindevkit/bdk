@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Set default toolchain
         run: rustup default nightly-2024-05-12
       - name: Set profile
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout `bitcoindevkit.org`
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           ssh-key: ${{ secrets.DOCS_PUSH_SSH_KEY }}
           repository: bitcoindevkit/bitcoindevkit.org
