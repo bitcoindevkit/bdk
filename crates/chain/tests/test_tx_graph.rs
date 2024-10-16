@@ -1168,11 +1168,13 @@ fn call_map_anchors_with_non_deterministic_anchor() {
     }
     assert!(new_txs.next().is_none());
 
-    let new_graph_anchors: Vec<_> = new_graph
+    let mut new_graph_anchors: Vec<_> = new_graph
         .all_anchors()
         .iter()
-        .map(|i| i.0.anchor_block)
+        .flat_map(|(_, anchors)| anchors)
+        .map(|a| a.anchor_block)
         .collect();
+    new_graph_anchors.sort();
     assert_eq!(
         new_graph_anchors,
         vec![
