@@ -33,9 +33,9 @@ use bdk_chain::{
         FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
         SyncResult,
     },
-    tx_graph::{CanonicalTx, TxGraph, TxNode, TxUpdate},
-    BlockId, ChainPosition, ConfirmationBlockTime, ConfirmationTime, DescriptorExt, FullTxOut,
-    Indexed, IndexedTxGraph, Merge,
+    tx_graph::{CanonicalTx, TxGraph, TxUpdate},
+    BlockId, ChainPosition, ConfirmationBlockTime, DescriptorExt, FullTxOut, Indexed,
+    IndexedTxGraph, Merge,
 };
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
@@ -1081,22 +1081,42 @@ impl Wallet {
         Ok(changed)
     }
 
-    /// Add a transaction to the wallet's internal view of the chain. This stages the change,
-    /// you must persist it later.
+    /// Insert a transaction into the wallet with the current timestamp and stages the changes.
+    /// Returns whether the transaction is newly introduced.
     ///
-    /// This method inserts the given `tx` and returns whether anything changed after insertion,
-    /// which will be false if the same transaction already exists in the wallet's transaction
-    /// graph. Any changes are staged but not committed.
+    /// This method is intended to be called after a transaction (which is created with this wallet)
+    /// is successfully broadcasted. This allows the newly broadcasted transaction to exist in the
+    /// wallet's canonical view of transactions and UTXO set.
     ///
-    /// # Note
-    ///
-    /// By default the inserted `tx` won't be considered "canonical" because it's not known
-    /// whether the transaction exists in the best chain. To know whether it exists, the tx
-    /// must be broadcast to the network and the wallet synced via a chain source.
+    /// To set the timestamp manually, use [`insert_tx_at`](Self::insert_tx_at).
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> bool {
+        use std::time::*;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time now must surpass epoch anchor");
+        self.insert_tx_at(tx, now.as_secs())
+    }
+
+    /// Insert a transaction into the wallet with the given `seen_at` and stages the changes.
+    /// Returns whether the transaction is newly introduced.
+    ///
+    /// This method is intended to be called after a transaction (which is created with this wallet)
+    /// is successfully broadcasted. This allows the newly broadcasted transaction to exist in the
+    /// wallet's canonical view of transactions and UTXO set.
+    ///
+    /// `seen_at` represents when the transaction is last seen by the mempool. This can be the time
+    /// when the transaction is broadcasted. To use the current timestamp,
+    /// [`insert_tx`](Self::insert_tx) can be called instead.
+    pub fn insert_tx_at<T: Into<Arc<Transaction>>>(&mut self, tx: T, seen_at: u64) -> bool {
+        let tx: Arc<Transaction> = tx.into();
+        let txid = tx.compute_txid();
+
         let mut changeset = ChangeSet::default();
         changeset.merge(self.indexed_graph.insert_tx(tx).into());
-        let ret = !changeset.is_empty();
+        changeset.merge(self.indexed_graph.insert_seen_at(txid, seen_at).into());
+        let ret = !changeset.tx_graph.txs.is_empty();
         self.stage.merge(changeset);
         ret
     }
@@ -1660,11 +1680,10 @@ impl Wallet {
                     .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
                 let txout = &prev_tx.output[txin.previous_output.vout as usize];
 
-                let confirmation_time: ConfirmationTime = graph
+                let chain_position = graph
                     .get_chain_position(&self.chain, chain_tip, txin.previous_output.txid)
                     .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?
-                    .cloned()
-                    .into();
+                    .cloned();
 
                 let weighted_utxo = match txout_index.index_of_spk(txout.script_pubkey.clone()) {
                     Some(&(keychain, derivation_index)) => {
@@ -1679,7 +1698,7 @@ impl Wallet {
                                 keychain,
                                 is_spent: true,
                                 derivation_index,
-                                confirmation_time,
+                                chain_position,
                             }),
                             satisfaction_weight,
                         }
@@ -2051,33 +2070,33 @@ impl Wallet {
                     Some(tx) => tx,
                     None => return false,
                 };
-                let confirmation_time: ConfirmationTime = match self
-                    .indexed_graph
-                    .graph()
-                    .get_chain_position(&self.chain, chain_tip, txid)
-                {
-                    Some(chain_position) => chain_position.cloned().into(),
+                let chain_position = match self.indexed_graph.graph().get_chain_position(
+                    &self.chain,
+                    chain_tip,
+                    txid,
+                ) {
+                    Some(chain_position) => chain_position.cloned(),
                     None => return false,
                 };
 
                 // Whether the UTXO is mature and, if needed, confirmed
                 let mut spendable = true;
-                if must_only_use_confirmed_tx && !confirmation_time.is_confirmed() {
+                if must_only_use_confirmed_tx && !chain_position.is_confirmed() {
                     return false;
                 }
                 if tx.is_coinbase() {
                     debug_assert!(
-                        confirmation_time.is_confirmed(),
+                        chain_position.is_confirmed(),
                         "coinbase must always be confirmed"
                     );
                     if let Some(current_height) = current_height {
-                        match confirmation_time {
-                            ConfirmationTime::Confirmed { height, .. } => {
+                        match chain_position {
+                            ChainPosition::Confirmed(a) => {
                                 // https://github.com/bitcoin/bitcoin/blob/c5e67be03bb06a5d7885c55db1f016fbf2333fe3/src/validation.cpp#L373-L375
-                                spendable &=
-                                    (current_height.saturating_sub(height)) >= COINBASE_MATURITY;
+                                spendable &= (current_height.saturating_sub(a.block_id.height))
+                                    >= COINBASE_MATURITY;
                             }
-                            ConfirmationTime::Unconfirmed { .. } => spendable = false,
+                            ChainPosition::Unconfirmed { .. } => spendable = false,
                         }
                     }
                 }
@@ -2292,10 +2311,10 @@ impl Wallet {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time now must surpass epoch anchor");
-        self.apply_update_at(update, Some(now.as_secs()))
+        self.apply_update_at(update, now.as_secs())
     }
 
-    /// Applies an `update` alongside an optional `seen_at` timestamp and stages the changes.
+    /// Applies an `update` alongside a `seen_at` timestamp and stages the changes.
     ///
     /// `seen_at` represents when the update is seen (in unix seconds). It is used to determine the
     /// `last_seen`s for all transactions in the update which have no corresponding anchor(s). The
@@ -2303,15 +2322,12 @@ impl Wallet {
     /// transactions (where the transaction with the lower `last_seen` value is omitted from the
     /// canonical history).
     ///
-    /// Not setting a `seen_at` value means unconfirmed transactions introduced by this update will
-    /// not be part of the canonical history of transactions.
-    ///
     /// Use [`apply_update`](Wallet::apply_update) to have the `seen_at` value automatically set to
     /// the current time.
     pub fn apply_update_at(
         &mut self,
         update: impl Into<Update>,
-        seen_at: Option<u64>,
+        seen_at: u64,
     ) -> Result<(), CannotConnectError> {
         let update = update.into();
         let mut changeset = match update.chain {
@@ -2326,7 +2342,7 @@ impl Wallet {
         changeset.merge(index_changeset.into());
         changeset.merge(
             self.indexed_graph
-                .apply_update_at(update.tx_update, seen_at)
+                .apply_update_at(update.tx_update, Some(seen_at))
                 .into(),
         );
         self.stage.merge(changeset);
@@ -2359,14 +2375,6 @@ impl Wallet {
     /// Get a reference to the inner [`TxGraph`].
     pub fn tx_graph(&self) -> &TxGraph<ConfirmationBlockTime> {
         self.indexed_graph.graph()
-    }
-
-    /// Iterate over transactions in the wallet that are unseen and unanchored likely
-    /// because they haven't been broadcast.
-    pub fn unbroadcast_transactions(
-        &self,
-    ) -> impl Iterator<Item = TxNode<'_, Arc<Transaction>, ConfirmationBlockTime>> {
-        self.tx_graph().txs_with_no_anchor_or_last_seen()
     }
 
     /// Get a reference to the inner [`KeychainTxOutIndex`].
@@ -2546,7 +2554,7 @@ fn new_local_utxo(
         outpoint: full_txo.outpoint,
         txout: full_txo.txout,
         is_spent: full_txo.spent_by.is_some(),
-        confirmation_time: full_txo.chain_position.into(),
+        chain_position: full_txo.chain_position,
         keychain,
         derivation_index,
     }
