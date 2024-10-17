@@ -37,7 +37,7 @@ jobs:
             override: true
             profile: minimal
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
+        uses: Swatinem/rust-cache@v2.7.5
       - name: Pin dependencies for MSRV
         if: matrix.rust.version == '1.63.0'
         run: |
@@ -68,7 +68,7 @@ jobs:
           profile: minimal
           # target: "thumbv6m-none-eabi"
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
+        uses: Swatinem/rust-cache@v2.7.5
       - name: Check bdk_chain
         working-directory: ./crates/chain
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
@@ -103,7 +103,7 @@ jobs:
             profile: minimal
             target: "wasm32-unknown-unknown"
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
+        uses: Swatinem/rust-cache@v2.7.5
       - name: Check bdk wallet
         working-directory: ./crates/wallet
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
@@ -138,7 +138,7 @@ jobs:
             components: clippy
             override: true
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
+        uses: Swatinem/rust-cache@v2.7.5
       - uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -168,7 +168,7 @@ jobs:
           override: true
           profile: minimal
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.2.1
+        uses: Swatinem/rust-cache@v2.7.5
       - name: Build
         working-directory: example-crates/${{ matrix.example-dir }}
         run: cargo build
