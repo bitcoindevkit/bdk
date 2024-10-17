@@ -101,10 +101,7 @@ use alloc::vec::Vec;
 pub use bdk_core::TxUpdate;
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
-use core::{
-    convert::Infallible,
-    ops::{Deref, RangeInclusive},
-};
+use core::{convert::Infallible, ops::Deref};
 
 impl<A: Ord> From<TxGraph<A>> for TxUpdate<A> {
     fn from(graph: TxGraph<A>) -> Self {
@@ -140,9 +137,11 @@ impl<A: Ord + Clone> From<TxUpdate<A>> for TxGraph<A> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TxGraph<A = ()> {
     txs: HashMap<Txid, TxNodeInternal>,
-    spends: BTreeMap<OutPoint, HashSet<Txid>>,
     anchors: HashMap<Txid, BTreeSet<A>>,
     last_seen: HashMap<Txid, u64>,
+
+    // Indexes
+    spends: HashMap<OutPoint, HashSet<Txid>>,
 
     // This atrocity exists so that `TxGraph::outspends()` can return a reference.
     // FIXME: This can be removed once `HashSet::new` is a const fn.
@@ -409,15 +408,20 @@ impl<A> TxGraph<A> {
     ///
     /// - `vout` is the provided `txid`'s outpoint that is being spent
     /// - `txid-set` is the set of txids spending the `vout`.
-    pub fn tx_spends(
-        &self,
-        txid: Txid,
-    ) -> impl DoubleEndedIterator<Item = (u32, &HashSet<Txid>)> + '_ {
-        let start = OutPoint::new(txid, 0);
-        let end = OutPoint::new(txid, u32::MAX);
-        self.spends
-            .range(start..=end)
-            .map(|(outpoint, spends)| (outpoint.vout, spends))
+    pub fn tx_spends(&self, txid: Txid) -> impl Iterator<Item = (u32, &HashSet<Txid>)> + '_ {
+        let txout_count = self
+            .txs
+            .get(&txid)
+            .map(|tx| match tx {
+                TxNodeInternal::Whole(tx) => tx.output.len() as u32,
+                TxNodeInternal::Partial(_) => 0,
+            })
+            .unwrap_or(0);
+        (0..txout_count).map(move |vout| {
+            let op = OutPoint::new(txid, vout);
+            let spends = self.spends.get(&op).unwrap_or(&self.empty_outspends);
+            (vout, spends)
+        })
     }
 }
 
@@ -1517,13 +1521,14 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
 
 impl<'g, A, F> TxDescendants<'g, A, F> {
     fn populate_queue(&mut self, depth: usize, txid: Txid) {
-        let spend_paths = self
-            .graph
-            .spends
-            .range(tx_outpoint_range(txid))
-            .flat_map(|(_, spends)| spends)
-            .map(|&txid| (depth, txid));
-        self.queue.extend(spend_paths);
+        if let Some(tx) = self.graph.get_tx(txid) {
+            let spend_paths = (0..tx.output.len() as u32)
+                .map(|vout| OutPoint::new(txid, vout))
+                .filter_map(|op| self.graph.spends.get(&op))
+                .flatten()
+                .map(|&txid| (depth, txid));
+            self.queue.extend(spend_paths);
+        }
     }
 }
 
@@ -1549,8 +1554,4 @@ where
         self.populate_queue(op_spends + 1, txid);
         Some(item)
     }
-}
-
-fn tx_outpoint_range(txid: Txid) -> RangeInclusive<OutPoint> {
-    OutPoint::new(txid, u32::MIN)..=OutPoint::new(txid, u32::MAX)
 }

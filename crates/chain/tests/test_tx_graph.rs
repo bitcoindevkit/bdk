@@ -725,9 +725,9 @@ fn test_descendants_no_repeat() {
         .collect::<Vec<_>>();
 
     let txs_c = (0..2)
-        .map(|vout| Transaction {
+        .map(|prev_tx_index| Transaction {
             input: vec![TxIn {
-                previous_output: OutPoint::new(txs_b[vout as usize].compute_txid(), vout),
+                previous_output: OutPoint::new(txs_b[prev_tx_index as usize].compute_txid(), 0),
                 ..TxIn::default()
             }],
             output: vec![TxOut::NULL],
@@ -772,6 +772,8 @@ fn test_descendants_no_repeat() {
 
     let mut graph = TxGraph::<()>::default();
     let mut expected_txids = Vec::new();
+
+    let _ = graph.insert_tx(tx_a.clone());
 
     // these are NOT descendants of `tx_a`
     for tx in txs_not_connected {
