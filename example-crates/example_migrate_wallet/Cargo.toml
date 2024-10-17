@@ -1,0 +1,9 @@
+[package]
+name = "example_migrate_wallet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bdk = { version = "0.29" }
+bdk_wallet = { path = "../../crates/wallet", features = ["rusqlite"] }
+bdk_electrum = { path = "../../crates/electrum" }
