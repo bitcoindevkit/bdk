@@ -858,7 +858,6 @@ mod test {
         };
     }
 
-    use bdk_chain::ConfirmationTime;
     use bitcoin::consensus::deserialize;
     use bitcoin::hex::FromHex;
     use bitcoin::TxOut;
@@ -1018,7 +1017,7 @@ mod test {
                 txout: TxOut::NULL,
                 keychain: KeychainKind::External,
                 is_spent: false,
-                confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
+                chain_position: chain::ChainPosition::Unconfirmed(0),
                 derivation_index: 0,
             },
             LocalOutput {
@@ -1029,10 +1028,13 @@ mod test {
                 txout: TxOut::NULL,
                 keychain: KeychainKind::Internal,
                 is_spent: false,
-                confirmation_time: ConfirmationTime::Confirmed {
-                    height: 32,
-                    time: 42,
-                },
+                chain_position: chain::ChainPosition::Confirmed(chain::ConfirmationBlockTime {
+                    block_id: chain::BlockId {
+                        height: 32,
+                        hash: bitcoin::BlockHash::all_zeros(),
+                    },
+                    confirmation_time: 42,
+                }),
                 derivation_index: 1,
             },
         ]
