@@ -129,8 +129,12 @@ fn test_set_all_derivation_indices() {
 fn test_lookahead() {
     let external_descriptor = parse_descriptor(DESCRIPTORS[0]);
     let internal_descriptor = parse_descriptor(DESCRIPTORS[1]);
-    let mut txout_index =
-        init_txout_index(external_descriptor.clone(), internal_descriptor.clone(), 10);
+    let lookahead = 10;
+    let mut txout_index = init_txout_index(
+        external_descriptor.clone(),
+        internal_descriptor.clone(),
+        lookahead,
+    );
 
     // given:
     // - external lookahead set to 10
@@ -139,7 +143,7 @@ fn test_lookahead() {
     // expect:
     // - scripts cached in spk_txout_index should increase correctly
     // - stored scripts of external keychain should be of expected counts
-    for index in (0..20).skip_while(|i| i % 2 == 1) {
+    for index in 0..20 {
         let (revealed_spks, revealed_changeset) = txout_index
             .reveal_to_target(TestKeychain::External, index)
             .unwrap();
@@ -152,12 +156,29 @@ fn test_lookahead() {
             &[(external_descriptor.descriptor_id(), index)].into()
         );
 
-        assert_eq!(
-            txout_index.inner().all_spks().len(),
-            10 /* external lookahead */ +
-            10 /* internal lookahead */ +
-            index as usize + 1 /* `derived` count */
-        );
+        // test stored spks are expected
+        let exp_last_store_index = index + lookahead;
+        for i in index + 1..=exp_last_store_index {
+            assert_eq!(
+                txout_index.spk_at_index(TestKeychain::External, i),
+                Some(spk_at_index(&external_descriptor, i))
+            );
+        }
+        assert!(txout_index
+            .spk_at_index(TestKeychain::External, exp_last_store_index + 1)
+            .is_none());
+
+        // internal should only have lookahead
+        for i in 0..lookahead {
+            assert_eq!(
+                txout_index.spk_at_index(TestKeychain::Internal, i),
+                Some(spk_at_index(&internal_descriptor, i))
+            );
+        }
+        assert!(txout_index
+            .spk_at_index(TestKeychain::Internal, lookahead)
+            .is_none());
+
         assert_eq!(
             txout_index
                 .revealed_keychain_spks(TestKeychain::External)
@@ -191,26 +212,33 @@ fn test_lookahead() {
     // - derivation index is set ahead of current derivation index + lookahead
     // expect:
     // - scripts cached in spk_txout_index should increase correctly, a.k.a. no scripts are skipped
+    let reveal_to = 24;
     let (revealed_spks, revealed_changeset) = txout_index
-        .reveal_to_target(TestKeychain::Internal, 24)
+        .reveal_to_target(TestKeychain::Internal, reveal_to)
         .unwrap();
     assert_eq!(
         revealed_spks,
-        (0..=24)
+        (0..=reveal_to)
             .map(|index| (index, spk_at_index(&internal_descriptor, index)))
             .collect::<Vec<_>>(),
     );
     assert_eq!(
         &revealed_changeset.last_revealed,
-        &[(internal_descriptor.descriptor_id(), 24)].into()
+        &[(internal_descriptor.descriptor_id(), reveal_to)].into()
     );
-    assert_eq!(
-        txout_index.inner().all_spks().len(),
-        10 /* external lookahead */ +
-        10 /* internal lookahead */ +
-        20 /* external stored index count */ +
-        25 /* internal stored index count */
-    );
+
+    // test stored spks are expected
+    let exp_last_store_index = reveal_to + lookahead;
+    for index in reveal_to + 1..=exp_last_store_index {
+        assert_eq!(
+            txout_index.spk_at_index(TestKeychain::Internal, index),
+            Some(spk_at_index(&internal_descriptor, index))
+        );
+    }
+    assert!(txout_index
+        .spk_at_index(TestKeychain::Internal, exp_last_store_index + 1)
+        .is_none());
+
     assert_eq!(
         txout_index
             .revealed_keychain_spks(TestKeychain::Internal)
@@ -562,15 +590,10 @@ fn lookahead_to_target() {
                     None => target,
                 };
                 index.lookahead_to_target(keychain.clone(), target);
-                let keys = index
-                    .inner()
-                    .all_spks()
-                    .range((keychain.clone(), 0)..=(keychain.clone(), u32::MAX))
-                    .map(|(k, _)| k.clone())
-                    .collect::<Vec<_>>();
-                let exp_keys = core::iter::repeat(keychain)
-                    .zip(0_u32..=exp_last_stored_index)
-                    .collect::<Vec<_>>();
+                let keys: Vec<_> = (0..)
+                    .take_while(|&i| index.spk_at_index(keychain.clone(), i).is_some())
+                    .collect();
+                let exp_keys: Vec<_> = (0..=exp_last_stored_index).collect();
                 assert_eq!(keys, exp_keys);
             }
         }

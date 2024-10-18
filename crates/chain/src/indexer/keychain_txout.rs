@@ -204,14 +204,6 @@ impl<K> KeychainTxOutIndex<K> {
 
 /// Methods that are *re-exposed* from the internal [`SpkTxOutIndex`].
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
-    /// Return a reference to the internal [`SpkTxOutIndex`].
-    ///
-    /// **WARNING**: The internal index will contain lookahead spks. Refer to
-    /// [struct-level docs](KeychainTxOutIndex) for more about `lookahead`.
-    pub fn inner(&self) -> &SpkTxOutIndex<(K, u32)> {
-        &self.inner
-    }
-
     /// Get the set of indexed outpoints, corresponding to tracked keychains.
     pub fn outpoints(&self) -> &BTreeSet<KeychainIndexed<K, OutPoint>> {
         self.inner.outpoints()
