@@ -1081,6 +1081,23 @@ impl Wallet {
         Ok(changed)
     }
 
+    /// Disconnect a checkpoint and all checkpoints after it from the wallet's internal view of the chain.
+    ///
+    /// Returns whether anything changed after the disconnection. (e.g `false` if the block was
+    /// not present).
+    ///
+    /// **WARNING**: You must persist the changes resulting from one or more calls to this method
+    /// if you need the inserted changeset data to be reloaded after closing the wallet.
+    pub fn disconnect_checkpoint(&mut self, block_id: BlockId) -> bool {
+        if let Ok(changeset) = self.chain.disconnect_from(block_id) {
+            if !changeset.is_empty() {
+                self.stage.merge(changeset.into());
+                return true;
+            }
+        }
+        false
+    }
+
     /// Add a transaction to the wallet's internal view of the chain. This stages the change,
     /// you must persist it later.
     ///

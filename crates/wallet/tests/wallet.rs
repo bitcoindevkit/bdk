@@ -4308,3 +4308,25 @@ fn test_transactions_sort_by() {
         .collect();
     assert_eq!([None, Some(2000), Some(1000)], conf_heights.as_slice());
 }
+
+#[test]
+fn test_disconnect_applies() {
+    let (mut wallet, _txid) = get_funded_wallet_wpkh();
+    // We reorg a block
+    let checkpoint = wallet.local_chain().get(2_000).expect("existing block");
+    assert!(wallet.disconnect_checkpoint(checkpoint.block_id()));
+    let wallet_tip = wallet.local_chain().tip().block_id();
+    assert_ne!(wallet_tip.height, 2_000);
+    // Then we add some back
+    wallet
+        .insert_checkpoint(BlockId::from((2_500, BlockHash::all_zeros())))
+        .expect("valid block");
+    wallet
+        .insert_checkpoint(BlockId::from((3_000, BlockHash::all_zeros())))
+        .expect("valid block");
+    let wallet_tip = wallet.local_chain().tip().block_id();
+    let mut local_chain_iter = wallet.local_chain().iter_checkpoints();
+    let has_reorged = local_chain_iter.any(|checkpoint| checkpoint.height() == 2_000);
+    assert!(!has_reorged);
+    assert_eq!(wallet_tip.height, 3_000);
+}
