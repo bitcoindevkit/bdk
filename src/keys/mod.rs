@@ -410,7 +410,7 @@ impl<Ctx: ScriptContext> From<bip32::ExtendedPrivKey> for ExtendedKey<Ctx> {
 /// }
 /// ```
 ///
-/// Types that don't internally encode the [`Network`](bitcoin::Network) in which they are valid need some extra
+/// Types that don't internally encode the [`Network`] in which they are valid need some extra
 /// steps to override the set of valid networks, otherwise only the network specified in the
 /// [`ExtendedPrivKey`] or [`ExtendedPubKey`] will be considered valid.
 ///

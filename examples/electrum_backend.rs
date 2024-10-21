@@ -83,5 +83,5 @@ fn run(network: &Network, electrum_url: &str, xpriv: &str) {
         .map_err(bdk::Error::Generic)
         .unwrap();
 
-    println!("------\nWallet Backup: {}", export.to_string());
+    println!("------\nWallet Backup: {}", export);
 }

@@ -209,6 +209,9 @@ This library should compile with any combination of features with Rust 1.63.0.
 To build with the MSRV you will need to pin dependencies as follows:
 
 ```shell
-cargo update -p regex --precise "1.7.3"
+cargo update -p tokio --precise "1.38.1"
+cargo update -p tokio-util --precise "0.7.11"
 cargo update -p home --precise "0.5.5"
+cargo update -p regex --precise "1.7.3"
+cargo update -p security-framework-sys --precise "2.11.1"
 ```

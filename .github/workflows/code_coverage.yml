@@ -21,19 +21,16 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Install lcov tools
         run: sudo apt-get install lcov -y
-      - name: Install rustup
-        run: curl https://sh.rustup.rs -sSf | sh -s -- -y
-      - name: Set default toolchain
-        run: rustup default nightly
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add llvm tools
-        run: rustup component add llvm-tools-preview
-      - name: Update toolchain
-        run: rustup update
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          components: llvm-tools-preview
+          profile: minimal
       - name: Cache cargo
         uses: actions/cache@v3
         with:
@@ -52,7 +49,7 @@ jobs:
         # For more info, see:
         # - https://github.com/bitcoindevkit/bdk/issues/696
         # - https://github.com/bitcoindevkit/bdk/pull/748#issuecomment-1242721040
-        run: cargo test --features all-keys,compact_filters,compiler,key-value-db,sqlite,sqlite-bundled,test-electrum,test-rpc,verify
+        run: cargo test --features all-keys,compact_filters,compiler,key-value-db,sqlite,sqlite-bundled,test-electrum,test-rpc,verify -- --test-threads=1
       - name: Run grcov
         run: mkdir coverage; grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore '/*' -o ./coverage/lcov.info
       - name: Generate HTML coverage report
@@ -63,7 +60,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage-report.html

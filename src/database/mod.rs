@@ -114,7 +114,7 @@ pub trait BatchOperations {
 pub trait Database: BatchOperations {
     /// Read and checks the descriptor checksum for a given keychain.
     ///
-    /// Should return [`Error::ChecksumMismatch`](crate::error::Error::ChecksumMismatch) if the
+    /// Should return [`Error::ChecksumMismatch`] if the
     /// checksum doesn't match. If there's no checksum in the database, simply store it for the
     /// next time.
     fn check_descriptor_checksum<B: AsRef<[u8]>>(

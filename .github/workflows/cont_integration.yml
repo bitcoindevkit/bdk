@@ -39,31 +39,32 @@ jobs:
           - sqlite-bundled
     steps:
       - name: checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Generate cache key
         run: echo "${{ matrix.rust.version }} ${{ matrix.features }}" | tee .cache_key
       - name: cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('.cache_key') }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Set default toolchain
-        run: rustup default ${{ matrix.rust.version }}
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add clippy
-        if: ${{ matrix.rust.clippy }}
-        run: rustup component add clippy
-      - name: Update toolchain
-        run: rustup update
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust.version }}
+          override: true
+          components: clippy
+          profile: minimal
       - name: Pin dependencies for MSRV
         if: matrix.rust.version == '1.63.0'
         run: |
-          cargo update -p regex --precise "1.7.3"
+          cargo update -p tokio --precise "1.38.1"
+          cargo update -p tokio-util --precise "0.7.11"
           cargo update -p home --precise "0.5.5"
+          cargo update -p regex --precise "1.7.3"
+          cargo update -p security-framework-sys --precise "2.11.1"
       - name: Build
         run: cargo build --features bitcoin/std,miniscript/std,${{ matrix.features }} --no-default-features
       - name: Clippy
@@ -77,21 +78,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-test-md-docs-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Set default toolchain
-        run: rustup default nightly
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Update toolchain
-        run: rustup update
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          components: clippy
+          profile: minimal
       - name: Test
         run: cargo test --features bitcoin/std,miniscript/std,test-md-docs --no-default-features -- doctest::ReadmeDoctests
 
@@ -100,6 +102,7 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         blockchain:
           - name: electrum
@@ -119,22 +122,23 @@ jobs:
             features: test-esplora,use-esplora-blocking,verify,bitcoin/std,miniscript/std
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Setup rust toolchain
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
+          profile: minimal
       - name: Test
-        run: cargo test --no-default-features --features bitcoin/std,miniscript/std,${{ matrix.blockchain.features }} ${{ matrix.blockchain.testprefix }}::bdk_blockchain_tests
+        run: cargo test --no-default-features --features bitcoin/std,miniscript/std,${{ matrix.blockchain.features }} ${{ matrix.blockchain.testprefix }}::bdk_blockchain_tests -- --test-threads=1
 
   check-wasm:
     name: Check WASM
@@ -144,9 +148,9 @@ jobs:
       CFLAGS: -I/usr/include
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -158,14 +162,14 @@ jobs:
       - run: sudo apt-add-repository "deb http://apt.llvm.org/focal/ llvm-toolchain-focal-10 main" || exit 1
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
-      - name: Set default toolchain
-        run: rustup default stable
-      - name: Set profile
-        run: rustup set profile minimal
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          profile: minimal
       - name: Add target wasm32
         run: rustup target add wasm32-unknown-unknown
-      - name: Update toolchain
-        run: rustup update
       - name: Check
         run: cargo check --target wasm32-unknown-unknown --features bitcoin/no-std,miniscript/no-std,async-interface,use-esplora-async,dev-getrandom-wasm --no-default-features
 
@@ -174,15 +178,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
-      - name: Set default toolchain
-        run: rustup default nightly
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Add rustfmt
-        run: rustup component add rustfmt
-      - name: Update toolchain
-        run: rustup update
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: rustfmt
+          profile: minimal
       - name: Check fmt
         run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
 
@@ -206,16 +209,19 @@ jobs:
         python-version: '3.9'
     - name: Install python dependencies
       run: pip install hwi==2.1.1 protobuf==3.20.1
-    - name: Set default toolchain
-      run: rustup default ${{ matrix.rust.version }}
-    - name: Set profile
-      run: rustup set profile minimal
-    - name: Update toolchain
-      run: rustup update
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: ${{ matrix.rust.version }}
+        override: true
+        profile: minimal
     - name: Pin dependencies for MSRV
       if: matrix.rust.version == '1.63.0'
       run: |
-        cargo update -p regex --precise "1.7.3"
+        cargo update -p tokio --precise "1.38.1"
+        cargo update -p tokio-util --precise "0.7.11"
         cargo update -p home --precise "0.5.5"
+        cargo update -p regex --precise "1.7.3"
+        cargo update -p security-framework-sys --precise "2.11.1"
     - name: Test
       run: cargo test --features test-hardware-signer

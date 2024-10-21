@@ -16,25 +16,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Setup cache
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
           key: nightly-docs-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
-      - name: Set default toolchain
-        run: rustup default nightly-2022-12-14
-      - name: Set profile
-        run: rustup set profile minimal
-      - name: Update toolchain
-        run: rustup update
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          components: clippy
+          profile: minimal
       - name: Build docs
         run: cargo rustdoc --verbose --features=compiler,electrum,esplora,use-esplora-blocking,compact_filters,rpc,key-value-db,sqlite,all-keys,verify,hardware-signer -- --cfg docsrs -Dwarnings
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: built-docs
           path: ./target/doc/*
@@ -46,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout `bitcoindevkit.org`
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           ssh-key: ${{ secrets.DOCS_PUSH_SSH_KEY }}
           repository: bitcoindevkit/bitcoindevkit.org
