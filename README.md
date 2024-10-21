@@ -204,45 +204,16 @@ dual licensed as above, without any additional terms or conditions.
 
 ## Minimum Supported Rust Version (MSRV)
 
-This library should compile with any combination of features with Rust 1.57.0.
+This library should compile with any combination of features with Rust 1.63.0.
 
 To build with the MSRV you will need to pin dependencies as follows:
 
 ```shell
-# log 0.4.19 has MSRV 1.60.0
-cargo update -p log --precise "0.4.18"
-# tempfile 3.7.0 has MSRV 1.63.0
-cargo update -p tempfile --precise "3.6.0"
-# required for sqlite feature, hashlink 0.8.2 has MSRV 1.61.0
-cargo update -p hashlink --precise "0.8.1"
-# required for compact_filters feature, regex after 1.7.3 has MSRV 1.60.0
+cargo update -p zstd-sys --precise "2.0.8+zstd.1.5.5"
+cargo update -p time --precise "0.3.20"
 cargo update -p regex --precise "1.7.3"
-# zip 0.6.3 has MSRV 1.59.0 but still works
-cargo update -p zip:0.6.6 --precise "0.6.3"
-# rustix 0.38.0 has MSRV 1.65.0
-cargo update -p rustix --precise "0.37.23"
-# tokio 1.30 has MSRV 1.63.0+
-cargo update -p tokio --precise "1.29.1"
-# tokio-util 0.7.9 doesn't build with MSRV 1.57.0
-cargo update -p tokio-util --precise "0.7.8"
-# cc 1.0.82 is throwing error with rust 1.57.0, "error[E0599]: no method named `retain_mut`..."
-cargo update -p cc --precise "1.0.81"
-# rustls 0.20.9 has MSRV 1.60.0+
-cargo update -p rustls:0.20.9 --precise "0.20.8"
-# rustls 0.21.2 has MSRV 1.60.0+
-cargo update -p rustls:0.21.7 --precise "0.21.1"
-# flate2 1.0.27 has MSRV 1.63.0+
-cargo update -p flate2:1.0.27 --precise "1.0.26"
-# reqwest 0.11.19 has MSRV 1.63.0+
-cargo update -p reqwest --precise "0.11.18"
-# h2 0.3.21 has MSRV 1.63.0+
-cargo update -p h2 --precise "0.3.20"
-# rustls-webpki 0.100.2 has MSRV 1.60+
-cargo update -p rustls-webpki:0.100.3 --precise "0.100.1"
-# rustls-webpki 0.101.6 has MSRV 1.60+
-cargo update -p rustls-webpki:0.101.6 --precise "0.101.1"
-# byteorder 1.5.0 has MSRV 1.60.0+
-cargo update -p byteorder --precise "1.4.3"
-# webpki 0.22.4 requires `ring:0.17.2` which has MSRV 1.61.0+
-cargo update -p webpki --precise "0.22.2"
+cargo update -p home --precise "0.5.5"
+cargo update -p tokio --precise "1.38.1"
+cargo update -p tokio-util --precise "0.7.11"
+cargo update -p security-framework-sys --precise "2.11.1"
 ```

@@ -206,17 +206,17 @@ extern crate serde_json;
 #[cfg(feature = "hardware-signer")]
 pub extern crate hwi;
 
-#[cfg(all(feature = "reqwest", feature = "ureq"))]
-compile_error!("Features reqwest and ureq are mutually exclusive and cannot be enabled together");
+#[cfg(all(feature = "use-esplora-async", feature = "use-esplora-blocking"))]
+compile_error!("Features use-esplora-async and use-esplora-blocking are mutually exclusive and cannot be enabled together");
 
 #[cfg(all(feature = "async-interface", feature = "electrum"))]
 compile_error!(
     "Features async-interface and electrum are mutually exclusive and cannot be enabled together"
 );
 
-#[cfg(all(feature = "async-interface", feature = "ureq"))]
+#[cfg(all(feature = "async-interface", feature = "use-esplora-blocking"))]
 compile_error!(
-    "Features async-interface and ureq are mutually exclusive and cannot be enabled together"
+    "Features async-interface and use-esplora-blocking are mutually exclusive and cannot be enabled together"
 );
 
 #[cfg(all(feature = "async-interface", feature = "compact_filters"))]
