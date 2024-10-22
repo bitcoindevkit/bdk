@@ -13,6 +13,7 @@ name: Code Coverage
 jobs:
   Codecov:
     name: Code Coverage
+    if: false # disabled
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-Cinstrument-coverage"

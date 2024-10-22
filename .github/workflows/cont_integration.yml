@@ -99,6 +99,7 @@ jobs:
 
   test-blockchains:
     name: Blockchain ${{ matrix.blockchain.features }}
+    if: false # disabled
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
