@@ -26,12 +26,9 @@ jobs:
       - name: Install lcov tools
         run: sudo apt-get install lcov -y
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly
-          override: true
           components: llvm-tools-preview
-          profile: minimal
       - name: Cache cargo
         uses: actions/cache@v3
         with:

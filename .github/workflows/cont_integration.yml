@@ -51,12 +51,10 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('.cache_key') }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust.version }}
-          override: true
           components: clippy
-          profile: minimal
       - name: Pin dependencies for MSRV
         if: matrix.rust.version == '1.63.0'
         run: |
@@ -88,12 +86,9 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-test-md-docs-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly
-          override: true
           components: clippy
-          profile: minimal
       - name: Test
         run: cargo test --features bitcoin/std,miniscript/std,test-md-docs --no-default-features -- doctest::ReadmeDoctests
 
@@ -133,11 +128,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ github.job }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          profile: minimal
+        uses: dtolnay/rust-toolchain@stable
       - name: Test
         run: cargo test --no-default-features --features bitcoin/std,miniscript/std,${{ matrix.blockchain.features }} ${{ matrix.blockchain.testprefix }}::bdk_blockchain_tests -- --test-threads=1
 
@@ -164,11 +155,7 @@ jobs:
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          profile: minimal
+        uses: dtolnay/rust-toolchain@stable
       - name: Add target wasm32
         run: rustup target add wasm32-unknown-unknown
       - name: Check
@@ -181,12 +168,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          override: true
           components: rustfmt
-          profile: minimal
       - name: Check fmt
         run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
 
@@ -211,11 +195,9 @@ jobs:
     - name: Install python dependencies
       run: pip install hwi==2.1.1 protobuf==3.20.1
     - name: Install Rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ matrix.rust.version }}
-        override: true
-        profile: minimal
     - name: Pin dependencies for MSRV
       if: matrix.rust.version == '1.63.0'
       run: |
