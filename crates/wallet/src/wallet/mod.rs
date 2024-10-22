@@ -551,7 +551,9 @@ impl Wallet {
         }
         let signers = Arc::new(SignersContainer::build(external_keymap, &descriptor, &secp));
 
-        let (mut change_descriptor, mut change_signers) = (None, Arc::new(SignersContainer::new()));
+        let mut change_descriptor = None;
+        let mut internal_keymap = params.change_descriptor_keymap;
+
         match (changeset.change_descriptor, params.check_change_descriptor) {
             // empty signer
             (None, None) => {}
@@ -592,16 +594,22 @@ impl Wallet {
                             expected: Some(exp_desc),
                         }));
                     }
-                    let mut internal_keymap = params.change_descriptor_keymap;
                     if params.extract_keys {
                         internal_keymap.extend(keymap);
                     }
-                    change_signers =
-                        Arc::new(SignersContainer::build(internal_keymap, &desc, &secp));
                     change_descriptor = Some(desc);
                 }
             },
         }
+
+        let change_signers = match change_descriptor {
+            Some(ref change_descriptor) => Arc::new(SignersContainer::build(
+                internal_keymap,
+                change_descriptor,
+                &secp,
+            )),
+            None => Arc::new(SignersContainer::new()),
+        };
 
         let index = create_indexer(descriptor, change_descriptor, params.lookahead)
             .map_err(LoadError::Descriptor)?;
