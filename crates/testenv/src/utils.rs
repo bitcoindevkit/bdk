@@ -1,4 +1,4 @@
-use bdk_chain::bitcoin;
+use bdk_chain::bitcoin::{self, TxIn};
 
 #[allow(unused_macros)]
 #[macro_export]
@@ -67,12 +67,21 @@ macro_rules! changeset {
     }};
 }
 
+/// Creates a "fake" transaction where `lt` is used to set the locktime and previous_output for
+/// uniqueness.
 #[allow(unused)]
 pub fn new_tx(lt: u32) -> bitcoin::Transaction {
     bitcoin::Transaction {
         version: bitcoin::transaction::Version::non_standard(0x00),
         lock_time: bitcoin::absolute::LockTime::from_consensus(lt),
-        input: vec![],
+        // Enforce single input otherwise we can't determine root spends.
+        input: vec![TxIn {
+            previous_output: bitcoin::OutPoint::new(
+                bitcoin::hashes::Hash::hash(lt.to_le_bytes().as_slice()),
+                0,
+            ),
+            ..Default::default()
+        }],
         output: vec![],
     }
 }

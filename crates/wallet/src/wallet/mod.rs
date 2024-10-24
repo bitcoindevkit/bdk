@@ -33,9 +33,8 @@ use bdk_chain::{
         FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
         SyncResult,
     },
-    tx_graph::{CanonicalTx, TxGraph, TxNode, TxUpdate},
-    BlockId, ChainPosition, ConfirmationBlockTime, DescriptorExt, FullTxOut, Indexed,
-    IndexedTxGraph, Merge,
+    tx_graph::{TxGraph, TxNode, TxUpdate},
+    BlockId, ConfirmationBlockTime, DescriptorExt, Indexed, IndexedTxGraph, Merge,
 };
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
@@ -45,6 +44,7 @@ use bitcoin::{
 use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
 use bitcoin::{constants::genesis_block, Amount};
 use bitcoin::{secp256k1::Secp256k1, Weight};
+use chain::{CanonicalPos, CanonicalTx, CanonicalTxOut, CanonicalView, LastSeenPrioritizer};
 use core::cmp::Ordering;
 use core::fmt;
 use core::mem;
@@ -116,6 +116,7 @@ pub struct Wallet {
     change_signers: Arc<SignersContainer>,
     chain: LocalChain,
     indexed_graph: IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<KeychainKind>>,
+    mempool_oracle: LastSeenPrioritizer,
     stage: ChangeSet,
     network: Network,
     secp: SecpCtx,
@@ -291,7 +292,7 @@ impl fmt::Display for ApplyBlockError {
 impl std::error::Error for ApplyBlockError {}
 
 /// A `CanonicalTx` managed by a `Wallet`.
-pub type WalletTx<'a> = CanonicalTx<'a, Arc<Transaction>, ConfirmationBlockTime>;
+pub type WalletTx<'a> = CanonicalTx<ConfirmationBlockTime, u64>;
 
 impl Wallet {
     /// Build a new single descriptor [`Wallet`].
@@ -419,6 +420,8 @@ impl Wallet {
         let indexed_graph = IndexedTxGraph::new(index);
         let indexed_graph_changeset = indexed_graph.initial_changeset();
 
+        let mempool_oracle = LastSeenPrioritizer;
+
         let stage = ChangeSet {
             descriptor,
             change_descriptor,
@@ -433,6 +436,7 @@ impl Wallet {
             change_signers,
             network,
             chain,
+            mempool_oracle,
             indexed_graph,
             stage,
             secp,
@@ -610,6 +614,8 @@ impl Wallet {
         indexed_graph.apply_changeset(changeset.indexer.into());
         indexed_graph.apply_changeset(changeset.tx_graph.into());
 
+        let mempool_oracle = LastSeenPrioritizer;
+
         let stage = ChangeSet::default();
 
         Ok(Some(Wallet {
@@ -617,6 +623,7 @@ impl Wallet {
             change_signers,
             chain,
             indexed_graph,
+            mempool_oracle,
             stage,
             network,
             secp,
@@ -818,12 +825,13 @@ impl Wallet {
     pub fn list_unspent(&self) -> impl Iterator<Item = LocalOutput> + '_ {
         self.indexed_graph
             .graph()
-            .filter_chain_unspents(
+            .canonical_view(
                 &self.chain,
                 self.chain.tip().block_id(),
-                self.indexed_graph.index.outpoints().iter().cloned(),
+                &self.mempool_oracle,
             )
-            .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
+            .into_filter_unspents(self.indexed_graph.index.outpoints().iter().cloned())
+            .map(new_local_utxo)
     }
 
     /// List all relevant outputs (includes both spent and unspent, confirmed and unconfirmed).
@@ -832,12 +840,13 @@ impl Wallet {
     pub fn list_output(&self) -> impl Iterator<Item = LocalOutput> + '_ {
         self.indexed_graph
             .graph()
-            .filter_chain_txouts(
+            .canonical_view(
                 &self.chain,
                 self.chain.tip().block_id(),
-                self.indexed_graph.index.outpoints().iter().cloned(),
+                &self.mempool_oracle,
             )
-            .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
+            .into_filter_txouts(self.indexed_graph.index.outpoints().iter().cloned())
+            .map(new_local_utxo)
     }
 
     /// Get all the checkpoints the wallet is currently storing indexed by height.
@@ -885,12 +894,13 @@ impl Wallet {
         let ((keychain, index), _) = self.indexed_graph.index.txout(op)?;
         self.indexed_graph
             .graph()
-            .filter_chain_unspents(
+            .canonical_view(
                 &self.chain,
                 self.chain.tip().block_id(),
-                core::iter::once(((), op)),
+                &self.mempool_oracle,
             )
-            .map(|(_, full_txo)| new_local_utxo(keychain, index, full_txo))
+            .into_filter_unspents(core::iter::once(((keychain, index), op)))
+            .map(new_local_utxo)
             .next()
     }
 
@@ -1052,15 +1062,13 @@ impl Wallet {
     /// [`Anchor`]: bdk_chain::Anchor
     pub fn get_tx(&self, txid: Txid) -> Option<WalletTx> {
         let graph = self.indexed_graph.graph();
-
-        Some(WalletTx {
-            chain_position: graph.get_chain_position(
+        graph
+            .canonical_view(
                 &self.chain,
                 self.chain.tip().block_id(),
-                txid,
-            )?,
-            tx_node: graph.get_tx_node(txid)?,
-        })
+                &self.mempool_oracle,
+            )
+            .tx(txid)
     }
 
     /// Add a new checkpoint to the wallet's internal view of the chain.
@@ -1103,9 +1111,16 @@ impl Wallet {
 
     /// Iterate over the transactions in the wallet.
     pub fn transactions(&self) -> impl Iterator<Item = WalletTx> + '_ {
-        self.indexed_graph
-            .graph()
-            .list_canonical_txs(&self.chain, self.chain.tip().block_id())
+        self.view().into_txs()
+    }
+
+    /// Get the canonical view of transactions.
+    pub fn view(&self) -> CanonicalView<ConfirmationBlockTime, u64> {
+        self.indexed_graph.graph().canonical_view(
+            &self.chain,
+            self.chain.tip().block_id(),
+            &self.mempool_oracle,
+        )
     }
 
     /// Array of transactions in the wallet sorted with a comparator function.
@@ -1132,9 +1147,7 @@ impl Wallet {
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
     /// values.
     pub fn balance(&self) -> Balance {
-        self.indexed_graph.graph().balance(
-            &self.chain,
-            self.chain.tip().block_id(),
+        self.view().balance(
             self.indexed_graph.index.outpoints().iter().cloned(),
             |&(k, _), _| k == KeychainKind::Internal,
         )
@@ -1616,31 +1629,28 @@ impl Wallet {
         &mut self,
         txid: Txid,
     ) -> Result<TxBuilder<'_, DefaultCoinSelectionAlgorithm>, BuildFeeBumpError> {
+        let view = self.view();
         let graph = self.indexed_graph.graph();
         let txout_index = &self.indexed_graph.index;
         let chain_tip = self.chain.tip().block_id();
 
-        let mut tx = graph
-            .get_tx(txid)
-            .ok_or(BuildFeeBumpError::TransactionNotFound(txid))?
-            .as_ref()
-            .clone();
-
-        let pos = graph
-            .get_chain_position(&self.chain, chain_tip, txid)
-            .ok_or(BuildFeeBumpError::TransactionNotFound(txid))?;
-        if let ChainPosition::Confirmed(_) = pos {
-            return Err(BuildFeeBumpError::TransactionConfirmed(txid));
-        }
-
+        let (txid, mut tx) = {
+            // The tx must be canonical to replace it. If it is not canonical, it means the tx was
+            // already replaced.
+            let canon_tx = view
+                .tx(txid)
+                .ok_or(BuildFeeBumpError::TransactionNotFound(txid))?;
+            if canon_tx.pos.is_confirmed() {
+                return Err(BuildFeeBumpError::TransactionConfirmed(txid));
+            }
+            (canon_tx.txid, canon_tx.tx.as_ref().clone())
+        };
         if !tx
             .input
             .iter()
             .any(|txin| txin.sequence.to_consensus_u32() <= 0xFFFFFFFD)
         {
-            return Err(BuildFeeBumpError::IrreplaceableTransaction(
-                tx.compute_txid(),
-            ));
+            return Err(BuildFeeBumpError::IrreplaceableTransaction(txid));
         }
 
         let fee = self
@@ -1655,53 +1665,43 @@ impl Wallet {
         let original_utxos = original_txin
             .iter()
             .map(|txin| -> Result<_, BuildFeeBumpError> {
-                let prev_tx = graph
-                    .get_tx(txin.previous_output.txid)
-                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
-                let txout = &prev_tx.output[txin.previous_output.vout as usize];
-
-                let chain_position = graph
-                    .get_chain_position(&self.chain, chain_tip, txin.previous_output.txid)
-                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?
-                    .cloned();
-
-                let weighted_utxo = match txout_index.index_of_spk(txout.script_pubkey.clone()) {
-                    Some(&(keychain, derivation_index)) => {
-                        let satisfaction_weight = self
-                            .public_descriptor(keychain)
+                let canon_utxo = view.txout(txin.previous_output, |op| {
+                    txout_index.txout(op).map(|(k, _)| k)
+                });
+                let weighted_utxo = match canon_utxo {
+                    Some(canon_txo) => WeightedUtxo {
+                        satisfaction_weight: self
+                            .public_descriptor(canon_txo.spk_index.0)
                             .max_weight_to_satisfy()
-                            .unwrap();
-                        WeightedUtxo {
-                            utxo: Utxo::Local(LocalOutput {
-                                outpoint: txin.previous_output,
-                                txout: txout.clone(),
-                                keychain,
-                                is_spent: true,
-                                derivation_index,
-                                chain_position,
-                            }),
-                            satisfaction_weight,
-                        }
-                    }
+                            .expect("descriptor must be satisfiable"),
+                        utxo: Utxo::Local(new_local_utxo(canon_txo)),
+                    },
                     None => {
-                        let satisfaction_weight = Weight::from_wu_usize(
-                            serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len(),
-                        );
+                        let prev_tx = view
+                            .tx(txin.previous_output.txid)
+                            .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
+                        let prev_txout = prev_tx
+                            .tx
+                            .output
+                            .get(txin.previous_output.vout as usize)
+                            .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
                         WeightedUtxo {
+                            satisfaction_weight: Weight::from_wu_usize(
+                                serialize(&txin.script_sig).len() * 4
+                                    + serialize(&txin.witness).len(),
+                            ),
                             utxo: Utxo::Foreign {
                                 outpoint: txin.previous_output,
                                 sequence: Some(txin.sequence),
                                 psbt_input: Box::new(psbt::Input {
-                                    witness_utxo: Some(txout.clone()),
-                                    non_witness_utxo: Some(prev_tx.as_ref().clone()),
+                                    witness_utxo: Some(prev_txout.clone()),
+                                    non_witness_utxo: Some(prev_tx.tx.as_ref().clone()),
                                     ..Default::default()
                                 }),
                             },
-                            satisfaction_weight,
                         }
                     }
                 };
-
                 Ok(weighted_utxo)
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -1878,11 +1878,9 @@ impl Wallet {
             let confirmation_height = self
                 .indexed_graph
                 .graph()
-                .get_chain_position(&self.chain, chain_tip, input.previous_output.txid)
-                .map(|chain_position| match chain_position {
-                    ChainPosition::Confirmed(a) => a.block_id.height,
-                    ChainPosition::Unconfirmed(_) => u32::MAX,
-                });
+                .confirmation_anchor(&self.chain, chain_tip, input.previous_output.txid)
+                .map(|a| a.block_id.height)
+                .unwrap_or(u32::MAX);
             let current_height = sign_options
                 .assume_height
                 .unwrap_or_else(|| self.chain.tip().height());
@@ -1910,7 +1908,7 @@ impl Wallet {
                         (
                             PsbtInputSatisfier::new(psbt, n),
                             After::new(Some(current_height), false),
-                            Older::new(Some(current_height), confirmation_height, false),
+                            Older::new(Some(current_height), Some(confirmation_height), false),
                         ),
                     ) {
                         Ok(_) => {
@@ -2024,6 +2022,7 @@ impl Wallet {
         let must_only_use_confirmed_tx = bumping_fee.is_some();
         let must_use_all_available = *drain_wallet;
 
+        let view = self.view();
         let chain_tip = self.chain.tip().block_id();
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
@@ -2050,33 +2049,29 @@ impl Wallet {
                     Some(tx) => tx,
                     None => return false,
                 };
-                let chain_position = match self.indexed_graph.graph().get_chain_position(
-                    &self.chain,
-                    chain_tip,
-                    txid,
-                ) {
-                    Some(chain_position) => chain_position.cloned(),
+                let canonical_pos = match view.tx(txid) {
                     None => return false,
+                    Some(tx) => tx.pos,
                 };
 
                 // Whether the UTXO is mature and, if needed, confirmed
                 let mut spendable = true;
-                if must_only_use_confirmed_tx && !chain_position.is_confirmed() {
+                if must_only_use_confirmed_tx && !canonical_pos.is_confirmed() {
                     return false;
                 }
                 if tx.is_coinbase() {
                     debug_assert!(
-                        chain_position.is_confirmed(),
+                        canonical_pos.is_confirmed(),
                         "coinbase must always be confirmed"
                     );
                     if let Some(current_height) = current_height {
-                        match chain_position {
-                            ChainPosition::Confirmed(a) => {
+                        match canonical_pos {
+                            CanonicalPos::Confirmed(a) => {
                                 // https://github.com/bitcoin/bitcoin/blob/c5e67be03bb06a5d7885c55db1f016fbf2333fe3/src/validation.cpp#L373-L375
                                 spendable &= (current_height.saturating_sub(a.block_id.height))
                                     >= COINBASE_MATURITY;
                             }
-                            ChainPosition::Unconfirmed { .. } => spendable = false,
+                            CanonicalPos::Unconfirmed(_) => spendable = false,
                         }
                     }
                 }
@@ -2537,17 +2532,15 @@ where
 }
 
 fn new_local_utxo(
-    keychain: KeychainKind,
-    derivation_index: u32,
-    full_txo: FullTxOut<ConfirmationBlockTime>,
+    canonical_txout: CanonicalTxOut<ConfirmationBlockTime, u64, (KeychainKind, u32)>,
 ) -> LocalOutput {
     LocalOutput {
-        outpoint: full_txo.outpoint,
-        txout: full_txo.txout,
-        is_spent: full_txo.spent_by.is_some(),
-        chain_position: full_txo.chain_position,
-        keychain,
-        derivation_index,
+        outpoint: canonical_txout.outpoint,
+        txout: canonical_txout.txout,
+        is_spent: canonical_txout.spent_by.is_some(),
+        chain_position: canonical_txout.pos,
+        keychain: canonical_txout.spk_index.0,
+        derivation_index: canonical_txout.spk_index.1,
     }
 }
 

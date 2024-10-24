@@ -43,6 +43,10 @@ pub mod tx_graph;
 pub use tx_graph::TxGraph;
 mod chain_oracle;
 pub use chain_oracle::*;
+mod unconfirmed_oracle;
+pub use unconfirmed_oracle::*;
+mod canonical_view;
+pub use canonical_view::*;
 
 #[doc(hidden)]
 pub mod example_utils;

@@ -2,12 +2,14 @@
 
 #[macro_use]
 mod common;
-use bdk_chain::{collections::*, BlockId, ConfirmationBlockTime};
+use bdk_chain::{
+    collections::*, BlockId, CanonicalPos, ConfirmationBlockTime, LastSeenPrioritizer,
+};
 use bdk_chain::{
     local_chain::LocalChain,
     tx_graph::{self, CalculateFeeError},
     tx_graph::{ChangeSet, TxGraph},
-    Anchor, ChainOracle, ChainPosition, Merge,
+    Anchor, ChainOracle, Merge,
 };
 use bdk_testenv::{block_id, hash, utils::new_tx};
 use bitcoin::{
@@ -197,8 +199,8 @@ fn insert_tx_graph_keeps_track_of_spend() {
     let tx1 = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
         output: vec![TxOut::NULL],
+        ..new_tx(1)
     };
 
     let op = OutPoint {
@@ -213,7 +215,7 @@ fn insert_tx_graph_keeps_track_of_spend() {
             previous_output: op,
             ..Default::default()
         }],
-        output: vec![],
+        ..new_tx(2)
     };
 
     let mut graph1 = TxGraph::<()>::default();
@@ -262,11 +264,11 @@ fn insert_tx_displaces_txouts() {
     let tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
         output: vec![TxOut {
             value: Amount::from_sat(42_000),
             script_pubkey: ScriptBuf::default(),
         }],
+        ..new_tx(0)
     };
     let txid = tx.compute_txid();
     let outpoint = OutPoint::new(txid, 0);
@@ -288,11 +290,11 @@ fn insert_txout_does_not_displace_tx() {
     let tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
         output: vec![TxOut {
             value: Amount::from_sat(42_000),
             script_pubkey: ScriptBuf::new(),
         }],
+        ..new_tx(0)
     };
 
     let _changeset = tx_graph.insert_tx(tx.clone());
@@ -344,20 +346,20 @@ fn test_calculate_fee() {
     let intx1 = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
         output: vec![TxOut {
             value: Amount::from_sat(100),
             script_pubkey: ScriptBuf::new(),
         }],
+        ..new_tx(1)
     };
     let intx2 = Transaction {
         version: transaction::Version::TWO,
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
         output: vec![TxOut {
             value: Amount::from_sat(200),
             script_pubkey: ScriptBuf::new(),
         }],
+        ..new_tx(2)
     };
 
     let intxout1 = (
@@ -811,7 +813,6 @@ fn test_chain_spends() {
     // The parent tx contains 2 outputs. Which are spent by one confirmed and one unconfirmed tx.
     // The parent tx is confirmed at block 95.
     let tx_0 = Transaction {
-        input: vec![],
         output: vec![
             TxOut {
                 value: Amount::from_sat(10_000),
@@ -841,7 +842,7 @@ fn test_chain_spends() {
                 script_pubkey: ScriptBuf::new(),
             },
         ],
-        ..new_tx(0)
+        ..new_tx(1)
     };
 
     // The second transactions spends vout:1, and is unconfirmed.
@@ -860,7 +861,7 @@ fn test_chain_spends() {
                 script_pubkey: ScriptBuf::new(),
             },
         ],
-        ..new_tx(0)
+        ..new_tx(2)
     };
 
     let mut graph = TxGraph::<ConfirmationBlockTime>::default();
@@ -880,29 +881,19 @@ fn test_chain_spends() {
     }
 
     // Assert that confirmed spends are returned correctly.
+    let view = graph.canonical_view(&local_chain, tip.block_id(), &LastSeenPrioritizer);
     assert_eq!(
-        graph.get_chain_spend(
-            &local_chain,
-            tip.block_id(),
-            OutPoint::new(tx_0.compute_txid(), 0)
-        ),
-        Some((
-            ChainPosition::Confirmed(&ConfirmationBlockTime {
-                block_id: BlockId {
-                    hash: tip.get(98).unwrap().hash(),
-                    height: 98,
-                },
-                confirmation_time: 100
-            }),
-            tx_1.compute_txid(),
-        )),
+        view.spend(OutPoint::new(tx_0.compute_txid(), 0)),
+        Some(tx_1.compute_txid()),
     );
 
     // Check if chain position is returned correctly.
     assert_eq!(
-        graph.get_chain_position(&local_chain, tip.block_id(), tx_0.compute_txid()),
-        // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
-        Some(ChainPosition::Confirmed(&ConfirmationBlockTime {
+        graph
+            .canonical_view(&local_chain, tip.block_id(), &LastSeenPrioritizer)
+            .tx(tx_0.compute_txid())
+            .map(|c_tx| c_tx.pos),
+        Some(CanonicalPos::Confirmed(ConfirmationBlockTime {
             block_id: BlockId {
                 hash: tip.get(95).unwrap().hash(),
                 height: 95,
@@ -917,13 +908,9 @@ fn test_chain_spends() {
     // Check chain spend returned correctly.
     assert_eq!(
         graph
-            .get_chain_spend(
-                &local_chain,
-                tip.block_id(),
-                OutPoint::new(tx_0.compute_txid(), 1)
-            )
-            .unwrap(),
-        (ChainPosition::Unconfirmed(1234567), tx_2.compute_txid())
+            .canonical_view(&local_chain, tip.block_id(), &LastSeenPrioritizer)
+            .spend_with_pos(OutPoint::new(tx_0.compute_txid(), 1)),
+        Some((CanonicalPos::Unconfirmed(1234567), tx_2.compute_txid()))
     );
 
     // A conflicting transaction that conflicts with tx_1.
@@ -938,7 +925,8 @@ fn test_chain_spends() {
 
     // Because this tx conflicts with an already confirmed transaction, chain position should return none.
     assert!(graph
-        .get_chain_position(&local_chain, tip.block_id(), tx_1_conflict.compute_txid())
+        .canonical_view(&local_chain, tip.block_id(), &LastSeenPrioritizer)
+        .tx(tx_1_conflict.compute_txid())
         .is_none());
 
     // Another conflicting tx that conflicts with tx_2.
@@ -957,29 +945,27 @@ fn test_chain_spends() {
     // This should return a valid observation with correct last seen.
     assert_eq!(
         graph
-            .get_chain_position(&local_chain, tip.block_id(), tx_2_conflict.compute_txid())
-            .expect("position expected"),
-        ChainPosition::Unconfirmed(1234568)
+            .canonical_view(&local_chain, tip.block_id(), &LastSeenPrioritizer)
+            .tx(tx_2_conflict.compute_txid())
+            .map(|c_tx| c_tx.pos),
+        Some(CanonicalPos::Unconfirmed(1234568))
     );
 
     // Chain_spend now catches the new transaction as the spend.
     assert_eq!(
         graph
-            .get_chain_spend(
-                &local_chain,
-                tip.block_id(),
-                OutPoint::new(tx_0.compute_txid(), 1)
-            )
-            .expect("expect observation"),
-        (
-            ChainPosition::Unconfirmed(1234568),
+            .canonical_view(&local_chain, tip.block_id(), &LastSeenPrioritizer)
+            .spend_with_pos(OutPoint::new(tx_0.compute_txid(), 1)),
+        Some((
+            CanonicalPos::Unconfirmed(1234568),
             tx_2_conflict.compute_txid()
-        )
+        ))
     );
 
     // Chain position of the `tx_2` is now none, as it is older than `tx_2_conflict`
     assert!(graph
-        .get_chain_position(&local_chain, tip.block_id(), tx_2.compute_txid())
+        .canonical_view(&local_chain, tip.block_id(), &LastSeenPrioritizer)
+        .tx(tx_2.compute_txid())
         .is_none());
 }
 
@@ -1018,7 +1004,27 @@ fn test_changeset_last_seen_merge() {
 
 #[test]
 fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anchor_in_best_chain() {
-    let txs = vec![new_tx(0), new_tx(1)];
+    fn make_tx(n: u8) -> bitcoin::Transaction {
+        bitcoin::Transaction {
+            input: vec![
+                TxIn {
+                    previous_output: OutPoint::new(bitcoin::hashes::Hash::hash(&[n]), 0),
+                    ..Default::default()
+                },
+                TxIn {
+                    previous_output: OutPoint::new(bitcoin::hashes::Hash::hash(&[n]), 2),
+                    ..Default::default()
+                },
+            ],
+            output: vec![TxOut {
+                value: bitcoin::Amount::from_sat(n as u64 * 1000),
+                script_pubkey: ScriptBuf::new(),
+            }],
+            ..new_tx(n as _)
+        }
+    }
+
+    let txs = vec![make_tx(0), make_tx(1)];
     let txids: Vec<Txid> = txs.iter().map(Transaction::compute_txid).collect();
 
     // graph
@@ -1033,28 +1039,25 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
         .into_iter()
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
-    let canonical_txs: Vec<_> = graph
-        .list_canonical_txs(&chain, chain.tip().block_id())
-        .collect();
-    assert!(canonical_txs.is_empty());
+    assert!(graph
+        .canonical_view(&chain, chain.tip().block_id(), &LastSeenPrioritizer)
+        .is_empty());
 
     // tx0 with seen_at should be returned by canonical txs
     let _ = graph.insert_seen_at(txids[0], 2);
-    let mut canonical_txs = graph.list_canonical_txs(&chain, chain.tip().block_id());
-    assert_eq!(
-        canonical_txs.next().map(|tx| tx.tx_node.txid).unwrap(),
-        txids[0]
-    );
-    drop(canonical_txs);
+    {
+        let view = graph.canonical_view(&chain, chain.tip().block_id(), &LastSeenPrioritizer);
+        assert_eq!(view.len(), 1);
+        assert_eq!(view.txs().next().map(|c_tx| c_tx.txid), Some(txids[0]));
+    }
 
     // tx1 with anchor is also canonical
     let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
-    let canonical_txids: Vec<_> = graph
-        .list_canonical_txs(&chain, chain.tip().block_id())
-        .map(|tx| tx.tx_node.txid)
-        .collect();
-    assert!(canonical_txids.contains(&txids[1]));
-    assert!(graph.txs_with_no_anchor_or_last_seen().next().is_none());
+    {
+        let view = graph.canonical_view(&chain, chain.tip().block_id(), &LastSeenPrioritizer);
+        assert!(view.tx(txids[1]).is_some());
+        assert!(graph.txs_with_no_anchor_or_last_seen().next().is_none());
+    }
 }
 
 #[test]
@@ -1149,15 +1152,6 @@ fn tx_graph_update_conversion() {
 
     type TestCase = (&'static str, TxUpdate<ConfirmationBlockTime>);
 
-    fn make_tx(v: i32) -> Transaction {
-        Transaction {
-            version: transaction::Version(v),
-            lock_time: absolute::LockTime::ZERO,
-            input: vec![],
-            output: vec![],
-        }
-    }
-
     fn make_txout(a: u64) -> TxOut {
         TxOut {
             value: Amount::from_sat(a),
@@ -1170,21 +1164,21 @@ fn tx_graph_update_conversion() {
         (
             "single_tx",
             TxUpdate {
-                txs: vec![make_tx(0).into()],
+                txs: vec![new_tx(0).into()],
                 ..Default::default()
             },
         ),
         (
             "two_txs",
             TxUpdate {
-                txs: vec![make_tx(0).into(), make_tx(1).into()],
+                txs: vec![new_tx(0).into(), new_tx(1).into()],
                 ..Default::default()
             },
         ),
         (
             "with_floating_txouts",
             TxUpdate {
-                txs: vec![make_tx(0).into(), make_tx(1).into()],
+                txs: vec![new_tx(0).into(), new_tx(1).into()],
                 txouts: [
                     (OutPoint::new(hash!("a"), 0), make_txout(0)),
                     (OutPoint::new(hash!("a"), 1), make_txout(1)),
@@ -1197,7 +1191,7 @@ fn tx_graph_update_conversion() {
         (
             "with_anchors",
             TxUpdate {
-                txs: vec![make_tx(0).into(), make_tx(1).into()],
+                txs: vec![new_tx(0).into(), new_tx(1).into()],
                 txouts: [
                     (OutPoint::new(hash!("a"), 0), make_txout(0)),
                     (OutPoint::new(hash!("a"), 1), make_txout(1)),
@@ -1215,7 +1209,7 @@ fn tx_graph_update_conversion() {
         (
             "with_seen_ats",
             TxUpdate {
-                txs: vec![make_tx(0).into(), make_tx(1).into()],
+                txs: vec![new_tx(0).into(), new_tx(1).into()],
                 txouts: [
                     (OutPoint::new(hash!("a"), 0), make_txout(0)),
                     (OutPoint::new(hash!("a"), 1), make_txout(1)),

@@ -1,5 +1,5 @@
 #![allow(unused)]
-use bdk_chain::{tx_graph, BlockId, ChainPosition, ConfirmationBlockTime, TxGraph};
+use bdk_chain::{tx_graph, BlockId, CanonicalPos, ChainPosition, ConfirmationBlockTime, TxGraph};
 use bdk_wallet::{CreateParams, KeychainKind, LocalOutput, Update, Wallet};
 use bitcoin::{
     hashes::Hash, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, Transaction,
@@ -89,7 +89,7 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
     insert_anchor_from_conf(
         &mut wallet,
         tx0.compute_txid(),
-        ChainPosition::Confirmed(ConfirmationBlockTime {
+        CanonicalPos::Confirmed(ConfirmationBlockTime {
             block_id: BlockId {
                 height: 1_000,
                 hash: BlockHash::all_zeros(),
@@ -102,7 +102,7 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
     insert_anchor_from_conf(
         &mut wallet,
         tx1.compute_txid(),
-        ChainPosition::Confirmed(ConfirmationBlockTime {
+        CanonicalPos::Confirmed(ConfirmationBlockTime {
             block_id: BlockId {
                 height: 2_000,
                 hash: BlockHash::all_zeros(),
@@ -214,9 +214,9 @@ pub fn feerate_unchecked(sat_vb: f64) -> FeeRate {
 pub fn insert_anchor_from_conf(
     wallet: &mut Wallet,
     txid: Txid,
-    position: ChainPosition<ConfirmationBlockTime>,
+    position: CanonicalPos<ConfirmationBlockTime, u64>,
 ) {
-    if let ChainPosition::Confirmed(anchor) = position {
+    if let CanonicalPos::Confirmed(anchor) = position {
         wallet
             .apply_update(Update {
                 tx_update: tx_graph::TxUpdate {

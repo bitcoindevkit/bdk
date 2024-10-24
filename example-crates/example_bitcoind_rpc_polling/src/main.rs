@@ -13,7 +13,7 @@ use bdk_bitcoind_rpc::{
 };
 use bdk_chain::{
     bitcoin::{Block, Transaction},
-    local_chain, Merge,
+    local_chain, LastSeenPrioritizer, Merge,
 };
 use example_cli::{
     anyhow,
@@ -182,14 +182,12 @@ fn main() -> anyhow::Result<()> {
                 if last_print.elapsed() >= STDOUT_PRINT_DELAY {
                     last_print = Instant::now();
                     let synced_to = chain.tip();
-                    let balance = {
-                        graph.graph().balance(
-                            &*chain,
-                            synced_to.block_id(),
-                            graph.index.outpoints().iter().cloned(),
-                            |(k, _), _| k == &Keychain::Internal,
-                        )
-                    };
+                    let balance = graph
+                        .graph()
+                        .canonical_view(&*chain, synced_to.block_id(), &LastSeenPrioritizer)
+                        .balance(graph.index.outpoints().iter().cloned(), |(k, _), _| {
+                            k == &Keychain::Internal
+                        });
                     println!(
                         "[{:>10}s] synced to {} @ {} | total: {}",
                         start.elapsed().as_secs_f32(),
@@ -319,14 +317,12 @@ fn main() -> anyhow::Result<()> {
                 if last_print.map_or(Duration::MAX, |i| i.elapsed()) >= STDOUT_PRINT_DELAY {
                     last_print = Some(Instant::now());
                     let synced_to = chain.tip();
-                    let balance = {
-                        graph.graph().balance(
-                            &*chain,
-                            synced_to.block_id(),
-                            graph.index.outpoints().iter().cloned(),
-                            |(k, _), _| k == &Keychain::Internal,
-                        )
-                    };
+                    let balance = graph
+                        .graph()
+                        .canonical_view(&*chain, synced_to.block_id(), &LastSeenPrioritizer)
+                        .balance(graph.index.outpoints().iter().cloned(), |(k, _), _| {
+                            k == &Keychain::Internal
+                        });
                     println!(
                         "[{:>10}s] synced to {} @ {} / {} | total: {}",
                         start.elapsed().as_secs_f32(),

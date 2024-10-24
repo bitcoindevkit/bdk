@@ -9,7 +9,7 @@ use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
-    tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt,
+    tx_graph, Balance, CanonicalPos, ConfirmationBlockTime, DescriptorExt, LastSeenPrioritizer,
 };
 use bdk_testenv::{
     block_id, hash,
@@ -191,8 +191,9 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(70000),
             script_pubkey: trusted_spks[0].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(1)
     };
+    assert!(tx1.is_coinbase());
 
     // tx2 is an incoming transaction received at untrusted keychain at block 1.
     let tx2 = Transaction {
@@ -200,7 +201,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(30000),
             script_pubkey: untrusted_spks[0].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(2)
     };
 
     // tx3 spends tx2 and gives a change back in trusted keychain. Confirmed at Block 2.
@@ -213,7 +214,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(10000),
             script_pubkey: trusted_spks[1].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(3)
     };
 
     // tx4 is an external transaction receiving at untrusted keychain, unconfirmed.
@@ -222,7 +223,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(20000),
             script_pubkey: untrusted_spks[1].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(4)
     };
 
     // tx5 is an external transaction receiving at trusted keychain, unconfirmed.
@@ -231,11 +232,11 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(15000),
             script_pubkey: trusted_spks[2].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(5)
     };
 
     // tx6 is an unrelated transaction confirmed at 3.
-    let tx6 = new_tx(0);
+    let tx6 = new_tx(6);
 
     // Insert transactions into graph with respective anchors
     // Insert unconfirmed txs with a last_seen timestamp
@@ -265,36 +266,25 @@ fn test_list_owned_txouts() {
                 .get(height)
                 .map(|cp| cp.block_id())
                 .unwrap_or_else(|| panic!("block must exist at {}", height));
-            let txouts = graph
+            let view = graph
                 .graph()
-                .filter_chain_txouts(
-                    &local_chain,
-                    chain_tip,
-                    graph.index.outpoints().iter().cloned(),
-                )
-                .collect::<Vec<_>>();
+                .canonical_view(&local_chain, chain_tip, &LastSeenPrioritizer);
 
-            let utxos = graph
-                .graph()
-                .filter_chain_unspents(
-                    &local_chain,
-                    chain_tip,
-                    graph.index.outpoints().iter().cloned(),
-                )
+            let txouts = view
+                .filter_txouts(graph.index.outpoints().iter().cloned())
                 .collect::<Vec<_>>();
-
-            let balance = graph.graph().balance(
-                &local_chain,
-                chain_tip,
-                graph.index.outpoints().iter().cloned(),
-                |_, spk: ScriptBuf| trusted_spks.contains(&spk),
-            );
+            let utxos = view
+                .filter_unspents(graph.index.outpoints().iter().cloned())
+                .collect::<Vec<_>>();
+            let balance = view.balance(graph.index.outpoints().iter().cloned(), |_, spk| {
+                trusted_spks.contains(&spk.to_owned())
+            });
 
             let confirmed_txouts_txid = txouts
                 .iter()
-                .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Confirmed(_)) {
-                        Some(full_txout.outpoint.txid)
+                .filter_map(|canon_txout| {
+                    if canon_txout.is_confirmed() {
+                        Some(canon_txout.outpoint.txid)
                     } else {
                         None
                     }
@@ -303,20 +293,20 @@ fn test_list_owned_txouts() {
 
             let unconfirmed_txouts_txid = txouts
                 .iter()
-                .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
-                        Some(full_txout.outpoint.txid)
-                    } else {
+                .filter_map(|canon_txout| {
+                    if canon_txout.is_confirmed() {
                         None
+                    } else {
+                        Some(canon_txout.outpoint.txid)
                     }
                 })
                 .collect::<BTreeSet<_>>();
 
             let confirmed_utxos_txid = utxos
                 .iter()
-                .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Confirmed(_)) {
-                        Some(full_txout.outpoint.txid)
+                .filter_map(|canon_txout| {
+                    if canon_txout.is_confirmed() {
+                        Some(canon_txout.outpoint.txid)
                     } else {
                         None
                     }
@@ -325,11 +315,11 @@ fn test_list_owned_txouts() {
 
             let unconfirmed_utxos_txid = utxos
                 .iter()
-                .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
-                        Some(full_txout.outpoint.txid)
-                    } else {
+                .filter_map(|canon_txout| {
+                    if canon_txout.is_confirmed() {
                         None
+                    } else {
+                        Some(canon_txout.outpoint.txid)
                     }
                 })
                 .collect::<BTreeSet<_>>();
@@ -539,7 +529,7 @@ fn test_get_chain_position() {
         tx: Transaction,
         anchor: Option<A>,
         last_seen: Option<u64>,
-        exp_pos: Option<ChainPosition<A>>,
+        exp_pos: Option<CanonicalPos<A, u64>>,
     }
 
     // addr: bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm
@@ -583,14 +573,12 @@ fn test_get_chain_position() {
         }
 
         // check chain position
-        let res = graph
+        let pos = graph
             .graph()
-            .get_chain_position(chain, chain.tip().block_id(), txid);
-        assert_eq!(
-            res.map(ChainPosition::cloned),
-            exp_pos,
-            "failed test case: {name}"
-        );
+            .canonical_view(chain, chain.tip().block_id(), &LastSeenPrioritizer)
+            .tx(txid)
+            .map(|c_tx| c_tx.pos);
+        assert_eq!(pos, exp_pos, "failed test case: {name}");
     }
 
     [
@@ -618,7 +606,7 @@ fn test_get_chain_position() {
             },
             anchor: None,
             last_seen: Some(2),
-            exp_pos: Some(ChainPosition::Unconfirmed(2)),
+            exp_pos: Some(CanonicalPos::Unconfirmed(2)),
         },
         TestCase {
             name: "tx anchor in best chain - confirmed",
@@ -631,7 +619,7 @@ fn test_get_chain_position() {
             },
             anchor: Some(blocks[1]),
             last_seen: None,
-            exp_pos: Some(ChainPosition::Confirmed(blocks[1])),
+            exp_pos: Some(CanonicalPos::Confirmed(blocks[1])),
         },
         TestCase {
             name: "tx unknown anchor with last_seen - unconfirmed",
@@ -644,7 +632,7 @@ fn test_get_chain_position() {
             },
             anchor: Some(block_id!(2, "B'")),
             last_seen: Some(2),
-            exp_pos: Some(ChainPosition::Unconfirmed(2)),
+            exp_pos: Some(CanonicalPos::Unconfirmed(2)),
         },
         TestCase {
             name: "tx unknown anchor - no chain pos",

@@ -8,7 +8,7 @@ use bdk_chain::{
     bitcoin::Network,
     keychain_txout::FullScanRequestBuilderExt,
     spk_client::{FullScanRequest, SyncRequest},
-    Merge,
+    LastSeenPrioritizer, Merge,
 };
 use bdk_esplora::{esplora_client, EsploraExt};
 use example_cli::{
@@ -240,12 +240,9 @@ fn main() -> anyhow::Result<()> {
                     request = request.outpoints(
                         graph
                             .graph()
-                            .filter_chain_unspents(
-                                &*chain,
-                                local_tip.block_id(),
-                                init_outpoints.iter().cloned(),
-                            )
-                            .map(|(_, utxo)| utxo.outpoint),
+                            .canonical_view(&*chain, local_tip.block_id(), &LastSeenPrioritizer)
+                            .into_filter_unspents(init_outpoints.iter().cloned())
+                            .map(|utxo| utxo.outpoint),
                     );
                 };
                 if unconfirmed {
@@ -255,9 +252,10 @@ fn main() -> anyhow::Result<()> {
                     request = request.txids(
                         graph
                             .graph()
-                            .list_canonical_txs(&*chain, local_tip.block_id())
-                            .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
-                            .map(|canonical_tx| canonical_tx.tx_node.txid),
+                            .canonical_view(&*chain, local_tip.block_id(), &LastSeenPrioritizer)
+                            .into_txs()
+                            .filter(|canonical_tx| !canonical_tx.pos.is_confirmed())
+                            .map(|canonical_tx| canonical_tx.txid),
                     );
                 }
             }

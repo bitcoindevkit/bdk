@@ -2,11 +2,12 @@ extern crate alloc;
 
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Mutex;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use bdk_chain::{tx_graph, COINBASE_MATURITY};
-use bdk_chain::{BlockId, ChainPosition, ConfirmationBlockTime};
+use bdk_chain::{tx_graph, CanonicalPos, COINBASE_MATURITY};
+use bdk_chain::{BlockId, ConfirmationBlockTime};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
 use bdk_wallet::error::CreateTxError;
@@ -35,22 +36,39 @@ use common::*;
 fn receive_output(
     wallet: &mut Wallet,
     value: u64,
-    height: ChainPosition<ConfirmationBlockTime>,
+    height: CanonicalPos<ConfirmationBlockTime, u64>,
 ) -> OutPoint {
     let addr = wallet.next_unused_address(KeychainKind::External).address;
     receive_output_to_address(wallet, addr, value, height)
+}
+
+static V: Mutex<u32> = Mutex::new(0_u32);
+fn inc() -> u32 {
+    let v = &mut *V.lock().expect("must lock");
+    *v += 1;
+    *v
+}
+
+fn unique_outpoint() -> OutPoint {
+    OutPoint::new(
+        bitcoin::hashes::Hash::hash(inc().to_le_bytes().as_slice()),
+        0,
+    )
 }
 
 fn receive_output_to_address(
     wallet: &mut Wallet,
     addr: Address,
     value: u64,
-    height: ChainPosition<ConfirmationBlockTime>,
+    height: CanonicalPos<ConfirmationBlockTime, u64>,
 ) -> OutPoint {
     let tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
+        input: vec![TxIn {
+            previous_output: unique_outpoint(),
+            ..Default::default()
+        }],
         output: vec![TxOut {
             script_pubkey: addr.script_pubkey(),
             value: Amount::from_sat(value),
@@ -61,10 +79,10 @@ fn receive_output_to_address(
     wallet.insert_tx(tx);
 
     match height {
-        ChainPosition::Confirmed { .. } => {
+        CanonicalPos::Confirmed(_) => {
             insert_anchor_from_conf(wallet, txid, height);
         }
-        ChainPosition::Unconfirmed(last_seen) => {
+        CanonicalPos::Unconfirmed(last_seen) => {
             insert_seen_at(wallet, txid, last_seen);
         }
     }
@@ -76,9 +94,9 @@ fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
     let latest_cp = wallet.latest_checkpoint();
     let height = latest_cp.height();
     let anchor = if height == 0 {
-        ChainPosition::Unconfirmed(0)
+        CanonicalPos::Unconfirmed(0)
     } else {
-        ChainPosition::Confirmed(ConfirmationBlockTime {
+        CanonicalPos::Confirmed(ConfirmationBlockTime {
             block_id: latest_cp.block_id(),
             confirmation_time: 0,
         })
@@ -383,11 +401,11 @@ fn test_get_funded_wallet_sent_and_received() {
 
     let mut tx_amounts: Vec<(Txid, (Amount, Amount))> = wallet
         .transactions()
-        .map(|ct| (ct.tx_node.txid, wallet.sent_and_received(&ct.tx_node)))
+        .map(|ct| (ct.txid, wallet.sent_and_received(&ct.tx)))
         .collect();
     tx_amounts.sort_by(|a1, a2| a1.0.cmp(&a2.0));
 
-    let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    let tx = wallet.get_tx(txid).expect("transaction").tx;
     let (sent, received) = wallet.sent_and_received(&tx);
 
     // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
@@ -401,7 +419,7 @@ fn test_get_funded_wallet_sent_and_received() {
 fn test_get_funded_wallet_tx_fees() {
     let (wallet, txid) = get_funded_wallet_wpkh();
 
-    let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    let tx = wallet.get_tx(txid).expect("transaction").tx;
     let tx_fee = wallet.calculate_fee(&tx).expect("transaction fee");
 
     // The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
@@ -414,7 +432,7 @@ fn test_get_funded_wallet_tx_fees() {
 fn test_get_funded_wallet_tx_fee_rate() {
     let (wallet, txid) = get_funded_wallet_wpkh();
 
-    let tx = wallet.get_tx(txid).expect("transaction").tx_node.tx;
+    let tx = wallet.get_tx(txid).expect("transaction").tx;
     let tx_fee_rate = wallet
         .calculate_fee_rate(&tx)
         .expect("transaction fee rate");
@@ -1204,7 +1222,10 @@ fn test_create_tx_both_non_witness_utxo_and_witness_utxo_default() {
 fn test_create_tx_add_utxo() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let small_output_tx = Transaction {
-        input: vec![],
+        input: vec![TxIn {
+            previous_output: unique_outpoint(),
+            ..Default::default()
+        }],
         output: vec![TxOut {
             script_pubkey: wallet
                 .next_unused_address(KeychainKind::External)
@@ -1216,7 +1237,7 @@ fn test_create_tx_add_utxo() {
     };
     let txid = small_output_tx.compute_txid();
     wallet.insert_tx(small_output_tx);
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+    let chain_position = CanonicalPos::Confirmed(ConfirmationBlockTime {
         block_id: wallet.latest_checkpoint().get(2000).unwrap().block_id(),
         confirmation_time: 200,
     });
@@ -1251,7 +1272,10 @@ fn test_create_tx_add_utxo() {
 fn test_create_tx_manually_selected_insufficient() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let small_output_tx = Transaction {
-        input: vec![],
+        input: vec![TxIn {
+            previous_output: unique_outpoint(),
+            ..Default::default()
+        }],
         output: vec![TxOut {
             script_pubkey: wallet
                 .next_unused_address(KeychainKind::External)
@@ -1263,7 +1287,7 @@ fn test_create_tx_manually_selected_insufficient() {
     };
     let txid = small_output_tx.compute_txid();
     wallet.insert_tx(small_output_tx.clone());
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+    let chain_position = CanonicalPos::Confirmed(ConfirmationBlockTime {
         block_id: wallet.latest_checkpoint().get(2000).unwrap().block_id(),
         confirmation_time: 200,
     });
@@ -1305,7 +1329,10 @@ fn test_create_tx_policy_path_no_csv() {
     let tx = Transaction {
         version: transaction::Version::non_standard(0),
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
+        input: vec![TxIn {
+            previous_output: unique_outpoint(),
+            ..Default::default()
+        }],
         output: vec![TxOut {
             script_pubkey: wallet
                 .next_unused_address(KeychainKind::External)
@@ -1492,7 +1519,7 @@ fn test_create_tx_increment_change_index() {
             .create_wallet_no_persist()
             .unwrap();
         // fund wallet
-        receive_output(&mut wallet, amount, ChainPosition::Unconfirmed(0));
+        receive_output(&mut wallet, amount, CanonicalPos::Unconfirmed(0));
         // create tx
         let mut builder = wallet.build_tx();
         builder.add_recipient(recipient.clone(), Amount::from_sat(test.to_send));
@@ -1645,8 +1672,8 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
         get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
     let utxo2 = wallet2.list_unspent().next().unwrap();
-    let tx1 = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
-    let tx2 = wallet2.get_tx(txid2).unwrap().tx_node.tx.clone();
+    let tx1 = wallet1.get_tx(txid1).unwrap().tx.clone();
+    let tx2 = wallet2.get_tx(txid2).unwrap().tx.clone();
 
     let satisfaction_weight = wallet2
         .public_descriptor(KeychainKind::External)
@@ -1733,7 +1760,7 @@ fn test_add_foreign_utxo_only_witness_utxo() {
 
     {
         let mut builder = builder.clone();
-        let tx2 = wallet2.get_tx(txid2).unwrap().tx_node.tx;
+        let tx2 = wallet2.get_tx(txid2).unwrap().tx;
         let psbt_input = psbt::Input {
             non_witness_utxo: Some(tx2.as_ref().clone()),
             ..Default::default()
@@ -1824,7 +1851,7 @@ fn test_bump_fee_confirmed_tx() {
 
     wallet.insert_tx(tx);
 
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+    let chain_position = CanonicalPos::Confirmed(ConfirmationBlockTime {
         block_id: wallet.latest_checkpoint().get(42).unwrap().block_id(),
         confirmation_time: 42_000,
     });
@@ -2091,7 +2118,10 @@ fn test_bump_fee_drain_wallet() {
     let tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
+        input: vec![TxIn {
+            previous_output: OutPoint::new(bitcoin::hashes::Hash::hash(b"prev_tx"), 0),
+            ..Default::default()
+        }],
         output: vec![TxOut {
             script_pubkey: wallet
                 .next_unused_address(KeychainKind::External)
@@ -2101,7 +2131,7 @@ fn test_bump_fee_drain_wallet() {
     };
     let txid = tx.compute_txid();
     wallet.insert_tx(tx.clone());
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+    let chain_position = CanonicalPos::Confirmed(ConfirmationBlockTime {
         block_id: wallet.latest_checkpoint().block_id(),
         confirmation_time: 42_000,
     });
@@ -2153,7 +2183,10 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     let init_tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
+        input: vec![TxIn {
+            previous_output: unique_outpoint(),
+            ..Default::default()
+        }],
         output: vec![TxOut {
             script_pubkey: wallet
                 .next_unused_address(KeychainKind::External)
@@ -2161,12 +2194,7 @@ fn test_bump_fee_remove_output_manually_selected_only() {
             value: Amount::from_sat(25_000),
         }],
     };
-    let position: ChainPosition<ConfirmationBlockTime> = wallet
-        .transactions()
-        .last()
-        .unwrap()
-        .chain_position
-        .cloned();
+    let position = wallet.transactions().last().unwrap().pos;
 
     wallet.insert_tx(init_tx.clone());
     insert_anchor_from_conf(&mut wallet, init_tx.compute_txid(), position);
@@ -2205,7 +2233,10 @@ fn test_bump_fee_add_input() {
     let init_tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
-        input: vec![],
+        input: vec![TxIn {
+            previous_output: unique_outpoint(),
+            ..Default::default()
+        }],
         output: vec![TxOut {
             script_pubkey: wallet
                 .next_unused_address(KeychainKind::External)
@@ -2214,12 +2245,7 @@ fn test_bump_fee_add_input() {
         }],
     };
     let txid = init_tx.compute_txid();
-    let pos: ChainPosition<ConfirmationBlockTime> = wallet
-        .transactions()
-        .last()
-        .unwrap()
-        .chain_position
-        .cloned();
+    let pos = wallet.transactions().last().unwrap().pos;
     wallet.insert_tx(init_tx);
     insert_anchor_from_conf(&mut wallet, txid, pos);
 
@@ -2614,7 +2640,7 @@ fn test_bump_fee_unconfirmed_inputs_only() {
     let psbt = builder.finish().unwrap();
     // Now we receive one transaction with 0 confirmations. We won't be able to use that for
     // fee bumping, as it's still unconfirmed!
-    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
+    receive_output(&mut wallet, 25_000, CanonicalPos::Unconfirmed(0));
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
     let txid = tx.compute_txid();
     for txin in &mut tx.input {
@@ -2640,7 +2666,7 @@ fn test_bump_fee_unconfirmed_input() {
         .assume_checked();
     // We receive a tx with 0 confirmations, which will be used as an input
     // in the drain tx.
-    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
+    receive_output(&mut wallet, 25_000, CanonicalPos::Unconfirmed(0));
     let mut builder = wallet.build_tx();
     builder.drain_wallet().drain_to(addr.script_pubkey());
     let psbt = builder.finish().unwrap();
@@ -3475,8 +3501,7 @@ fn test_taproot_sign_using_non_witness_utxo() {
     let mut psbt = builder.finish().unwrap();
 
     psbt.inputs[0].witness_utxo = None;
-    psbt.inputs[0].non_witness_utxo =
-        Some(wallet.get_tx(prev_txid).unwrap().tx_node.as_ref().clone());
+    psbt.inputs[0].non_witness_utxo = Some(wallet.get_tx(prev_txid).unwrap().tx.as_ref().clone());
     assert!(
         psbt.inputs[0].non_witness_utxo.is_some(),
         "Previous tx should be present in the database"
@@ -3865,7 +3890,7 @@ fn test_spend_coinbase() {
     };
     let txid = coinbase_tx.compute_txid();
     wallet.insert_tx(coinbase_tx);
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+    let chain_position = CanonicalPos::Confirmed(ConfirmationBlockTime {
         block_id: confirmation_block_id,
         confirmation_time: 30_000,
     });
@@ -4111,7 +4136,7 @@ fn test_keychains_with_overlapping_spks() {
         .last()
         .unwrap()
         .address;
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+    let chain_position = CanonicalPos::Confirmed(ConfirmationBlockTime {
         block_id: BlockId {
             height: 8000,
             hash: BlockHash::all_zeros(),
@@ -4250,7 +4275,7 @@ fn single_descriptor_wallet_can_create_tx_and_receive_change() {
         .unwrap();
     assert_eq!(wallet.keychains().count(), 1);
     let amt = Amount::from_sat(5_000);
-    receive_output(&mut wallet, 2 * amt.to_sat(), ChainPosition::Unconfirmed(2));
+    receive_output(&mut wallet, 2 * amt.to_sat(), CanonicalPos::Unconfirmed(2));
     // create spend tx that produces a change output
     let addr = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")
         .unwrap()
@@ -4277,14 +4302,13 @@ fn single_descriptor_wallet_can_create_tx_and_receive_change() {
 #[test]
 fn test_transactions_sort_by() {
     let (mut wallet, _txid) = get_funded_wallet_wpkh();
-    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
+    receive_output(&mut wallet, 25_000, CanonicalPos::Unconfirmed(0));
 
     // sort by chain position, unconfirmed then confirmed by descending block height
-    let sorted_txs: Vec<WalletTx> =
-        wallet.transactions_sort_by(|t1, t2| t2.chain_position.cmp(&t1.chain_position));
+    let sorted_txs: Vec<WalletTx> = wallet.transactions_sort_by(|t1, t2| t2.pos.cmp(&t1.pos));
     let conf_heights: Vec<Option<u32>> = sorted_txs
         .iter()
-        .map(|tx| tx.chain_position.confirmation_height_upper_bound())
+        .map(|tx| tx.pos.confirmation_height_upper_bound())
         .collect();
     assert_eq!([None, Some(2000), Some(1000)], conf_heights.as_slice());
 }

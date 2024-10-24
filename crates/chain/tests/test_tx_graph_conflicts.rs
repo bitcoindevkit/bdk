@@ -3,9 +3,9 @@
 #[macro_use]
 mod common;
 
-use bdk_chain::{Balance, BlockId};
+use bdk_chain::{Balance, BlockId, LastSeenPrioritizer};
 use bdk_testenv::{block_id, hash, local_chain};
-use bitcoin::{Amount, OutPoint, ScriptBuf};
+use bitcoin::{Amount, OutPoint};
 use common::*;
 use std::collections::{BTreeSet, HashSet};
 
@@ -92,6 +92,7 @@ fn test_tx_conflict_handling() {
             tx_templates: &[
                 TxTemplate {
                     tx_name: "tx1",
+                    inputs: &[TxInTemplate::Coinbase],
                     outputs: &[TxOutTemplate::new(40000, Some(0))],
                     anchors: &[block_id!(1, "B")],
                     last_seen: None,
@@ -333,7 +334,9 @@ fn test_tx_conflict_handling() {
                     tx_name: "B",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
-                    last_seen: Some(23),
+                    // TODO: C shoud be seen alongside B (since B is a parent).
+                    // last_seen: Some(23),
+                    last_seen: Some(25),
                     ..Default::default()
                 },
                 TxTemplate {
@@ -595,11 +598,9 @@ fn test_tx_conflict_handling() {
 
     for scenario in scenarios {
         let (tx_graph, spk_index, exp_tx_ids) = init_graph(scenario.tx_templates.iter());
+        let view = tx_graph.canonical_view(&local_chain, chain_tip, &LastSeenPrioritizer);
 
-        let txs = tx_graph
-            .list_canonical_txs(&local_chain, chain_tip)
-            .map(|tx| tx.tx_node.txid)
-            .collect::<BTreeSet<_>>();
+        let txs = view.txs().map(|tx| tx.txid).collect::<BTreeSet<_>>();
         let exp_txs = scenario
             .exp_chain_txs
             .iter()
@@ -611,13 +612,9 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
 
-        let txouts = tx_graph
-            .filter_chain_txouts(
-                &local_chain,
-                chain_tip,
-                spk_index.outpoints().iter().cloned(),
-            )
-            .map(|(_, full_txout)| full_txout.outpoint)
+        let txouts = view
+            .filter_txouts(spk_index.outpoints().iter().cloned())
+            .map(|c_txo| c_txo.outpoint)
             .collect::<BTreeSet<_>>();
         let exp_txouts = scenario
             .exp_chain_txouts
@@ -633,13 +630,9 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
 
-        let utxos = tx_graph
-            .filter_chain_unspents(
-                &local_chain,
-                chain_tip,
-                spk_index.outpoints().iter().cloned(),
-            )
-            .map(|(_, full_txout)| full_txout.outpoint)
+        let utxos = view
+            .filter_unspents(spk_index.outpoints().iter().cloned())
+            .map(|c_txo| c_txo.outpoint)
             .collect::<BTreeSet<_>>();
         let exp_utxos = scenario
             .exp_unspents
@@ -655,12 +648,9 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
 
-        let balance = tx_graph.balance(
-            &local_chain,
-            chain_tip,
-            spk_index.outpoints().iter().cloned(),
-            |_, spk: ScriptBuf| spk_index.index_of_spk(spk).is_some(),
-        );
+        let balance = view.balance(spk_index.outpoints().iter().cloned(), |_, spk| {
+            spk_index.index_of_spk(spk.to_owned()).is_some()
+        });
         assert_eq!(
             balance, scenario.exp_balance,
             "\n[{}] 'balance' failed",

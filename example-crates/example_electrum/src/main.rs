@@ -5,7 +5,7 @@ use bdk_chain::{
     collections::BTreeSet,
     indexed_tx_graph,
     spk_client::{FullScanRequest, SyncRequest},
-    ConfirmationBlockTime, Merge,
+    ConfirmationBlockTime, LastSeenPrioritizer, Merge,
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
@@ -226,21 +226,19 @@ fn main() -> anyhow::Result<()> {
                 request = request.outpoints(
                     graph
                         .graph()
-                        .filter_chain_unspents(
-                            &*chain,
-                            chain_tip.block_id(),
-                            init_outpoints.iter().cloned(),
-                        )
-                        .map(|(_, utxo)| utxo.outpoint),
+                        .canonical_view(&*chain, chain_tip.block_id(), &LastSeenPrioritizer)
+                        .into_filter_unspents(init_outpoints.iter().cloned())
+                        .map(|utxo| utxo.outpoint),
                 );
             };
             if unconfirmed {
                 request = request.txids(
                     graph
                         .graph()
-                        .list_canonical_txs(&*chain, chain_tip.block_id())
-                        .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
-                        .map(|canonical_tx| canonical_tx.tx_node.txid),
+                        .canonical_view(&*chain, chain_tip.block_id(), &LastSeenPrioritizer)
+                        .into_txs()
+                        .filter(|canonical_tx| !canonical_tx.pos.is_confirmed())
+                        .map(|canonical_tx| canonical_tx.txid),
                 );
             }
 

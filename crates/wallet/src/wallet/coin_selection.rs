@@ -278,7 +278,7 @@ impl CoinSelectionAlgorithm for OldestFirstCoinSelection {
         // For utxo that doesn't exist in DB, they will have lowest priority to be selected
         let utxos = {
             optional_utxos.sort_unstable_by_key(|wu| match &wu.utxo {
-                Utxo::Local(local) => Some(local.chain_position),
+                Utxo::Local(local) => Some(local.chain_position.clone()),
                 Utxo::Foreign { .. } => None,
             });
 
@@ -734,7 +734,7 @@ where
 mod test {
     use assert_matches::assert_matches;
     use bitcoin::hashes::Hash;
-    use chain::{BlockId, ChainPosition, ConfirmationBlockTime};
+    use chain::{BlockId, CanonicalPos, ChainPosition, ConfirmationBlockTime};
     use core::str::FromStr;
     use rand::rngs::StdRng;
 
@@ -754,7 +754,7 @@ mod test {
     const FEE_AMOUNT: u64 = 50;
 
     fn unconfirmed_utxo(value: u64, index: u32, last_seen: u64) -> WeightedUtxo {
-        utxo(value, index, ChainPosition::Unconfirmed(last_seen))
+        utxo(value, index, CanonicalPos::Unconfirmed(last_seen))
     }
 
     fn confirmed_utxo(
@@ -766,7 +766,7 @@ mod test {
         utxo(
             value,
             index,
-            ChainPosition::Confirmed(ConfirmationBlockTime {
+            CanonicalPos::Confirmed(ConfirmationBlockTime {
                 block_id: chain::BlockId {
                     height: confirmation_height,
                     hash: bitcoin::BlockHash::all_zeros(),
@@ -779,7 +779,7 @@ mod test {
     fn utxo(
         value: u64,
         index: u32,
-        chain_position: ChainPosition<ConfirmationBlockTime>,
+        chain_position: CanonicalPos<ConfirmationBlockTime, u64>,
     ) -> WeightedUtxo {
         assert!(index < 10);
         let outpoint = OutPoint::from_str(&format!(
@@ -838,7 +838,7 @@ mod test {
                     is_spent: false,
                     derivation_index: rng.next_u32(),
                     chain_position: if rng.gen_bool(0.5) {
-                        ChainPosition::Confirmed(ConfirmationBlockTime {
+                        CanonicalPos::Confirmed(ConfirmationBlockTime {
                             block_id: chain::BlockId {
                                 height: rng.next_u32(),
                                 hash: BlockHash::all_zeros(),
@@ -846,7 +846,7 @@ mod test {
                             confirmation_time: rng.next_u64(),
                         })
                     } else {
-                        ChainPosition::Unconfirmed(0)
+                        CanonicalPos::Unconfirmed(0)
                     },
                 }),
             });
@@ -871,7 +871,7 @@ mod test {
                     keychain: KeychainKind::External,
                     is_spent: false,
                     derivation_index: 42,
-                    chain_position: ChainPosition::Unconfirmed(0),
+                    chain_position: CanonicalPos::Unconfirmed(0),
                 }),
             })
             .collect()
@@ -1228,7 +1228,7 @@ mod test {
         optional.push(utxo(
             500_000,
             3,
-            ChainPosition::<ConfirmationBlockTime>::Unconfirmed(0),
+            CanonicalPos::<ConfirmationBlockTime, u64>::Unconfirmed(0),
         ));
 
         // Defensive assertions, for sanity and in case someone changes the test utxos vector.
@@ -1590,7 +1590,7 @@ mod test {
                     keychain: KeychainKind::External,
                     is_spent: false,
                     derivation_index: 0,
-                    chain_position: ChainPosition::Confirmed(ConfirmationBlockTime {
+                    chain_position: CanonicalPos::Confirmed(ConfirmationBlockTime {
                         block_id: BlockId {
                             height: 12345,
                             hash: BlockHash::all_zeros(),

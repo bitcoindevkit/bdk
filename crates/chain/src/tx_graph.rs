@@ -94,14 +94,18 @@
 
 use crate::collections::*;
 use crate::BlockId;
-use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
+use crate::CanonicalError;
+use crate::CanonicalView;
+use crate::UnconfirmedOracle;
+use crate::{Anchor, ChainOracle, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 pub use bdk_core::TxUpdate;
-use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, SignedAmount, Transaction, TxOut, Txid};
+use core::convert::Infallible;
 use core::fmt::{self, Formatter};
-use core::{convert::Infallible, ops::Deref};
+use core::ops::Deref;
 
 impl<A: Ord> From<TxGraph<A>> for TxUpdate<A> {
     fn from(graph: TxGraph<A>) -> Self {
@@ -142,6 +146,7 @@ pub struct TxGraph<A = ()> {
 
     // Indexes
     spends: HashMap<OutPoint, HashSet<Txid>>,
+    roots: TxRoots,
 
     // This atrocity exists so that `TxGraph::outspends()` can return a reference.
     // FIXME: This can be removed once `HashSet::new` is a const fn.
@@ -153,13 +158,23 @@ impl<A> Default for TxGraph<A> {
     fn default() -> Self {
         Self {
             txs: Default::default(),
-            spends: Default::default(),
             anchors: Default::default(),
             last_seen: Default::default(),
+            spends: Default::default(),
+            roots: Default::default(),
             empty_outspends: Default::default(),
             empty_anchors: Default::default(),
         }
     }
+}
+
+/// Roots of the [`TxGraph`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TxRoots {
+    /// These outputs being spent reside in transactions that are not part of the [`TxGraph`].
+    pub spends: BTreeSet<OutPoint>,
+    /// Coinbase transactions.
+    pub coinbase: BTreeSet<Txid>,
 }
 
 /// A transaction node in the [`TxGraph`].
@@ -199,15 +214,6 @@ impl Default for TxNodeInternal {
     }
 }
 
-/// A transaction that is included in the chain, or is still in mempool.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CanonicalTx<'a, T, A> {
-    /// How the transaction is observed as (confirmed or unconfirmed).
-    pub chain_position: ChainPosition<&'a A>,
-    /// The transaction node (as part of the graph).
-    pub tx_node: TxNode<'a, T, A>,
-}
-
 /// Errors returned by `TxGraph::calculate_fee`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CalculateFeeError {
@@ -238,6 +244,19 @@ impl fmt::Display for CalculateFeeError {
 impl std::error::Error for CalculateFeeError {}
 
 impl<A> TxGraph<A> {
+    /// Coinbase transactions.
+    pub fn coinbase_txs(&self) -> impl ExactSizeIterator<Item = TxNode<'_, Arc<Transaction>, A>> {
+        self.roots.coinbase.iter().map(|&txid| {
+            self.get_tx_node(txid)
+                .expect("coinbase tx must have corresponding full tx")
+        })
+    }
+
+    /// Root outpoints.
+    pub fn root_outpoints(&self) -> &BTreeSet<OutPoint> {
+        &self.roots.spends
+    }
+
     /// Iterate over all tx outputs known by [`TxGraph`].
     ///
     /// This includes txouts of both full transactions as well as floating transactions.
@@ -588,23 +607,43 @@ impl<A: Clone + Ord> TxGraph<A> {
                     tx.as_ref(),
                     "tx of same txid should never change"
                 );
+                return changeset;
             }
             partial_tx => {
-                for txin in &tx.input {
-                    // this means the tx is coinbase so there is no previous output
-                    if txin.previous_output.is_null() {
-                        continue;
-                    }
-                    self.spends
-                        .entry(txin.previous_output)
-                        .or_default()
-                        .insert(txid);
-                }
                 *partial_tx = TxNodeInternal::Whole(tx.clone());
-                changeset.txs.insert(tx);
             }
         }
 
+        for tx_op in (0..tx.output.len() as u32).map(|vout| OutPoint::new(txid, vout)) {
+            self.roots.spends.remove(&tx_op);
+        }
+        for txin in &tx.input {
+            // this means the tx is coinbase so there is no previous output
+            if txin.previous_output.is_null() {
+                assert!(
+                    self.roots.coinbase.insert(txid),
+                    "must not insert the same tx twice"
+                );
+                debug_assert_eq!(tx.input.len(), 1, "coinbase txs must have one input");
+                break;
+            }
+            match self.txs.get(&txin.previous_output.txid) {
+                Some(TxNodeInternal::Whole(_)) => {}
+                _ => {
+                    self.roots.spends.insert(txin.previous_output);
+                }
+            }
+            self.spends
+                .entry(txin.previous_output)
+                .or_default()
+                .insert(txid);
+        }
+        debug_assert!(
+            !tx.input.is_empty(),
+            "a transaction must have atleast one input"
+        );
+
+        changeset.txs.insert(tx);
         changeset
     }
 
@@ -739,457 +778,57 @@ impl<A: Clone + Ord> TxGraph<A> {
 }
 
 impl<A: Anchor> TxGraph<A> {
-    /// Get the position of the transaction in `chain` with tip `chain_tip`.
-    ///
-    /// Chain data is fetched from `chain`, a [`ChainOracle`] implementation.
-    ///
-    /// This method returns `Ok(None)` if the transaction is not found in the chain, and no longer
-    /// belongs in the mempool. The following factors are used to approximate whether an
-    /// unconfirmed transaction exists in the mempool (not evicted):
-    ///
-    /// 1. Unconfirmed transactions that conflict with confirmed transactions are evicted.
-    /// 2. Unconfirmed transactions that spend from transactions that are evicted, are also
-    ///    evicted.
-    /// 3. Given two conflicting unconfirmed transactions, the transaction with the lower
-    ///    `last_seen_unconfirmed` parameter is evicted. A transaction's `last_seen_unconfirmed`
-    ///    parameter is the max of all it's descendants' `last_seen_unconfirmed` parameters. If the
-    ///    final `last_seen_unconfirmed`s are the same, the transaction with the lower `txid` (by
-    ///    lexicographical order) is evicted.
-    ///
-    /// # Error
-    ///
-    /// An error will occur if the [`ChainOracle`] implementation (`chain`) fails. If the
-    /// [`ChainOracle`] is infallible, [`get_chain_position`] can be used instead.
-    ///
-    /// [`get_chain_position`]: Self::get_chain_position
-    pub fn try_get_chain_position<C: ChainOracle>(
+    /// Contruct the [`CanonicalView`] of transactions.
+    pub fn try_canonical_view<C: ChainOracle, U: UnconfirmedOracle>(
+        &self,
+        chain_oracle: &C,
+        chain_tip: BlockId,
+        unconf_oracle: &U,
+    ) -> Result<CanonicalView<A, U::UnconfirmedPos>, CanonicalError<C::Error, U::Error>> {
+        CanonicalView::new(chain_oracle, chain_tip, unconf_oracle, self)
+    }
+
+    /// Infallible version of [`Self::try_canonical_view`].
+    pub fn canonical_view<
+        C: ChainOracle<Error = Infallible>,
+        U: UnconfirmedOracle<Error = Infallible>,
+    >(
+        &self,
+        chain_oracle: &C,
+        chain_tip: BlockId,
+        unconf_oracle: &U,
+    ) -> CanonicalView<A, U::UnconfirmedPos> {
+        self.try_canonical_view(chain_oracle, chain_tip, unconf_oracle)
+            .expect("infallible")
+    }
+
+    /// Try get confirmation anchor for the given tx.
+    pub fn try_confirmation_anchor<C: ChainOracle>(
         &self,
         chain: &C,
         chain_tip: BlockId,
         txid: Txid,
-    ) -> Result<Option<ChainPosition<&A>>, C::Error> {
-        let tx_node = match self.txs.get(&txid) {
-            Some(v) => v,
-            None => return Ok(None),
-        };
-
-        for anchor in self.anchors.get(&txid).unwrap_or(&self.empty_anchors) {
-            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip)? {
-                Some(true) => return Ok(Some(ChainPosition::Confirmed(anchor))),
-                _ => continue,
-            }
-        }
-
-        // If no anchors are in best chain and we don't have a last_seen, we can return
-        // early because by definition the tx doesn't have a chain position.
-        let last_seen = match self.last_seen.get(&txid) {
-            Some(t) => *t,
-            None => return Ok(None),
-        };
-
-        // The tx is not anchored to a block in the best chain, which means that it
-        // might be in mempool, or it might have been dropped already.
-        // Let's check conflicts to find out!
-        let tx = match tx_node {
-            TxNodeInternal::Whole(tx) => {
-                // A coinbase tx that is not anchored in the best chain cannot be unconfirmed and
-                // should always be filtered out.
-                if tx.is_coinbase() {
-                    return Ok(None);
-                }
-                tx.clone()
-            }
-            TxNodeInternal::Partial(_) => {
-                // Partial transactions (outputs only) cannot have conflicts.
-                return Ok(None);
-            }
-        };
-
-        // We want to retrieve all the transactions that conflict with us, plus all the
-        // transactions that conflict with our unconfirmed ancestors, since they conflict with us
-        // as well.
-        // We only traverse unconfirmed ancestors since conflicts of confirmed transactions
-        // cannot be in the best chain.
-
-        // First of all, we retrieve all our ancestors. Since we're using `new_include_root`, the
-        // resulting array will also include `tx`
-        let unconfirmed_ancestor_txs =
-            TxAncestors::new_include_root(self, tx.clone(), |_, ancestor_tx: Arc<Transaction>| {
-                let tx_node = self.get_tx_node(ancestor_tx.as_ref().compute_txid())?;
-                // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
-                // the best chain)
-                for block in tx_node.anchors {
-                    match chain.is_block_in_chain(block.anchor_block(), chain_tip) {
-                        Ok(Some(true)) => return None,
-                        Err(e) => return Some(Err(e)),
-                        _ => continue,
-                    }
-                }
-                Some(Ok(tx_node))
-            })
-            .collect::<Result<Vec<_>, C::Error>>()?;
-
-        // We determine our tx's last seen, which is the max between our last seen,
-        // and our unconf descendants' last seen.
-        let unconfirmed_descendants_txs = TxDescendants::new_include_root(
-            self,
-            tx.as_ref().compute_txid(),
-            |_, descendant_txid: Txid| {
-                let tx_node = self.get_tx_node(descendant_txid)?;
-                // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
-                // the best chain)
-                for block in tx_node.anchors {
-                    match chain.is_block_in_chain(block.anchor_block(), chain_tip) {
-                        Ok(Some(true)) => return None,
-                        Err(e) => return Some(Err(e)),
-                        _ => continue,
-                    }
-                }
-                Some(Ok(tx_node))
-            },
-        )
-        .collect::<Result<Vec<_>, C::Error>>()?;
-
-        let tx_last_seen = unconfirmed_descendants_txs
-            .iter()
-            .max_by_key(|tx| tx.last_seen_unconfirmed)
-            .map(|tx| tx.last_seen_unconfirmed)
-            .expect("descendants always includes at least one transaction (the root tx");
-
-        // Now we traverse our ancestors and consider all their conflicts
-        for tx_node in unconfirmed_ancestor_txs {
-            // We retrieve all the transactions conflicting with this specific ancestor
-            let conflicting_txs =
-                self.walk_conflicts(tx_node.tx.as_ref(), |_, txid| self.get_tx_node(txid));
-
-            // If a conflicting tx is in the best chain, or has `last_seen` higher than this ancestor, then
-            // this tx cannot exist in the best chain
-            for conflicting_tx in conflicting_txs {
-                for block in conflicting_tx.anchors {
-                    if chain.is_block_in_chain(block.anchor_block(), chain_tip)? == Some(true) {
-                        return Ok(None);
-                    }
-                }
-                if conflicting_tx.last_seen_unconfirmed > tx_last_seen {
-                    return Ok(None);
-                }
-                if conflicting_tx.last_seen_unconfirmed == Some(last_seen)
-                    && conflicting_tx.as_ref().compute_txid() > tx.as_ref().compute_txid()
-                {
-                    // Conflicting tx has priority if txid of conflicting tx > txid of original tx
-                    return Ok(None);
-                }
-            }
-        }
-
-        Ok(Some(ChainPosition::Unconfirmed(last_seen)))
-    }
-
-    /// Get the position of the transaction in `chain` with tip `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_get_chain_position`].
-    ///
-    /// [`try_get_chain_position`]: Self::try_get_chain_position
-    pub fn get_chain_position<C: ChainOracle<Error = Infallible>>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        txid: Txid,
-    ) -> Option<ChainPosition<&A>> {
-        self.try_get_chain_position(chain, chain_tip, txid)
-            .expect("error is infallible")
-    }
-
-    /// Get the txid of the spending transaction and where the spending transaction is observed in
-    /// the `chain` of `chain_tip`.
-    ///
-    /// If no in-chain transaction spends `outpoint`, `None` will be returned.
-    ///
-    /// # Error
-    ///
-    /// An error will occur only if the [`ChainOracle`] implementation (`chain`) fails.
-    ///
-    /// If the [`ChainOracle`] is infallible, [`get_chain_spend`] can be used instead.
-    ///
-    /// [`get_chain_spend`]: Self::get_chain_spend
-    pub fn try_get_chain_spend<C: ChainOracle>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        outpoint: OutPoint,
-    ) -> Result<Option<(ChainPosition<&A>, Txid)>, C::Error> {
-        if self
-            .try_get_chain_position(chain, chain_tip, outpoint.txid)?
-            .is_none()
-        {
-            return Ok(None);
-        }
-        if let Some(spends) = self.spends.get(&outpoint) {
-            for &txid in spends {
-                if let Some(observed_at) = self.try_get_chain_position(chain, chain_tip, txid)? {
-                    return Ok(Some((observed_at, txid)));
+    ) -> Result<Option<A>, C::Error> {
+        if let Some(anchors) = self.anchors.get(&txid) {
+            for anchor in anchors {
+                let is_in_chain = chain.is_block_in_chain(anchor.anchor_block(), chain_tip)?;
+                if is_in_chain == Some(true) {
+                    return Ok(Some(anchor.clone()));
                 }
             }
         }
         Ok(None)
     }
 
-    /// Get the txid of the spending transaction and where the spending transaction is observed in
-    /// the `chain` of `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_get_chain_spend`]
-    ///
-    /// [`try_get_chain_spend`]: Self::try_get_chain_spend
-    pub fn get_chain_spend<C: ChainOracle<Error = Infallible>>(
-        &self,
-        chain: &C,
-        static_block: BlockId,
-        outpoint: OutPoint,
-    ) -> Option<(ChainPosition<&A>, Txid)> {
-        self.try_get_chain_spend(chain, static_block, outpoint)
-            .expect("error is infallible")
-    }
-
-    /// List graph transactions that are in `chain` with `chain_tip`.
-    ///
-    /// Each transaction is represented as a [`CanonicalTx`] that contains where the transaction is
-    /// observed in-chain, and the [`TxNode`].
-    ///
-    /// # Error
-    ///
-    /// If the [`ChainOracle`] implementation (`chain`) fails, an error will be returned with the
-    /// returned item.
-    ///
-    /// If the [`ChainOracle`] is infallible, [`list_canonical_txs`] can be used instead.
-    ///
-    /// [`list_canonical_txs`]: Self::list_canonical_txs
-    pub fn try_list_canonical_txs<'a, C: ChainOracle + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = Result<CanonicalTx<'a, Arc<Transaction>, A>, C::Error>> {
-        self.full_txs().filter_map(move |tx| {
-            self.try_get_chain_position(chain, chain_tip, tx.txid)
-                .map(|v| {
-                    v.map(|observed_in| CanonicalTx {
-                        chain_position: observed_in,
-                        tx_node: tx,
-                    })
-                })
-                .transpose()
-        })
-    }
-
-    /// List graph transactions that are in `chain` with `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_list_canonical_txs`].
-    ///
-    /// [`try_list_canonical_txs`]: Self::try_list_canonical_txs
-    pub fn list_canonical_txs<'a, C: ChainOracle + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-    ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
-        self.try_list_canonical_txs(chain, chain_tip)
-            .map(|r| r.expect("oracle is infallible"))
-    }
-
-    /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
-    /// `chain_tip`.
-    ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
-    /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
-    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
-    ///
-    /// Floating outputs (i.e., outputs for which we don't have the full transaction in the graph)
-    /// are ignored.
-    ///
-    /// # Error
-    ///
-    /// An [`Iterator::Item`] can be an [`Err`] if the [`ChainOracle`] implementation (`chain`)
-    /// fails.
-    ///
-    /// If the [`ChainOracle`] implementation is infallible, [`filter_chain_txouts`] can be used
-    /// instead.
-    ///
-    /// [`filter_chain_txouts`]: Self::filter_chain_txouts
-    pub fn try_filter_chain_txouts<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
-        outpoints
-            .into_iter()
-            .map(
-                move |(spk_i, op)| -> Result<Option<(OI, FullTxOut<_>)>, C::Error> {
-                    let tx_node = match self.get_tx_node(op.txid) {
-                        Some(n) => n,
-                        None => return Ok(None),
-                    };
-
-                    let txout = match tx_node.tx.as_ref().output.get(op.vout as usize) {
-                        Some(txout) => txout.clone(),
-                        None => return Ok(None),
-                    };
-
-                    let chain_position =
-                        match self.try_get_chain_position(chain, chain_tip, op.txid)? {
-                            Some(pos) => pos.cloned(),
-                            None => return Ok(None),
-                        };
-
-                    let spent_by = self
-                        .try_get_chain_spend(chain, chain_tip, op)?
-                        .map(|(a, txid)| (a.cloned(), txid));
-
-                    Ok(Some((
-                        spk_i,
-                        FullTxOut {
-                            outpoint: op,
-                            txout,
-                            chain_position,
-                            spent_by,
-                            is_on_coinbase: tx_node.tx.is_coinbase(),
-                        },
-                    )))
-                },
-            )
-            .filter_map(Result::transpose)
-    }
-
-    /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
-    /// `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_filter_chain_txouts`].
-    ///
-    /// [`try_filter_chain_txouts`]: Self::try_filter_chain_txouts
-    pub fn filter_chain_txouts<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
-        self.try_filter_chain_txouts(chain, chain_tip, outpoints)
-            .map(|r| r.expect("oracle is infallible"))
-    }
-
-    /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
-    /// `chain` with `chain_tip`.
-    ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
-    /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
-    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
-    ///
-    /// Floating outputs are ignored.
-    ///
-    /// # Error
-    ///
-    /// An [`Iterator::Item`] can be an [`Err`] if the [`ChainOracle`] implementation (`chain`)
-    /// fails.
-    ///
-    /// If the [`ChainOracle`] implementation is infallible, [`filter_chain_unspents`] can be used
-    /// instead.
-    ///
-    /// [`filter_chain_unspents`]: Self::filter_chain_unspents
-    pub fn try_filter_chain_unspents<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
-        self.try_filter_chain_txouts(chain, chain_tip, outpoints)
-            .filter(|r| match r {
-                // keep unspents, drop spents
-                Ok((_, full_txo)) => full_txo.spent_by.is_none(),
-                // keep errors
-                Err(_) => true,
-            })
-    }
-
-    /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
-    /// `chain` with `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_filter_chain_unspents`].
-    ///
-    /// [`try_filter_chain_unspents`]: Self::try_filter_chain_unspents
-    pub fn filter_chain_unspents<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        txouts: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
-        self.try_filter_chain_unspents(chain, chain_tip, txouts)
-            .map(|r| r.expect("oracle is infallible"))
-    }
-
-    /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
-    ///
-    /// The output of `trust_predicate` should return `true` for scripts that we trust.
-    ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
-    /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
-    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
-    ///
-    /// If the provided [`ChainOracle`] implementation (`chain`) is infallible, [`balance`] can be
-    /// used instead.
-    ///
-    /// [`balance`]: Self::balance
-    pub fn try_balance<C: ChainOracle, OI: Clone>(
+    /// Infallible version of [`Self::try_confirmation_anchor`].
+    pub fn confirmation_anchor<C: ChainOracle<Error = Infallible>>(
         &self,
         chain: &C,
         chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
-        mut trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
-    ) -> Result<Balance, C::Error> {
-        let mut immature = Amount::ZERO;
-        let mut trusted_pending = Amount::ZERO;
-        let mut untrusted_pending = Amount::ZERO;
-        let mut confirmed = Amount::ZERO;
-
-        for res in self.try_filter_chain_unspents(chain, chain_tip, outpoints) {
-            let (spk_i, txout) = res?;
-
-            match &txout.chain_position {
-                ChainPosition::Confirmed(_) => {
-                    if txout.is_confirmed_and_spendable(chain_tip.height) {
-                        confirmed += txout.txout.value;
-                    } else if !txout.is_mature(chain_tip.height) {
-                        immature += txout.txout.value;
-                    }
-                }
-                ChainPosition::Unconfirmed(_) => {
-                    if trust_predicate(&spk_i, txout.txout.script_pubkey) {
-                        trusted_pending += txout.txout.value;
-                    } else {
-                        untrusted_pending += txout.txout.value;
-                    }
-                }
-            }
-        }
-
-        Ok(Balance {
-            immature,
-            trusted_pending,
-            untrusted_pending,
-            confirmed,
-        })
-    }
-
-    /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_balance`].
-    ///
-    /// [`try_balance`]: Self::try_balance
-    pub fn balance<C: ChainOracle<Error = Infallible>, OI: Clone>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
-        trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
-    ) -> Balance {
-        self.try_balance(chain, chain_tip, outpoints, trust_predicate)
-            .expect("oracle is infallible")
+        txid: Txid,
+    ) -> Option<A> {
+        self.try_confirmation_anchor(chain, chain_tip, txid)
+            .expect("infallible")
     }
 }
 

@@ -1,3 +1,6 @@
+use bdk_chain::CanonicalError;
+use bdk_chain::CanonicalTxOut;
+use bdk_chain::LastSeenPrioritizer;
 use serde_json::json;
 use std::cmp;
 use std::collections::HashMap;
@@ -24,7 +27,7 @@ use bdk_chain::{
     indexed_tx_graph,
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
-    tx_graph, ChainOracle, DescriptorExt, FullTxOut, IndexedTxGraph, Merge,
+    tx_graph, ChainOracle, DescriptorExt, IndexedTxGraph, Merge,
 };
 use bdk_coin_select::{
     metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
@@ -275,9 +278,9 @@ where
             plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.txout.value))
         }
         CoinSelectionAlgo::SmallestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.txout.value),
-        CoinSelectionAlgo::OldestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.chain_position),
+        CoinSelectionAlgo::OldestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.pos.clone()),
         CoinSelectionAlgo::NewestFirst => {
-            plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.chain_position))
+            plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.pos.clone()))
         }
         CoinSelectionAlgo::BranchAndBound => plan_utxos.shuffle(&mut thread_rng()),
     }
@@ -410,7 +413,10 @@ where
 }
 
 // Alias the elements of `planned_utxos`
-pub type PlanUtxo = (Plan, FullTxOut<ConfirmationBlockTime>);
+pub type PlanUtxo = (
+    Plan,
+    CanonicalTxOut<ConfirmationBlockTime, u64, (Keychain, u32)>,
+);
 
 pub fn planned_utxos<O: ChainOracle>(
     graph: &KeychainTxGraph,
@@ -421,12 +427,11 @@ pub fn planned_utxos<O: ChainOracle>(
     let outpoints = graph.index.outpoints();
     graph
         .graph()
-        .try_filter_chain_unspents(chain, chain_tip, outpoints.iter().cloned())
-        .filter_map(|r| -> Option<Result<PlanUtxo, _>> {
-            let (k, i, full_txo) = match r {
-                Err(err) => return Some(Err(err)),
-                Ok(((k, i), full_txo)) => (k, i, full_txo),
-            };
+        .try_canonical_view(chain, chain_tip, &LastSeenPrioritizer)
+        .map_err(CanonicalError::into_chain_oracle_error)?
+        .into_filter_txouts(outpoints.iter().cloned())
+        .filter_map(|canon_txo| -> Option<Result<PlanUtxo, _>> {
+            let (k, i) = canon_txo.spk_index;
             let desc = graph
                 .index
                 .keychains()
@@ -438,7 +443,7 @@ pub fn planned_utxos<O: ChainOracle>(
 
             let plan = desc.plan(assets).ok()?;
 
-            Some(Ok((plan, full_txo)))
+            Some(Ok((plan, canon_txo)))
         })
         .collect()
 }
@@ -516,12 +521,12 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 }
             }
 
-            let balance = graph.graph().try_balance(
-                chain,
-                chain.get_chain_tip()?,
-                graph.index.outpoints().iter().cloned(),
-                |(k, _), _| k == &Keychain::Internal,
-            )?;
+            let balance = graph
+                .graph()
+                .canonical_view(chain, chain.get_chain_tip()?, &LastSeenPrioritizer)
+                .balance(graph.index.outpoints().iter().cloned(), |(k, _), _| {
+                    k == &Keychain::Internal
+                });
 
             let confirmed_total = balance.confirmed + balance.immature;
             let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;
@@ -560,32 +565,25 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 } => {
                     let txouts = graph
                         .graph()
-                        .try_filter_chain_txouts(chain, chain_tip, outpoints.iter().cloned())
-                        .filter(|r| match r {
-                            Ok((_, full_txo)) => match (spent, unspent) {
-                                (true, false) => full_txo.spent_by.is_some(),
-                                (false, true) => full_txo.spent_by.is_none(),
-                                _ => true,
-                            },
-                            // always keep errored items
-                            Err(_) => true,
+                        .canonical_view(chain, chain_tip, &LastSeenPrioritizer)
+                        .into_filter_txouts(outpoints.iter().cloned())
+                        .filter(|canon_txo| match (spent, unspent) {
+                            (true, false) => canon_txo.spent_by.is_some(),
+                            (false, true) => canon_txo.spent_by.is_none(),
+                            _ => true,
                         })
-                        .filter(|r| match r {
-                            Ok((_, full_txo)) => match (confirmed, unconfirmed) {
-                                (true, false) => full_txo.chain_position.is_confirmed(),
-                                (false, true) => !full_txo.chain_position.is_confirmed(),
-                                _ => true,
-                            },
-                            // always keep errored items
-                            Err(_) => true,
+                        .filter(|canon_txo| match (confirmed, unconfirmed) {
+                            (true, false) => canon_txo.pos.is_confirmed(),
+                            (false, true) => !canon_txo.pos.is_confirmed(),
+                            _ => true,
                         })
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .collect::<Vec<_>>();
 
-                    for (spk_i, full_txo) in txouts {
-                        let addr = Address::from_script(&full_txo.txout.script_pubkey, network)?;
+                    for txo in txouts {
+                        let addr = Address::from_script(&txo.txout.script_pubkey, network)?;
                         println!(
                             "{:?} {} {} {} spent:{:?}",
-                            spk_i, full_txo.txout.value, full_txo.outpoint, addr, full_txo.spent_by
+                            txo.spk_index, txo.txout.value, txo.outpoint, addr, txo.spent_by
                         )
                     }
                     Ok(())

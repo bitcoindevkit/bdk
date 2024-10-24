@@ -128,12 +128,13 @@ impl FullyNodedExport {
         Self::is_compatible_with_core(&descriptor)?;
 
         let blockheight = if include_blockheight {
-            wallet.transactions().next().map_or(0, |canonical_tx| {
-                match canonical_tx.chain_position {
-                    bdk_chain::ChainPosition::Confirmed(a) => a.block_id.height,
-                    bdk_chain::ChainPosition::Unconfirmed(_) => 0,
-                }
-            })
+            wallet
+                .transactions()
+                .next()
+                .map_or(0, |canonical_tx| match canonical_tx.pos {
+                    bdk_chain::CanonicalPos::Confirmed(a) => a.block_id.height,
+                    bdk_chain::CanonicalPos::Unconfirmed(_) => 0,
+                })
         } else {
             0
         };
@@ -218,7 +219,7 @@ mod test {
     use crate::std::string::ToString;
     use bdk_chain::{BlockId, ConfirmationBlockTime};
     use bitcoin::hashes::Hash;
-    use bitcoin::{transaction, BlockHash, Network, Transaction};
+    use bitcoin::{transaction, BlockHash, Network, OutPoint, Transaction, TxIn};
     use chain::tx_graph;
 
     use super::*;
@@ -231,7 +232,10 @@ mod test {
             .create_wallet_no_persist()
             .expect("must create wallet");
         let transaction = Transaction {
-            input: vec![],
+            input: vec![TxIn {
+                previous_output: OutPoint::new(bitcoin::hashes::Hash::hash(b"yoo"), 0),
+                ..Default::default()
+            }],
             output: vec![],
             version: transaction::Version::non_standard(0),
             lock_time: bitcoin::absolute::LockTime::ZERO,
