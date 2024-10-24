@@ -86,29 +86,29 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
         .unwrap();
 
     wallet.insert_tx(tx0.clone());
-    insert_anchor_from_conf(
+    insert_anchor(
         &mut wallet,
         tx0.compute_txid(),
-        ChainPosition::Confirmed(ConfirmationBlockTime {
+        ConfirmationBlockTime {
             block_id: BlockId {
                 height: 1_000,
                 hash: BlockHash::all_zeros(),
             },
             confirmation_time: 100,
-        }),
+        },
     );
 
     wallet.insert_tx(tx1.clone());
-    insert_anchor_from_conf(
+    insert_anchor(
         &mut wallet,
         tx1.compute_txid(),
-        ChainPosition::Confirmed(ConfirmationBlockTime {
+        ConfirmationBlockTime {
             block_id: BlockId {
                 height: 2_000,
                 hash: BlockHash::all_zeros(),
             },
             confirmation_time: 200,
-        }),
+        },
     );
 
     (wallet, tx1.compute_txid())
@@ -208,23 +208,17 @@ pub fn feerate_unchecked(sat_vb: f64) -> FeeRate {
     FeeRate::from_sat_per_kwu(sat_kwu)
 }
 
-/// Simulates confirming a tx with `txid` at the specified `position` by inserting an anchor
-/// at the lowest height in local chain that is greater or equal to `position`'s height,
-/// assuming the confirmation time matches `ConfirmationTime::Confirmed`.
-pub fn insert_anchor_from_conf(
-    wallet: &mut Wallet,
-    txid: Txid,
-    position: ChainPosition<ConfirmationBlockTime>,
-) {
-    if let ChainPosition::Confirmed(anchor) = position {
-        wallet
-            .apply_update(Update {
-                tx_update: tx_graph::TxUpdate {
-                    anchors: [(anchor, txid)].into(),
-                    ..Default::default()
-                },
+/// Simulates confirming a tx with `txid` by applying an update to the wallet containing
+/// the given `anchor`. Note: to be considered confirmed the anchor block must exist in
+/// the current active chain.
+pub fn insert_anchor(wallet: &mut Wallet, txid: Txid, anchor: ConfirmationBlockTime) {
+    wallet
+        .apply_update(Update {
+            tx_update: tx_graph::TxUpdate {
+                anchors: [(anchor, txid)].into(),
                 ..Default::default()
-            })
-            .unwrap();
-    }
+            },
+            ..Default::default()
+        })
+        .unwrap();
 }

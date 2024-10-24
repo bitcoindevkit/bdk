@@ -62,8 +62,8 @@ fn receive_output_to_address(
     wallet.insert_tx(tx);
 
     match height {
-        ChainPosition::Confirmed { .. } => {
-            insert_anchor_from_conf(wallet, txid, height);
+        ChainPosition::Confirmed(anchor) => {
+            insert_anchor(wallet, txid, anchor);
         }
         ChainPosition::Unconfirmed(last_seen) => {
             insert_seen_at(wallet, txid, last_seen);
@@ -1237,11 +1237,11 @@ fn test_create_tx_add_utxo() {
     };
     let txid = small_output_tx.compute_txid();
     wallet.insert_tx(small_output_tx);
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
-        block_id: wallet.latest_checkpoint().get(2000).unwrap().block_id(),
+    let anchor = ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().block_id(),
         confirmation_time: 200,
-    });
-    insert_anchor_from_conf(&mut wallet, txid, chain_position);
+    };
+    insert_anchor(&mut wallet, txid, anchor);
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -1284,11 +1284,11 @@ fn test_create_tx_manually_selected_insufficient() {
     };
     let txid = small_output_tx.compute_txid();
     wallet.insert_tx(small_output_tx.clone());
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
-        block_id: wallet.latest_checkpoint().get(2000).unwrap().block_id(),
+    let anchor = ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().block_id(),
         confirmation_time: 200,
-    });
-    insert_anchor_from_conf(&mut wallet, txid, chain_position);
+    };
+    insert_anchor(&mut wallet, txid, anchor);
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -1845,11 +1845,11 @@ fn test_bump_fee_confirmed_tx() {
 
     wallet.insert_tx(tx);
 
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+    let anchor = ConfirmationBlockTime {
         block_id: wallet.latest_checkpoint().get(42).unwrap().block_id(),
         confirmation_time: 42_000,
-    });
-    insert_anchor_from_conf(&mut wallet, txid, chain_position);
+    };
+    insert_anchor(&mut wallet, txid, anchor);
 
     wallet.build_fee_bump(txid).unwrap().finish().unwrap();
 }
@@ -2122,11 +2122,11 @@ fn test_bump_fee_drain_wallet() {
     };
     let txid = tx.compute_txid();
     wallet.insert_tx(tx.clone());
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+    let anchor = ConfirmationBlockTime {
         block_id: wallet.latest_checkpoint().block_id(),
         confirmation_time: 42_000,
-    });
-    insert_anchor_from_conf(&mut wallet, txid, chain_position);
+    };
+    insert_anchor(&mut wallet, txid, anchor);
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -2182,15 +2182,13 @@ fn test_bump_fee_remove_output_manually_selected_only() {
             value: Amount::from_sat(25_000),
         }],
     };
-    let position: ChainPosition<ConfirmationBlockTime> = wallet
-        .transactions()
-        .last()
-        .unwrap()
-        .chain_position
-        .cloned();
 
     wallet.insert_tx(init_tx.clone());
-    insert_anchor_from_conf(&mut wallet, init_tx.compute_txid(), position);
+    let anchor = ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().block_id(),
+        confirmation_time: 200,
+    };
+    insert_anchor(&mut wallet, init_tx.compute_txid(), anchor);
 
     let outpoint = OutPoint {
         txid: init_tx.compute_txid(),
@@ -2235,14 +2233,12 @@ fn test_bump_fee_add_input() {
         }],
     };
     let txid = init_tx.compute_txid();
-    let pos: ChainPosition<ConfirmationBlockTime> = wallet
-        .transactions()
-        .last()
-        .unwrap()
-        .chain_position
-        .cloned();
     wallet.insert_tx(init_tx);
-    insert_anchor_from_conf(&mut wallet, txid, pos);
+    let anchor = ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().block_id(),
+        confirmation_time: 200,
+    };
+    insert_anchor(&mut wallet, txid, anchor);
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -3886,11 +3882,11 @@ fn test_spend_coinbase() {
     };
     let txid = coinbase_tx.compute_txid();
     wallet.insert_tx(coinbase_tx);
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
+    let anchor = ConfirmationBlockTime {
         block_id: confirmation_block_id,
         confirmation_time: 30_000,
-    });
-    insert_anchor_from_conf(&mut wallet, txid, chain_position);
+    };
+    insert_anchor(&mut wallet, txid, anchor);
 
     let not_yet_mature_time = confirmation_height + COINBASE_MATURITY - 1;
     let maturity_time = confirmation_height + COINBASE_MATURITY;
@@ -4134,7 +4130,7 @@ fn test_keychains_with_overlapping_spks() {
         .address;
     let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
         block_id: BlockId {
-            height: 8000,
+            height: 2000,
             hash: BlockHash::all_zeros(),
         },
         confirmation_time: 0,
