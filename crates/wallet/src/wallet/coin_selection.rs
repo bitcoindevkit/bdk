@@ -278,7 +278,7 @@ impl CoinSelectionAlgorithm for OldestFirstCoinSelection {
         // For utxo that doesn't exist in DB, they will have lowest priority to be selected
         let utxos = {
             optional_utxos.sort_unstable_by_key(|wu| match &wu.utxo {
-                Utxo::Local(local) => Some(local.confirmation_time),
+                Utxo::Local(local) => Some(local.chain_position),
                 Utxo::Foreign { .. } => None,
             });
 
@@ -733,11 +733,12 @@ where
 #[cfg(test)]
 mod test {
     use assert_matches::assert_matches;
+    use bitcoin::hashes::Hash;
+    use chain::{BlockId, ChainPosition, ConfirmationBlockTime};
     use core::str::FromStr;
     use rand::rngs::StdRng;
 
-    use bdk_chain::ConfirmationTime;
-    use bitcoin::{Amount, ScriptBuf, TxIn, TxOut};
+    use bitcoin::{Amount, BlockHash, ScriptBuf, TxIn, TxOut};
 
     use super::*;
     use crate::types::*;
@@ -752,7 +753,34 @@ mod test {
 
     const FEE_AMOUNT: u64 = 50;
 
-    fn utxo(value: u64, index: u32, confirmation_time: ConfirmationTime) -> WeightedUtxo {
+    fn unconfirmed_utxo(value: u64, index: u32, last_seen: u64) -> WeightedUtxo {
+        utxo(value, index, ChainPosition::Unconfirmed(last_seen))
+    }
+
+    fn confirmed_utxo(
+        value: u64,
+        index: u32,
+        confirmation_height: u32,
+        confirmation_time: u64,
+    ) -> WeightedUtxo {
+        utxo(
+            value,
+            index,
+            ChainPosition::Confirmed(ConfirmationBlockTime {
+                block_id: chain::BlockId {
+                    height: confirmation_height,
+                    hash: bitcoin::BlockHash::all_zeros(),
+                },
+                confirmation_time,
+            }),
+        )
+    }
+
+    fn utxo(
+        value: u64,
+        index: u32,
+        chain_position: ChainPosition<ConfirmationBlockTime>,
+    ) -> WeightedUtxo {
         assert!(index < 10);
         let outpoint = OutPoint::from_str(&format!(
             "000000000000000000000000000000000000000000000000000000000000000{}:0",
@@ -770,49 +798,24 @@ mod test {
                 keychain: KeychainKind::External,
                 is_spent: false,
                 derivation_index: 42,
-                confirmation_time,
+                chain_position,
             }),
         }
     }
 
     fn get_test_utxos() -> Vec<WeightedUtxo> {
         vec![
-            utxo(100_000, 0, ConfirmationTime::Unconfirmed { last_seen: 0 }),
-            utxo(
-                FEE_AMOUNT - 40,
-                1,
-                ConfirmationTime::Unconfirmed { last_seen: 0 },
-            ),
-            utxo(200_000, 2, ConfirmationTime::Unconfirmed { last_seen: 0 }),
+            unconfirmed_utxo(100_000, 0, 0),
+            unconfirmed_utxo(FEE_AMOUNT - 40, 1, 0),
+            unconfirmed_utxo(200_000, 2, 0),
         ]
     }
 
     fn get_oldest_first_test_utxos() -> Vec<WeightedUtxo> {
         // ensure utxos are from different tx
-        let utxo1 = utxo(
-            120_000,
-            1,
-            ConfirmationTime::Confirmed {
-                height: 1,
-                time: 1231006505,
-            },
-        );
-        let utxo2 = utxo(
-            80_000,
-            2,
-            ConfirmationTime::Confirmed {
-                height: 2,
-                time: 1231006505,
-            },
-        );
-        let utxo3 = utxo(
-            300_000,
-            3,
-            ConfirmationTime::Confirmed {
-                height: 3,
-                time: 1231006505,
-            },
-        );
+        let utxo1 = confirmed_utxo(120_000, 1, 1, 1231006505);
+        let utxo2 = confirmed_utxo(80_000, 2, 2, 1231006505);
+        let utxo3 = confirmed_utxo(300_000, 3, 3, 1231006505);
         vec![utxo1, utxo2, utxo3]
     }
 
@@ -834,13 +837,16 @@ mod test {
                     keychain: KeychainKind::External,
                     is_spent: false,
                     derivation_index: rng.next_u32(),
-                    confirmation_time: if rng.gen_bool(0.5) {
-                        ConfirmationTime::Confirmed {
-                            height: rng.next_u32(),
-                            time: rng.next_u64(),
-                        }
+                    chain_position: if rng.gen_bool(0.5) {
+                        ChainPosition::Confirmed(ConfirmationBlockTime {
+                            block_id: chain::BlockId {
+                                height: rng.next_u32(),
+                                hash: BlockHash::all_zeros(),
+                            },
+                            confirmation_time: rng.next_u64(),
+                        })
                     } else {
-                        ConfirmationTime::Unconfirmed { last_seen: 0 }
+                        ChainPosition::Unconfirmed(0)
                     },
                 }),
             });
@@ -865,7 +871,7 @@ mod test {
                     keychain: KeychainKind::External,
                     is_spent: false,
                     derivation_index: 42,
-                    confirmation_time: ConfirmationTime::Unconfirmed { last_seen: 0 },
+                    chain_position: ChainPosition::Unconfirmed(0),
                 }),
             })
             .collect()
@@ -1222,7 +1228,7 @@ mod test {
         optional.push(utxo(
             500_000,
             3,
-            ConfirmationTime::Unconfirmed { last_seen: 0 },
+            ChainPosition::<ConfirmationBlockTime>::Unconfirmed(0),
         ));
 
         // Defensive assertions, for sanity and in case someone changes the test utxos vector.
@@ -1584,10 +1590,13 @@ mod test {
                     keychain: KeychainKind::External,
                     is_spent: false,
                     derivation_index: 0,
-                    confirmation_time: ConfirmationTime::Confirmed {
-                        height: 12345,
-                        time: 12345,
-                    },
+                    chain_position: ChainPosition::Confirmed(ConfirmationBlockTime {
+                        block_id: BlockId {
+                            height: 12345,
+                            hash: BlockHash::all_zeros(),
+                        },
+                        confirmation_time: 12345,
+                    }),
                 }),
             }
         }

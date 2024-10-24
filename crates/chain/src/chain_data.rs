@@ -1,4 +1,3 @@
-use crate::ConfirmationBlockTime;
 use bitcoin::{OutPoint, TxOut, Txid};
 
 use crate::{Anchor, COINBASE_MATURITY};
@@ -7,6 +6,14 @@ use crate::{Anchor, COINBASE_MATURITY};
 ///
 /// The generic `A` should be a [`Anchor`] implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, core::hash::Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(bound(
+        deserialize = "A: Ord + serde::Deserialize<'de>",
+        serialize = "A: Ord + serde::Serialize",
+    ))
+)]
 pub enum ChainPosition<A> {
     /// The chain data is seen as confirmed, and in anchored by `A`.
     Confirmed(A),
@@ -37,48 +44,6 @@ impl<A: Anchor> ChainPosition<A> {
         match self {
             ChainPosition::Confirmed(a) => Some(a.confirmation_height_upper_bound()),
             ChainPosition::Unconfirmed(_) => None,
-        }
-    }
-}
-
-/// Block height and timestamp at which a transaction is confirmed.
-#[derive(Debug, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-pub enum ConfirmationTime {
-    /// The transaction is confirmed
-    Confirmed {
-        /// Confirmation height.
-        height: u32,
-        /// Confirmation time in unix seconds.
-        time: u64,
-    },
-    /// The transaction is unconfirmed
-    Unconfirmed {
-        /// The last-seen timestamp in unix seconds.
-        last_seen: u64,
-    },
-}
-
-impl ConfirmationTime {
-    /// Construct an unconfirmed variant using the given `last_seen` time in unix seconds.
-    pub fn unconfirmed(last_seen: u64) -> Self {
-        Self::Unconfirmed { last_seen }
-    }
-
-    /// Returns whether [`ConfirmationTime`] is the confirmed variant.
-    pub fn is_confirmed(&self) -> bool {
-        matches!(self, Self::Confirmed { .. })
-    }
-}
-
-impl From<ChainPosition<ConfirmationBlockTime>> for ConfirmationTime {
-    fn from(observed_as: ChainPosition<ConfirmationBlockTime>) -> Self {
-        match observed_as {
-            ChainPosition::Confirmed(a) => Self::Confirmed {
-                height: a.block_id.height,
-                time: a.confirmation_time,
-            },
-            ChainPosition::Unconfirmed(last_seen) => Self::Unconfirmed { last_seen },
         }
     }
 }
@@ -159,6 +124,8 @@ impl<A: Anchor> FullTxOut<A> {
 
 #[cfg(test)]
 mod test {
+    use bdk_core::ConfirmationBlockTime;
+
     use crate::BlockId;
 
     use super::*;

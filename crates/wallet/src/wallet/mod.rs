@@ -34,8 +34,8 @@ use bdk_chain::{
         SyncResult,
     },
     tx_graph::{CanonicalTx, TxGraph, TxNode, TxUpdate},
-    BlockId, ChainPosition, ConfirmationBlockTime, ConfirmationTime, DescriptorExt, FullTxOut,
-    Indexed, IndexedTxGraph, Merge,
+    BlockId, ChainPosition, ConfirmationBlockTime, DescriptorExt, FullTxOut, Indexed,
+    IndexedTxGraph, Merge,
 };
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
@@ -1660,11 +1660,10 @@ impl Wallet {
                     .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
                 let txout = &prev_tx.output[txin.previous_output.vout as usize];
 
-                let confirmation_time: ConfirmationTime = graph
+                let chain_position = graph
                     .get_chain_position(&self.chain, chain_tip, txin.previous_output.txid)
                     .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?
-                    .cloned()
-                    .into();
+                    .cloned();
 
                 let weighted_utxo = match txout_index.index_of_spk(txout.script_pubkey.clone()) {
                     Some(&(keychain, derivation_index)) => {
@@ -1679,7 +1678,7 @@ impl Wallet {
                                 keychain,
                                 is_spent: true,
                                 derivation_index,
-                                confirmation_time,
+                                chain_position,
                             }),
                             satisfaction_weight,
                         }
@@ -2051,33 +2050,33 @@ impl Wallet {
                     Some(tx) => tx,
                     None => return false,
                 };
-                let confirmation_time: ConfirmationTime = match self
-                    .indexed_graph
-                    .graph()
-                    .get_chain_position(&self.chain, chain_tip, txid)
-                {
-                    Some(chain_position) => chain_position.cloned().into(),
+                let chain_position = match self.indexed_graph.graph().get_chain_position(
+                    &self.chain,
+                    chain_tip,
+                    txid,
+                ) {
+                    Some(chain_position) => chain_position.cloned(),
                     None => return false,
                 };
 
                 // Whether the UTXO is mature and, if needed, confirmed
                 let mut spendable = true;
-                if must_only_use_confirmed_tx && !confirmation_time.is_confirmed() {
+                if must_only_use_confirmed_tx && !chain_position.is_confirmed() {
                     return false;
                 }
                 if tx.is_coinbase() {
                     debug_assert!(
-                        confirmation_time.is_confirmed(),
+                        chain_position.is_confirmed(),
                         "coinbase must always be confirmed"
                     );
                     if let Some(current_height) = current_height {
-                        match confirmation_time {
-                            ConfirmationTime::Confirmed { height, .. } => {
+                        match chain_position {
+                            ChainPosition::Confirmed(a) => {
                                 // https://github.com/bitcoin/bitcoin/blob/c5e67be03bb06a5d7885c55db1f016fbf2333fe3/src/validation.cpp#L373-L375
-                                spendable &=
-                                    (current_height.saturating_sub(height)) >= COINBASE_MATURITY;
+                                spendable &= (current_height.saturating_sub(a.block_id.height))
+                                    >= COINBASE_MATURITY;
                             }
-                            ConfirmationTime::Unconfirmed { .. } => spendable = false,
+                            ChainPosition::Unconfirmed { .. } => spendable = false,
                         }
                     }
                 }
@@ -2546,7 +2545,7 @@ fn new_local_utxo(
         outpoint: full_txo.outpoint,
         txout: full_txo.txout,
         is_spent: full_txo.spent_by.is_some(),
-        confirmation_time: full_txo.chain_position.into(),
+        chain_position: full_txo.chain_position,
         keychain,
         derivation_index,
     }
