@@ -483,186 +483,74 @@ where
 
 #[cfg(test)]
 mod test {
-    use std::{collections::BTreeSet, time::Duration};
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::time::Duration;
 
-    use bdk_chain::{
-        bitcoin::{hashes::Hash, Txid},
-        local_chain::LocalChain,
-        BlockId,
-    };
+    use bdk_chain::bitcoin::{constants, hashes::Hash, BlockHash, Network, Txid};
+    use bdk_chain::{local_chain::LocalChain, BlockId};
     use bdk_core::ConfirmationBlockTime;
     use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
     use esplora_client::Builder;
 
     use crate::async_ext::{chain_update, fetch_latest_blocks};
 
-    macro_rules! h {
-        ($index:literal) => {{
-            bdk_chain::bitcoin::hashes::Hash::hash($index.as_bytes())
-        }};
-    }
-
     /// Ensure that update does not remove heights (from original), and all anchor heights are included.
     #[tokio::test]
     pub async fn test_finalize_chain_update() -> anyhow::Result<()> {
-        struct TestCase<'a> {
-            #[allow(dead_code)]
-            name: &'a str,
-            /// Initial blockchain height to start the env with.
-            initial_env_height: u32,
-            /// Initial checkpoint heights to start with.
-            initial_cps: &'a [u32],
-            /// The final blockchain height of the env.
-            final_env_height: u32,
-            /// The anchors to test with: `(height, txid)`. Only the height is provided as we can fetch
-            /// the blockhash from the env.
-            anchors: &'a [(u32, Txid)],
+        let env = TestEnv::new()?;
+        let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+        let client = Builder::new(base_url.as_str()).build_async()?;
+        let init_count: u32 = env.rpc_client().get_block_count()?.try_into()?;
+        assert_eq!(init_count, 1);
+
+        // mine blocks
+        let final_env_height = 15;
+        let to_mine = (final_env_height - init_count) as usize;
+        let blocks: BTreeMap<u32, BlockHash> = (init_count + 1..=final_env_height)
+            .zip(env.mine_blocks(to_mine, None)?)
+            .collect();
+
+        // wait for esplora client to catch up
+        let dur = Duration::from_millis(64);
+        while client.get_height().await? < final_env_height {
+            std::thread::sleep(dur);
         }
 
-        let test_cases = [
-            TestCase {
-                name: "chain_extends",
-                initial_env_height: 60,
-                initial_cps: &[59, 60],
-                final_env_height: 90,
-                anchors: &[],
-            },
-            TestCase {
-                name: "introduce_older_heights",
-                initial_env_height: 50,
-                initial_cps: &[10, 15],
-                final_env_height: 50,
-                anchors: &[(11, h!("A")), (14, h!("B"))],
-            },
-            TestCase {
-                name: "introduce_older_heights_after_chain_extends",
-                initial_env_height: 50,
-                initial_cps: &[10, 15],
-                final_env_height: 100,
-                anchors: &[(11, h!("A")), (14, h!("B"))],
-            },
-        ];
+        // initialize local chain
+        let genesis_hash = constants::genesis_block(Network::Regtest).block_hash();
+        let mut cp = LocalChain::from_genesis_hash(genesis_hash).0.tip();
+        let local_chain_heights = vec![2, 4];
+        for &height in local_chain_heights.iter() {
+            let hash = blocks[&height];
+            let block = BlockId { height, hash };
+            cp = cp.insert(block);
+        }
 
-        for t in test_cases.into_iter() {
-            let env = TestEnv::new()?;
-            let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
-            let client = Builder::new(base_url.as_str()).build_async()?;
-
-            // set env to `initial_env_height`
-            if let Some(to_mine) = t
-                .initial_env_height
-                .checked_sub(env.make_checkpoint_tip().height())
-            {
-                env.mine_blocks(to_mine as _, None)?;
-            }
-            while client.get_height().await? < t.initial_env_height {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-
-            // craft initial `local_chain`
-            let local_chain = {
-                let (mut chain, _) = LocalChain::from_genesis_hash(env.genesis_hash()?);
-                // force `chain_update_blocking` to add all checkpoints in `t.initial_cps`
-                let anchors = t
-                    .initial_cps
-                    .iter()
-                    .map(|&height| -> anyhow::Result<_> {
-                        Ok((
-                            ConfirmationBlockTime {
-                                block_id: BlockId {
-                                    height,
-                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
-                                },
-                                confirmation_time: height as _,
-                            },
-                            Txid::all_zeros(),
-                        ))
-                    })
-                    .collect::<anyhow::Result<BTreeSet<_>>>()?;
-                let update = chain_update(
-                    &client,
-                    &fetch_latest_blocks(&client).await?,
-                    &chain.tip(),
-                    &anchors,
-                )
-                .await?;
-                chain.apply_update(update)?;
-                chain
-            };
-
-            // extend env chain
-            if let Some(to_mine) = t
-                .final_env_height
-                .checked_sub(env.make_checkpoint_tip().height())
-            {
-                env.mine_blocks(to_mine as _, None)?;
-            }
-            while client.get_height().await? < t.final_env_height {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-
-            // craft update
-            let update = {
-                let anchors = t
-                    .anchors
-                    .iter()
-                    .map(|&(height, txid)| -> anyhow::Result<_> {
-                        Ok((
-                            ConfirmationBlockTime {
-                                block_id: BlockId {
-                                    height,
-                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
-                                },
-                                confirmation_time: height as _,
-                            },
-                            txid,
-                        ))
-                    })
-                    .collect::<anyhow::Result<_>>()?;
-                chain_update(
-                    &client,
-                    &fetch_latest_blocks(&client).await?,
-                    &local_chain.tip(),
-                    &anchors,
-                )
-                .await?
-            };
-
-            // apply update
-            let mut updated_local_chain = local_chain.clone();
-            updated_local_chain.apply_update(update)?;
-
-            assert!(
-                {
-                    let initial_heights = local_chain
-                        .iter_checkpoints()
-                        .map(|cp| cp.height())
-                        .collect::<BTreeSet<_>>();
-                    let updated_heights = updated_local_chain
-                        .iter_checkpoints()
-                        .map(|cp| cp.height())
-                        .collect::<BTreeSet<_>>();
-                    updated_heights.is_superset(&initial_heights)
+        // include these anchors when requesting a chain update. anchor 3 is behind
+        // the local chain tip, and anchor 5 is ahead
+        let mut anchors = BTreeSet::new();
+        let anchor_heights = vec![3, 5];
+        for &height in anchor_heights.iter() {
+            let anchor = ConfirmationBlockTime {
+                block_id: BlockId {
+                    height,
+                    hash: blocks[&height],
                 },
-                "heights from the initial chain must all be in the updated chain",
-            );
+                confirmation_time: height as u64,
+            };
+            anchors.insert((anchor, Txid::all_zeros()));
+        }
 
-            assert!(
-                {
-                    let exp_anchor_heights = t
-                        .anchors
-                        .iter()
-                        .map(|(h, _)| *h)
-                        .chain(t.initial_cps.iter().copied())
-                        .collect::<BTreeSet<_>>();
-                    let anchor_heights = updated_local_chain
-                        .iter_checkpoints()
-                        .map(|cp| cp.height())
-                        .collect::<BTreeSet<_>>();
-                    anchor_heights.is_superset(&exp_anchor_heights)
-                },
-                "anchor heights must all be in updated chain",
-            );
+        // fetch latest and get update
+        let latest_blocks = fetch_latest_blocks(&client).await?;
+        assert_eq!(latest_blocks.len(), 10);
+        let update = chain_update(&client, &latest_blocks, &cp, &anchors).await?;
+        assert_eq!(update.height(), final_env_height);
+
+        // check update cp contains expected heights
+        for height in local_chain_heights.into_iter().chain(anchor_heights) {
+            let cp = update.get(height).expect("update must have height");
+            assert_eq!(blocks[&cp.height()], cp.hash());
         }
 
         Ok(())
