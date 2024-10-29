@@ -26,6 +26,7 @@ use bitcoin::{
     absolute, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, ScriptBuf,
     Sequence, Transaction, TxIn, TxOut, Txid, Weight,
 };
+use miniscript::{descriptor::KeyMap, Descriptor, DescriptorPublicKey};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -97,6 +98,11 @@ fn insert_seen_at(wallet: &mut Wallet, txid: Txid, seen_at: u64) {
             ..Default::default()
         })
         .unwrap();
+}
+
+fn parse_descriptor(s: &str) -> (Descriptor<DescriptorPublicKey>, KeyMap) {
+    <Descriptor<DescriptorPublicKey>>::parse_descriptor(&Secp256k1::new(), s)
+        .expect("failed to parse descriptor")
 }
 
 // The satisfaction size of a P2WPKH is 112 WU =
@@ -251,7 +257,22 @@ fn wallet_load_checks() -> anyhow::Result<()> {
             ))),
             "unexpected descriptors check result",
         );
-
+        // check setting keymaps
+        let (_, external_keymap) = parse_descriptor(external_desc);
+        let (_, internal_keymap) = parse_descriptor(internal_desc);
+        let wallet = Wallet::load()
+            .keymap(KeychainKind::External, external_keymap)
+            .keymap(KeychainKind::Internal, internal_keymap)
+            .load_wallet(&mut open_db(&file_path)?)
+            .expect("db should not fail")
+            .expect("wallet was persisted");
+        for keychain in [KeychainKind::External, KeychainKind::Internal] {
+            let keymap = wallet.get_signers(keychain).as_key_map(wallet.secp_ctx());
+            assert!(
+                !keymap.is_empty(),
+                "load should populate keymap for keychain {keychain:?}"
+            );
+        }
         Ok(())
     }
 
