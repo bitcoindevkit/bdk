@@ -130,6 +130,8 @@ jobs:
   clippy_check:
     needs: prepare
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -142,6 +144,7 @@ jobs:
       - uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          name: Clippy Results
           args: --all-features --all-targets -- -D warnings
 
   build-examples:
