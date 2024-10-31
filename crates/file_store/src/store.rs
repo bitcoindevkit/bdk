@@ -10,6 +10,9 @@ use std::{
 };
 
 /// Persists an append-only list of changesets (`C`) to a single file.
+///
+/// > ⚠ This is a development/testing database. It does not natively support backwards compatible
+/// > BDK version upgrades so should not be used in production.
 #[derive(Debug)]
 pub struct Store<C>
 where
