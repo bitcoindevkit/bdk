@@ -12,6 +12,7 @@ use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescripto
 use bdk_wallet::error::CreateTxError;
 use bdk_wallet::psbt::PsbtUtils;
 use bdk_wallet::signer::{SignOptions, SignerError};
+use bdk_wallet::test_utils::*;
 use bdk_wallet::tx_builder::AddForeignUtxoError;
 use bdk_wallet::{AddressInfo, Balance, ChangeSet, Wallet, WalletPersister, WalletTx};
 use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
@@ -29,9 +30,6 @@ use bitcoin::{
 use miniscript::{descriptor::KeyMap, Descriptor, DescriptorPublicKey};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-
-mod common;
-use common::*;
 
 fn receive_output(
     wallet: &mut Wallet,

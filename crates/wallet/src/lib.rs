@@ -28,6 +28,8 @@ pub extern crate serde_json;
 pub mod descriptor;
 pub mod keys;
 pub mod psbt;
+#[cfg(feature = "test-utils")]
+pub mod test_utils;
 mod types;
 mod wallet;
 

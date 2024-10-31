@@ -35,13 +35,14 @@ all-keys = ["keys-bip39"]
 keys-bip39 = ["bip39"]
 rusqlite = ["bdk_chain/rusqlite"]
 file_store = ["bdk_file_store"]
+test-utils = ["std"]
 
 [dev-dependencies]
 lazy_static = "1.4"
 assert_matches = "1.5.0"
 tempfile = "3"
 bdk_chain = { path = "../chain", features = ["rusqlite"] }
-bdk_wallet = { path = ".", features = ["rusqlite", "file_store"] }
+bdk_wallet = { path = ".", features = ["rusqlite", "file_store", "test-utils"] }
 bdk_file_store = { path = "../file_store" }
 anyhow = "1"
 rand = "^0.8"
