@@ -1063,11 +1063,9 @@ impl Wallet {
         let graph = self.indexed_graph.graph();
 
         Some(WalletTx {
-            chain_position: graph.get_chain_position(
-                &self.chain,
-                self.chain.tip().block_id(),
-                txid,
-            )?,
+            chain_position: graph
+                .get_chain_position(&self.chain, self.chain.tip().block_id(), txid)?
+                .cloned(),
             tx_node: graph.get_tx_node(txid)?,
         })
     }

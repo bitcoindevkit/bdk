@@ -191,7 +191,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(70000),
             script_pubkey: trusted_spks[0].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(1)
     };
 
     // tx2 is an incoming transaction received at untrusted keychain at block 1.
@@ -200,7 +200,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(30000),
             script_pubkey: untrusted_spks[0].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(2)
     };
 
     // tx3 spends tx2 and gives a change back in trusted keychain. Confirmed at Block 2.
@@ -213,7 +213,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(10000),
             script_pubkey: trusted_spks[1].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(3)
     };
 
     // tx4 is an external transaction receiving at untrusted keychain, unconfirmed.
@@ -222,7 +222,7 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(20000),
             script_pubkey: untrusted_spks[1].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(4)
     };
 
     // tx5 is an external transaction receiving at trusted keychain, unconfirmed.
@@ -231,11 +231,12 @@ fn test_list_owned_txouts() {
             value: Amount::from_sat(15000),
             script_pubkey: trusted_spks[2].to_owned(),
         }],
-        ..new_tx(0)
+        ..new_tx(5)
     };
 
     // tx6 is an unrelated transaction confirmed at 3.
-    let tx6 = new_tx(0);
+    // This won't be inserted because it is not relevant.
+    let tx6 = new_tx(6);
 
     // Insert transactions into graph with respective anchors
     // Insert unconfirmed txs with a last_seen timestamp
@@ -293,7 +294,7 @@ fn test_list_owned_txouts() {
             let confirmed_txouts_txid = txouts
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Confirmed { .. }) {
+                    if full_txout.chain_position.is_confirmed() {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -304,7 +305,7 @@ fn test_list_owned_txouts() {
             let unconfirmed_txouts_txid = txouts
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed { .. }) {
+                    if !full_txout.chain_position.is_confirmed() {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -315,7 +316,7 @@ fn test_list_owned_txouts() {
             let confirmed_utxos_txid = utxos
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Confirmed { .. }) {
+                    if full_txout.chain_position.is_confirmed() {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -326,7 +327,7 @@ fn test_list_owned_txouts() {
             let unconfirmed_utxos_txid = utxos
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed { .. }) {
+                    if !full_txout.chain_position.is_confirmed() {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -360,20 +361,26 @@ fn test_list_owned_txouts() {
         assert_eq!(confirmed_txouts_txid, [tx1.compute_txid()].into());
         assert_eq!(
             unconfirmed_txouts_txid,
-            [tx4.compute_txid(), tx5.compute_txid()].into()
+            [
+                tx2.compute_txid(),
+                tx3.compute_txid(),
+                tx4.compute_txid(),
+                tx5.compute_txid()
+            ]
+            .into()
         );
 
         assert_eq!(confirmed_utxos_txid, [tx1.compute_txid()].into());
         assert_eq!(
             unconfirmed_utxos_txid,
-            [tx4.compute_txid(), tx5.compute_txid()].into()
+            [tx3.compute_txid(), tx4.compute_txid(), tx5.compute_txid()].into()
         );
 
         assert_eq!(
             balance,
             Balance {
                 immature: Amount::from_sat(70000),          // immature coinbase
-                trusted_pending: Amount::from_sat(15000),   // tx5
+                trusted_pending: Amount::from_sat(25000),   // tx3, tx5
                 untrusted_pending: Amount::from_sat(20000), // tx4
                 confirmed: Amount::ZERO                     // Nothing is confirmed yet
             }
@@ -397,26 +404,23 @@ fn test_list_owned_txouts() {
         );
         assert_eq!(
             unconfirmed_txouts_txid,
-            [tx4.compute_txid(), tx5.compute_txid()].into()
+            [tx3.compute_txid(), tx4.compute_txid(), tx5.compute_txid()].into()
         );
 
         // tx2 gets into confirmed utxos set
-        assert_eq!(
-            confirmed_utxos_txid,
-            [tx1.compute_txid(), tx2.compute_txid()].into()
-        );
+        assert_eq!(confirmed_utxos_txid, [tx1.compute_txid()].into());
         assert_eq!(
             unconfirmed_utxos_txid,
-            [tx4.compute_txid(), tx5.compute_txid()].into()
+            [tx3.compute_txid(), tx4.compute_txid(), tx5.compute_txid()].into()
         );
 
         assert_eq!(
             balance,
             Balance {
                 immature: Amount::from_sat(70000),          // immature coinbase
-                trusted_pending: Amount::from_sat(15000),   // tx5
+                trusted_pending: Amount::from_sat(25000),   // tx3, tx5
                 untrusted_pending: Amount::from_sat(20000), // tx4
-                confirmed: Amount::from_sat(30_000)         // tx2 got confirmed
+                confirmed: Amount::from_sat(0)              // tx2 got confirmed (but spent by 3)
             }
         );
     }
@@ -534,6 +538,7 @@ fn test_get_chain_position() {
     use bdk_chain::spk_txout::SpkTxOutIndex;
     use bdk_chain::BlockId;
 
+    #[derive(Debug)]
     struct TestCase<A> {
         name: &'static str,
         tx: Transaction,

@@ -185,7 +185,7 @@ fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
         output: vec![],
     };
 
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let changeset = graph.insert_tx(tx);
     assert!(!changeset.is_empty());
     assert!(graph.outspends(OutPoint::null()).is_empty());
@@ -216,8 +216,8 @@ fn insert_tx_graph_keeps_track_of_spend() {
         output: vec![],
     };
 
-    let mut graph1 = TxGraph::<()>::default();
-    let mut graph2 = TxGraph::<()>::default();
+    let mut graph1 = TxGraph::<ConfirmationBlockTime>::default();
+    let mut graph2 = TxGraph::<ConfirmationBlockTime>::default();
 
     // insert in different order
     let _ = graph1.insert_tx(tx1.clone());
@@ -245,7 +245,7 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
         output: vec![TxOut::NULL],
     };
 
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let _ = graph.insert_tx(tx.clone());
     assert_eq!(
         graph
@@ -257,7 +257,7 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
 
 #[test]
 fn insert_tx_displaces_txouts() {
-    let mut tx_graph = TxGraph::<()>::default();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
 
     let tx = Transaction {
         version: transaction::Version::ONE,
@@ -284,7 +284,7 @@ fn insert_tx_displaces_txouts() {
 
 #[test]
 fn insert_txout_does_not_displace_tx() {
-    let mut tx_graph = TxGraph::<()>::default();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
     let tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
@@ -340,7 +340,7 @@ fn insert_txout_does_not_displace_tx() {
 
 #[test]
 fn test_calculate_fee() {
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let intx1 = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
@@ -694,7 +694,7 @@ fn test_conflicting_descendants() {
     let txid_a = tx_a.compute_txid();
     let txid_b = tx_b.compute_txid();
 
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let _ = graph.insert_tx(tx_a);
     let _ = graph.insert_tx(tx_b);
 
@@ -770,7 +770,7 @@ fn test_descendants_no_repeat() {
         })
         .collect::<Vec<_>>();
 
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let mut expected_txids = Vec::new();
 
     // these are NOT descendants of `tx_a`
@@ -1110,6 +1110,12 @@ fn call_map_anchors_with_non_deterministic_anchor() {
     pub struct NonDeterministicAnchor {
         pub anchor_block: BlockId,
         pub non_deterministic_field: u32,
+    }
+
+    impl Anchor for NonDeterministicAnchor {
+        fn anchor_block(&self) -> BlockId {
+            self.anchor_block
+        }
     }
 
     let template = [
