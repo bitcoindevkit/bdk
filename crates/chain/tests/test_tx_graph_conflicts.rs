@@ -413,12 +413,13 @@ fn test_tx_conflict_handling() {
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
                     anchors: &[block_id!(1, "B")],
-                    last_seen: None,
+                    ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "B",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(2),
                     ..Default::default()
                 },
                 TxTemplate {
@@ -432,6 +433,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "C",
                     inputs: &[TxInTemplate::PrevTx("B'", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(3))],
+                    last_seen: Some(1),
                     ..Default::default()
                 },
             ],
