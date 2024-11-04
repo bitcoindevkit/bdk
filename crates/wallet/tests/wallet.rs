@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use bdk_chain::{tx_graph, COINBASE_MATURITY};
+use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ChainPosition, ConfirmationBlockTime};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
@@ -30,73 +30,6 @@ use bitcoin::{
 use miniscript::{descriptor::KeyMap, Descriptor, DescriptorPublicKey};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-
-fn receive_output(
-    wallet: &mut Wallet,
-    value: u64,
-    height: ChainPosition<ConfirmationBlockTime>,
-) -> OutPoint {
-    let addr = wallet.next_unused_address(KeychainKind::External).address;
-    receive_output_to_address(wallet, addr, value, height)
-}
-
-fn receive_output_to_address(
-    wallet: &mut Wallet,
-    addr: Address,
-    value: u64,
-    height: ChainPosition<ConfirmationBlockTime>,
-) -> OutPoint {
-    let tx = Transaction {
-        version: transaction::Version::ONE,
-        lock_time: absolute::LockTime::ZERO,
-        input: vec![],
-        output: vec![TxOut {
-            script_pubkey: addr.script_pubkey(),
-            value: Amount::from_sat(value),
-        }],
-    };
-
-    let txid = tx.compute_txid();
-    wallet.insert_tx(tx);
-
-    match height {
-        ChainPosition::Confirmed(anchor) => {
-            insert_anchor(wallet, txid, anchor);
-        }
-        ChainPosition::Unconfirmed(last_seen) => {
-            insert_seen_at(wallet, txid, last_seen);
-        }
-    }
-
-    OutPoint { txid, vout: 0 }
-}
-
-fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
-    let latest_cp = wallet.latest_checkpoint();
-    let height = latest_cp.height();
-    let anchor = if height == 0 {
-        ChainPosition::Unconfirmed(0)
-    } else {
-        ChainPosition::Confirmed(ConfirmationBlockTime {
-            block_id: latest_cp.block_id(),
-            confirmation_time: 0,
-        })
-    };
-    receive_output(wallet, value, anchor)
-}
-
-fn insert_seen_at(wallet: &mut Wallet, txid: Txid, seen_at: u64) {
-    use bdk_wallet::Update;
-    wallet
-        .apply_update(Update {
-            tx_update: tx_graph::TxUpdate {
-                seen_ats: [(txid, seen_at)].into_iter().collect(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .unwrap();
-}
 
 fn parse_descriptor(s: &str) -> (Descriptor<DescriptorPublicKey>, KeyMap) {
     <Descriptor<DescriptorPublicKey>>::parse_descriptor(&Secp256k1::new(), s)

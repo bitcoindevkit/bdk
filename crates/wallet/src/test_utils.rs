@@ -1,12 +1,13 @@
 //! `bdk_wallet` test utilities
 
 use alloc::string::ToString;
+use alloc::sync::Arc;
 use core::str::FromStr;
 
-use bdk_chain::{tx_graph, BlockId, ConfirmationBlockTime};
+use bdk_chain::{tx_graph, BlockId, ChainPosition, ConfirmationBlockTime};
 use bitcoin::{
-    hashes::Hash, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, Transaction,
-    TxIn, TxOut, Txid,
+    absolute, hashes::Hash, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint,
+    Transaction, TxIn, TxOut, Txid,
 };
 
 use crate::{KeychainKind, Update, Wallet};
@@ -224,6 +225,90 @@ pub fn feerate_unchecked(sat_vb: f64) -> FeeRate {
     FeeRate::from_sat_per_kwu(sat_kwu)
 }
 
+/// Receive a tx output with the given value in the latest block
+pub fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
+    let latest_cp = wallet.latest_checkpoint();
+    let height = latest_cp.height();
+    let anchor = if height == 0 {
+        ChainPosition::Unconfirmed(0)
+    } else {
+        ChainPosition::Confirmed(ConfirmationBlockTime {
+            block_id: latest_cp.block_id(),
+            confirmation_time: 0,
+        })
+    };
+    receive_output(wallet, value, anchor)
+}
+
+/// Receive a tx output with the given value and chain position
+pub fn receive_output(
+    wallet: &mut Wallet,
+    value: u64,
+    pos: ChainPosition<ConfirmationBlockTime>,
+) -> OutPoint {
+    let addr = wallet.next_unused_address(KeychainKind::External).address;
+    receive_output_to_address(wallet, addr, value, pos)
+}
+
+/// Receive a tx output to an address with the given value and chain position
+pub fn receive_output_to_address(
+    wallet: &mut Wallet,
+    addr: Address,
+    value: u64,
+    pos: ChainPosition<ConfirmationBlockTime>,
+) -> OutPoint {
+    let tx = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![TxOut {
+            script_pubkey: addr.script_pubkey(),
+            value: Amount::from_sat(value),
+        }],
+    };
+
+    let txid = tx.compute_txid();
+    wallet.insert_tx(tx);
+
+    match pos {
+        ChainPosition::Confirmed(anchor) => {
+            insert_anchor(wallet, txid, anchor);
+        }
+        ChainPosition::Unconfirmed(last_seen) => {
+            insert_seen_at(wallet, txid, last_seen);
+        }
+    }
+
+    OutPoint { txid, vout: 0 }
+}
+
+/// Insert a checkpoint into the wallet. This can be used to extend the wallet's local chain
+/// or to insert a block that did not exist previously. Note that if replacing a block with
+/// a different one at the same height, then all later blocks are evicted as well.
+pub fn insert_checkpoint(wallet: &mut Wallet, block: BlockId) {
+    let mut cp = wallet.latest_checkpoint();
+    cp = cp.insert(block);
+    wallet
+        .apply_update(Update {
+            chain: Some(cp),
+            ..Default::default()
+        })
+        .unwrap();
+}
+
+/// Insert transaction
+pub fn insert_tx(wallet: &mut Wallet, tx: Transaction) {
+    wallet
+        .apply_update(Update {
+            tx_update: bdk_chain::TxUpdate {
+                txs: vec![Arc::new(tx)],
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+}
+
 /// Simulates confirming a tx with `txid` by applying an update to the wallet containing
 /// the given `anchor`. Note: to be considered confirmed the anchor block must exist in
 /// the current active chain.
@@ -232,6 +317,19 @@ pub fn insert_anchor(wallet: &mut Wallet, txid: Txid, anchor: ConfirmationBlockT
         .apply_update(Update {
             tx_update: tx_graph::TxUpdate {
                 anchors: [(anchor, txid)].into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+}
+
+/// Marks the given `txid` seen as unconfirmed at `seen_at`
+pub fn insert_seen_at(wallet: &mut Wallet, txid: Txid, seen_at: u64) {
+    wallet
+        .apply_update(crate::Update {
+            tx_update: tx_graph::TxUpdate {
+                seen_ats: [(txid, seen_at)].into_iter().collect(),
                 ..Default::default()
             },
             ..Default::default()
