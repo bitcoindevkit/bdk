@@ -1,7 +1,6 @@
-extern crate alloc;
-
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
@@ -925,8 +924,6 @@ fn test_create_tx_drain_to_dust_amount() {
 
 #[test]
 fn test_create_tx_ordering_respected() {
-    use alloc::sync::Arc;
-
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let addr = wallet.next_unused_address(KeychainKind::External);
 

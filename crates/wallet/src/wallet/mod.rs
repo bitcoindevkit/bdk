@@ -12,17 +12,15 @@
 //! Wallet
 //!
 //! This module defines the [`Wallet`].
-use crate::{
-    collections::{BTreeMap, HashMap},
-    descriptor::check_wallet_descriptor,
-};
+
 use alloc::{
     boxed::Box,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
-pub use bdk_chain::Balance;
+use core::{cmp::Ordering, fmt, mem, ops::Deref};
+
 use bdk_chain::{
     indexed_tx_graph,
     indexer::keychain_txout::KeychainTxOutIndex,
@@ -33,63 +31,62 @@ use bdk_chain::{
         FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
         SyncResult,
     },
-    tx_graph::{CanonicalTx, TxGraph, TxNode, TxUpdate},
+    tx_graph::{CalculateFeeError, CanonicalTx, TxGraph, TxNode, TxUpdate},
     BlockId, ChainPosition, ConfirmationBlockTime, DescriptorExt, FullTxOut, Indexed,
     IndexedTxGraph, Merge,
 };
-use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
-    absolute, psbt, Address, Block, FeeRate, Network, OutPoint, ScriptBuf, Sequence, Transaction,
-    TxOut, Txid, Witness,
+    absolute,
+    consensus::encode::serialize,
+    constants::genesis_block,
+    psbt,
+    secp256k1::Secp256k1,
+    sighash::{EcdsaSighashType, TapSighashType},
+    transaction, Address, Amount, Block, BlockHash, FeeRate, Network, OutPoint, Psbt, ScriptBuf,
+    Sequence, Transaction, TxOut, Txid, Weight, Witness,
 };
-use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
-use bitcoin::{constants::genesis_block, Amount};
-use bitcoin::{secp256k1::Secp256k1, Weight};
-use core::cmp::Ordering;
-use core::fmt;
-use core::mem;
-use core::ops::Deref;
-use rand_core::RngCore;
-
-use descriptor::error::Error as DescriptorError;
 use miniscript::{
     descriptor::KeyMap,
     psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier},
 };
-
-use bdk_chain::tx_graph::CalculateFeeError;
+use rand_core::RngCore;
 
 mod changeset;
 pub mod coin_selection;
+pub mod error;
 pub mod export;
 mod params;
+mod persisted;
 pub mod signer;
 pub mod tx_builder;
-pub use changeset::*;
-pub use params::*;
-mod persisted;
-pub use persisted::*;
 pub(crate) mod utils;
 
-pub mod error;
-
-pub use utils::IsDust;
-
-use coin_selection::{DefaultCoinSelectionAlgorithm, InsufficientFunds};
-use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
-use tx_builder::{FeePolicy, TxBuilder, TxParams};
-use utils::{check_nsequence_rbf, After, Older, SecpCtx};
-
-use crate::descriptor::policy::BuildSatisfaction;
+use crate::collections::{BTreeMap, HashMap};
 use crate::descriptor::{
-    self, DerivedDescriptor, DescriptorMeta, ExtendedDescriptor, ExtractPolicy,
-    IntoWalletDescriptor, Policy, XKeyUtils,
+    check_wallet_descriptor, error::Error as DescriptorError, policy::BuildSatisfaction,
+    DerivedDescriptor, DescriptorMeta, ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor,
+    Policy, XKeyUtils,
 };
 use crate::psbt::PsbtUtils;
-use crate::signer::SignerError;
 use crate::types::*;
-use crate::wallet::coin_selection::Excess::{self, Change, NoChange};
-use crate::wallet::error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError};
+use crate::wallet::{
+    coin_selection::{
+        DefaultCoinSelectionAlgorithm,
+        Excess::{self, Change, NoChange},
+        InsufficientFunds,
+    },
+    error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError},
+    signer::{SignOptions, SignerError, SignerOrdering, SignersContainer, TransactionSigner},
+    tx_builder::{FeePolicy, TxBuilder, TxParams},
+    utils::{check_nsequence_rbf, After, Older, SecpCtx},
+};
+
+// re-exports
+pub use bdk_chain::Balance;
+pub use changeset::ChangeSet;
+pub use params::*;
+pub use persisted::*;
+pub use utils::IsDust;
 
 const COINBASE_MATURITY: u32 = 100;
 
