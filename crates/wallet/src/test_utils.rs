@@ -17,8 +17,18 @@ use crate::{KeychainKind, Update, Wallet};
 /// The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
 /// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
 /// sats are the transaction fee.
-pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet, bitcoin::Txid) {
-    let mut wallet = Wallet::create(descriptor.to_string(), change.to_string())
+pub fn get_funded_wallet(descriptor: &str, change_descriptor: &str) -> (Wallet, bitcoin::Txid) {
+    new_funded_wallet(descriptor, Some(change_descriptor))
+}
+
+fn new_funded_wallet(descriptor: &str, change_descriptor: Option<&str>) -> (Wallet, bitcoin::Txid) {
+    let params = if let Some(change_desc) = change_descriptor {
+        Wallet::create(descriptor.to_string(), change_desc.to_string())
+    } else {
+        Wallet::create_single(descriptor.to_string())
+    };
+
+    let mut wallet = params
         .network(Network::Regtest)
         .create_wallet_no_persist()
         .expect("descriptors must be valid");
@@ -124,18 +134,14 @@ pub fn get_funded_wallet_with_change(descriptor: &str, change: &str) -> (Wallet,
 /// The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
 /// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
 /// sats are the transaction fee.
-///
-/// Note: the change descriptor will have script type `p2wpkh`. If passing some other script type
-/// as argument, make sure you're ok with getting a wallet where the keychains have potentially
-/// different script types. Otherwise, use `get_funded_wallet_with_change`.
-pub fn get_funded_wallet(descriptor: &str) -> (Wallet, bitcoin::Txid) {
-    let change = get_test_wpkh_change();
-    get_funded_wallet_with_change(descriptor, change)
+pub fn get_funded_wallet_single(descriptor: &str) -> (Wallet, bitcoin::Txid) {
+    new_funded_wallet(descriptor, None)
 }
 
 /// Get funded segwit wallet
 pub fn get_funded_wallet_wpkh() -> (Wallet, bitcoin::Txid) {
-    get_funded_wallet_with_change(get_test_wpkh(), get_test_wpkh_change())
+    let (desc, change_desc) = get_test_wpkh_and_change_desc();
+    get_funded_wallet(desc, change_desc)
 }
 
 /// `wpkh` single key descriptor
@@ -143,17 +149,10 @@ pub fn get_test_wpkh() -> &'static str {
     "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)"
 }
 
-/// `wpkh` descriptor and change descriptor
-pub fn get_test_wpkh_with_change_desc() -> (&'static str, &'static str) {
-    (
-        "wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)",
-        get_test_wpkh_change(),
-    )
-}
-
-/// `wpkh` change descriptor
-fn get_test_wpkh_change() -> &'static str {
-    "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/0)"
+/// `wpkh` xpriv and change descriptor
+pub fn get_test_wpkh_and_change_desc() -> (&'static str, &'static str) {
+    ("wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)",
+    "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)")
 }
 
 /// `wsh` descriptor with policy `and(pk(A),older(6))`
@@ -197,7 +196,7 @@ pub fn get_test_tr_single_sig_xprv() -> &'static str {
 }
 
 /// taproot xpriv and change descriptor
-pub fn get_test_tr_single_sig_xprv_with_change_desc() -> (&'static str, &'static str) {
+pub fn get_test_tr_single_sig_xprv_and_change_desc() -> (&'static str, &'static str) {
     ("tr(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/0/*)",
     "tr(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/1/*)")
 }

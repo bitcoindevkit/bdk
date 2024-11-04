@@ -61,7 +61,7 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
     {
         let temp_dir = tempfile::tempdir().expect("must create tempdir");
         let file_path = temp_dir.path().join(filename);
-        let (external_desc, internal_desc) = get_test_tr_single_sig_xprv_with_change_desc();
+        let (external_desc, internal_desc) = get_test_tr_single_sig_xprv_and_change_desc();
 
         // create new wallet
         let wallet_spk_index = {
@@ -145,7 +145,7 @@ fn wallet_load_checks() -> anyhow::Result<()> {
         let temp_dir = tempfile::tempdir().expect("must create tempdir");
         let file_path = temp_dir.path().join(filename);
         let network = Network::Testnet;
-        let (external_desc, internal_desc) = get_test_tr_single_sig_xprv_with_change_desc();
+        let (external_desc, internal_desc) = get_test_tr_single_sig_xprv_and_change_desc();
 
         // create new wallet
         let _ = Wallet::create(external_desc, internal_desc)
@@ -491,7 +491,7 @@ fn test_create_tx_version_0() {
 
 #[test]
 fn test_create_tx_version_1_csv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_csv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -545,7 +545,7 @@ fn test_create_tx_fee_sniping_locktime_last_sync() {
 
 #[test]
 fn test_create_tx_default_locktime_cltv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_cltv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
@@ -573,7 +573,7 @@ fn test_create_tx_custom_locktime() {
 
 #[test]
 fn test_create_tx_custom_locktime_compatible_with_cltv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_cltv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -586,7 +586,7 @@ fn test_create_tx_custom_locktime_compatible_with_cltv() {
 
 #[test]
 fn test_create_tx_custom_locktime_incompatible_with_cltv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_cltv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -600,7 +600,7 @@ fn test_create_tx_custom_locktime_incompatible_with_cltv() {
 #[test]
 fn test_create_tx_custom_csv() {
     // desc: wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(6)))
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_csv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -613,7 +613,7 @@ fn test_create_tx_custom_csv() {
 
 #[test]
 fn test_create_tx_no_rbf_csv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_csv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
@@ -624,7 +624,7 @@ fn test_create_tx_no_rbf_csv() {
 
 #[test]
 fn test_create_tx_incompatible_csv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_csv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -637,7 +637,7 @@ fn test_create_tx_incompatible_csv() {
 
 #[test]
 fn test_create_tx_with_default_rbf_csv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_csv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_csv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
@@ -649,7 +649,7 @@ fn test_create_tx_with_default_rbf_csv() {
 
 #[test]
 fn test_create_tx_no_rbf_cltv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_cltv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
@@ -995,7 +995,7 @@ fn test_create_tx_input_hd_keypaths() {
     use bitcoin::bip32::{DerivationPath, Fingerprint};
     use core::str::FromStr;
 
-    let (mut wallet, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -1016,7 +1016,7 @@ fn test_create_tx_output_hd_keypaths() {
     use bitcoin::bip32::{DerivationPath, Fingerprint};
     use core::str::FromStr;
 
-    let (mut wallet, _) = get_funded_wallet("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh([d34db33f/44'/0'/0']tpubDEnoLuPdBep9bzw5LoGYpsxUQYheRQ9gcgrJhJEcdKFB9cWQRyYmkCyRoTqeD4tJYiVVgt6A3rN6rWn9RYhR9sBsGxji29LYWHuKKbdb1ev/0/*)");
 
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
@@ -1039,7 +1039,7 @@ fn test_create_tx_set_redeem_script_p2sh() {
     use bitcoin::hex::FromHex;
 
     let (mut wallet, _) =
-        get_funded_wallet("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        get_funded_wallet_single("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -1062,7 +1062,7 @@ fn test_create_tx_set_witness_script_p2wsh() {
     use bitcoin::hex::FromHex;
 
     let (mut wallet, _) =
-        get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        get_funded_wallet_single("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -1082,8 +1082,9 @@ fn test_create_tx_set_witness_script_p2wsh() {
 
 #[test]
 fn test_create_tx_set_redeem_witness_script_p2wsh_p2sh() {
-    let (mut wallet, _) =
-        get_funded_wallet("sh(wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)))");
+    let (mut wallet, _) = get_funded_wallet_single(
+        "sh(wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)))",
+    );
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -1101,7 +1102,7 @@ fn test_create_tx_set_redeem_witness_script_p2wsh_p2sh() {
 #[test]
 fn test_create_tx_non_witness_utxo() {
     let (mut wallet, _) =
-        get_funded_wallet("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        get_funded_wallet_single("sh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -1114,7 +1115,7 @@ fn test_create_tx_non_witness_utxo() {
 #[test]
 fn test_create_tx_only_witness_utxo() {
     let (mut wallet, _) =
-        get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        get_funded_wallet_single("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -1130,7 +1131,7 @@ fn test_create_tx_only_witness_utxo() {
 #[test]
 fn test_create_tx_shwpkh_has_witness_utxo() {
     let (mut wallet, _) =
-        get_funded_wallet("sh(wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        get_funded_wallet_single("sh(wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -1142,7 +1143,7 @@ fn test_create_tx_shwpkh_has_witness_utxo() {
 #[test]
 fn test_create_tx_both_non_witness_utxo_and_witness_utxo_default() {
     let (mut wallet, _) =
-        get_funded_wallet("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
+        get_funded_wallet_single("wsh(pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW))");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -1236,7 +1237,7 @@ fn test_create_tx_manually_selected_insufficient() {
 #[test]
 #[should_panic(expected = "SpendingPolicyRequired(External)")]
 fn test_create_tx_policy_path_required() {
-    let (mut wallet, _) = get_funded_wallet(get_test_a_or_b_plus_csv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_a_or_b_plus_csv());
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -1248,7 +1249,7 @@ fn test_create_tx_policy_path_required() {
 
 #[test]
 fn test_create_tx_policy_path_no_csv() {
-    let (descriptor, change_descriptor) = get_test_wpkh_with_change_desc();
+    let (descriptor, change_descriptor) = get_test_wpkh_and_change_desc();
     let mut wallet = Wallet::create(descriptor, change_descriptor)
         .network(Network::Regtest)
         .create_wallet_no_persist()
@@ -1288,7 +1289,7 @@ fn test_create_tx_policy_path_no_csv() {
 
 #[test]
 fn test_create_tx_policy_path_use_csv() {
-    let (mut wallet, _) = get_funded_wallet(get_test_a_or_b_plus_csv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_a_or_b_plus_csv());
 
     let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
     let root_id = external_policy.id;
@@ -1309,7 +1310,7 @@ fn test_create_tx_policy_path_use_csv() {
 
 #[test]
 fn test_create_tx_policy_path_ignored_subtree_with_csv() {
-    let (mut wallet, _) = get_funded_wallet("wsh(or_d(pk(cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu),or_i(and_v(v:pkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(30)),and_v(v:pkh(cMnkdebixpXMPfkcNEjjGin7s94hiehAH4mLbYkZoh9KSiNNmqC8),older(90)))))");
+    let (mut wallet, _) = get_funded_wallet_single("wsh(or_d(pk(cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu),or_i(and_v(v:pkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(30)),and_v(v:pkh(cMnkdebixpXMPfkcNEjjGin7s94hiehAH4mLbYkZoh9KSiNNmqC8),older(90)))))");
 
     let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
     let root_id = external_policy.id;
@@ -1331,7 +1332,7 @@ fn test_create_tx_policy_path_ignored_subtree_with_csv() {
 #[test]
 fn test_create_tx_global_xpubs_with_origin() {
     use bitcoin::bip32;
-    let (mut wallet, _) = get_funded_wallet("wpkh([73756c7f/48'/0'/0'/2']tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh([73756c7f/48'/0'/0'/2']tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -1343,7 +1344,7 @@ fn test_create_tx_global_xpubs_with_origin() {
     let fingerprint = bip32::Fingerprint::from_hex("73756c7f").unwrap();
     let path = bip32::DerivationPath::from_str("m/48'/0'/0'/2'").unwrap();
 
-    assert_eq!(psbt.xpub.len(), 2);
+    assert_eq!(psbt.xpub.len(), 1);
     assert_eq!(psbt.xpub.get(&key), Some(&(fingerprint, path)));
 }
 
@@ -1368,7 +1369,7 @@ fn test_create_tx_increment_change_index() {
         .unwrap()
         .assume_checked()
         .script_pubkey();
-    let (desc, change_desc) = get_test_tr_single_sig_xprv_with_change_desc();
+    let (desc, change_desc) = get_test_tr_single_sig_xprv_and_change_desc();
     [
         TestCase {
             name: "two wildcard, builder error",
@@ -1472,7 +1473,7 @@ fn test_create_tx_increment_change_index() {
 fn test_add_foreign_utxo() {
     let (mut wallet1, _) = get_funded_wallet_wpkh();
     let (wallet2, _) =
-        get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+        get_funded_wallet_single("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -1548,7 +1549,7 @@ fn test_add_foreign_utxo() {
 fn test_calculate_fee_with_missing_foreign_utxo() {
     let (mut wallet1, _) = get_funded_wallet_wpkh();
     let (wallet2, _) =
-        get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+        get_funded_wallet_single("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -1594,7 +1595,7 @@ fn test_add_foreign_utxo_invalid_psbt_input() {
 fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
     let (mut wallet1, txid1) = get_funded_wallet_wpkh();
     let (wallet2, txid2) =
-        get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+        get_funded_wallet_single("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
 
     let utxo2 = wallet2.list_unspent().next().unwrap();
     let tx1 = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
@@ -1638,7 +1639,7 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
 fn test_add_foreign_utxo_only_witness_utxo() {
     let (mut wallet1, _) = get_funded_wallet_wpkh();
     let (wallet2, txid2) =
-        get_funded_wallet("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+        get_funded_wallet_single("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
         .assume_checked();
@@ -1715,7 +1716,7 @@ fn test_get_psbt_input() {
     expected = "MissingKeyOrigin(\"tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3\")"
 )]
 fn test_create_tx_global_xpubs_origin_missing() {
-    let (mut wallet, _) = get_funded_wallet("wpkh(tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh(tpubDCKxNyM3bLgbEX13Mcd8mYxbVg9ajDkWXMh29hMWBurKfVmBfWAM96QVP3zaUcN51HvkZ3ar4VwP82kC8JZhhux8vFQoJintSpVBwpFvyU3/0/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -1727,7 +1728,7 @@ fn test_create_tx_global_xpubs_origin_missing() {
 #[test]
 fn test_create_tx_global_xpubs_master_without_origin() {
     use bitcoin::bip32;
-    let (mut wallet, _) = get_funded_wallet("wpkh(tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL/0/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh(tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL/0/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -1738,7 +1739,7 @@ fn test_create_tx_global_xpubs_master_without_origin() {
     let key = bip32::Xpub::from_str("tpubD6NzVbkrYhZ4Y55A58Gv9RSNF5hy84b5AJqYy7sCcjFrkcLpPre8kmgfit6kY1Zs3BLgeypTDBZJM222guPpdz7Cup5yzaMu62u7mYGbwFL").unwrap();
     let fingerprint = bip32::Fingerprint::from_hex("997a323b").unwrap();
 
-    assert_eq!(psbt.xpub.len(), 2);
+    assert_eq!(psbt.xpub.len(), 1);
     assert_eq!(
         psbt.xpub.get(&key),
         Some(&(fingerprint, bip32::DerivationPath::default()))
@@ -2644,7 +2645,7 @@ fn test_fee_amount_negative_drain_val() {
 
 #[test]
 fn test_sign_single_xprv() {
-    let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -2659,7 +2660,7 @@ fn test_sign_single_xprv() {
 
 #[test]
 fn test_sign_single_xprv_with_master_fingerprint_and_path() {
-    let (mut wallet, _) = get_funded_wallet("wpkh([d34db33f/84h/1h/0h]tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh([d34db33f/84h/1h/0h]tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -2674,7 +2675,7 @@ fn test_sign_single_xprv_with_master_fingerprint_and_path() {
 
 #[test]
 fn test_sign_single_xprv_bip44_path() {
-    let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/44'/0'/0'/0/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/44'/0'/0'/0/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -2689,7 +2690,7 @@ fn test_sign_single_xprv_bip44_path() {
 
 #[test]
 fn test_sign_single_xprv_sh_wpkh() {
-    let (mut wallet, _) = get_funded_wallet("sh(wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*))");
+    let (mut wallet, _) = get_funded_wallet_single("sh(wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*))");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -2705,7 +2706,7 @@ fn test_sign_single_xprv_sh_wpkh() {
 #[test]
 fn test_sign_single_wif() {
     let (mut wallet, _) =
-        get_funded_wallet("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)");
+        get_funded_wallet_single("wpkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -2720,7 +2721,7 @@ fn test_sign_single_wif() {
 
 #[test]
 fn test_sign_single_xprv_no_hd_keypaths() {
-    let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -2740,7 +2741,7 @@ fn test_sign_single_xprv_no_hd_keypaths() {
 fn test_include_output_redeem_witness_script() {
     let desc = get_test_wpkh();
     let change_desc = "sh(wsh(multi(1,cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW,cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu)))";
-    let (mut wallet, _) = get_funded_wallet_with_change(desc, change_desc);
+    let (mut wallet, _) = get_funded_wallet(desc, change_desc);
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
         .assume_checked();
@@ -2805,7 +2806,7 @@ fn test_signing_only_one_of_multiple_inputs() {
 
 #[test]
 fn test_try_finalize_sign_option() {
-    let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
 
     for try_finalize in &[true, false] {
         let addr = wallet.next_unused_address(KeychainKind::External);
@@ -2839,7 +2840,7 @@ fn test_try_finalize_sign_option() {
 
 #[test]
 fn test_taproot_try_finalize_sign_option() {
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_with_taptree());
 
     for try_finalize in &[true, false] {
         let addr = wallet.next_unused_address(KeychainKind::External);
@@ -2890,7 +2891,7 @@ fn test_taproot_try_finalize_sign_option() {
 fn test_sign_nonstandard_sighash() {
     let sighash = EcdsaSighashType::NonePlusAnyoneCanPay;
 
-    let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -3183,7 +3184,7 @@ fn test_get_address() {
 
 #[test]
 fn test_reveal_addresses() {
-    let (desc, change_desc) = get_test_tr_single_sig_xprv_with_change_desc();
+    let (desc, change_desc) = get_test_tr_single_sig_xprv_and_change_desc();
     let mut wallet = Wallet::create(desc, change_desc)
         .network(Network::Signet)
         .create_wallet_no_persist()
@@ -3229,8 +3230,8 @@ fn test_get_address_no_reuse() {
 
 #[test]
 fn test_taproot_psbt_populate_tap_key_origins() {
-    let (desc, change_desc) = get_test_tr_single_sig_xprv_with_change_desc();
-    let (mut wallet, _) = get_funded_wallet_with_change(desc, change_desc);
+    let (desc, change_desc) = get_test_tr_single_sig_xprv_and_change_desc();
+    let (mut wallet, _) = get_funded_wallet(desc, change_desc);
     let addr = wallet.reveal_next_address(KeychainKind::External);
 
     let mut builder = wallet.build_tx();
@@ -3265,8 +3266,7 @@ fn test_taproot_psbt_populate_tap_key_origins() {
 
 #[test]
 fn test_taproot_psbt_populate_tap_key_origins_repeated_key() {
-    let (mut wallet, _) =
-        get_funded_wallet_with_change(get_test_tr_repeated_key(), get_test_tr_single_sig());
+    let (mut wallet, _) = get_funded_wallet(get_test_tr_repeated_key(), get_test_tr_single_sig());
     let addr = wallet.reveal_next_address(KeychainKind::External);
 
     let path = vec![("rn4nre9c".to_string(), vec![0])]
@@ -3333,7 +3333,7 @@ fn test_taproot_psbt_input_tap_tree() {
     use bitcoin::hex::FromHex;
     use bitcoin::taproot;
 
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_with_taptree());
     let addr = wallet.next_unused_address(KeychainKind::External);
 
     let mut builder = wallet.build_tx();
@@ -3376,7 +3376,7 @@ fn test_taproot_psbt_input_tap_tree() {
 
 #[test]
 fn test_taproot_sign_missing_witness_utxo() {
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_single_sig());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -3416,7 +3416,7 @@ fn test_taproot_sign_missing_witness_utxo() {
 
 #[test]
 fn test_taproot_sign_using_non_witness_utxo() {
-    let (mut wallet, prev_txid) = get_funded_wallet(get_test_tr_single_sig());
+    let (mut wallet, prev_txid) = get_funded_wallet_single(get_test_tr_single_sig());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.drain_to(addr.script_pubkey()).drain_wallet();
@@ -3441,7 +3441,7 @@ fn test_taproot_sign_using_non_witness_utxo() {
 #[test]
 fn test_taproot_foreign_utxo() {
     let (mut wallet1, _) = get_funded_wallet_wpkh();
-    let (wallet2, _) = get_funded_wallet(get_test_tr_single_sig());
+    let (wallet2, _) = get_funded_wallet_single(get_test_tr_single_sig());
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -3499,16 +3499,16 @@ fn test_spend_from_wallet(mut wallet: Wallet) {
 
 //     #[test]
 //     fn test_taproot_key_spend() {
-//         let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig());
+//         let (mut wallet, _) = get_funded_wallet_single(get_test_tr_single_sig());
 //         test_spend_from_wallet(wallet);
 
-//         let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
+//         let (mut wallet, _) = get_funded_wallet_single(get_test_tr_single_sig_xprv());
 //         test_spend_from_wallet(wallet);
 //     }
 
 #[test]
 fn test_taproot_no_key_spend() {
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_with_taptree_both_priv());
     let addr = wallet.next_unused_address(KeychainKind::External);
 
     let mut builder = wallet.build_tx();
@@ -3533,17 +3533,17 @@ fn test_taproot_no_key_spend() {
 
 #[test]
 fn test_taproot_script_spend() {
-    let (wallet, _) = get_funded_wallet(get_test_tr_with_taptree());
+    let (wallet, _) = get_funded_wallet_single(get_test_tr_with_taptree());
     test_spend_from_wallet(wallet);
 
-    let (wallet, _) = get_funded_wallet(get_test_tr_with_taptree_xprv());
+    let (wallet, _) = get_funded_wallet_single(get_test_tr_with_taptree_xprv());
     test_spend_from_wallet(wallet);
 }
 
 #[test]
 fn test_taproot_script_spend_sign_all_leaves() {
     use bdk_wallet::signer::TapLeavesOptions;
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_with_taptree_both_priv());
     let addr = wallet.next_unused_address(KeychainKind::External);
 
     let mut builder = wallet.build_tx();
@@ -3574,7 +3574,7 @@ fn test_taproot_script_spend_sign_include_some_leaves() {
     use bdk_wallet::signer::TapLeavesOptions;
     use bitcoin::taproot::TapLeafHash;
 
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_with_taptree_both_priv());
     let addr = wallet.next_unused_address(KeychainKind::External);
 
     let mut builder = wallet.build_tx();
@@ -3614,7 +3614,7 @@ fn test_taproot_script_spend_sign_exclude_some_leaves() {
     use bdk_wallet::signer::TapLeavesOptions;
     use bitcoin::taproot::TapLeafHash;
 
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_with_taptree_both_priv());
     let addr = wallet.next_unused_address(KeychainKind::External);
 
     let mut builder = wallet.build_tx();
@@ -3652,7 +3652,7 @@ fn test_taproot_script_spend_sign_exclude_some_leaves() {
 #[test]
 fn test_taproot_script_spend_sign_no_leaves() {
     use bdk_wallet::signer::TapLeavesOptions;
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_with_taptree_both_priv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_with_taptree_both_priv());
     let addr = wallet.next_unused_address(KeychainKind::External);
 
     let mut builder = wallet.build_tx();
@@ -3674,7 +3674,7 @@ fn test_taproot_script_spend_sign_no_leaves() {
 
 #[test]
 fn test_taproot_sign_derive_index_from_psbt() {
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_single_sig_xprv());
 
     let addr = wallet.next_unused_address(KeychainKind::External);
 
@@ -3698,7 +3698,7 @@ fn test_taproot_sign_derive_index_from_psbt() {
 
 #[test]
 fn test_taproot_sign_explicit_sighash_all() {
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_single_sig());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -3718,7 +3718,7 @@ fn test_taproot_sign_explicit_sighash_all() {
 fn test_taproot_sign_non_default_sighash() {
     let sighash = TapSighashType::NonePlusAnyoneCanPay;
 
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_single_sig());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
@@ -3785,7 +3785,7 @@ fn test_taproot_sign_non_default_sighash() {
 
 #[test]
 fn test_spend_coinbase() {
-    let (desc, change_desc) = get_test_wpkh_with_change_desc();
+    let (desc, change_desc) = get_test_wpkh_and_change_desc();
     let mut wallet = Wallet::create(desc, change_desc)
         .network(Network::Regtest)
         .create_wallet_no_persist()
@@ -3892,7 +3892,7 @@ fn test_spend_coinbase() {
 
 #[test]
 fn test_allow_dust_limit() {
-    let (mut wallet, _) = get_funded_wallet(get_test_single_sig_cltv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv());
 
     let addr = wallet.next_unused_address(KeychainKind::External);
 
@@ -3919,7 +3919,7 @@ fn test_fee_rate_sign_no_grinding_high_r() {
     // Our goal is to obtain a transaction with a signature with high-R (71 bytes
     // instead of 70). We then check that our fee rate and fee calculation is
     // alright.
-    let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let fee_rate = FeeRate::from_sat_per_vb_unchecked(1);
     let mut builder = wallet.build_tx();
@@ -3986,7 +3986,7 @@ fn test_fee_rate_sign_grinding_low_r() {
     // by setting the `allow_grinding` signing option as true.
     // We then check that our fee rate and fee calculation is alright and that our
     // signature is 70 bytes.
-    let (mut wallet, _) = get_funded_wallet("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
+    let (mut wallet, _) = get_funded_wallet_single("wpkh(tprv8ZgxMBicQKsPd3EupYiPRhaMooHKUHJxNsTfYuScep13go8QFfHdtkG9nRkFGb7busX4isf6X9dURGCoKgitaApQ6MupRhZMcELAxTBRJgS/*)");
     let addr = wallet.next_unused_address(KeychainKind::External);
     let fee_rate = FeeRate::from_sat_per_vb_unchecked(1);
     let mut builder = wallet.build_tx();
@@ -4023,7 +4023,7 @@ fn test_taproot_load_descriptor_duplicated_keys() {
     //
     // Having the same key in multiple taproot leaves is safe and should be accepted by BDK
 
-    let (wallet, _) = get_funded_wallet(get_test_tr_dup_keys());
+    let (wallet, _) = get_funded_wallet_single(get_test_tr_dup_keys());
     let addr = wallet.peek_address(KeychainKind::External, 0);
 
     assert_eq!(
@@ -4051,7 +4051,7 @@ fn test_keychains_with_overlapping_spks() {
     let wildcard_keychain = "wpkh(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/*)";
     let non_wildcard_keychain = "wpkh(tprv8ZgxMBicQKsPdDArR4xSAECuVxeX1jwwSXR4ApKbkYgZiziDc4LdBy2WvJeGDfUSE4UT4hHhbgEwbdq8ajjUHiKDegkwrNU6V55CxcxonVN/1)";
 
-    let (mut wallet, _) = get_funded_wallet_with_change(wildcard_keychain, non_wildcard_keychain);
+    let (mut wallet, _) = get_funded_wallet(wildcard_keychain, non_wildcard_keychain);
     assert_eq!(wallet.balance().confirmed, Amount::from_sat(50000));
 
     let addr = wallet
@@ -4087,8 +4087,7 @@ fn test_tx_cancellation() {
         }};
     }
 
-    let (mut wallet, _) =
-        get_funded_wallet_with_change(get_test_wpkh(), get_test_tr_single_sig_xprv());
+    let (mut wallet, _) = get_funded_wallet(get_test_wpkh(), get_test_tr_single_sig_xprv());
 
     let psbt1 = new_tx!(wallet);
     let change_derivation_1 = psbt1
@@ -4150,7 +4149,7 @@ fn test_thread_safety() {
 #[test]
 fn test_insert_tx_balance_and_utxos() {
     // creating many txs has no effect on the wallet's available utxos
-    let (mut wallet, _) = get_funded_wallet(get_test_tr_single_sig_xprv());
+    let (mut wallet, _) = get_funded_wallet_single(get_test_tr_single_sig_xprv());
     let addr = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")
         .unwrap()
         .assume_checked();
