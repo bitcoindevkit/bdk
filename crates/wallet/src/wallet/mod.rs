@@ -2609,6 +2609,7 @@ macro_rules! doctest_wallet {
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
         use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph, tx_graph};
         use $crate::{Update, KeychainKind, Wallet};
+        use $crate::test_utils::*;
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
 
@@ -2628,21 +2629,14 @@ macro_rules! doctest_wallet {
         };
         let txid = tx.compute_txid();
         let block_id = BlockId { height: 500, hash: BlockHash::all_zeros() };
-        let _ = wallet.insert_checkpoint(block_id);
-        let _ = wallet.insert_checkpoint(BlockId { height: 1_000, hash: BlockHash::all_zeros() });
-        let _ = wallet.insert_tx(tx);
+        insert_checkpoint(&mut wallet, block_id);
+        insert_checkpoint(&mut wallet, BlockId { height: 1_000, hash: BlockHash::all_zeros() });
+        insert_tx(&mut wallet, tx);
         let anchor = ConfirmationBlockTime {
             confirmation_time: 50_000,
             block_id,
         };
-        let update = Update {
-            tx_update: tx_graph::TxUpdate {
-                anchors: [(anchor, txid)].into_iter().collect(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        wallet.apply_update(update).unwrap();
+        insert_anchor(&mut wallet, txid, anchor);
         wallet
     }}
 }

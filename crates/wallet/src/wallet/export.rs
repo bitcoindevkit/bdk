@@ -213,55 +213,28 @@ impl FullyNodedExport {
 
 #[cfg(test)]
 mod test {
+    use alloc::string::ToString;
     use core::str::FromStr;
 
-    use crate::std::string::ToString;
-    use bdk_chain::{BlockId, ConfirmationBlockTime};
-    use bitcoin::hashes::Hash;
-    use bitcoin::{transaction, BlockHash, Network, Transaction};
-    use chain::tx_graph;
+    use bdk_chain::BlockId;
+    use bitcoin::{hashes::Hash, BlockHash, Network};
 
     use super::*;
+    use crate::test_utils::*;
     use crate::Wallet;
 
     fn get_test_wallet(descriptor: &str, change_descriptor: &str, network: Network) -> Wallet {
-        use crate::wallet::Update;
         let mut wallet = Wallet::create(descriptor.to_string(), change_descriptor.to_string())
             .network(network)
             .create_wallet_no_persist()
             .expect("must create wallet");
-        let transaction = Transaction {
-            input: vec![],
-            output: vec![],
-            version: transaction::Version::non_standard(0),
-            lock_time: bitcoin::absolute::LockTime::ZERO,
-        };
-        let txid = transaction.compute_txid();
-        let block_id = BlockId {
+        let block = BlockId {
             height: 5000,
             hash: BlockHash::all_zeros(),
         };
-        wallet.insert_checkpoint(block_id).unwrap();
-        wallet
-            .insert_checkpoint(BlockId {
-                height: 5001,
-                hash: BlockHash::all_zeros(),
-            })
-            .unwrap();
-        wallet.insert_tx(transaction);
-        let anchor = ConfirmationBlockTime {
-            confirmation_time: 0,
-            block_id,
-        };
-        wallet
-            .apply_update(Update {
-                tx_update: tx_graph::TxUpdate {
-                    anchors: [(anchor, txid)].into_iter().collect(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
-            .unwrap();
+        insert_checkpoint(&mut wallet, block);
+        receive_output_in_latest_block(&mut wallet, 10_000);
+
         wallet
     }
 

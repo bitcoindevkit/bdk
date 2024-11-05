@@ -17,11 +17,11 @@ use crate::{KeychainKind, Update, Wallet};
 /// The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
 /// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
 /// sats are the transaction fee.
-pub fn get_funded_wallet(descriptor: &str, change_descriptor: &str) -> (Wallet, bitcoin::Txid) {
+pub fn get_funded_wallet(descriptor: &str, change_descriptor: &str) -> (Wallet, Txid) {
     new_funded_wallet(descriptor, Some(change_descriptor))
 }
 
-fn new_funded_wallet(descriptor: &str, change_descriptor: Option<&str>) -> (Wallet, bitcoin::Txid) {
+fn new_funded_wallet(descriptor: &str, change_descriptor: Option<&str>) -> (Wallet, Txid) {
     let params = if let Some(change_desc) = change_descriptor {
         Wallet::create(descriptor.to_string(), change_desc.to_string())
     } else {
@@ -40,34 +40,20 @@ fn new_funded_wallet(descriptor: &str, change_descriptor: Option<&str>) -> (Wall
         .unwrap();
 
     let tx0 = Transaction {
-        version: transaction::Version::ONE,
-        lock_time: bitcoin::absolute::LockTime::ZERO,
-        input: vec![TxIn {
-            previous_output: OutPoint {
-                txid: Txid::all_zeros(),
-                vout: 0,
-            },
-            script_sig: Default::default(),
-            sequence: Default::default(),
-            witness: Default::default(),
-        }],
         output: vec![TxOut {
             value: Amount::from_sat(76_000),
             script_pubkey: receive_address.script_pubkey(),
         }],
+        ..new_tx(0)
     };
 
     let tx1 = Transaction {
-        version: transaction::Version::ONE,
-        lock_time: bitcoin::absolute::LockTime::ZERO,
         input: vec![TxIn {
             previous_output: OutPoint {
                 txid: tx0.compute_txid(),
                 vout: 0,
             },
-            script_sig: Default::default(),
-            sequence: Default::default(),
-            witness: Default::default(),
+            ..Default::default()
         }],
         output: vec![
             TxOut {
@@ -79,28 +65,32 @@ fn new_funded_wallet(descriptor: &str, change_descriptor: Option<&str>) -> (Wall
                 script_pubkey: sendto_address.script_pubkey(),
             },
         ],
+        ..new_tx(0)
     };
 
-    wallet
-        .insert_checkpoint(BlockId {
+    insert_checkpoint(
+        &mut wallet,
+        BlockId {
             height: 42,
             hash: BlockHash::all_zeros(),
-        })
-        .unwrap();
-    wallet
-        .insert_checkpoint(BlockId {
+        },
+    );
+    insert_checkpoint(
+        &mut wallet,
+        BlockId {
             height: 1_000,
             hash: BlockHash::all_zeros(),
-        })
-        .unwrap();
-    wallet
-        .insert_checkpoint(BlockId {
+        },
+    );
+    insert_checkpoint(
+        &mut wallet,
+        BlockId {
             height: 2_000,
             hash: BlockHash::all_zeros(),
-        })
-        .unwrap();
+        },
+    );
 
-    wallet.insert_tx(tx0.clone());
+    insert_tx(&mut wallet, tx0.clone());
     insert_anchor(
         &mut wallet,
         tx0.compute_txid(),
@@ -113,7 +103,7 @@ fn new_funded_wallet(descriptor: &str, change_descriptor: Option<&str>) -> (Wall
         },
     );
 
-    wallet.insert_tx(tx1.clone());
+    insert_tx(&mut wallet, tx1.clone());
     insert_anchor(
         &mut wallet,
         tx1.compute_txid(),
@@ -134,12 +124,12 @@ fn new_funded_wallet(descriptor: &str, change_descriptor: Option<&str>) -> (Wall
 /// The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
 /// to a foreign address and one returning 50_000 back to the wallet. The remaining 1000
 /// sats are the transaction fee.
-pub fn get_funded_wallet_single(descriptor: &str) -> (Wallet, bitcoin::Txid) {
+pub fn get_funded_wallet_single(descriptor: &str) -> (Wallet, Txid) {
     new_funded_wallet(descriptor, None)
 }
 
 /// Get funded segwit wallet
-pub fn get_funded_wallet_wpkh() -> (Wallet, bitcoin::Txid) {
+pub fn get_funded_wallet_wpkh() -> (Wallet, Txid) {
     let (desc, change_desc) = get_test_wpkh_and_change_desc();
     get_funded_wallet(desc, change_desc)
 }
@@ -211,6 +201,16 @@ pub fn get_test_tr_dup_keys() -> &'static str {
     "tr(cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG,{pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642),pk(8aee2b8120a5f157f1223f72b5e62b825831a27a9fdf427db7cc697494d4a642)})"
 }
 
+/// A new empty transaction with the given locktime
+pub fn new_tx(locktime: u32) -> Transaction {
+    Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::from_consensus(locktime),
+        input: vec![],
+        output: vec![],
+    }
+}
+
 /// Construct a new [`FeeRate`] from the given raw `sat_vb` feerate. This is
 /// useful in cases where we want to create a feerate from a `f64`, as the
 /// traditional [`FeeRate::from_sat_per_vb`] method will only accept an integer.
@@ -267,7 +267,7 @@ pub fn receive_output_to_address(
     };
 
     let txid = tx.compute_txid();
-    wallet.insert_tx(tx);
+    insert_tx(wallet, tx);
 
     match pos {
         ChainPosition::Confirmed(anchor) => {
