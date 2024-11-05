@@ -24,9 +24,7 @@ use core::{cmp::Ordering, fmt, mem, ops::Deref};
 use bdk_chain::{
     indexed_tx_graph,
     indexer::keychain_txout::KeychainTxOutIndex,
-    local_chain::{
-        self, ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain,
-    },
+    local_chain::{ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     spk_client::{
         FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
         SyncResult,
@@ -120,7 +118,7 @@ pub struct Wallet {
 
 /// An update to [`Wallet`].
 ///
-/// It updates [`KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`local_chain::LocalChain`] atomically.
+/// It updates [`KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`LocalChain`] atomically.
 #[derive(Debug, Clone, Default)]
 pub struct Update {
     /// Contains the last active derivation indices per keychain (`K`), which is used to update the
@@ -131,8 +129,6 @@ pub struct Update {
     pub tx_update: TxUpdate<ConfirmationBlockTime>,
 
     /// Update for the wallet's internal [`LocalChain`].
-    ///
-    /// [`LocalChain`]: local_chain::LocalChain
     pub chain: Option<CheckPoint>,
 }
 
@@ -1066,44 +1062,6 @@ impl Wallet {
             )?,
             tx_node: graph.get_tx_node(txid)?,
         })
-    }
-
-    /// Add a new checkpoint to the wallet's internal view of the chain.
-    ///
-    /// Returns whether anything changed with the insertion (e.g. `false` if checkpoint was already
-    /// there).
-    ///
-    /// **WARNING**: You must persist the changes resulting from one or more calls to this method
-    /// if you need the inserted checkpoint data to be reloaded after closing the wallet.
-    /// See [`Wallet::reveal_next_address`].
-    pub fn insert_checkpoint(
-        &mut self,
-        block_id: BlockId,
-    ) -> Result<bool, local_chain::AlterCheckPointError> {
-        let changeset = self.chain.insert_block(block_id)?;
-        let changed = !changeset.is_empty();
-        self.stage.merge(changeset.into());
-        Ok(changed)
-    }
-
-    /// Add a transaction to the wallet's internal view of the chain. This stages the change,
-    /// you must persist it later.
-    ///
-    /// This method inserts the given `tx` and returns whether anything changed after insertion,
-    /// which will be false if the same transaction already exists in the wallet's transaction
-    /// graph. Any changes are staged but not committed.
-    ///
-    /// # Note
-    ///
-    /// By default the inserted `tx` won't be considered "canonical" because it's not known
-    /// whether the transaction exists in the best chain. To know whether it exists, the tx
-    /// must be broadcast to the network and the wallet synced via a chain source.
-    pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> bool {
-        let mut changeset = ChangeSet::default();
-        changeset.merge(self.indexed_graph.insert_tx(tx).into());
-        let ret = !changeset.is_empty();
-        self.stage.merge(changeset);
-        ret
     }
 
     /// Iterate over the transactions in the wallet.
