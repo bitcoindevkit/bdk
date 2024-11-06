@@ -398,6 +398,29 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 );
             }
 
+            // Validate that the length of the coinbase merkle path matches the length of the
+            // transaction's merkle path, and verify the coinbase transaction's merkle proof. This
+            // prevents a known brute-force exploit from inserting invalid transactions.
+            if let Ok(txid_from_pos_res) = self
+                .inner
+                .txid_from_pos_with_merkle(merkle_res.block_height, 0)
+            {
+                // Construct the GetMerkleRes required for validating the merkle proof of the
+                // coinbase transaction.
+                let coinbase_merkle_res = &electrum_client::GetMerkleRes {
+                    block_height: merkle_res.block_height,
+                    pos: 0,
+                    merkle: txid_from_pos_res.merkle.clone(),
+                };
+
+                is_confirmed_tx = txid_from_pos_res.merkle.len() == merkle_res.merkle.len()
+                    && electrum_client::utils::validate_merkle_proof(
+                        &txid_from_pos_res.tx_hash,
+                        &header.merkle_root,
+                        coinbase_merkle_res,
+                    );
+            }
+
             if is_confirmed_tx {
                 tx_update.anchors.insert((
                     ConfirmationBlockTime {
