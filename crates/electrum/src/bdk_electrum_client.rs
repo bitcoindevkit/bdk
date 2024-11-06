@@ -346,24 +346,22 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 Err(other_err) => return Err(other_err),
             };
 
-            let spk = tx
-                .output
-                .first()
-                .map(|txo| &txo.script_pubkey)
-                .expect("tx must have an output");
+            if let Some(txo) = tx.output.first() {
+                let spk = &txo.script_pubkey;
 
-            // because of restrictions of the Electrum API, we have to use the `script_get_history`
-            // call to get confirmation status of our transaction
-            if let Some(r) = self
-                .inner
-                .script_get_history(spk)?
-                .into_iter()
-                .find(|r| r.tx_hash == txid)
-            {
-                self.validate_merkle_for_anchor(tx_update, txid, r.height)?;
+                // because of restrictions of the Electrum API, we have to use the `script_get_history`
+                // call to get confirmation status of our transaction
+                if let Some(r) = self
+                    .inner
+                    .script_get_history(spk)?
+                    .into_iter()
+                    .find(|r| r.tx_hash == txid)
+                {
+                    self.validate_merkle_for_anchor(tx_update, txid, r.height)?;
+                }
+
+                tx_update.txs.push(tx);
             }
-
-            tx_update.txs.push(tx);
         }
         Ok(())
     }
