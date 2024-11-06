@@ -422,7 +422,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ) -> Result<(), Error> {
         let mut no_dup = HashSet::<Txid>::new();
         for tx in &tx_update.txs {
-            if no_dup.insert(tx.compute_txid()) {
+            if !tx.is_coinbase() && no_dup.insert(tx.compute_txid()) {
                 for vin in &tx.input {
                     let outpoint = vin.previous_output;
                     let vout = outpoint.vout;
