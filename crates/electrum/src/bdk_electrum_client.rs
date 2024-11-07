@@ -563,6 +563,27 @@ mod test {
 
     #[cfg(feature = "default")]
     #[test]
+    fn test_populate_with_txids_without_output() {
+        let env = TestEnv::new().unwrap();
+        let electrum_client =
+            electrum_client::Client::new(env.electrsd.electrum_url.as_str()).unwrap();
+        let client = BdkElectrumClient::new(electrum_client);
+
+        // Setup transaction with no outputs.
+        let tx = new_tx(0);
+
+        // Populate tx_cache with `tx` to make it fetchable.
+        client.populate_tx_cache(vec![tx.clone()]);
+
+        // Test that populate_with_txids does not panic or process a tx with no output.
+        let mut tx_update = TxUpdate::default();
+        let _ = client.populate_with_txids(&mut tx_update, vec![tx.compute_txid()]);
+
+        assert_eq!(tx_update.txs, Vec::new());
+    }
+
+    #[cfg(feature = "default")]
+    #[test]
     fn test_fetch_prev_txout_with_coinbase() {
         let env = TestEnv::new().unwrap();
         let electrum_client =
