@@ -58,6 +58,7 @@ use miniscript::{
 };
 
 use bdk_chain::tx_graph::CalculateFeeError;
+use chain::collections::HashSet;
 
 mod changeset;
 pub mod coin_selection;
@@ -116,6 +117,7 @@ pub struct Wallet {
     change_signers: Arc<SignersContainer>,
     chain: LocalChain,
     indexed_graph: IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<KeychainKind>>,
+    locked_unspent: HashSet<OutPoint>,
     stage: ChangeSet,
     network: Network,
     secp: SecpCtx,
@@ -308,7 +310,7 @@ impl Wallet {
     /// received on the external keychain (including change), and without a change keychain
     /// BDK lacks enough information to distinguish between change and outside payments.
     ///
-    /// Additionally because this wallet has no internal (change) keychain, all methods that
+    /// Additionally, because this wallet has no internal (change) keychain, all methods that
     /// require a [`KeychainKind`] as input, e.g. [`reveal_next_address`] should only be called
     /// using the [`External`] variant. In most cases passing [`Internal`] is treated as the
     /// equivalent of [`External`] but this behavior must not be relied on.
@@ -434,6 +436,7 @@ impl Wallet {
             network,
             chain,
             indexed_graph,
+            locked_unspent: Default::default(),
             stage,
             secp,
         })
@@ -625,6 +628,7 @@ impl Wallet {
             change_signers,
             chain,
             indexed_graph,
+            locked_unspent: Default::default(),
             stage,
             network,
             secp,
@@ -832,6 +836,27 @@ impl Wallet {
                 self.indexed_graph.index.outpoints().iter().cloned(),
             )
             .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
+    }
+
+    /// Lock unspent output
+    ///
+    /// The wallet's locked unspent outputs are automatically added to the [`TxBuilder`]
+    /// unspendable [`TxOut`]s. See [`TxBuilder::add_unspendable`].
+    ///
+    /// Returns true if the given [`TxOut`] is unspent and not already locked.
+    pub fn lock_unspent(&mut self, outpoint: OutPoint) -> bool {
+        // if outpoint is unspent and not already locked insert it in locked_unspent
+        if self.list_unspent().any(|utxo| utxo.outpoint == outpoint) {
+            return self.locked_unspent.insert(outpoint);
+        }
+        false
+    }
+
+    /// Unlock unspent output
+    ///
+    /// returns true if the given [`TxOut`] was locked.
+    pub fn unlock_unspent(&mut self, outpoint: OutPoint) -> bool {
+        self.locked_unspent.remove(&outpoint)
     }
 
     /// List all relevant outputs (includes both spent and unspent, confirmed and unconfirmed).
@@ -1214,7 +1239,10 @@ impl Wallet {
 
     /// Start building a transaction.
     ///
-    /// This returns a blank [`TxBuilder`] from which you can specify the parameters for the transaction.
+    /// This returns a [`TxBuilder`] from which you can specify the parameters for the transaction.
+    ///
+    /// Locked unspent [`TxOut`] are automatically added to the unspendable set. See [`Wallet::lock_unspent`]
+    /// and [`TxBuilder::add_unspendable`].
     ///
     /// ## Example
     ///
@@ -1238,12 +1266,16 @@ impl Wallet {
     /// // sign and broadcast ...
     /// # Ok::<(), anyhow::Error>(())
     /// ```
-    ///
-    /// [`TxBuilder`]: crate::TxBuilder
+
     pub fn build_tx(&mut self) -> TxBuilder<'_, DefaultCoinSelectionAlgorithm> {
+        let params = TxParams {
+            unspendable: self.locked_unspent.clone(),
+            ..Default::default()
+        };
+
         TxBuilder {
             wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
-            params: TxParams::default(),
+            params,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
         }
     }
@@ -1585,6 +1617,9 @@ impl Wallet {
     /// *replace by fee* (RBF). If the transaction can be fee bumped then it returns a [`TxBuilder`]
     /// pre-populated with the inputs and outputs of the original transaction.
     ///
+    /// Locked unspent [`TxOut`] are automatically added to the unspendable set. See [`Wallet::lock_unspent`]
+    /// and [`TxBuilder::add_unspendable`].
+    ///
     /// ## Example
     ///
     /// ```no_run
@@ -1744,6 +1779,7 @@ impl Wallet {
                 absolute: fee,
                 rate: fee_rate,
             }),
+            unspendable: self.locked_unspent.clone(),
             ..Default::default()
         };
 

@@ -13,7 +13,7 @@ use bdk_wallet::error::CreateTxError;
 use bdk_wallet::psbt::PsbtUtils;
 use bdk_wallet::signer::{SignOptions, SignerError};
 use bdk_wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::{AddressInfo, Balance, ChangeSet, Wallet, WalletPersister, WalletTx};
+use bdk_wallet::{AddressInfo, Balance, ChangeSet, TxOrdering, Wallet, WalletPersister, WalletTx};
 use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
 use bitcoin::constants::ChainHash;
 use bitcoin::hashes::Hash;
@@ -4308,4 +4308,127 @@ fn test_transactions_sort_by() {
         .map(|tx| tx.chain_position.confirmation_height_upper_bound())
         .collect();
     assert_eq!([None, Some(2000), Some(1000)], conf_heights.as_slice());
+}
+
+#[test]
+fn test_locked_unlocked_utxo() {
+    // create a wallet with 2 utxos
+    let (mut wallet, _txid) = get_funded_wallet_wpkh();
+    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
+    let unspent = wallet.list_unspent().collect::<Vec<_>>();
+    assert_eq!(unspent.len(), 2);
+
+    // get a drain-to address and fee_rate
+    let spk = wallet
+        .next_unused_address(KeychainKind::External)
+        .script_pubkey();
+    let fee_rate = FeeRate::from_sat_per_vb_unchecked(1);
+
+    // lock utxo 0 and verify it is NOT included in drain all utxo tx
+    wallet.lock_unspent(unspent[0].outpoint);
+
+    // verify locking an already locked utxo returns false
+    assert!(!wallet.lock_unspent(unspent[0].outpoint));
+
+    // verify locked utxo is not spent
+    let mut builder = wallet.build_tx();
+    builder
+        .drain_to(spk.clone())
+        .drain_wallet()
+        .ordering(TxOrdering::Untouched)
+        .fee_rate(fee_rate);
+    let tx_inputs = builder.finish().unwrap().unsigned_tx.input;
+    assert_eq!(tx_inputs.len(), 1);
+    assert_eq!(tx_inputs[0].previous_output, unspent[1].outpoint);
+
+    // unlock utxo 0 and verify it IS included in drain all utxo tx
+    wallet.unlock_unspent(unspent[0].outpoint);
+
+    // verify unlocking an already unlocked utxo returns false
+    assert!(!wallet.unlock_unspent(unspent[0].outpoint));
+
+    // verify all utxos are spent
+    let mut builder = wallet.build_tx();
+    builder
+        .drain_to(spk)
+        .drain_wallet()
+        .ordering(TxOrdering::Untouched)
+        .fee_rate(fee_rate);
+    let tx_inputs = builder.finish().unwrap().unsigned_tx.input;
+    assert_eq!(tx_inputs.len(), 2);
+    assert_eq!(tx_inputs[0].previous_output, unspent[0].outpoint);
+    assert_eq!(tx_inputs[1].previous_output, unspent[1].outpoint);
+}
+
+#[test]
+fn test_bump_fee_with_locked_unlocked_utxo() {
+    // create a wallet with 2 utxos
+    let (mut wallet, _txid) = get_funded_wallet_wpkh();
+    receive_output_in_latest_block(&mut wallet, 25_000);
+    receive_output_in_latest_block(&mut wallet, 2000);
+    let mut unspent = wallet.list_unspent().collect::<Vec<_>>();
+    unspent.sort_by_key(|utxo| utxo.txout.value);
+    unspent.reverse(); // now unspent are in largest first order
+    assert_eq!(unspent.len(), 3);
+
+    // get a drain-to address and fee_rate
+    let spk = wallet
+        .next_unused_address(KeychainKind::External)
+        .script_pubkey();
+    let fee_rate = FeeRate::from_sat_per_vb_unchecked(1);
+
+    // lock largest utxo
+    wallet.lock_unspent(unspent[0].outpoint);
+
+    // verify locked largest (50_000 sats) utxo is not spent
+    let mut builder = wallet.build_tx().coin_selection(LargestFirstCoinSelection);
+    builder
+        .set_recipients(vec![(spk.clone(), Amount::from_sat(24_500))])
+        .ordering(TxOrdering::Untouched)
+        .fee_rate(fee_rate);
+    let mut psbt = builder.finish().unwrap();
+    wallet
+        .finalize_psbt(&mut psbt, SignOptions::default())
+        .unwrap();
+
+    let signed_tx = psbt.extract_tx().unwrap();
+    wallet.apply_unconfirmed_txs([(signed_tx.clone(), 100_000)]);
+    let original_txid = signed_tx.compute_txid();
+    let tx_inputs = signed_tx.clone().input;
+
+    // verify unlocked utxo (25_000 sats) used instead of locked largest (50_000 sats) utxo
+    assert_eq!(tx_inputs.len(), 1);
+    assert_eq!(tx_inputs[0].previous_output, unspent[1].outpoint);
+
+    // get new bump fee rate: 10 sats/vb
+    let new_fee_rate = FeeRate::from_sat_per_vb_unchecked(10);
+    let mut builder = wallet
+        .build_fee_bump(original_txid)
+        .unwrap()
+        .coin_selection(LargestFirstCoinSelection);
+    builder
+        .ordering(TxOrdering::Untouched)
+        .fee_rate(new_fee_rate);
+
+    let tx_inputs = builder.finish().unwrap().unsigned_tx.input;
+    // verify unlocked utxo used instead of locked largest first utxo
+    assert_eq!(tx_inputs.len(), 2);
+    assert_eq!(tx_inputs[0].previous_output, unspent[1].outpoint);
+    assert_eq!(tx_inputs[1].previous_output, unspent[2].outpoint);
+
+    // confirm locked largest utxo is unlocked
+    assert!(wallet.unlock_unspent(unspent[0].outpoint));
+    let mut builder = wallet
+        .build_fee_bump(original_txid)
+        .unwrap()
+        .coin_selection(LargestFirstCoinSelection);
+    builder
+        .ordering(TxOrdering::Untouched)
+        .fee_rate(new_fee_rate);
+
+    let tx_inputs = builder.finish().unwrap().unsigned_tx.input;
+    // verify unlocked largest utxo used instead of smaller unlocked utxo
+    assert_eq!(tx_inputs.len(), 2);
+    assert_eq!(tx_inputs[0].previous_output, unspent[1].outpoint);
+    assert_eq!(tx_inputs[1].previous_output, unspent[0].outpoint);
 }
