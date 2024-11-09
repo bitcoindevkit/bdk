@@ -492,6 +492,7 @@ mod test {
     }
 
     /// Ensure that update does not remove heights (from original), and all anchor heights are included.
+    #[cfg(not(docsrs))]
     #[test]
     pub fn test_finalize_chain_update() -> anyhow::Result<()> {
         struct TestCase<'a> {
@@ -655,6 +656,7 @@ mod test {
         Ok(())
     }
 
+    #[cfg(not(docsrs))]
     #[test]
     fn update_local_chain() -> anyhow::Result<()> {
         const TIP_HEIGHT: u32 = 50;

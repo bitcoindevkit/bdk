@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 pub mod utils;
 
 use bdk_chain::{
@@ -25,12 +27,14 @@ use std::time::Duration;
 
 /// Struct for running a regtest environment with a single `bitcoind` node with an `electrs`
 /// instance connected to it.
+#[cfg_attr(docsrs, doc(cfg(not(docsrs))))]
 pub struct TestEnv {
     pub bitcoind: electrsd::bitcoind::BitcoinD,
     pub electrsd: electrsd::ElectrsD,
 }
 
 /// Configuration parameters.
+#[cfg_attr(docsrs, doc(cfg(not(docsrs))))]
 #[derive(Debug)]
 pub struct Config<'a> {
     /// [`bitcoind::Conf`]
@@ -39,6 +43,7 @@ pub struct Config<'a> {
     pub electrsd: electrsd::Conf<'a>,
 }
 
+#[cfg(not(docsrs))]
 impl<'a> Default for Config<'a> {
     /// Use the default configuration plus set `http_enabled = true` for [`electrsd::Conf`]
     /// which is required for testing `bdk_esplora`.
@@ -54,6 +59,7 @@ impl<'a> Default for Config<'a> {
     }
 }
 
+#[cfg(not(docsrs))]
 impl TestEnv {
     /// Construct a new [`TestEnv`] instance with the default configuration used by BDK.
     pub fn new() -> anyhow::Result<Self> {
@@ -310,7 +316,7 @@ impl TestEnv {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(docsrs)))]
 mod test {
     use crate::TestEnv;
     use core::time::Duration;

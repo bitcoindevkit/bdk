@@ -1,3 +1,5 @@
+#![cfg(not(docsrs))]
+
 use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
     local_chain::LocalChain,

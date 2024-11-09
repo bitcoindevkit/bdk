@@ -503,6 +503,7 @@ mod test {
     }
 
     /// Ensure that update does not remove heights (from original), and all anchor heights are included.
+    #[cfg(not(docsrs))]
     #[tokio::test]
     pub async fn test_finalize_chain_update() -> anyhow::Result<()> {
         struct TestCase<'a> {

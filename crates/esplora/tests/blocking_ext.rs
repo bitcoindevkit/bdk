@@ -1,3 +1,5 @@
+#![cfg(not(docsrs))]
+
 use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
 use bdk_chain::{ConfirmationBlockTime, TxGraph};
 use bdk_esplora::EsploraExt;
