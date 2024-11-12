@@ -12,84 +12,79 @@
 //! Wallet
 //!
 //! This module defines the [`Wallet`].
-use crate::{
-    collections::{BTreeMap, HashMap},
-    descriptor::check_wallet_descriptor,
-};
+
 use alloc::{
     boxed::Box,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
-pub use bdk_chain::Balance;
+use core::{cmp::Ordering, fmt, mem, ops::Deref};
+
 use bdk_chain::{
     indexed_tx_graph,
     indexer::keychain_txout::KeychainTxOutIndex,
-    local_chain::{
-        self, ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain,
-    },
+    local_chain::{ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     spk_client::{
         FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
         SyncResult,
     },
-    tx_graph::{CanonicalTx, TxGraph, TxNode, TxUpdate},
+    tx_graph::{CalculateFeeError, CanonicalTx, TxGraph, TxUpdate},
     BlockId, ChainPosition, ConfirmationBlockTime, DescriptorExt, FullTxOut, Indexed,
     IndexedTxGraph, Merge,
 };
-use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::{
-    absolute, psbt, Address, Block, FeeRate, Network, OutPoint, ScriptBuf, Sequence, Transaction,
-    TxOut, Txid, Witness,
+    absolute,
+    consensus::encode::serialize,
+    constants::genesis_block,
+    psbt,
+    secp256k1::Secp256k1,
+    sighash::{EcdsaSighashType, TapSighashType},
+    transaction, Address, Amount, Block, BlockHash, FeeRate, Network, OutPoint, Psbt, ScriptBuf,
+    Sequence, Transaction, TxOut, Txid, Weight, Witness,
 };
-use bitcoin::{consensus::encode::serialize, transaction, BlockHash, Psbt};
-use bitcoin::{constants::genesis_block, Amount};
-use bitcoin::{secp256k1::Secp256k1, Weight};
-use core::cmp::Ordering;
-use core::fmt;
-use core::mem;
-use core::ops::Deref;
-use rand_core::RngCore;
-
-use descriptor::error::Error as DescriptorError;
 use miniscript::{
     descriptor::KeyMap,
     psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier},
 };
-
-use bdk_chain::tx_graph::CalculateFeeError;
+use rand_core::RngCore;
 
 mod changeset;
 pub mod coin_selection;
+pub mod error;
 pub mod export;
 mod params;
+mod persisted;
 pub mod signer;
 pub mod tx_builder;
-pub use changeset::*;
-pub use params::*;
-mod persisted;
-pub use persisted::*;
 pub(crate) mod utils;
 
-pub mod error;
-
-pub use utils::IsDust;
-
-use coin_selection::{DefaultCoinSelectionAlgorithm, InsufficientFunds};
-use signer::{SignOptions, SignerOrdering, SignersContainer, TransactionSigner};
-use tx_builder::{FeePolicy, TxBuilder, TxParams};
-use utils::{check_nsequence_rbf, After, Older, SecpCtx};
-
-use crate::descriptor::policy::BuildSatisfaction;
+use crate::collections::{BTreeMap, HashMap};
 use crate::descriptor::{
-    self, DerivedDescriptor, DescriptorMeta, ExtendedDescriptor, ExtractPolicy,
-    IntoWalletDescriptor, Policy, XKeyUtils,
+    check_wallet_descriptor, error::Error as DescriptorError, policy::BuildSatisfaction,
+    DerivedDescriptor, DescriptorMeta, ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor,
+    Policy, XKeyUtils,
 };
 use crate::psbt::PsbtUtils;
-use crate::signer::SignerError;
 use crate::types::*;
-use crate::wallet::coin_selection::Excess::{self, Change, NoChange};
-use crate::wallet::error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError};
+use crate::wallet::{
+    coin_selection::{
+        DefaultCoinSelectionAlgorithm,
+        Excess::{self, Change, NoChange},
+        InsufficientFunds,
+    },
+    error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError},
+    signer::{SignOptions, SignerError, SignerOrdering, SignersContainer, TransactionSigner},
+    tx_builder::{FeePolicy, TxBuilder, TxParams},
+    utils::{check_nsequence_rbf, After, Older, SecpCtx},
+};
+
+// re-exports
+pub use bdk_chain::Balance;
+pub use changeset::ChangeSet;
+pub use params::*;
+pub use persisted::*;
+pub use utils::IsDust;
 
 const COINBASE_MATURITY: u32 = 100;
 
@@ -123,7 +118,7 @@ pub struct Wallet {
 
 /// An update to [`Wallet`].
 ///
-/// It updates [`KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`local_chain::LocalChain`] atomically.
+/// It updates [`KeychainTxOutIndex`], [`bdk_chain::TxGraph`] and [`LocalChain`] atomically.
 #[derive(Debug, Clone, Default)]
 pub struct Update {
     /// Contains the last active derivation indices per keychain (`K`), which is used to update the
@@ -134,8 +129,6 @@ pub struct Update {
     pub tx_update: TxUpdate<ConfirmationBlockTime>,
 
     /// Update for the wallet's internal [`LocalChain`].
-    ///
-    /// [`LocalChain`]: local_chain::LocalChain
     pub chain: Option<CheckPoint>,
 }
 
@@ -1069,44 +1062,6 @@ impl Wallet {
             )?,
             tx_node: graph.get_tx_node(txid)?,
         })
-    }
-
-    /// Add a new checkpoint to the wallet's internal view of the chain.
-    ///
-    /// Returns whether anything changed with the insertion (e.g. `false` if checkpoint was already
-    /// there).
-    ///
-    /// **WARNING**: You must persist the changes resulting from one or more calls to this method
-    /// if you need the inserted checkpoint data to be reloaded after closing the wallet.
-    /// See [`Wallet::reveal_next_address`].
-    pub fn insert_checkpoint(
-        &mut self,
-        block_id: BlockId,
-    ) -> Result<bool, local_chain::AlterCheckPointError> {
-        let changeset = self.chain.insert_block(block_id)?;
-        let changed = !changeset.is_empty();
-        self.stage.merge(changeset.into());
-        Ok(changed)
-    }
-
-    /// Add a transaction to the wallet's internal view of the chain. This stages the change,
-    /// you must persist it later.
-    ///
-    /// This method inserts the given `tx` and returns whether anything changed after insertion,
-    /// which will be false if the same transaction already exists in the wallet's transaction
-    /// graph. Any changes are staged but not committed.
-    ///
-    /// # Note
-    ///
-    /// By default the inserted `tx` won't be considered "canonical" because it's not known
-    /// whether the transaction exists in the best chain. To know whether it exists, the tx
-    /// must be broadcast to the network and the wallet synced via a chain source.
-    pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> bool {
-        let mut changeset = ChangeSet::default();
-        changeset.merge(self.indexed_graph.insert_tx(tx).into());
-        let ret = !changeset.is_empty();
-        self.stage.merge(changeset);
-        ret
     }
 
     /// Iterate over the transactions in the wallet.
@@ -2299,10 +2254,10 @@ impl Wallet {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time now must surpass epoch anchor");
-        self.apply_update_at(update, Some(now.as_secs()))
+        self.apply_update_at(update, now.as_secs())
     }
 
-    /// Applies an `update` alongside an optional `seen_at` timestamp and stages the changes.
+    /// Applies an `update` alongside a `seen_at` timestamp and stages the changes.
     ///
     /// `seen_at` represents when the update is seen (in unix seconds). It is used to determine the
     /// `last_seen`s for all transactions in the update which have no corresponding anchor(s). The
@@ -2310,15 +2265,12 @@ impl Wallet {
     /// transactions (where the transaction with the lower `last_seen` value is omitted from the
     /// canonical history).
     ///
-    /// Not setting a `seen_at` value means unconfirmed transactions introduced by this update will
-    /// not be part of the canonical history of transactions.
-    ///
     /// Use [`apply_update`](Wallet::apply_update) to have the `seen_at` value automatically set to
     /// the current time.
     pub fn apply_update_at(
         &mut self,
         update: impl Into<Update>,
-        seen_at: Option<u64>,
+        seen_at: u64,
     ) -> Result<(), CannotConnectError> {
         let update = update.into();
         let mut changeset = match update.chain {
@@ -2333,7 +2285,7 @@ impl Wallet {
         changeset.merge(index_changeset.into());
         changeset.merge(
             self.indexed_graph
-                .apply_update_at(update.tx_update, seen_at)
+                .apply_update_at(update.tx_update, Some(seen_at))
                 .into(),
         );
         self.stage.merge(changeset);
@@ -2366,14 +2318,6 @@ impl Wallet {
     /// Get a reference to the inner [`TxGraph`].
     pub fn tx_graph(&self) -> &TxGraph<ConfirmationBlockTime> {
         self.indexed_graph.graph()
-    }
-
-    /// Iterate over transactions in the wallet that are unseen and unanchored likely
-    /// because they haven't been broadcast.
-    pub fn unbroadcast_transactions(
-        &self,
-    ) -> impl Iterator<Item = TxNode<'_, Arc<Transaction>, ConfirmationBlockTime>> {
-        self.tx_graph().txs_with_no_anchor_or_last_seen()
     }
 
     /// Get a reference to the inner [`KeychainTxOutIndex`].
@@ -2612,6 +2556,7 @@ macro_rules! doctest_wallet {
         use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
         use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph, tx_graph};
         use $crate::{Update, KeychainKind, Wallet};
+        use $crate::test_utils::*;
         let descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/0/*)";
         let change_descriptor = "tr([73c5da0a/86'/0'/0']tprv8fMn4hSKPRC1oaCPqxDb1JWtgkpeiQvZhsr8W2xuy3GEMkzoArcAWTfJxYb6Wj8XNNDWEjfYKK4wGQXh3ZUXhDF2NcnsALpWTeSwarJt7Vc/1/*)";
 
@@ -2631,21 +2576,14 @@ macro_rules! doctest_wallet {
         };
         let txid = tx.compute_txid();
         let block_id = BlockId { height: 500, hash: BlockHash::all_zeros() };
-        let _ = wallet.insert_checkpoint(block_id);
-        let _ = wallet.insert_checkpoint(BlockId { height: 1_000, hash: BlockHash::all_zeros() });
-        let _ = wallet.insert_tx(tx);
+        insert_checkpoint(&mut wallet, block_id);
+        insert_checkpoint(&mut wallet, BlockId { height: 1_000, hash: BlockHash::all_zeros() });
+        insert_tx(&mut wallet, tx);
         let anchor = ConfirmationBlockTime {
             confirmation_time: 50_000,
             block_id,
         };
-        let update = Update {
-            tx_update: tx_graph::TxUpdate {
-                anchors: [(anchor, txid)].into_iter().collect(),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        wallet.apply_update(update).unwrap();
+        insert_anchor(&mut wallet, txid, anchor);
         wallet
     }}
 }
