@@ -1653,7 +1653,7 @@ impl Wallet {
                         WeightedUtxo {
                             utxo: Utxo::Foreign {
                                 outpoint: txin.previous_output,
-                                sequence: Some(txin.sequence),
+                                sequence: txin.sequence,
                                 psbt_input: Box::new(psbt::Input {
                                     witness_utxo: Some(txout.clone()),
                                     non_witness_utxo: Some(prev_tx.as_ref().clone()),

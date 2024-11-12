@@ -408,7 +408,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
             satisfaction_weight,
             utxo: Utxo::Foreign {
                 outpoint,
-                sequence: Some(sequence),
+                sequence,
                 psbt_input: Box::new(psbt_input),
             },
         });
