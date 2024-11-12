@@ -278,6 +278,6 @@ fn main() -> anyhow::Result<()> {
     };
 
     let mut db = db.lock().unwrap();
-    db.append_changeset(&db_changeset)?;
+    db.append(&db_changeset)?;
     Ok(())
 }
