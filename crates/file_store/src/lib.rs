@@ -18,6 +18,8 @@ pub enum FileError {
     Io(io::Error),
     /// Magic bytes do not match what is expected.
     InvalidMagicBytes { got: Vec<u8>, expected: Vec<u8> },
+    /// Failure to decode data from the file.
+    Bincode(bincode::ErrorKind),
 }
 
 impl core::fmt::Display for FileError {
@@ -29,6 +31,7 @@ impl core::fmt::Display for FileError {
                 "file has invalid magic bytes: expected={:?} got={:?}",
                 expected, got,
             ),
+            Self::Bincode(e) => write!(f, "bincode error while reading entry {}", e),
         }
     }
 }
