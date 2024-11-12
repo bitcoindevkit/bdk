@@ -278,7 +278,7 @@ fn main() -> anyhow::Result<()> {
 
     // We persist the changes
     let mut db = db.lock().unwrap();
-    db.append_changeset(&ChangeSet {
+    db.append(&ChangeSet {
         local_chain: local_chain_changeset,
         tx_graph: indexed_tx_graph_changeset.tx_graph,
         indexer: indexed_tx_graph_changeset.indexer,
