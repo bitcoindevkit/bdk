@@ -41,16 +41,8 @@ where
     where
         P: AsRef<Path>,
     {
-        if file_path.as_ref().exists() {
-            // `io::Error` is used instead of a variant on `FileError` because there is already a
-            // nightly-only `File::create_new` method
-            return Err(FileError::Io(io::Error::new(
-                io::ErrorKind::Other,
-                "file already exists",
-            )));
-        }
         let mut f = OpenOptions::new()
-            .create(true)
+            .create_new(true)
             .read(true)
             .write(true)
             .truncate(true)
