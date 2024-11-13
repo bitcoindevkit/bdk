@@ -161,7 +161,8 @@ pub fn get_test_single_sig_cltv() -> &'static str {
 }
 
 /// `wsh` descriptor with policy `and(pk(A),after(500_000_000))`
-/// the checking has to be done 500_000_000 for
+/// the parameter passed to miniscript fragment `after` has to equal or grather than 500_000_000
+/// in order to use a lock based on unix time
 pub fn get_test_single_sig_cltv_for_specific_time() -> &'static str {
     "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(500000000)))"
 }
