@@ -379,15 +379,17 @@ mod test {
         let changeset = BTreeSet::from(["hello".to_string(), "world".to_string()]);
 
         {
-            let (_, mut store) = Store::<TestChangeSet>::load_or_create(&TEST_MAGIC_BYTES, &file_path)
-                .expect("must create");
+            let (_, mut store) =
+                Store::<TestChangeSet>::load_or_create(&TEST_MAGIC_BYTES, &file_path)
+                    .expect("must create");
             assert!(file_path.exists());
             store.append(&changeset).expect("must succeed");
         }
 
         {
-            let (recovered_changeset, _) = Store::<TestChangeSet>::load_or_create(&TEST_MAGIC_BYTES, &file_path)
-                .expect("must load");
+            let (recovered_changeset, _) =
+                Store::<TestChangeSet>::load_or_create(&TEST_MAGIC_BYTES, &file_path)
+                    .expect("must load");
             assert_eq!(recovered_changeset, Some(changeset));
         }
     }
