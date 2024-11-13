@@ -557,8 +557,449 @@ fn chain_update(
 mod test {
     use crate::{bdk_electrum_client::TxUpdate, BdkElectrumClient};
     use bdk_chain::bitcoin::{OutPoint, Transaction, TxIn};
+    use bdk_chain::{
+        bitcoin::{
+            block::{Header, Version},
+            pow::CompactTarget,
+            BlockHash, Script, TxMerkleNode, Txid,
+        },
+        BlockId, ConfirmationBlockTime,
+    };
     use bdk_core::collections::BTreeMap;
-    use bdk_testenv::{utils::new_tx, TestEnv};
+    use bdk_core::collections::BTreeSet;
+    use bdk_testenv::{bitcoincore_rpc::jsonrpc::serde_json, utils::new_tx, TestEnv};
+    use electrum_client::{
+        Batch, ElectrumApi, Error, GetBalanceRes, GetHeadersRes, GetHistoryRes, GetMerkleRes,
+        HeaderNotification, ListUnspentRes, Param, RawHeaderNotification, ScriptStatus,
+        ServerFeaturesRes, TxidFromPosRes,
+    };
+    use std::{borrow::Borrow, str::FromStr};
+
+    // Mock electrum client that can be used to set customized responses for testing.
+    #[derive(Clone)]
+    pub struct MockElectrumClient {
+        pub merkle_res: Option<GetMerkleRes>,
+        pub txid_from_pos_res: Option<TxidFromPosRes>,
+        pub block_header: Option<Header>,
+    }
+
+    impl MockElectrumClient {
+        pub fn new() -> Self {
+            MockElectrumClient {
+                merkle_res: None,
+                txid_from_pos_res: None,
+                block_header: None,
+            }
+        }
+
+        pub fn set_merkle_res(&mut self, res: GetMerkleRes) {
+            self.merkle_res = Some(res);
+        }
+
+        pub fn set_txid_from_pos_res(&mut self, res: TxidFromPosRes) {
+            self.txid_from_pos_res = Some(res);
+        }
+
+        pub fn set_block_header(&mut self, header: Header) {
+            self.block_header = Some(header);
+        }
+    }
+
+    impl ElectrumApi for MockElectrumClient {
+        fn transaction_get_merkle(
+            &self,
+            _txid: &Txid,
+            _block_height: usize,
+        ) -> Result<GetMerkleRes, Error> {
+            self.merkle_res
+                .clone()
+                .ok_or_else(|| Error::Message("Missing GetMerkleRes".to_string()))
+        }
+
+        fn txid_from_pos_with_merkle(
+            &self,
+            _block_height: usize,
+            _pos: usize,
+        ) -> Result<TxidFromPosRes, Error> {
+            self.txid_from_pos_res
+                .clone()
+                .ok_or_else(|| Error::Message("Missing TxidFromPosRes".to_string()))
+        }
+
+        fn block_header(&self, _height: usize) -> Result<Header, Error> {
+            self.block_header
+                .ok_or_else(|| Error::Message("Missing Header".to_string()))
+        }
+
+        fn block_headers_subscribe(&self) -> Result<HeaderNotification, Error> {
+            unimplemented!()
+        }
+
+        fn block_headers_pop(&self) -> Result<Option<HeaderNotification>, Error> {
+            unimplemented!()
+        }
+
+        fn transaction_get(&self, _txid: &Txid) -> Result<Transaction, Error> {
+            unimplemented!()
+        }
+
+        fn batch_transaction_get<'t, I>(&self, _txids: I) -> Result<Vec<Transaction>, Error>
+        where
+            I: IntoIterator + Clone,
+            I::Item: Borrow<&'t Txid>,
+        {
+            unimplemented!()
+        }
+
+        fn batch_block_header<I>(&self, _heights: I) -> Result<Vec<Header>, Error>
+        where
+            I: IntoIterator + Clone,
+            I::Item: Borrow<u32>,
+        {
+            unimplemented!()
+        }
+
+        fn transaction_broadcast(&self, _tx: &Transaction) -> Result<Txid, Error> {
+            unimplemented!()
+        }
+
+        fn raw_call(
+            &self,
+            _method_name: &str,
+            _params: impl IntoIterator<Item = Param>,
+        ) -> Result<serde_json::Value, Error> {
+            unimplemented!()
+        }
+
+        fn batch_call(&self, _batch: &Batch) -> Result<Vec<serde_json::Value>, Error> {
+            unimplemented!()
+        }
+
+        fn block_headers_subscribe_raw(&self) -> Result<RawHeaderNotification, Error> {
+            unimplemented!()
+        }
+
+        fn block_headers_pop_raw(&self) -> Result<Option<RawHeaderNotification>, Error> {
+            unimplemented!()
+        }
+
+        fn block_header_raw(&self, _height: usize) -> Result<Vec<u8>, Error> {
+            unimplemented!()
+        }
+
+        fn block_headers(
+            &self,
+            _start_height: usize,
+            _count: usize,
+        ) -> Result<GetHeadersRes, Error> {
+            unimplemented!()
+        }
+
+        fn estimate_fee(&self, _number: usize) -> Result<f64, Error> {
+            unimplemented!()
+        }
+
+        fn relay_fee(&self) -> Result<f64, Error> {
+            unimplemented!()
+        }
+
+        fn script_subscribe(&self, _script: &Script) -> Result<Option<ScriptStatus>, Error> {
+            unimplemented!()
+        }
+
+        fn batch_script_subscribe<'s, I>(
+            &self,
+            _scripts: I,
+        ) -> Result<Vec<Option<ScriptStatus>>, Error>
+        where
+            I: IntoIterator + Clone,
+            I::Item: Borrow<&'s Script>,
+        {
+            unimplemented!()
+        }
+
+        fn script_unsubscribe(&self, _script: &Script) -> Result<bool, Error> {
+            unimplemented!()
+        }
+
+        fn script_pop(&self, _script: &Script) -> Result<Option<ScriptStatus>, Error> {
+            unimplemented!()
+        }
+
+        fn script_get_balance(&self, _script: &Script) -> Result<GetBalanceRes, Error> {
+            unimplemented!()
+        }
+
+        fn batch_script_get_balance<'s, I>(&self, _scripts: I) -> Result<Vec<GetBalanceRes>, Error>
+        where
+            I: IntoIterator + Clone,
+            I::Item: Borrow<&'s Script>,
+        {
+            unimplemented!()
+        }
+
+        fn script_get_history(&self, _script: &Script) -> Result<Vec<GetHistoryRes>, Error> {
+            unimplemented!()
+        }
+
+        fn batch_script_get_history<'s, I>(
+            &self,
+            _scripts: I,
+        ) -> Result<Vec<Vec<GetHistoryRes>>, Error>
+        where
+            I: IntoIterator + Clone,
+            I::Item: Borrow<&'s Script>,
+        {
+            unimplemented!()
+        }
+
+        fn script_list_unspent(&self, _script: &Script) -> Result<Vec<ListUnspentRes>, Error> {
+            unimplemented!()
+        }
+
+        fn batch_script_list_unspent<'s, I>(
+            &self,
+            _scripts: I,
+        ) -> Result<Vec<Vec<ListUnspentRes>>, Error>
+        where
+            I: IntoIterator + Clone,
+            I::Item: Borrow<&'s Script>,
+        {
+            unimplemented!()
+        }
+
+        fn transaction_get_raw(&self, _txid: &Txid) -> Result<Vec<u8>, Error> {
+            unimplemented!()
+        }
+
+        fn batch_transaction_get_raw<'t, I>(&self, _txids: I) -> Result<Vec<Vec<u8>>, Error>
+        where
+            I: IntoIterator + Clone,
+            I::Item: Borrow<&'t Txid>,
+        {
+            unimplemented!()
+        }
+
+        fn batch_block_header_raw<I>(&self, _heights: I) -> Result<Vec<Vec<u8>>, Error>
+        where
+            I: IntoIterator + Clone,
+            I::Item: Borrow<u32>,
+        {
+            unimplemented!()
+        }
+
+        fn batch_estimate_fee<I>(&self, _numbers: I) -> Result<Vec<f64>, Error>
+        where
+            I: IntoIterator + Clone,
+            I::Item: Borrow<usize>,
+        {
+            unimplemented!()
+        }
+
+        fn transaction_broadcast_raw(&self, _raw_tx: &[u8]) -> Result<Txid, Error> {
+            unimplemented!()
+        }
+
+        fn txid_from_pos(&self, _height: usize, _tx_pos: usize) -> Result<Txid, Error> {
+            unimplemented!()
+        }
+
+        fn server_features(&self) -> Result<ServerFeaturesRes, Error> {
+            unimplemented!()
+        }
+
+        fn ping(&self) -> Result<(), Error> {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    fn test_validate_coinbase_merkle() {
+        let mut mock_client = MockElectrumClient::new();
+        let txid =
+            Txid::from_str("1f7ff3c407f33eabc8bec7d2cc230948f2249ec8e591bcf6f971ca9366c8788d")
+                .unwrap();
+
+        let mut merkle: Vec<[u8; 32]> = vec![
+            [
+                34, 65, 51, 64, 49, 139, 115, 189, 185, 246, 70, 225, 168, 193, 217, 195, 47, 66,
+                179, 240, 153, 24, 114, 215, 144, 196, 212, 41, 39, 155, 246, 25,
+            ],
+            [
+                185, 59, 215, 191, 138, 123, 233, 120, 174, 62, 233, 130, 153, 171, 102, 171, 32,
+                174, 166, 60, 5, 151, 70, 218, 95, 110, 151, 77, 143, 97, 90, 19,
+            ],
+            [
+                155, 2, 161, 113, 164, 35, 145, 2, 101, 98, 112, 120, 95, 13, 8, 1, 140, 128, 241,
+                140, 31, 20, 214, 228, 131, 192, 252, 146, 211, 196, 43, 179,
+            ],
+            [
+                155, 23, 18, 65, 102, 238, 135, 40, 232, 83, 40, 231, 13, 199, 40, 81, 96, 10, 207,
+                111, 30, 82, 68, 142, 36, 21, 149, 101, 53, 107, 187, 161,
+            ],
+            [
+                246, 103, 126, 61, 208, 239, 94, 152, 52, 41, 40, 241, 221, 154, 209, 196, 173,
+                194, 211, 89, 64, 240, 12, 88, 222, 95, 216, 227, 168, 68, 142, 78,
+            ],
+            [
+                232, 108, 108, 180, 65, 160, 85, 181, 159, 12, 193, 56, 210, 168, 187, 165, 11,
+                129, 16, 101, 248, 6, 180, 198, 222, 52, 127, 99, 64, 243, 223, 236,
+            ],
+            [
+                165, 160, 163, 233, 2, 89, 141, 233, 228, 173, 147, 169, 91, 158, 77, 9, 94, 201,
+                159, 139, 187, 242, 76, 174, 39, 213, 9, 220, 65, 33, 74, 12,
+            ],
+            [
+                175, 109, 105, 234, 23, 120, 195, 125, 108, 54, 156, 210, 197, 154, 114, 181, 77,
+                97, 10, 190, 243, 19, 82, 33, 213, 95, 38, 52, 133, 230, 86, 132,
+            ],
+            [
+                160, 171, 49, 37, 71, 5, 86, 200, 20, 163, 161, 165, 148, 193, 185, 175, 35, 164,
+                193, 205, 16, 111, 30, 142, 193, 51, 220, 0, 81, 188, 25, 101,
+            ],
+            [
+                172, 76, 240, 124, 147, 238, 233, 168, 132, 155, 126, 204, 0, 254, 83, 110, 122,
+                23, 246, 16, 232, 57, 1, 97, 141, 68, 71, 2, 43, 69, 154, 86,
+            ],
+            [
+                182, 99, 142, 10, 136, 90, 85, 59, 130, 238, 243, 117, 179, 135, 8, 127, 129, 195,
+                84, 8, 158, 103, 12, 97, 253, 157, 71, 64, 32, 122, 52, 48,
+            ],
+            [
+                24, 175, 170, 196, 213, 149, 80, 192, 109, 100, 53, 134, 173, 96, 83, 155, 143, 9,
+                159, 113, 157, 161, 133, 77, 178, 75, 8, 64, 81, 90, 14, 28,
+            ],
+        ];
+
+        // GetMerkleRes, the block header, and the subsequent txid and height used in
+        // validate_merkle_for_anchor need to be valid in order for validate_merkle_proof to return
+        // true. The merkle path here has a length of 12.
+        let merkle_res = GetMerkleRes {
+            block_height: 630000,
+            pos: 68,
+            merkle: merkle.clone(),
+        };
+        mock_client.set_merkle_res(merkle_res);
+
+        let header = Header {
+            version: Version::from_consensus(536870912),
+            prev_blockhash: BlockHash::from_str(
+                "0000000000000000000d656be18bb095db1b23bd797266b0ac3ba720b1962b1e",
+            )
+            .unwrap(),
+            merkle_root: TxMerkleNode::from_str(
+                "b191f5f973b9040e81c4f75f99c7e43c92010ba8654718e3dd1a4800851d300d",
+            )
+            .unwrap(),
+            time: 1589225023,
+            bits: CompactTarget::from_consensus(387021369),
+            nonce: 2302182970,
+        };
+        mock_client.set_block_header(header);
+
+        merkle = vec![
+            [
+                30, 10, 161, 245, 132, 125, 136, 198, 186, 138, 107, 216, 92, 22, 145, 81, 130,
+                126, 200, 65, 121, 158, 105, 111, 38, 151, 38, 147, 144, 224, 5, 218,
+            ],
+            [
+                16, 245, 30, 176, 235, 72, 58, 108, 38, 26, 236, 17, 138, 235, 231, 182, 149, 25,
+                101, 238, 238, 238, 175, 148, 82, 183, 204, 41, 131, 36, 145, 113,
+            ],
+            [
+                29, 159, 187, 22, 126, 103, 119, 114, 136, 137, 177, 221, 72, 147, 36, 215, 242,
+                178, 230, 226, 20, 184, 65, 147, 173, 67, 157, 246, 254, 116, 225, 109,
+            ],
+            [
+                42, 17, 94, 57, 204, 128, 27, 169, 61, 18, 111, 66, 247, 92, 121, 129, 98, 234,
+                218, 114, 203, 51, 249, 145, 65, 118, 179, 227, 246, 42, 134, 171,
+            ],
+            [
+                240, 44, 170, 24, 11, 6, 71, 160, 94, 49, 22, 162, 53, 38, 98, 40, 92, 206, 125,
+                142, 162, 48, 39, 146, 237, 246, 108, 98, 200, 149, 97, 121,
+            ],
+            [
+                121, 61, 243, 180, 64, 58, 107, 239, 85, 215, 79, 75, 134, 172, 122, 119, 9, 41,
+                16, 34, 74, 75, 13, 111, 208, 114, 184, 166, 32, 171, 186, 83,
+            ],
+            [
+                59, 29, 13, 95, 135, 131, 4, 175, 46, 34, 124, 69, 188, 129, 223, 161, 59, 210, 99,
+                129, 174, 189, 181, 202, 107, 209, 236, 102, 109, 146, 142, 86,
+            ],
+            [
+                175, 109, 105, 234, 23, 120, 195, 125, 108, 54, 156, 210, 197, 154, 114, 181, 77,
+                97, 10, 190, 243, 19, 82, 33, 213, 95, 38, 52, 133, 230, 86, 132,
+            ],
+            [
+                160, 171, 49, 37, 71, 5, 86, 200, 20, 163, 161, 165, 148, 193, 185, 175, 35, 164,
+                193, 205, 16, 111, 30, 142, 193, 51, 220, 0, 81, 188, 25, 101,
+            ],
+            [
+                172, 76, 240, 124, 147, 238, 233, 168, 132, 155, 126, 204, 0, 254, 83, 110, 122,
+                23, 246, 16, 232, 57, 1, 97, 141, 68, 71, 2, 43, 69, 154, 86,
+            ],
+            [
+                182, 99, 142, 10, 136, 90, 85, 59, 130, 238, 243, 117, 179, 135, 8, 127, 129, 195,
+                84, 8, 158, 103, 12, 97, 253, 157, 71, 64, 32, 122, 52, 48,
+            ],
+            [
+                24, 175, 170, 196, 213, 149, 80, 192, 109, 100, 53, 134, 173, 96, 83, 155, 143, 9,
+                159, 113, 157, 161, 133, 77, 178, 75, 8, 64, 81, 90, 14, 28,
+            ],
+        ];
+
+        // We first setup TxidFromPosRes to return a valid result.
+        let txid_from_pos_res = TxidFromPosRes {
+            tx_hash: Txid::from_str(
+                "cc2ca076fd04c2aeed6d02151c447ced3d09be6fb4d4ef36cb5ed4e7a3260566",
+            )
+            .unwrap(),
+            merkle: merkle.clone(),
+        };
+        mock_client.set_txid_from_pos_res(txid_from_pos_res);
+
+        let client = BdkElectrumClient::new(mock_client.clone());
+        let mut tx_update = TxUpdate::default();
+
+        // With valid data, we are expecting validate_merkle_for_anchor to insert anchor data.
+        let _ = client.validate_merkle_for_anchor(&mut tx_update, txid, 630000);
+        assert_eq!(
+            tx_update.anchors,
+            BTreeSet::from([(
+                ConfirmationBlockTime {
+                    block_id: BlockId {
+                        height: 630000,
+                        hash: BlockHash::from_str(
+                            "000000000000000000024bead8df69990852c202db0e0097c1a12ea637d7e96d"
+                        )
+                        .unwrap(),
+                    },
+                    confirmation_time: 1589225023
+                },
+                Txid::from_str("1f7ff3c407f33eabc8bec7d2cc230948f2249ec8e591bcf6f971ca9366c8788d")
+                    .unwrap()
+            )])
+        );
+
+        // Now we setup TxidFromPosRes to return invalid data. The merkle path length will now
+        // return a value of 13.
+        merkle.push([0; 32]);
+        assert_eq!(merkle.len(), 13);
+
+        let txid_from_pos_res = TxidFromPosRes {
+            tx_hash: new_tx(0).compute_txid(),
+            merkle,
+        };
+        mock_client.set_txid_from_pos_res(txid_from_pos_res);
+
+        let client = BdkElectrumClient::new(mock_client);
+        tx_update = TxUpdate::default();
+
+        // Because the transaction merkle path length is now different from the coinbase merkle path
+        // length, we are expecting validate_merkle_for_anchor to not insert any anchors.
+        let _ = client.validate_merkle_for_anchor(&mut tx_update, txid, 630000);
+        assert_eq!(tx_update.anchors, BTreeSet::default());
+    }
     use std::sync::Arc;
 
     #[cfg(feature = "default")]
