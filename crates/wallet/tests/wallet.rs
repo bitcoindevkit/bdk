@@ -559,9 +559,13 @@ fn test_create_tx_locktime_cltv_for_specific_time() {
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
-    let psbt = builder.finish().unwrap();
+    let mut psbt = builder.finish().unwrap();
 
     assert_eq!(psbt.unsigned_tx.lock_time.to_consensus_u32(), 500_000_000);
+
+    let finalized = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+
+    assert!(finalized);
 }
 
 #[test]
