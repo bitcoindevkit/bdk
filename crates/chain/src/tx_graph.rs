@@ -980,7 +980,7 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_list_canonical_txs`].
     ///
     /// [`try_list_canonical_txs`]: Self::try_list_canonical_txs
-    pub fn list_canonical_txs<'a, C: ChainOracle + 'a>(
+    pub fn list_canonical_txs<'a, C: ChainOracle<Error = Infallible> + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
