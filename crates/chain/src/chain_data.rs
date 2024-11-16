@@ -1,6 +1,6 @@
-use bitcoin::{OutPoint, TxOut, Txid};
+use bitcoin::{constants::COINBASE_MATURITY, OutPoint, TxOut, Txid};
 
-use crate::{Anchor, COINBASE_MATURITY};
+use crate::Anchor;
 
 /// Represents the observed position of some chain data.
 ///
