@@ -201,6 +201,9 @@ fn chain_update(
     local_tip: &CheckPoint,
     anchors: &BTreeSet<(ConfirmationBlockTime, Txid)>,
 ) -> Result<CheckPoint, Error> {
+    if latest_blocks.is_empty() {
+        return Ok(local_tip.clone());
+    }
     let mut point_of_agreement = None;
     let mut conflicts = vec![];
     for local_cp in local_tip.iter() {
