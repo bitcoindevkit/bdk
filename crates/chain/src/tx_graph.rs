@@ -1553,3 +1553,115 @@ where
 fn tx_outpoint_range(txid: Txid) -> RangeInclusive<OutPoint> {
     OutPoint::new(txid, u32::MIN)..=OutPoint::new(txid, u32::MAX)
 }
+
+/// Bench
+#[allow(unused)]
+#[allow(missing_docs)]
+pub mod bench {
+    use std::str::FromStr;
+
+    use bdk_core::{CheckPoint, ConfirmationBlockTime};
+    use bitcoin::absolute;
+    use bitcoin::hashes::Hash;
+    use bitcoin::transaction;
+    use bitcoin::{Address, BlockHash, Network, TxIn};
+    use criterion::Criterion;
+    use miniscript::Descriptor;
+    use miniscript::DescriptorPublicKey;
+
+    use super::*;
+    use crate::keychain_txout::KeychainTxOutIndex;
+    use crate::local_chain::LocalChain;
+    use crate::IndexedTxGraph;
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    enum Keychain {
+        External,
+    }
+
+    const EXTERNAL: &str = "tr([ab28dc00/86h/1h/0h]tpubDCdDtzAMZZrkwKBxwNcGCqe4FRydeD9rfMisoi7qLdraG79YohRfPW4YgdKQhpgASdvh612xXNY5xYzoqnyCgPbkpK4LSVcH5Xv4cK7johH/0/*)";
+
+    fn get_params() -> (
+        IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<Keychain>>,
+        LocalChain,
+    ) {
+        let genesis = bitcoin::constants::genesis_block(Network::Regtest).block_hash();
+        let block_0 = BlockId {
+            height: 0,
+            hash: genesis,
+        };
+        let mut cp = CheckPoint::new(block_0);
+        let block_100 = BlockId {
+            height: 100,
+            hash: BlockHash::all_zeros(),
+        };
+        cp = cp.push(block_100).unwrap();
+        let chain = LocalChain::from_tip(cp).unwrap();
+
+        let mut graph = IndexedTxGraph::new({
+            let mut index = KeychainTxOutIndex::new(10);
+            index
+                .insert_descriptor(Keychain::External, parse_descriptor(EXTERNAL))
+                .unwrap();
+            index
+        });
+
+        // insert funding tx (coinbase)
+        let addr_0 =
+            Address::from_str("bcrt1plhmjhj75nut38qwwm5w7xqysy25xhd4ckuv7zu5tey3nkmcwh3cqvan5mz")
+                .unwrap()
+                .assume_checked();
+        let tx_0 = Transaction {
+            output: vec![TxOut {
+                script_pubkey: addr_0.script_pubkey(),
+                value: Amount::ONE_BTC,
+            }],
+            ..new_tx(0)
+        };
+        let txid_0 = tx_0.compute_txid();
+        let _ = graph.insert_tx(tx_0);
+        let _ = graph.insert_anchor(
+            txid_0,
+            ConfirmationBlockTime {
+                block_id: block_100,
+                confirmation_time: 100,
+            },
+        );
+
+        (graph, chain)
+    }
+
+    fn parse_descriptor(s: &str) -> miniscript::Descriptor<DescriptorPublicKey> {
+        <Descriptor<DescriptorPublicKey>>::parse_descriptor(
+            &bitcoin::secp256k1::Secp256k1::new(),
+            s,
+        )
+        .unwrap()
+        .0
+    }
+
+    fn new_tx(lt: u32) -> Transaction {
+        Transaction {
+            version: transaction::Version::TWO,
+            lock_time: absolute::LockTime::from_consensus(lt),
+            input: vec![],
+            output: vec![],
+        }
+    }
+
+    pub fn filter_chain_unspents(bench: &mut Criterion) {
+        let (graph, chain) = get_params();
+        // TODO: insert conflicts
+        let outpoints = graph.index.outpoints().clone();
+        bench.bench_function("filter_chain_unspents", |b| {
+            b.iter(|| {
+                TxGraph::filter_chain_unspents(
+                    graph.graph(),
+                    &chain,
+                    chain.tip().block_id(),
+                    outpoints.clone(),
+                )
+            })
+        });
+    }
+}

@@ -20,6 +20,7 @@ bitcoin = { version = "0.32.0", default-features = false }
 bdk_core = { path = "../core", version = "0.3.0", default-features = false }
 serde = { version = "1", optional = true, features = ["derive", "rc"] }
 miniscript = { version = "12.0.0", optional = true, default-features = false }
+criterion = { version = "0.5", default-features = false }
 
 # Feature dependencies
 rusqlite = { version = "0.31.0", features = ["bundled"], optional = true }
