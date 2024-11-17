@@ -1557,6 +1557,7 @@ fn tx_outpoint_range(txid: Txid) -> RangeInclusive<OutPoint> {
 /// Bench
 #[allow(unused)]
 #[allow(missing_docs)]
+#[cfg(bdk_bench)]
 pub mod bench {
     use std::str::FromStr;
 
@@ -1652,14 +1653,13 @@ pub mod bench {
     pub fn filter_chain_unspents(bench: &mut Criterion) {
         let (graph, chain) = get_params();
         // TODO: insert conflicts
-        let outpoints = graph.index.outpoints().clone();
         bench.bench_function("filter_chain_unspents", |b| {
             b.iter(|| {
                 TxGraph::filter_chain_unspents(
                     graph.graph(),
                     &chain,
                     chain.tip().block_id(),
-                    outpoints.clone(),
+                    graph.index.outpoints().clone(),
                 )
             })
         });

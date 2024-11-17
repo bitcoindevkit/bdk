@@ -26,3 +26,9 @@ authors = ["Bitcoin Dev Kit Developers"]
 [workspace.lints.clippy]
 print_stdout = "deny"
 print_stderr = "deny"
+
+[workspace.lints.rust.unexpected_cfgs]
+level = "forbid"
+check-cfg = [
+    "cfg(bdk_bench)",
+]

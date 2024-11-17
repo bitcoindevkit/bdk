@@ -8,5 +8,5 @@ name = "bench"
 harness = false
 
 [dependencies]
-bdk_chain = { path = "../crates/chain" }
+bdk_chain = { path = "../crates/chain", features = ["criterion"] }
 criterion = { version = "0.5", default-features = false }

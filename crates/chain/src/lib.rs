@@ -68,6 +68,8 @@ pub use bdk_core::*;
 #[allow(unused_imports)]
 #[macro_use]
 extern crate alloc;
+#[cfg(bdk_bench)]
+extern crate criterion;
 #[cfg(feature = "rusqlite")]
 pub extern crate rusqlite;
 #[cfg(feature = "serde")]
