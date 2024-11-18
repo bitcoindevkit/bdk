@@ -1554,21 +1554,14 @@ fn tx_outpoint_range(txid: Txid) -> RangeInclusive<OutPoint> {
     OutPoint::new(txid, u32::MIN)..=OutPoint::new(txid, u32::MAX)
 }
 
-/// Bench
-#[allow(unused)]
-#[allow(missing_docs)]
-#[cfg(bdk_bench)]
-pub mod bench {
-    use std::str::FromStr;
-
+#[cfg(any(test, bdk_bench))]
+mod bench_util {
     use bdk_core::{CheckPoint, ConfirmationBlockTime};
-    use bitcoin::absolute;
-    use bitcoin::hashes::Hash;
-    use bitcoin::transaction;
-    use bitcoin::{Address, BlockHash, Network, TxIn};
-    use criterion::Criterion;
-    use miniscript::Descriptor;
-    use miniscript::DescriptorPublicKey;
+    use bitcoin::{
+        absolute, constants, hashes::Hash, secp256k1::Secp256k1, transaction, BlockHash, Network,
+        TxIn,
+    };
+    use miniscript::{Descriptor, DescriptorPublicKey};
 
     use super::*;
     use crate::keychain_txout::KeychainTxOutIndex;
@@ -1576,91 +1569,294 @@ pub mod bench {
     use crate::IndexedTxGraph;
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-    enum Keychain {
+    pub enum Keychain {
         External,
     }
 
     const EXTERNAL: &str = "tr([ab28dc00/86h/1h/0h]tpubDCdDtzAMZZrkwKBxwNcGCqe4FRydeD9rfMisoi7qLdraG79YohRfPW4YgdKQhpgASdvh612xXNY5xYzoqnyCgPbkpK4LSVcH5Xv4cK7johH/0/*)";
 
-    fn get_params() -> (
-        IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<Keychain>>,
-        LocalChain,
-    ) {
-        let genesis = bitcoin::constants::genesis_block(Network::Regtest).block_hash();
-        let block_0 = BlockId {
-            height: 0,
-            hash: genesis,
-        };
-        let mut cp = CheckPoint::new(block_0);
-        let block_100 = BlockId {
-            height: 100,
-            hash: BlockHash::all_zeros(),
-        };
-        cp = cp.push(block_100).unwrap();
-        let chain = LocalChain::from_tip(cp).unwrap();
-
-        let mut graph = IndexedTxGraph::new({
-            let mut index = KeychainTxOutIndex::new(10);
-            index
-                .insert_descriptor(Keychain::External, parse_descriptor(EXTERNAL))
-                .unwrap();
-            index
-        });
-
-        // insert funding tx (coinbase)
-        let addr_0 =
-            Address::from_str("bcrt1plhmjhj75nut38qwwm5w7xqysy25xhd4ckuv7zu5tey3nkmcwh3cqvan5mz")
-                .unwrap()
-                .assume_checked();
-        let tx_0 = Transaction {
-            output: vec![TxOut {
-                script_pubkey: addr_0.script_pubkey(),
-                value: Amount::ONE_BTC,
-            }],
-            ..new_tx(0)
-        };
-        let txid_0 = tx_0.compute_txid();
-        let _ = graph.insert_tx(tx_0);
-        let _ = graph.insert_anchor(
-            txid_0,
-            ConfirmationBlockTime {
-                block_id: block_100,
-                confirmation_time: 100,
-            },
-        );
-
-        (graph, chain)
+    pub fn parse_descriptor(s: &str) -> Descriptor<DescriptorPublicKey> {
+        <Descriptor<DescriptorPublicKey>>::parse_descriptor(&Secp256k1::new(), s)
+            .unwrap()
+            .0
     }
 
-    fn parse_descriptor(s: &str) -> miniscript::Descriptor<DescriptorPublicKey> {
-        <Descriptor<DescriptorPublicKey>>::parse_descriptor(
-            &bitcoin::secp256k1::Secp256k1::new(),
-            s,
-        )
-        .unwrap()
-        .0
-    }
-
-    fn new_tx(lt: u32) -> Transaction {
+    /// New tx guaranteed to have at least one output
+    pub fn new_tx(lt: u32) -> Transaction {
         Transaction {
             version: transaction::Version::TWO,
             lock_time: absolute::LockTime::from_consensus(lt),
             input: vec![],
-            output: vec![],
+            output: vec![TxOut::NULL],
         }
     }
 
+    pub fn spk_at_index(txout_index: &KeychainTxOutIndex<Keychain>, index: u32) -> ScriptBuf {
+        txout_index
+            .get_descriptor(Keychain::External)
+            .unwrap()
+            .at_derivation_index(index)
+            .unwrap()
+            .script_pubkey()
+    }
+
+    type KeychainTxGraph = IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<Keychain>>;
+
+    /// Initialize indexed tx-graph with one keychain and a local chain. Also insert the
+    /// first ancestor tx.
+    pub fn init_graph_chain() -> (KeychainTxGraph, LocalChain) {
+        let genesis = constants::genesis_block(Network::Regtest).block_hash();
+        let block_0 = BlockId {
+            height: 0,
+            hash: genesis,
+        };
+        // chain tip 100
+        let mut cp = CheckPoint::new(block_0);
+        let chain_tip = BlockId {
+            height: 100,
+            hash: BlockHash::all_zeros(),
+        };
+        cp = cp.push(chain_tip).unwrap();
+        let chain = LocalChain::from_tip(cp).unwrap();
+
+        let desc = parse_descriptor(EXTERNAL);
+        let mut index = KeychainTxOutIndex::new(10);
+        index.insert_descriptor(Keychain::External, desc).unwrap();
+        let mut graph = IndexedTxGraph::new(index);
+
+        // insert funding tx (coinbase) confirmed at chain tip
+        add_ancestor_tx(&mut graph, chain_tip, 0);
+
+        (graph, chain)
+    }
+
+    /// Add ancestor tx confirmed at `block_id` with `locktime` (used for uniqueness).
+    /// The transaction always pays 1 BTC to SPK 0.
+    pub fn add_ancestor_tx(graph: &mut KeychainTxGraph, block_id: BlockId, locktime: u32) {
+        let spk_0 = spk_at_index(&graph.index, 0);
+        let tx = Transaction {
+            input: vec![TxIn::default()],
+            output: vec![TxOut {
+                value: Amount::ONE_BTC,
+                script_pubkey: spk_0,
+            }],
+            ..new_tx(locktime)
+        };
+        let txid = tx.compute_txid();
+        let _ = graph.insert_tx(tx);
+        let _ = graph.insert_anchor(
+            txid,
+            ConfirmationBlockTime {
+                block_id,
+                confirmation_time: 100,
+            },
+        );
+    }
+
+    /// Add `n` conflicts to `graph` that spend the given `previous_output`, incrementing
+    /// the tx last-seen each time.
+    pub fn add_conflicts(n: u32, graph: &mut KeychainTxGraph, previous_output: OutPoint) {
+        let spk_1 = spk_at_index(&graph.index, 1);
+        for i in 1..n + 1 {
+            let tx = Transaction {
+                input: vec![TxIn {
+                    previous_output,
+                    ..Default::default()
+                }],
+                output: vec![TxOut {
+                    value: Amount::ONE_BTC - Amount::from_sat(i as u64 * 10),
+                    script_pubkey: spk_1.clone(),
+                }],
+                ..new_tx(i)
+            };
+            let update = TxUpdate {
+                txs: vec![Arc::new(tx)],
+                ..Default::default()
+            };
+            let _ = graph.apply_update_at(update, Some(i as u64));
+        }
+    }
+
+    /// Apply a chain of `n` unconfirmed txs where each subsequent tx spends the output
+    /// of the previous one.
+    pub fn chain_unconfirmed(n: u32, graph: &mut KeychainTxGraph, mut previous_output: OutPoint) {
+        for i in 0..n {
+            // create tx
+            let tx = Transaction {
+                input: vec![TxIn {
+                    previous_output,
+                    ..Default::default()
+                }],
+                ..new_tx(i)
+            };
+            let txid = tx.compute_txid();
+            let update = TxUpdate {
+                txs: vec![Arc::new(tx)],
+                ..Default::default()
+            };
+            let _ = graph.apply_update_at(update, Some(21));
+            // store the next prevout
+            previous_output = OutPoint::new(txid, 0);
+        }
+    }
+
+    /// Insert `n` txs where
+    /// - half spend ancestor A
+    /// - half spend ancestor B
+    /// - and one spends both
+    pub fn add_nested_conflicts(n: u32, graph: &mut KeychainTxGraph, chain: &LocalChain) {
+        // add ancestor B
+        add_ancestor_tx(graph, chain.tip().block_id(), 1);
+
+        let outpoints: Vec<_> = graph.index.outpoints().iter().map(|(_, op)| *op).collect();
+        assert!(outpoints.len() >= 2);
+        let op_a = outpoints[0];
+        let op_b = outpoints[1];
+
+        for i in 0..n {
+            let tx = if i == n / 2 {
+                // tx spends both A, B
+                Transaction {
+                    input: vec![
+                        TxIn {
+                            previous_output: op_a,
+                            ..Default::default()
+                        },
+                        TxIn {
+                            previous_output: op_b,
+                            ..Default::default()
+                        },
+                    ],
+                    ..new_tx(i)
+                }
+            } else if i % 2 == 1 {
+                // tx spends A
+                Transaction {
+                    input: vec![TxIn {
+                        previous_output: op_a,
+                        ..Default::default()
+                    }],
+                    ..new_tx(i)
+                }
+            } else {
+                // tx spends B
+                Transaction {
+                    input: vec![TxIn {
+                        previous_output: op_b,
+                        ..Default::default()
+                    }],
+                    ..new_tx(i)
+                }
+            };
+
+            let update = TxUpdate {
+                txs: vec![Arc::new(tx)],
+                ..Default::default()
+            };
+            let _ = graph.apply_update_at(update, Some(i as u64));
+        }
+    }
+
+    #[test]
+    fn test_add_conflicts() {
+        let (mut graph, chain) = init_graph_chain();
+        let txouts: Vec<_> = graph.graph().all_txouts().collect();
+        assert_eq!(txouts.len(), 1);
+        let prevout = txouts.first().unwrap().0;
+        add_conflicts(3, &mut graph, prevout);
+
+        let unspent = graph.graph().filter_chain_unspents(
+            &chain,
+            chain.tip().block_id(),
+            graph.index.outpoints().clone(),
+        );
+        assert_eq!(unspent.count(), 1);
+    }
+
+    #[test]
+    fn test_chain_unconfirmed() {
+        let (mut graph, _) = init_graph_chain();
+        let (prevout, _txout) = graph
+            .graph()
+            .all_txouts()
+            .find(|(_, txout)| txout.value == Amount::ONE_BTC)
+            .expect("initial graph should have txout");
+        chain_unconfirmed(5, &mut graph, prevout);
+        assert_eq!(graph.graph().txs.len(), 6); // 1 onchain + 5 unconfirmed
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_nested() {
+        let (mut graph, chain) = init_graph_chain();
+        let chain_tip = chain.tip().block_id();
+        let n = 5;
+        add_nested_conflicts(n, &mut graph, &chain);
+
+        let op = graph.index.outpoints().clone();
+        assert_eq!(graph.graph().full_txs().count() as u32, 2 + n); // 2 onchain + n unconfirmed
+        assert_eq!(graph.graph().filter_chain_txouts(&chain, chain_tip, op).count(), 2); // 2 onchain
+        assert_eq!(graph.graph().list_canonical_txs(&chain, chain_tip).count(), 2 + 2); // 2 onchain + 2 unconfirmed
+    }
+}
+
+/// Bench
+#[allow(missing_docs)]
+#[cfg(bdk_bench)]
+pub mod bench {
+    use std::hint::black_box;
+
+    use criterion::Criterion;
+
+    use super::bench_util::*;
+
+    #[inline(never)]
     pub fn filter_chain_unspents(bench: &mut Criterion) {
-        let (graph, chain) = get_params();
-        // TODO: insert conflicts
+        let (mut graph, chain) = black_box(init_graph_chain());
+        let prevout = graph.graph().all_txouts().next().unwrap().0;
+        black_box(add_conflicts(1000, &mut graph, prevout));
+
         bench.bench_function("filter_chain_unspents", |b| {
             b.iter(|| {
-                TxGraph::filter_chain_unspents(
-                    graph.graph(),
+                let unspent = graph.graph().filter_chain_unspents(
                     &chain,
                     chain.tip().block_id(),
                     graph.index.outpoints().clone(),
-                )
+                );
+                assert_eq!(unspent.count(), 1);
+            })
+        });
+    }
+
+    #[inline(never)]
+    pub fn list_canonical_txs(bench: &mut Criterion) {
+        let (mut graph, chain) = black_box(init_graph_chain());
+        let prevout = graph.graph().all_txouts().next().unwrap().0;
+        black_box(chain_unconfirmed(100, &mut graph, prevout));
+
+        bench.bench_function("list_canonical_txs", |b| {
+            b.iter(|| {
+                let txs = graph
+                    .graph()
+                    .list_canonical_txs(&chain, chain.tip().block_id());
+                // 1 onchain + 100 unconfirmed
+                assert_eq!(txs.count(), 1 + 100);
+            })
+        });
+    }
+
+    #[inline(never)]
+    pub fn nested_conflicts(bench: &mut Criterion) {
+        let (mut graph, chain) = black_box(init_graph_chain());
+        black_box(add_nested_conflicts(2000, &mut graph, &chain));
+        let graph = graph.graph();
+        let chain_tip = chain.tip().block_id();
+
+        bench.bench_function("nested_conflicts", |b| {
+            b.iter(|| {
+                let txs = graph.list_canonical_txs(&chain, chain_tip);
+                // 2 onchain + 2 unconfirmed
+                assert_eq!(txs.count(), 4);
             })
         });
     }
