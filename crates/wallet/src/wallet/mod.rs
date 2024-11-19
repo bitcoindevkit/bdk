@@ -59,7 +59,7 @@ pub mod signer;
 pub mod tx_builder;
 pub(crate) mod utils;
 
-use crate::collections::{BTreeMap, HashMap};
+use crate::collections::{BTreeMap, HashMap, HashSet};
 use crate::descriptor::{
     check_wallet_descriptor, error::Error as DescriptorError, policy::BuildSatisfaction,
     DerivedDescriptor, DescriptorMeta, ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor,
@@ -1061,13 +1061,9 @@ impl Wallet {
     /// [`Anchor`]: bdk_chain::Anchor
     pub fn get_tx(&self, txid: Txid) -> Option<WalletTx> {
         let graph = self.indexed_graph.graph();
-
-        Some(WalletTx {
-            chain_position: graph
-                .get_chain_position(&self.chain, self.chain.tip().block_id(), txid)?
-                .cloned(),
-            tx_node: graph.get_tx_node(txid)?,
-        })
+        graph
+            .list_canonical_txs(&self.chain, self.chain.tip().block_id())
+            .find(|tx| tx.tx_node.txid == txid)
     }
 
     /// Iterate over the transactions in the wallet.
@@ -1588,6 +1584,10 @@ impl Wallet {
         let graph = self.indexed_graph.graph();
         let txout_index = &self.indexed_graph.index;
         let chain_tip = self.chain.tip().block_id();
+        let chain_positions = graph
+            .list_canonical_txs(&self.chain, chain_tip)
+            .map(|canon_tx| (canon_tx.tx_node.txid, canon_tx.chain_position))
+            .collect::<HashMap<Txid, _>>();
 
         let mut tx = graph
             .get_tx(txid)
@@ -1595,10 +1595,11 @@ impl Wallet {
             .as_ref()
             .clone();
 
-        let pos = graph
-            .get_chain_position(&self.chain, chain_tip, txid)
-            .ok_or(BuildFeeBumpError::TransactionNotFound(txid))?;
-        if pos.is_confirmed() {
+        if chain_positions
+            .get(&txid)
+            .ok_or(BuildFeeBumpError::TransactionNotFound(txid))?
+            .is_confirmed()
+        {
             return Err(BuildFeeBumpError::TransactionConfirmed(txid));
         }
 
@@ -1629,10 +1630,10 @@ impl Wallet {
                     .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
                 let txout = &prev_tx.output[txin.previous_output.vout as usize];
 
-                let chain_position = graph
-                    .get_chain_position(&self.chain, chain_tip, txin.previous_output.txid)
-                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?
-                    .cloned();
+                let chain_position = chain_positions
+                    .get(&txin.previous_output.txid)
+                    .cloned()
+                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
 
                 let weighted_utxo = match txout_index.index_of_spk(txout.script_pubkey.clone()) {
                     Some(&(keychain, derivation_index)) => {
@@ -1831,9 +1832,28 @@ impl Wallet {
         psbt: &mut Psbt,
         sign_options: SignOptions,
     ) -> Result<bool, SignerError> {
-        let chain_tip = self.chain.tip().block_id();
-
         let tx = &psbt.unsigned_tx;
+        let chain_tip = self.chain.tip().block_id();
+        let prev_txids = tx
+            .input
+            .iter()
+            .map(|txin| txin.previous_output.txid)
+            .collect::<HashSet<Txid>>();
+        let confirmation_heights = self
+            .indexed_graph
+            .graph()
+            .list_canonical_txs(&self.chain, chain_tip)
+            .filter(|canon_tx| prev_txids.contains(&canon_tx.tx_node.txid))
+            .take(prev_txids.len())
+            .map(|canon_tx| {
+                let txid = canon_tx.tx_node.txid;
+                match canon_tx.chain_position {
+                    ChainPosition::Confirmed { anchor, .. } => (txid, anchor.block_id.height),
+                    ChainPosition::Unconfirmed { .. } => (txid, u32::MAX),
+                }
+            })
+            .collect::<HashMap<Txid, u32>>();
+
         let mut finished = true;
 
         for (n, input) in tx.input.iter().enumerate() {
@@ -1844,15 +1864,9 @@ impl Wallet {
             if psbt_input.final_script_sig.is_some() || psbt_input.final_script_witness.is_some() {
                 continue;
             }
-            let confirmation_height = self
-                .indexed_graph
-                .graph()
-                .get_chain_position(&self.chain, chain_tip, input.previous_output.txid)
-                .map(|chain_position| {
-                    chain_position
-                        .confirmation_height_upper_bound()
-                        .unwrap_or(u32::MAX)
-                });
+            let confirmation_height = confirmation_heights
+                .get(&input.previous_output.txid)
+                .copied();
             let current_height = sign_options
                 .assume_height
                 .unwrap_or_else(|| self.chain.tip().height());
@@ -2012,20 +2026,22 @@ impl Wallet {
             return (must_spend, vec![]);
         }
 
+        let canon_txs = self
+            .indexed_graph
+            .graph()
+            .list_canonical_txs(&self.chain, chain_tip)
+            .map(|canon_tx| (canon_tx.tx_node.txid, canon_tx))
+            .collect::<HashMap<Txid, _>>();
+
         let satisfies_confirmed = may_spend
             .iter()
             .map(|u| -> bool {
                 let txid = u.0.outpoint.txid;
-                let tx = match self.indexed_graph.graph().get_tx(txid) {
-                    Some(tx) => tx,
-                    None => return false,
-                };
-                let chain_position = match self.indexed_graph.graph().get_chain_position(
-                    &self.chain,
-                    chain_tip,
-                    txid,
-                ) {
-                    Some(chain_position) => chain_position.cloned(),
+                let (chain_position, tx) = match canon_txs.get(&txid) {
+                    Some(CanonicalTx {
+                        chain_position,
+                        tx_node,
+                    }) => (chain_position, tx_node.tx.clone()),
                     None => return false,
                 };
 
