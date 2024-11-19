@@ -27,7 +27,7 @@ use bdk_chain::{
     local_chain::{ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     spk_client::{
         FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
-        SyncResult,
+        SyncResponse,
     },
     tx_graph::{CalculateFeeError, CanonicalTx, TxGraph, TxUpdate},
     BlockId, ChainPosition, ConfirmationBlockTime, DescriptorExt, FullTxOut, Indexed,
@@ -142,8 +142,8 @@ impl From<FullScanResult<KeychainKind>> for Update {
     }
 }
 
-impl From<SyncResult> for Update {
-    fn from(value: SyncResult) -> Self {
+impl From<SyncResponse> for Update {
+    fn from(value: SyncResponse) -> Self {
         Self {
             last_active_indices: BTreeMap::new(),
             tx_update: value.tx_update,

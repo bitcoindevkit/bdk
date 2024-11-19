@@ -1,7 +1,7 @@
 use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
     local_chain::LocalChain,
-    spk_client::{FullScanRequest, SyncRequest, SyncResult},
+    spk_client::{FullScanRequest, SyncRequest, SyncResponse},
     spk_txout::SpkTxOutIndex,
     Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
 };
@@ -31,7 +31,7 @@ fn sync_with_electrum<I, Spks>(
     spks: Spks,
     chain: &mut LocalChain,
     graph: &mut IndexedTxGraph<ConfirmationBlockTime, I>,
-) -> anyhow::Result<SyncResult>
+) -> anyhow::Result<SyncResponse>
 where
     I: Indexer,
     I::ChangeSet: Default + Merge,

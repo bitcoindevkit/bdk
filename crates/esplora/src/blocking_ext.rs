@@ -1,5 +1,5 @@
 use bdk_core::collections::{BTreeMap, BTreeSet, HashSet};
-use bdk_core::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult};
+use bdk_core::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResponse};
 use bdk_core::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
@@ -43,7 +43,7 @@ pub trait EsploraExt {
         &self,
         request: R,
         parallel_requests: usize,
-    ) -> Result<SyncResult, Error>;
+    ) -> Result<SyncResponse, Error>;
 }
 
 impl EsploraExt for esplora_client::BlockingClient {
@@ -101,7 +101,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         &self,
         request: R,
         parallel_requests: usize,
-    ) -> Result<SyncResult, Error> {
+    ) -> Result<SyncResponse, Error> {
         let mut request: SyncRequest<I> = request.into();
 
         let chain_tip = request.chain_tip();
@@ -142,7 +142,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             _ => None,
         };
 
-        Ok(SyncResult {
+        Ok(SyncResponse {
             chain_update,
             tx_update,
         })
