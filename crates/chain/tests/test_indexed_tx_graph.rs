@@ -588,14 +588,17 @@ fn test_get_chain_position() {
         }
 
         // check chain position
-        let res = graph
+        let chain_pos = graph
             .graph()
-            .get_chain_position(chain, chain.tip().block_id(), txid);
-        assert_eq!(
-            res.map(ChainPosition::cloned),
-            exp_pos,
-            "failed test case: {name}"
-        );
+            .list_canonical_txs(chain, chain.tip().block_id())
+            .find_map(|canon_tx| {
+                if canon_tx.tx_node.txid == txid {
+                    Some(canon_tx.chain_position)
+                } else {
+                    None
+                }
+            });
+        assert_eq!(chain_pos, exp_pos, "failed test case: {name}");
     }
 
     [
@@ -655,7 +658,7 @@ fn test_get_chain_position() {
             exp_pos: Some(ChainPosition::Unconfirmed { last_seen: Some(2) }),
         },
         TestCase {
-            name: "tx unknown anchor - no chain pos",
+            name: "tx unknown anchor - unconfirmed",
             tx: Transaction {
                 output: vec![TxOut {
                     value: Amount::ONE_BTC,
@@ -665,7 +668,7 @@ fn test_get_chain_position() {
             },
             anchor: Some(block_id!(2, "B'")),
             last_seen: None,
-            exp_pos: None,
+            exp_pos: Some(ChainPosition::Unconfirmed { last_seen: None }),
         },
     ]
     .into_iter()
