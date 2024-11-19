@@ -229,12 +229,15 @@ pub fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoi
     let latest_cp = wallet.latest_checkpoint();
     let height = latest_cp.height();
     let anchor = if height == 0 {
-        ChainPosition::Unconfirmed(0)
+        ChainPosition::Unconfirmed { last_seen: Some(0) }
     } else {
-        ChainPosition::Confirmed(ConfirmationBlockTime {
-            block_id: latest_cp.block_id(),
-            confirmation_time: 0,
-        })
+        ChainPosition::Confirmed {
+            anchor: ConfirmationBlockTime {
+                block_id: latest_cp.block_id(),
+                confirmation_time: 0,
+            },
+            transitively: None,
+        }
     };
     receive_output(wallet, value, anchor)
 }
@@ -270,11 +273,13 @@ pub fn receive_output_to_address(
     insert_tx(wallet, tx);
 
     match pos {
-        ChainPosition::Confirmed(anchor) => {
+        ChainPosition::Confirmed { anchor, .. } => {
             insert_anchor(wallet, txid, anchor);
         }
-        ChainPosition::Unconfirmed(last_seen) => {
-            insert_seen_at(wallet, txid, last_seen);
+        ChainPosition::Unconfirmed { last_seen } => {
+            if let Some(last_seen) = last_seen {
+                insert_seen_at(wallet, txid, last_seen);
+            }
         }
     }
 

@@ -129,10 +129,10 @@ impl FullyNodedExport {
 
         let blockheight = if include_blockheight {
             wallet.transactions().next().map_or(0, |canonical_tx| {
-                match canonical_tx.chain_position {
-                    bdk_chain::ChainPosition::Confirmed(a) => a.block_id.height,
-                    bdk_chain::ChainPosition::Unconfirmed(_) => 0,
-                }
+                canonical_tx
+                    .chain_position
+                    .confirmation_height_upper_bound()
+                    .unwrap_or(0)
             })
         } else {
             0

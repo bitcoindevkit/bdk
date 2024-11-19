@@ -1439,7 +1439,11 @@ fn test_create_tx_increment_change_index() {
             .create_wallet_no_persist()
             .unwrap();
         // fund wallet
-        receive_output(&mut wallet, amount, ChainPosition::Unconfirmed(0));
+        receive_output(
+            &mut wallet,
+            amount,
+            ChainPosition::Unconfirmed { last_seen: Some(0) },
+        );
         // create tx
         let mut builder = wallet.build_tx();
         builder.add_recipient(recipient.clone(), Amount::from_sat(test.to_send));
@@ -2541,7 +2545,11 @@ fn test_bump_fee_unconfirmed_inputs_only() {
     let psbt = builder.finish().unwrap();
     // Now we receive one transaction with 0 confirmations. We won't be able to use that for
     // fee bumping, as it's still unconfirmed!
-    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
+    receive_output(
+        &mut wallet,
+        25_000,
+        ChainPosition::Unconfirmed { last_seen: Some(0) },
+    );
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
     let txid = tx.compute_txid();
     for txin in &mut tx.input {
@@ -2566,7 +2574,11 @@ fn test_bump_fee_unconfirmed_input() {
         .assume_checked();
     // We receive a tx with 0 confirmations, which will be used as an input
     // in the drain tx.
-    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
+    receive_output(
+        &mut wallet,
+        25_000,
+        ChainPosition::Unconfirmed { last_seen: Some(0) },
+    );
     let mut builder = wallet.build_tx();
     builder.drain_wallet().drain_to(addr.script_pubkey());
     let psbt = builder.finish().unwrap();
@@ -4036,13 +4048,16 @@ fn test_keychains_with_overlapping_spks() {
         .last()
         .unwrap()
         .address;
-    let chain_position = ChainPosition::Confirmed(ConfirmationBlockTime {
-        block_id: BlockId {
-            height: 2000,
-            hash: BlockHash::all_zeros(),
+    let chain_position = ChainPosition::Confirmed {
+        anchor: ConfirmationBlockTime {
+            block_id: BlockId {
+                height: 2000,
+                hash: BlockHash::all_zeros(),
+            },
+            confirmation_time: 0,
         },
-        confirmation_time: 0,
-    });
+        transitively: None,
+    };
     let _outpoint = receive_output_to_address(&mut wallet, addr, 8000, chain_position);
     assert_eq!(wallet.balance().confirmed, Amount::from_sat(58000));
 }
@@ -4132,7 +4147,11 @@ fn single_descriptor_wallet_can_create_tx_and_receive_change() {
         .unwrap();
     assert_eq!(wallet.keychains().count(), 1);
     let amt = Amount::from_sat(5_000);
-    receive_output(&mut wallet, 2 * amt.to_sat(), ChainPosition::Unconfirmed(2));
+    receive_output(
+        &mut wallet,
+        2 * amt.to_sat(),
+        ChainPosition::Unconfirmed { last_seen: Some(2) },
+    );
     // create spend tx that produces a change output
     let addr = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")
         .unwrap()
@@ -4158,7 +4177,11 @@ fn single_descriptor_wallet_can_create_tx_and_receive_change() {
 #[test]
 fn test_transactions_sort_by() {
     let (mut wallet, _txid) = get_funded_wallet_wpkh();
-    receive_output(&mut wallet, 25_000, ChainPosition::Unconfirmed(0));
+    receive_output(
+        &mut wallet,
+        25_000,
+        ChainPosition::Unconfirmed { last_seen: Some(0) },
+    );
 
     // sort by chain position, unconfirmed then confirmed by descending block height
     let sorted_txs: Vec<WalletTx> =

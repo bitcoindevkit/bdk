@@ -885,13 +885,16 @@ fn test_chain_spends() {
             OutPoint::new(tx_0.compute_txid(), 0)
         ),
         Some((
-            ChainPosition::Confirmed(&ConfirmationBlockTime {
-                block_id: BlockId {
-                    hash: tip.get(98).unwrap().hash(),
-                    height: 98,
+            ChainPosition::Confirmed {
+                anchor: &ConfirmationBlockTime {
+                    block_id: BlockId {
+                        hash: tip.get(98).unwrap().hash(),
+                        height: 98,
+                    },
+                    confirmation_time: 100
                 },
-                confirmation_time: 100
-            }),
+                transitively: None
+            },
             tx_1.compute_txid(),
         )),
     );
@@ -900,13 +903,16 @@ fn test_chain_spends() {
     assert_eq!(
         graph.get_chain_position(&local_chain, tip.block_id(), tx_0.compute_txid()),
         // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
-        Some(ChainPosition::Confirmed(&ConfirmationBlockTime {
-            block_id: BlockId {
-                hash: tip.get(95).unwrap().hash(),
-                height: 95,
+        Some(ChainPosition::Confirmed {
+            anchor: &ConfirmationBlockTime {
+                block_id: BlockId {
+                    hash: tip.get(95).unwrap().hash(),
+                    height: 95,
+                },
+                confirmation_time: 100
             },
-            confirmation_time: 100
-        }))
+            transitively: None
+        })
     );
 
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
@@ -921,7 +927,12 @@ fn test_chain_spends() {
                 OutPoint::new(tx_0.compute_txid(), 1)
             )
             .unwrap(),
-        (ChainPosition::Unconfirmed(1234567), tx_2.compute_txid())
+        (
+            ChainPosition::Unconfirmed {
+                last_seen: Some(1234567)
+            },
+            tx_2.compute_txid()
+        )
     );
 
     // A conflicting transaction that conflicts with tx_1.
@@ -957,7 +968,9 @@ fn test_chain_spends() {
         graph
             .get_chain_position(&local_chain, tip.block_id(), tx_2_conflict.compute_txid())
             .expect("position expected"),
-        ChainPosition::Unconfirmed(1234568)
+        ChainPosition::Unconfirmed {
+            last_seen: Some(1234568)
+        }
     );
 
     // Chain_spend now catches the new transaction as the spend.
@@ -970,7 +983,9 @@ fn test_chain_spends() {
             )
             .expect("expect observation"),
         (
-            ChainPosition::Unconfirmed(1234568),
+            ChainPosition::Unconfirmed {
+                last_seen: Some(1234568)
+            },
             tx_2_conflict.compute_txid()
         )
     );

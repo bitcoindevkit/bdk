@@ -1017,7 +1017,7 @@ mod test {
                 txout: TxOut::NULL,
                 keychain: KeychainKind::External,
                 is_spent: false,
-                chain_position: chain::ChainPosition::Unconfirmed(0),
+                chain_position: chain::ChainPosition::Unconfirmed { last_seen: Some(0) },
                 derivation_index: 0,
             },
             LocalOutput {
@@ -1028,13 +1028,16 @@ mod test {
                 txout: TxOut::NULL,
                 keychain: KeychainKind::Internal,
                 is_spent: false,
-                chain_position: chain::ChainPosition::Confirmed(chain::ConfirmationBlockTime {
-                    block_id: chain::BlockId {
-                        height: 32,
-                        hash: bitcoin::BlockHash::all_zeros(),
+                chain_position: chain::ChainPosition::Confirmed {
+                    anchor: chain::ConfirmationBlockTime {
+                        block_id: chain::BlockId {
+                            height: 32,
+                            hash: bitcoin::BlockHash::all_zeros(),
+                        },
+                        confirmation_time: 42,
                     },
-                    confirmation_time: 42,
-                }),
+                    transitively: None,
+                },
                 derivation_index: 1,
             },
         ]
