@@ -38,7 +38,7 @@ impl Drop for CPInner {
             // that no recursive drop calls can happen even with multiple threads.
             match Arc::try_unwrap(arc_node).ok() {
                 Some(mut node) => {
-                    // Keep goign backwards
+                    // Keep going backwards
                     current = node.prev.take();
                     // Don't call `drop` on `CPInner` since that risks it becoming recursive.
                     core::mem::forget(node);
