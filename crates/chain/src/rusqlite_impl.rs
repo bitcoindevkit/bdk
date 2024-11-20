@@ -376,8 +376,15 @@ where
             "REPLACE INTO {}(txid, block_height, block_hash, anchor) VALUES(:txid, :block_height, :block_hash, jsonb(:anchor))",
             Self::ANCHORS_TABLE_NAME,
         ))?;
+        let mut statement_txid = db_tx.prepare_cached(&format!(
+            "INSERT OR IGNORE INTO {}(txid) VALUES(:txid)",
+            Self::TXS_TABLE_NAME,
+        ))?;
         for (anchor, txid) in &self.anchors {
             let anchor_block = anchor.anchor_block();
+            statement_txid.execute(named_params! {
+                ":txid": Impl(*txid)
+            })?;
             statement.execute(named_params! {
                 ":txid": Impl(*txid),
                 ":block_height": anchor_block.height,
