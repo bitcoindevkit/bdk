@@ -1645,11 +1645,10 @@ fn test_add_foreign_utxo_only_witness_utxo() {
         .max_weight_to_satisfy()
         .unwrap();
 
-    let mut builder = wallet1.build_tx();
-    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(60_000));
-
     {
-        let mut builder = builder.clone();
+        let mut builder = wallet1.build_tx();
+        builder.add_recipient(addr.script_pubkey(), Amount::from_sat(60_000));
+
         let psbt_input = psbt::Input {
             witness_utxo: Some(utxo2.txout.clone()),
             ..Default::default()
@@ -1664,7 +1663,9 @@ fn test_add_foreign_utxo_only_witness_utxo() {
     }
 
     {
-        let mut builder = builder.clone();
+        let mut builder = wallet1.build_tx();
+        builder.add_recipient(addr.script_pubkey(), Amount::from_sat(60_000));
+
         let psbt_input = psbt::Input {
             witness_utxo: Some(utxo2.txout.clone()),
             ..Default::default()
@@ -1680,7 +1681,9 @@ fn test_add_foreign_utxo_only_witness_utxo() {
     }
 
     {
-        let mut builder = builder.clone();
+        let mut builder = wallet1.build_tx();
+        builder.add_recipient(addr.script_pubkey(), Amount::from_sat(60_000));
+
         let tx2 = wallet2.get_tx(txid2).unwrap().tx_node.tx;
         let psbt_input = psbt::Input {
             non_witness_utxo: Some(tx2.as_ref().clone()),
@@ -4168,4 +4171,10 @@ fn test_transactions_sort_by() {
         .map(|tx| tx.chain_position.confirmation_height_upper_bound())
         .collect();
     assert_eq!([None, Some(2000), Some(1000)], conf_heights.as_slice());
+}
+
+#[test]
+fn test_tx_builder_is_send_safe() {
+    let (mut wallet, _txid) = get_funded_wallet_wpkh();
+    let _box: Box<dyn Send + Sync> = Box::new(wallet.build_tx());
 }
