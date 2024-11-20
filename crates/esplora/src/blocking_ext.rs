@@ -1,5 +1,5 @@
 use bdk_core::collections::{BTreeMap, BTreeSet, HashSet};
-use bdk_core::spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResponse};
+use bdk_core::spk_client::{FullScanRequest, FullScanResponse, SyncRequest, SyncResponse};
 use bdk_core::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
@@ -30,7 +30,7 @@ pub trait EsploraExt {
         request: R,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<FullScanResult<K>, Error>;
+    ) -> Result<FullScanResponse<K>, Error>;
 
     /// Sync a set of scripts, txids, and/or outpoints against Esplora.
     ///
@@ -52,7 +52,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         request: R,
         stop_gap: usize,
         parallel_requests: usize,
-    ) -> Result<FullScanResult<K>, Error> {
+    ) -> Result<FullScanResponse<K>, Error> {
         let mut request = request.into();
 
         let chain_tip = request.chain_tip();
@@ -90,7 +90,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             _ => None,
         };
 
-        Ok(FullScanResult {
+        Ok(FullScanResponse {
             chain_update,
             tx_update,
             last_active_indices,

@@ -26,7 +26,7 @@ use bdk_chain::{
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::{ApplyHeaderError, CannotConnectError, CheckPoint, CheckPointIter, LocalChain},
     spk_client::{
-        FullScanRequest, FullScanRequestBuilder, FullScanResult, SyncRequest, SyncRequestBuilder,
+        FullScanRequest, FullScanRequestBuilder, FullScanResponse, SyncRequest, SyncRequestBuilder,
         SyncResponse,
     },
     tx_graph::{CalculateFeeError, CanonicalTx, TxGraph, TxUpdate},
@@ -132,8 +132,8 @@ pub struct Update {
     pub chain: Option<CheckPoint>,
 }
 
-impl From<FullScanResult<KeychainKind>> for Update {
-    fn from(value: FullScanResult<KeychainKind>) -> Self {
+impl From<FullScanResponse<KeychainKind>> for Update {
+    fn from(value: FullScanResponse<KeychainKind>) -> Self {
         Self {
             last_active_indices: value.last_active_indices,
             tx_update: value.tx_update,
