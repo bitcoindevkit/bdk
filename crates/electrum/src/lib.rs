@@ -1,7 +1,7 @@
 //! This crate is used for returning updates from Electrum servers.
 //!
-//! Updates are returned as either a [`SyncResult`] (if [`BdkElectrumClient::sync()`] is called),
-//! or a [`FullScanResult`] (if [`BdkElectrumClient::full_scan()`] is called).
+//! Updates are returned as either a [`SyncResponse`] (if [`BdkElectrumClient::sync()`] is called),
+//! or a [`FullScanResponse`] (if [`BdkElectrumClient::full_scan()`] is called).
 //!
 //! In most cases [`BdkElectrumClient::sync()`] is used to sync the transaction histories of scripts
 //! that the application cares about, for example the scripts for all the receive addresses of a
@@ -14,8 +14,8 @@
 //! Refer to [`example_electrum`] for a complete example.
 //!
 //! [`example_electrum`]: https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_electrum
-//! [`SyncResult`]: bdk_core::spk_client::SyncResult
-//! [`FullScanResult`]: bdk_core::spk_client::FullScanResult
+//! [`SyncResponse`]: bdk_core::spk_client::SyncResponse
+//! [`FullScanResponse`]: bdk_core::spk_client::FullScanResponse
 
 #![warn(missing_docs)]
 

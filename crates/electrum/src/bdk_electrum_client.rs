@@ -1,7 +1,7 @@
 use bdk_core::{
     bitcoin::{block::Header, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
     collections::{BTreeMap, HashMap},
-    spk_client::{FullScanRequest, FullScanResult, SyncRequest, SyncResult},
+    spk_client::{FullScanRequest, FullScanResponse, SyncRequest, SyncResponse},
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
@@ -126,7 +126,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         stop_gap: usize,
         batch_size: usize,
         fetch_prev_txouts: bool,
-    ) -> Result<FullScanResult<K>, Error> {
+    ) -> Result<FullScanResponse<K>, Error> {
         let mut request: FullScanRequest<K> = request.into();
 
         let tip_and_latest_blocks = match request.chain_tip() {
@@ -159,7 +159,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             _ => None,
         };
 
-        Ok(FullScanResult {
+        Ok(FullScanResponse {
             tx_update,
             chain_update,
             last_active_indices,
@@ -194,7 +194,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         request: impl Into<SyncRequest<I>>,
         batch_size: usize,
         fetch_prev_txouts: bool,
-    ) -> Result<SyncResult, Error> {
+    ) -> Result<SyncResponse, Error> {
         let mut request: SyncRequest<I> = request.into();
 
         let tip_and_latest_blocks = match request.chain_tip() {
@@ -229,7 +229,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             None => None,
         };
 
-        Ok(SyncResult {
+        Ok(SyncResponse {
             tx_update,
             chain_update,
         })

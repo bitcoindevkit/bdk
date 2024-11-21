@@ -322,14 +322,14 @@ impl<I> SyncRequest<I> {
 /// See also [`SyncRequest`].
 #[must_use]
 #[derive(Debug)]
-pub struct SyncResult<A = ConfirmationBlockTime> {
+pub struct SyncResponse<A = ConfirmationBlockTime> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,
     /// Changes to the chain discovered during the scan.
     pub chain_update: Option<CheckPoint>,
 }
 
-impl<A> Default for SyncResult<A> {
+impl<A> Default for SyncResponse<A> {
     fn default() -> Self {
         Self {
             tx_update: Default::default(),
@@ -459,7 +459,7 @@ impl<K: Ord + Clone> FullScanRequest<K> {
 /// See also [`FullScanRequest`].
 #[must_use]
 #[derive(Debug)]
-pub struct FullScanResult<K, A = ConfirmationBlockTime> {
+pub struct FullScanResponse<K, A = ConfirmationBlockTime> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,
     /// Last active indices for the corresponding keychains (`K`). An index is active if it had a
@@ -469,7 +469,7 @@ pub struct FullScanResult<K, A = ConfirmationBlockTime> {
     pub chain_update: Option<CheckPoint>,
 }
 
-impl<K, A> Default for FullScanResult<K, A> {
+impl<K, A> Default for FullScanResponse<K, A> {
     fn default() -> Self {
         Self {
             tx_update: Default::default(),
