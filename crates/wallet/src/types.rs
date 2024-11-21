@@ -87,7 +87,7 @@ pub enum Utxo {
         /// The location of the output.
         outpoint: OutPoint,
         /// The nSequence value to set for this input.
-        sequence: Option<Sequence>,
+        sequence: Sequence,
         /// The information about the input we require to add it to a PSBT.
         // Box it to stop the type being too big.
         psbt_input: Box<psbt::Input>,
@@ -129,7 +129,7 @@ impl Utxo {
     pub fn sequence(&self) -> Option<Sequence> {
         match self {
             Utxo::Local(_) => None,
-            Utxo::Foreign { sequence, .. } => *sequence,
+            Utxo::Foreign { sequence, .. } => Some(*sequence),
         }
     }
 }
