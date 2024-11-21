@@ -8,6 +8,7 @@ use bdk_chain::{
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
 use core::time::Duration;
+use serial_test::serial;
 use std::collections::{BTreeSet, HashSet};
 use std::str::FromStr;
 
@@ -55,6 +56,7 @@ where
 }
 
 #[test]
+#[serial]
 pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
@@ -163,6 +165,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
 
 /// Test the bounds of the address scan depending on the `stop_gap`.
 #[test]
+#[serial]
 pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
@@ -290,6 +293,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
 /// reorg and no-reorg situations. After the transaction is confirmed after reorg, check if floating
 /// txouts for previous outputs were inserted for transaction fee calculation.
 #[test]
+#[serial]
 fn test_sync() -> anyhow::Result<()> {
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
@@ -432,6 +436,7 @@ fn test_sync() -> anyhow::Result<()> {
 /// 3. Perform 8 separate reorgs on each block with a confirmed tx.
 /// 4. Check [`Balance`] after each reorg to ensure unconfirmed amount is correct.
 #[test]
+#[serial]
 fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     const REORG_COUNT: usize = 8;
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);

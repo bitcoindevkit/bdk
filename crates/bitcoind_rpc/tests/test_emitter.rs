@@ -10,6 +10,7 @@ use bdk_chain::{
 use bdk_testenv::{anyhow, TestEnv};
 use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};
 use bitcoincore_rpc::RpcApi;
+use serial_test::serial;
 
 /// Ensure that blocks are emitted in order even after reorg.
 ///
@@ -18,6 +19,7 @@ use bitcoincore_rpc::RpcApi;
 /// 3. Reorg highest 6 blocks.
 /// 4. Emit blocks from [`Emitter`] and re-update the [`LocalChain`].
 #[test]
+#[serial]
 pub fn test_sync_local_chain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let network_tip = env.rpc_client().get_block_count()?;
@@ -129,6 +131,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
 ///
 /// [`EmittedUpdate::into_tx_graph_update`]: bdk_bitcoind_rpc::EmittedUpdate::into_tx_graph_update
 #[test]
+#[serial]
 fn test_into_tx_graph() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
 
@@ -240,6 +243,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 /// TODO: If the reorg height is lower than the fallback height, how do we find a block height to
 /// emit that can connect with our receiver chain?
 #[test]
+#[serial]
 fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
     const EMITTER_START_HEIGHT: usize = 100;
     const CHAIN_TIP_HEIGHT: usize = 110;
@@ -315,6 +319,7 @@ fn get_balance(
 /// If a block is reorged out, ensure that containing transactions that do not exist in the
 /// replacement block(s) become unconfirmed.
 #[test]
+#[serial]
 fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     const PREMINE_COUNT: usize = 101;
     const ADDITIONAL_COUNT: usize = 11;
@@ -406,6 +411,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 /// When we call Emitter::mempool multiple times, mempool txs should not be re-emitted, even if the
 /// chain tip is extended.
 #[test]
+#[serial]
 fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     const BLOCKS_TO_MINE: usize = 101;
     const MEMPOOL_TX_COUNT: usize = 2;
@@ -471,6 +477,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
 /// that `mempool` should always re-emit txs that have introduced at a height greater than the last
 /// emitted block height.
 #[test]
+#[serial]
 fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()> {
     const PREMINE_COUNT: usize = 101;
     const MEMPOOL_TX_COUNT: usize = 21;
@@ -559,6 +566,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
 
 /// Ensure we force re-emit all mempool txs after reorg.
 #[test]
+#[serial]
 fn mempool_during_reorg() -> anyhow::Result<()> {
     const TIP_DIFF: usize = 10;
     const PREMINE_COUNT: usize = 101;
@@ -682,6 +690,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
 /// The block hash of 99b should be different than 99a, but their previous block hashes should
 /// be the same.
 #[test]
+#[serial]
 fn no_agreement_point() -> anyhow::Result<()> {
     const PREMINE_COUNT: usize = 101;
 

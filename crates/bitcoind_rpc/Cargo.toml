@@ -23,6 +23,7 @@ bdk_core = { path = "../core", version = "0.3.0", default-features = false }
 [dev-dependencies]
 bdk_testenv = { path = "../testenv", default-features = false }
 bdk_chain = { path = "../chain" }
+serial_test = { version = "=0.8.0" }
 
 [features]
 default = ["std"]
