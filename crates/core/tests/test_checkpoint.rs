@@ -1,5 +1,5 @@
-use bdk_core::CheckPoint;
-use bdk_testenv::block_id;
+use bdk_core::{BlockId, CheckPoint};
+use bdk_testenv::{block_id, hash};
 
 /// Inserting a block that already exists in the checkpoint chain must always succeed.
 #[test]
@@ -31,4 +31,23 @@ fn checkpoint_insert_existing() {
             assert!(new_cp_chain.eq_ptr(&cp_chain), "pointers must still match");
         }
     }
+}
+
+#[test]
+fn checkpoint_destruction_is_sound() {
+    // Prior to the fix in https://github.com/bitcoindevkit/bdk/pull/1731
+    // this could have caused a stack overflow due to drop recursion in Arc.
+    // We test that a long linked list can clean itself up without blowing
+    // out the stack.
+    let mut cp = CheckPoint::new(BlockId {
+        height: 0,
+        hash: hash!("g"),
+    });
+    let end = 10_000;
+    for height in 1u32..end {
+        let hash = bitcoin::hashes::Hash::hash(height.to_be_bytes().as_slice());
+        let block = BlockId { height, hash };
+        cp = cp.push(block).unwrap();
+    }
+    assert_eq!(cp.iter().count() as u32, end);
 }
