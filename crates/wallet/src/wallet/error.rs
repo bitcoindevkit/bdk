@@ -104,6 +104,10 @@ pub enum CreateTxError {
     MissingNonWitnessUtxo(OutPoint),
     /// Miniscript PSBT error
     MiniscriptPsbt(MiniscriptPsbtError),
+    /// Multiple recipients are OP_RETURN outputs
+    MultipleOpReturn,
+    /// The OP_RETURN data contains too many bytes
+    MaxDataCarrierSize,
 }
 
 impl fmt::Display for CreateTxError {
@@ -170,6 +174,12 @@ impl fmt::Display for CreateTxError {
             }
             CreateTxError::MiniscriptPsbt(err) => {
                 write!(f, "Miniscript PSBT error: {}", err)
+            }
+            CreateTxError::MultipleOpReturn => {
+                write!(f, "Multiple recipients are OP_RETURN outputs")
+            }
+            CreateTxError::MaxDataCarrierSize => {
+                write!(f, "The OP_RETURN data contains too many bytes")
             }
         }
     }

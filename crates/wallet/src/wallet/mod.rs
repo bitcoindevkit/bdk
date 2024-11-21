@@ -87,6 +87,7 @@ pub use persisted::*;
 pub use utils::IsDust;
 
 const COINBASE_MATURITY: u32 = 100;
+const MAX_OP_RETURN_BYTES: usize = 83;
 
 /// A Bitcoin wallet
 ///
@@ -1388,10 +1389,21 @@ impl Wallet {
         let mut received = Amount::ZERO;
 
         let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
+        let mut contains_op_return = false;
 
         for (index, (script_pubkey, value)) in recipients.enumerate() {
             if !params.allow_dust && value.is_dust(script_pubkey) && !script_pubkey.is_op_return() {
                 return Err(CreateTxError::OutputBelowDustLimit(index));
+            }
+
+            if script_pubkey.is_op_return() {
+                if contains_op_return {
+                    return Err(CreateTxError::MultipleOpReturn);
+                }
+                if script_pubkey.len() > MAX_OP_RETURN_BYTES {
+                    return Err(CreateTxError::MaxDataCarrierSize);
+                }
+                contains_op_return = true;
             }
 
             if self.is_mine(script_pubkey.clone()) {
