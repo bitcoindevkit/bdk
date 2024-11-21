@@ -36,7 +36,7 @@ use bdk_chain::{
 use bitcoin::{
     absolute,
     consensus::encode::serialize,
-    constants::genesis_block,
+    constants::{genesis_block, COINBASE_MATURITY},
     psbt,
     secp256k1::Secp256k1,
     sighash::{EcdsaSighashType, TapSighashType},
@@ -85,8 +85,6 @@ pub use changeset::ChangeSet;
 pub use params::*;
 pub use persisted::*;
 pub use utils::IsDust;
-
-const COINBASE_MATURITY: u32 = 100;
 
 /// A Bitcoin wallet
 ///

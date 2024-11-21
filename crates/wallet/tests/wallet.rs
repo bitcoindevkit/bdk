@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use bdk_chain::COINBASE_MATURITY;
 use bdk_chain::{BlockId, ChainPosition, ConfirmationBlockTime};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
@@ -15,7 +14,7 @@ use bdk_wallet::test_utils::*;
 use bdk_wallet::tx_builder::AddForeignUtxoError;
 use bdk_wallet::{AddressInfo, Balance, ChangeSet, Wallet, WalletPersister, WalletTx};
 use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
-use bitcoin::constants::ChainHash;
+use bitcoin::constants::{ChainHash, COINBASE_MATURITY};
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
 use bitcoin::psbt;

@@ -77,9 +77,6 @@ pub extern crate serde;
 #[macro_use]
 extern crate std;
 
-/// How many confirmations are needed f or a coinbase output to be spent.
-pub const COINBASE_MATURITY: u32 = 100;
-
 /// A wrapper that we use to impl remote traits for types in our crate or dependency crates.
 pub struct Impl<T>(pub T);
 
