@@ -352,9 +352,10 @@ where
                 Self::TXS_TABLE_NAME,
             ))?;
         for (&txid, &last_seen) in &self.last_seen {
+            let checked_time = last_seen.to_sql()?;
             statement.execute(named_params! {
                 ":txid": Impl(txid),
-                ":last_seen": Some(last_seen),
+                ":last_seen": Some(checked_time),
             })?;
         }
 
