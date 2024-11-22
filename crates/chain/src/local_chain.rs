@@ -174,7 +174,7 @@ impl LocalChain {
     pub fn apply_update(&mut self, update: CheckPoint) -> Result<ChangeSet, CannotConnectError> {
         let (new_tip, changeset) = merge_chains(self.tip.clone(), update)?;
         self.tip = new_tip;
-        self._check_changeset_is_applied(&changeset);
+        debug_assert!(self._check_changeset_is_applied(&changeset));
         Ok(changeset)
     }
 
