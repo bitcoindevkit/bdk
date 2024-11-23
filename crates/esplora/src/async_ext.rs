@@ -5,6 +5,7 @@ use bdk_core::{
     bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
 };
+use esplora_client::Sleeper;
 use futures::{stream::FuturesOrdered, TryStreamExt};
 
 use crate::{insert_anchor_from_status, insert_prevouts};
@@ -50,7 +51,11 @@ pub trait EsploraAsyncExt {
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl EsploraAsyncExt for esplora_client::AsyncClient {
+impl<S> EsploraAsyncExt for esplora_client::AsyncClient<S>
+where
+    S: Sleeper + Clone + Send + Sync,
+    S::Sleep: Send,
+{
     async fn full_scan<K: Ord + Clone + Send, R: Into<FullScanRequest<K>> + Send>(
         &self,
         request: R,
@@ -165,8 +170,8 @@ impl EsploraAsyncExt for esplora_client::AsyncClient {
 /// block-based chain-sources). Therefore it's better to be conservative when setting the tip (use
 /// an earlier tip rather than a later tip) otherwise the caller may accidentally skip blocks when
 /// alternating between chain-sources.
-async fn fetch_latest_blocks(
-    client: &esplora_client::AsyncClient,
+async fn fetch_latest_blocks<S: Sleeper>(
+    client: &esplora_client::AsyncClient<S>,
 ) -> Result<BTreeMap<u32, BlockHash>, Error> {
     Ok(client
         .get_blocks(None)
@@ -179,8 +184,8 @@ async fn fetch_latest_blocks(
 /// Used instead of [`esplora_client::BlockingClient::get_block_hash`].
 ///
 /// This first checks the previously fetched `latest_blocks` before fetching from Esplora again.
-async fn fetch_block(
-    client: &esplora_client::AsyncClient,
+async fn fetch_block<S: Sleeper>(
+    client: &esplora_client::AsyncClient<S>,
     latest_blocks: &BTreeMap<u32, BlockHash>,
     height: u32,
 ) -> Result<Option<BlockHash>, Error> {
@@ -205,8 +210,8 @@ async fn fetch_block(
 ///
 /// We want to have a corresponding checkpoint per anchor height. However, checkpoints fetched
 /// should not surpass `latest_blocks`.
-async fn chain_update(
-    client: &esplora_client::AsyncClient,
+async fn chain_update<S: Sleeper>(
+    client: &esplora_client::AsyncClient<S>,
     latest_blocks: &BTreeMap<u32, BlockHash>,
     local_tip: &CheckPoint,
     anchors: &BTreeSet<(ConfirmationBlockTime, Txid)>,
@@ -271,13 +276,17 @@ async fn chain_update(
 /// script pubkey that contains a non-empty transaction history.
 ///
 /// Refer to [crate-level docs](crate) for more.
-async fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>> + Send>(
-    client: &esplora_client::AsyncClient,
+async fn fetch_txs_with_keychain_spks<I, S>(
+    client: &esplora_client::AsyncClient<S>,
     inserted_txs: &mut HashSet<Txid>,
     mut keychain_spks: I,
     stop_gap: usize,
     parallel_requests: usize,
-) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error> {
+) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error>
+where
+    I: Iterator<Item = Indexed<ScriptBuf>> + Send,
+    S: Sleeper + Clone + Send + Sync,
+{
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
@@ -346,14 +355,16 @@ async fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>> + S
 /// HTTP requests to make in parallel.
 ///
 /// Refer to [crate-level docs](crate) for more.
-async fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf> + Send>(
-    client: &esplora_client::AsyncClient,
+async fn fetch_txs_with_spks<I, S>(
+    client: &esplora_client::AsyncClient<S>,
     inserted_txs: &mut HashSet<Txid>,
     spks: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error>
 where
+    I: IntoIterator<Item = ScriptBuf> + Send,
     I::IntoIter: Send,
+    S: Sleeper + Clone + Send + Sync,
 {
     fetch_txs_with_keychain_spks(
         client,
@@ -372,14 +383,16 @@ where
 /// `parallel_requests` specifies the maximum number of HTTP requests to make in parallel.
 ///
 /// Refer to [crate-level docs](crate) for more.
-async fn fetch_txs_with_txids<I: IntoIterator<Item = Txid> + Send>(
-    client: &esplora_client::AsyncClient,
+async fn fetch_txs_with_txids<I, S>(
+    client: &esplora_client::AsyncClient<S>,
     inserted_txs: &mut HashSet<Txid>,
     txids: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error>
 where
+    I: IntoIterator<Item = Txid> + Send,
     I::IntoIter: Send,
+    S: Sleeper + Clone + Send + Sync,
 {
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     // Only fetch for non-inserted txs.
@@ -421,14 +434,16 @@ where
 /// `parallel_requests` specifies the maximum number of HTTP requests to make in parallel.
 ///
 /// Refer to [crate-level docs](crate) for more.
-async fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint> + Send>(
-    client: &esplora_client::AsyncClient,
+async fn fetch_txs_with_outpoints<I, S>(
+    client: &esplora_client::AsyncClient<S>,
     inserted_txs: &mut HashSet<Txid>,
     outpoints: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error>
 where
+    I: IntoIterator<Item = OutPoint> + Send,
     I::IntoIter: Send,
+    S: Sleeper + Clone + Send + Sync,
 {
     let outpoints = outpoints.into_iter().collect::<Vec<_>>();
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
