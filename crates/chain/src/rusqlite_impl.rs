@@ -1,4 +1,4 @@
-//! Module for stuff
+//! Support for persisting `bdk_chain` structures to SQLite using [`rusqlite`].
 
 use crate::*;
 use core::str::FromStr;
