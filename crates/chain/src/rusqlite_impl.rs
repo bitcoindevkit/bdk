@@ -536,3 +536,70 @@ impl keychain_txout::ChangeSet {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use bdk_testenv::{anyhow, hash};
+    use bitcoin::{absolute, transaction, TxIn, TxOut};
+
+    #[test]
+    fn can_persist_anchors_and_txs_independently() -> anyhow::Result<()> {
+        type ChangeSet = tx_graph::ChangeSet<BlockId>;
+        let mut conn = rusqlite::Connection::open_in_memory()?;
+
+        // init tables
+        {
+            let db_tx = conn.transaction()?;
+            ChangeSet::init_sqlite_tables(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        let tx = bitcoin::Transaction {
+            version: transaction::Version::TWO,
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut::NULL],
+        };
+        let tx = Arc::new(tx);
+        let txid = tx.compute_txid();
+        let anchor = BlockId {
+            height: 21,
+            hash: hash!("anchor"),
+        };
+
+        // First persist the anchor
+        {
+            let changeset = ChangeSet {
+                anchors: [(anchor, txid)].into(),
+                ..Default::default()
+            };
+            let db_tx = conn.transaction()?;
+            changeset.persist_to_sqlite(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        // Now persist the tx
+        {
+            let changeset = ChangeSet {
+                txs: [tx.clone()].into(),
+                ..Default::default()
+            };
+            let db_tx = conn.transaction()?;
+            changeset.persist_to_sqlite(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        // Loading changeset from sqlite should succeed
+        {
+            let db_tx = conn.transaction()?;
+            let changeset = ChangeSet::from_sqlite(&db_tx)?;
+            db_tx.commit()?;
+            assert!(changeset.txs.contains(&tx));
+            assert!(changeset.anchors.contains(&(anchor, txid)));
+        }
+
+        Ok(())
+    }
+}
