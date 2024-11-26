@@ -435,7 +435,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each `Transaction`
     /// it visits and decide whether to visit ancestors.
-    pub fn walk_ancestors<'g, T, F, O>(&'g self, tx: T, walk_map: F) -> TxAncestors<'g, A, F>
+    pub fn walk_ancestors<'g, T, F, O>(&'g self, tx: T, walk_map: F) -> TxAncestors<'g, A, F, O>
     where
         T: Into<Arc<Transaction>>,
         F: FnMut(usize, Arc<Transaction>) -> Option<O> + 'g,
@@ -453,7 +453,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it visits
     /// and decide whether to visit descendants.
-    pub fn walk_descendants<'g, F, O>(&'g self, txid: Txid, walk_map: F) -> TxDescendants<A, F>
+    pub fn walk_descendants<'g, F, O>(&'g self, txid: Txid, walk_map: F) -> TxDescendants<A, F, O>
     where
         F: FnMut(usize, Txid) -> Option<O> + 'g,
     {
@@ -470,7 +470,7 @@ impl<A> TxGraph<A> {
         &'g self,
         tx: &'g Transaction,
         walk_map: F,
-    ) -> TxDescendants<A, F>
+    ) -> TxDescendants<A, F, O>
     where
         F: FnMut(usize, Txid) -> Option<O> + 'g,
     {
@@ -1329,14 +1329,20 @@ impl<A> AsRef<TxGraph<A>> for TxGraph<A> {
 /// Returned by the [`walk_ancestors`] method of [`TxGraph`].
 ///
 /// [`walk_ancestors`]: TxGraph::walk_ancestors
-pub struct TxAncestors<'g, A, F> {
+pub struct TxAncestors<'g, A, F, O>
+where
+    F: FnMut(usize, Arc<Transaction>) -> Option<O>,
+{
     graph: &'g TxGraph<A>,
     visited: HashSet<Txid>,
     queue: VecDeque<(usize, Arc<Transaction>)>,
     filter_map: F,
 }
 
-impl<'g, A, F> TxAncestors<'g, A, F> {
+impl<'g, A, F, O> TxAncestors<'g, A, F, O>
+where
+    F: FnMut(usize, Arc<Transaction>) -> Option<O>,
+{
     /// Creates a `TxAncestors` that includes the starting `Transaction` when iterating.
     pub(crate) fn new_include_root(
         graph: &'g TxGraph<A>,
@@ -1411,6 +1417,11 @@ impl<'g, A, F> TxAncestors<'g, A, F> {
         ancestors
     }
 
+    /// Traverse all ancestors that are not filtered out by the provided closure.
+    pub fn run_until_finished(self) {
+        self.for_each(|_| {})
+    }
+
     fn populate_queue(&mut self, depth: usize, tx: Arc<Transaction>) {
         let ancestors = tx
             .input
@@ -1423,7 +1434,7 @@ impl<'g, A, F> TxAncestors<'g, A, F> {
     }
 }
 
-impl<'g, A, F, O> Iterator for TxAncestors<'g, A, F>
+impl<'g, A, F, O> Iterator for TxAncestors<'g, A, F, O>
 where
     F: FnMut(usize, Arc<Transaction>) -> Option<O>,
 {
@@ -1449,14 +1460,20 @@ where
 /// Returned by the [`walk_descendants`] method of [`TxGraph`].
 ///
 /// [`walk_descendants`]: TxGraph::walk_descendants
-pub struct TxDescendants<'g, A, F> {
+pub struct TxDescendants<'g, A, F, O>
+where
+    F: FnMut(usize, Txid) -> Option<O>,
+{
     graph: &'g TxGraph<A>,
     visited: HashSet<Txid>,
     queue: VecDeque<(usize, Txid)>,
     filter_map: F,
 }
 
-impl<'g, A, F> TxDescendants<'g, A, F> {
+impl<'g, A, F, O> TxDescendants<'g, A, F, O>
+where
+    F: FnMut(usize, Txid) -> Option<O>,
+{
     /// Creates a `TxDescendants` that includes the starting `txid` when iterating.
     #[allow(unused)]
     pub(crate) fn new_include_root(graph: &'g TxGraph<A>, txid: Txid, filter_map: F) -> Self {
@@ -1520,9 +1537,12 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
         }
         descendants
     }
-}
 
-impl<'g, A, F> TxDescendants<'g, A, F> {
+    /// Traverse all descendants that are not filtered out by the provided closure.
+    pub fn run_until_finished(self) {
+        self.for_each(|_| {})
+    }
+
     fn populate_queue(&mut self, depth: usize, txid: Txid) {
         let spend_paths = self
             .graph
@@ -1534,7 +1554,7 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
     }
 }
 
-impl<'g, A, F, O> Iterator for TxDescendants<'g, A, F>
+impl<'g, A, F, O> Iterator for TxDescendants<'g, A, F, O>
 where
     F: FnMut(usize, Txid) -> Option<O>,
 {
