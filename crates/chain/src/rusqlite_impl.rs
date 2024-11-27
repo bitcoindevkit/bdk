@@ -211,10 +211,7 @@ fn to_sql_error<E: std::error::Error + Send + Sync + 'static>(err: E) -> rusqlit
     rusqlite::Error::ToSqlConversionFailure(Box::new(err))
 }
 
-impl<A> tx_graph::ChangeSet<A>
-where
-    A: Anchor + Clone + Ord + serde::Serialize + serde::de::DeserializeOwned,
-{
+impl tx_graph::ChangeSet<ConfirmationBlockTime> {
     /// Schema name for [`tx_graph::ChangeSet`].
     pub const SCHEMA_NAME: &'static str = "bdk_txgraph";
     /// Name of table that stores full transactions and `last_seen` timestamps.
@@ -260,7 +257,21 @@ where
                 Self::TXS_TABLE_NAME,
             ),
         ];
-        migrate_schema(db_tx, Self::SCHEMA_NAME, &[schema_v0])
+        let schema_v1: &[&str] = &[
+            &format!(
+                "ALTER TABLE {} ADD COLUMN confirmation_time INTEGER DEFAULT -1 NOT NULL",
+                Self::ANCHORS_TABLE_NAME,
+            ),
+            &format!(
+                "UPDATE {} SET confirmation_time = json_extract(anchor, '$.confirmation_time')",
+                Self::ANCHORS_TABLE_NAME,
+            ),
+            &format!(
+                "ALTER TABLE {} DROP COLUMN anchor",
+                Self::ANCHORS_TABLE_NAME,
+            ),
+        ];
+        migrate_schema(db_tx, Self::SCHEMA_NAME, &[schema_v0, schema_v1])
     }
 
     /// Construct a [`TxGraph`] from an sqlite database.
@@ -314,18 +325,26 @@ where
         }
 
         let mut statement = db_tx.prepare(&format!(
-            "SELECT json(anchor), txid FROM {}",
+            "SELECT block_hash, block_height, confirmation_time, txid FROM {}",
             Self::ANCHORS_TABLE_NAME,
         ))?;
         let row_iter = statement.query_map([], |row| {
             Ok((
-                row.get::<_, AnchorImpl<A>>("json(anchor)")?,
+                row.get::<_, Impl<bitcoin::BlockHash>>("block_hash")?,
+                row.get::<_, u32>("block_height")?,
+                row.get::<_, u64>("confirmation_time")?,
                 row.get::<_, Impl<bitcoin::Txid>>("txid")?,
             ))
         })?;
         for row in row_iter {
-            let (AnchorImpl(anchor), Impl(txid)) = row?;
-            changeset.anchors.insert((anchor, txid));
+            let (hash, height, confirmation_time, Impl(txid)) = row?;
+            changeset.anchors.insert((
+                ConfirmationBlockTime {
+                    block_id: BlockId::from((&height, &hash.0)),
+                    confirmation_time,
+                },
+                txid,
+            ));
         }
 
         Ok(changeset)
@@ -373,7 +392,7 @@ where
         }
 
         let mut statement = db_tx.prepare_cached(&format!(
-            "REPLACE INTO {}(txid, block_height, block_hash, anchor) VALUES(:txid, :block_height, :block_hash, jsonb(:anchor))",
+            "REPLACE INTO {}(txid, block_height, block_hash, confirmation_time) VALUES(:txid, :block_height, :block_hash, :confirmation_time)",
             Self::ANCHORS_TABLE_NAME,
         ))?;
         let mut statement_txid = db_tx.prepare_cached(&format!(
@@ -389,7 +408,7 @@ where
                 ":txid": Impl(*txid),
                 ":block_height": anchor_block.height,
                 ":block_hash": Impl(anchor_block.hash),
-                ":anchor": AnchorImpl(anchor.clone()),
+                ":confirmation_time": anchor.confirmation_time,
             })?;
         }
 
