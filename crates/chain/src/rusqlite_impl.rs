@@ -157,22 +157,6 @@ impl ToSql for Impl<bitcoin::Amount> {
     }
 }
 
-impl<A: Anchor + serde::de::DeserializeOwned> FromSql for AnchorImpl<A> {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        serde_json::from_str(value.as_str()?)
-            .map(AnchorImpl)
-            .map_err(from_sql_error)
-    }
-}
-
-impl<A: Anchor + serde::Serialize> ToSql for AnchorImpl<A> {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        serde_json::to_string(&self.0)
-            .map(Into::into)
-            .map_err(to_sql_error)
-    }
-}
-
 #[cfg(feature = "miniscript")]
 impl FromSql for Impl<miniscript::Descriptor<miniscript::DescriptorPublicKey>> {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
