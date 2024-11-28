@@ -1056,6 +1056,37 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
 }
 
 #[test]
+fn insert_anchor_without_tx() {
+    let mut graph = TxGraph::<BlockId>::default();
+
+    let tx = new_tx(21);
+    let txid = tx.compute_txid();
+
+    let anchor = BlockId {
+        height: 100,
+        hash: hash!("A"),
+    };
+
+    // insert anchor with no corresponding tx
+    let mut changeset = graph.insert_anchor(txid, anchor);
+    assert!(changeset.anchors.contains(&(anchor, txid)));
+    // recover from changeset
+    let mut recovered = TxGraph::default();
+    recovered.apply_changeset(changeset.clone());
+    assert_eq!(recovered, graph);
+
+    // now insert tx
+    let tx = Arc::new(tx);
+    let graph_changeset = graph.insert_tx(tx.clone());
+    assert!(graph_changeset.txs.contains(&tx));
+    changeset.merge(graph_changeset);
+    // recover from changeset again
+    let mut recovered = TxGraph::default();
+    recovered.apply_changeset(changeset);
+    assert_eq!(recovered, graph);
+}
+
+#[test]
 /// The `map_anchors` allow a caller to pass a function to reconstruct the [`TxGraph`] with any [`Anchor`],
 /// even though the function is non-deterministic.
 fn call_map_anchors_with_non_deterministic_anchor() {

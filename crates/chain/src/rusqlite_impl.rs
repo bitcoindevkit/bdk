@@ -1,4 +1,4 @@
-//! Module for stuff
+//! Support for persisting `bdk_chain` structures to SQLite using [`rusqlite`].
 
 use crate::*;
 use core::str::FromStr;
@@ -376,8 +376,15 @@ where
             "REPLACE INTO {}(txid, block_height, block_hash, anchor) VALUES(:txid, :block_height, :block_hash, jsonb(:anchor))",
             Self::ANCHORS_TABLE_NAME,
         ))?;
+        let mut statement_txid = db_tx.prepare_cached(&format!(
+            "INSERT OR IGNORE INTO {}(txid) VALUES(:txid)",
+            Self::TXS_TABLE_NAME,
+        ))?;
         for (anchor, txid) in &self.anchors {
             let anchor_block = anchor.anchor_block();
+            statement_txid.execute(named_params! {
+                ":txid": Impl(*txid)
+            })?;
             statement.execute(named_params! {
                 ":txid": Impl(*txid),
                 ":block_height": anchor_block.height,
@@ -524,6 +531,73 @@ impl keychain_txout::ChangeSet {
                 ":descriptor_id": Impl(descriptor_id),
                 ":last_revealed": last_revealed,
             })?;
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use bdk_testenv::{anyhow, hash};
+    use bitcoin::{absolute, transaction, TxIn, TxOut};
+
+    #[test]
+    fn can_persist_anchors_and_txs_independently() -> anyhow::Result<()> {
+        type ChangeSet = tx_graph::ChangeSet<BlockId>;
+        let mut conn = rusqlite::Connection::open_in_memory()?;
+
+        // init tables
+        {
+            let db_tx = conn.transaction()?;
+            ChangeSet::init_sqlite_tables(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        let tx = bitcoin::Transaction {
+            version: transaction::Version::TWO,
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut::NULL],
+        };
+        let tx = Arc::new(tx);
+        let txid = tx.compute_txid();
+        let anchor = BlockId {
+            height: 21,
+            hash: hash!("anchor"),
+        };
+
+        // First persist the anchor
+        {
+            let changeset = ChangeSet {
+                anchors: [(anchor, txid)].into(),
+                ..Default::default()
+            };
+            let db_tx = conn.transaction()?;
+            changeset.persist_to_sqlite(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        // Now persist the tx
+        {
+            let changeset = ChangeSet {
+                txs: [tx.clone()].into(),
+                ..Default::default()
+            };
+            let db_tx = conn.transaction()?;
+            changeset.persist_to_sqlite(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        // Loading changeset from sqlite should succeed
+        {
+            let db_tx = conn.transaction()?;
+            let changeset = ChangeSet::from_sqlite(&db_tx)?;
+            db_tx.commit()?;
+            assert!(changeset.txs.contains(&tx));
+            assert!(changeset.anchors.contains(&(anchor, txid)));
         }
 
         Ok(())
