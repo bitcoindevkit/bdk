@@ -224,6 +224,58 @@ fn wallet_load_checks() -> anyhow::Result<()> {
 }
 
 #[test]
+fn wallet_should_persist_anchors_and_recover() {
+    use bdk_chain::rusqlite;
+    let temp_dir = tempfile::tempdir().unwrap();
+    let db_path = temp_dir.path().join("wallet.db");
+    let mut db = rusqlite::Connection::open(db_path).unwrap();
+
+    let desc = get_test_tr_single_sig_xprv();
+    let mut wallet = Wallet::create_single(desc)
+        .network(Network::Testnet)
+        .create_wallet(&mut db)
+        .unwrap();
+    let small_output_tx = Transaction {
+        input: vec![],
+        output: vec![TxOut {
+            script_pubkey: wallet
+                .next_unused_address(KeychainKind::External)
+                .script_pubkey(),
+            value: Amount::from_sat(25_000),
+        }],
+        version: transaction::Version::non_standard(0),
+        lock_time: absolute::LockTime::ZERO,
+    };
+    let txid = small_output_tx.compute_txid();
+    insert_tx(&mut wallet, small_output_tx);
+    let anchor = ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().block_id(),
+        confirmation_time: 200,
+    };
+    insert_anchor(&mut wallet, txid, anchor);
+    assert!(wallet.persist(&mut db).unwrap());
+
+    // should recover persisted wallet
+    let secp = wallet.secp_ctx();
+    let (_, keymap) = <Descriptor<DescriptorPublicKey>>::parse_descriptor(secp, desc).unwrap();
+    assert!(!keymap.is_empty());
+    let wallet = Wallet::load()
+        .descriptor(KeychainKind::External, Some(desc))
+        .extract_keys()
+        .load_wallet(&mut db)
+        .unwrap()
+        .expect("must have loaded changeset");
+    // stored anchor should be retrieved in the same condition it was persisted
+    assert_eq!(
+        wallet
+            .get_tx(txid)
+            .expect("should retrieve stored tx")
+            .chain_position,
+        ChainPosition::Confirmed(&anchor),
+    );
+}
+
+#[test]
 fn single_descriptor_wallet_persist_and_recover() {
     use bdk_chain::miniscript::Descriptor;
     use bdk_chain::miniscript::DescriptorPublicKey;
