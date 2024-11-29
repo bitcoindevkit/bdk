@@ -549,7 +549,7 @@ mod test {
 
     #[test]
     fn can_persist_anchors_and_txs_independently() -> anyhow::Result<()> {
-        type ChangeSet = tx_graph::ChangeSet<BlockId>;
+        type ChangeSet = tx_graph::ChangeSet<ConfirmationBlockTime>;
         let mut conn = rusqlite::Connection::open_in_memory()?;
 
         // init tables
@@ -567,9 +567,12 @@ mod test {
         };
         let tx = Arc::new(tx);
         let txid = tx.compute_txid();
-        let anchor = BlockId {
-            height: 21,
-            hash: hash!("anchor"),
+        let anchor = ConfirmationBlockTime {
+            block_id: BlockId {
+                height: 21,
+                hash: hash!("anchor"),
+            },
+            confirmation_time: 1342,
         };
 
         // First persist the anchor
