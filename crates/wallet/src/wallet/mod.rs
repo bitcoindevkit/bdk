@@ -1503,7 +1503,6 @@ impl Wallet {
                 rng,
             )
             .map_err(CreateTxError::CoinSelection)?;
-        fee_amount += coin_selection.fee_amount;
         let excess = &coin_selection.excess;
 
         tx.input = coin_selection
@@ -1544,28 +1543,18 @@ impl Wallet {
             }
         }
 
-        match excess {
-            Excess::NoChange {
-                remaining_amount, ..
-            } => fee_amount += *remaining_amount,
-            Excess::Change { amount, fee } => {
-                if self.is_mine(drain_script.clone()) {
-                    received += *amount;
-                }
-                fee_amount += *fee;
+        if let Excess::Change { amount, .. } = excess {
+            // create drain output
+            let drain_output = TxOut {
+                value: *amount,
+                script_pubkey: drain_script,
+            };
 
-                // create drain output
-                let drain_output = TxOut {
-                    value: *amount,
-                    script_pubkey: drain_script,
-                };
-
-                // TODO: We should pay attention when adding a new output: this might increase
-                // the length of the "number of vouts" parameter by 2 bytes, potentially making
-                // our feerate too low
-                tx.output.push(drain_output);
-            }
-        };
+            // TODO: We should pay attention when adding a new output: this might increase
+            // the length of the "number of vouts" parameter by 2 bytes, potentially making
+            // our feerate too low
+            tx.output.push(drain_output);
+        }
 
         // sort input/outputs according to the chosen algorithm
         params.ordering.sort_tx_with_aux_rand(&mut tx, rng);
@@ -1808,7 +1797,7 @@ impl Wallet {
 
         // attempt to finalize
         if sign_options.try_finalize {
-            self.finalize_psbt(psbt, sign_options)
+            self.finalize_psbt(psbt)
         } else {
             Ok(false)
         }
@@ -1851,11 +1840,7 @@ impl Wallet {
     /// Returns `true` if the PSBT could be finalized, and `false` otherwise.
     ///
     /// The [`SignOptions`] can be used to tweak the behavior of the finalizer.
-    pub fn finalize_psbt(
-        &self,
-        psbt: &mut Psbt,
-        _sign_options: SignOptions,
-    ) -> Result<bool, SignerError> {
+    pub fn finalize_psbt(&self, psbt: &mut Psbt) -> Result<bool, SignerError> {
         let tx = &psbt.unsigned_tx;
         let mut finished = true;
 
