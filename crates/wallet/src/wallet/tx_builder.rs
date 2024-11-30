@@ -125,7 +125,8 @@ pub(crate) struct TxParams {
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) utxos: Vec<WeightedUtxo>,
+    pub(crate) utxos: Vec<OutPoint>,
+    pub(crate) foreign_utxos: Vec<WeightedUtxo>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<psbt::PsbtSighashType>,
@@ -274,27 +275,14 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, AddUtxoError> {
-        {
-            let wallet = &mut self.wallet;
-            let utxos = outpoints
-                .iter()
-                .map(|outpoint| {
-                    wallet
-                        .get_utxo(*outpoint)
-                        .ok_or(AddUtxoError::UnknownUtxo(*outpoint))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            for utxo in utxos {
-                let descriptor = wallet.public_descriptor(utxo.keychain);
-                let satisfaction_weight = descriptor.max_weight_to_satisfy().unwrap();
-                self.params.utxos.push(WeightedUtxo {
-                    satisfaction_weight,
-                    utxo: Utxo::Local(utxo),
-                });
-            }
+        // first check that we can get the utxo from the wallet
+        for outpoint in outpoints {
+            let _utxo = self
+                .wallet
+                .get_utxo(*outpoint)
+                .ok_or(AddUtxoError::UnknownUtxo(*outpoint))?;
         }
-
+        self.params.utxos.extend(outpoints);
         Ok(self)
     }
 
@@ -393,7 +381,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
             }
         }
 
-        self.params.utxos.push(WeightedUtxo {
+        self.params.foreign_utxos.push(WeightedUtxo {
             satisfaction_weight,
             utxo: Utxo::Foreign {
                 outpoint,
