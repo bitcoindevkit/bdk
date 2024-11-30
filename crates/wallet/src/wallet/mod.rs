@@ -889,6 +889,22 @@ impl Wallet {
             .next()
     }
 
+    /// Get a local output. A local output is an output owned by this wallet and
+    /// indexed internally. This can be used for retrieving an output that may be
+    /// spent but is eligible to be used in a replacement tx.
+    fn get_output(&self, outpoint: OutPoint) -> Option<LocalOutput> {
+        let ((keychain, index), _) = self.indexed_graph.index.txout(outpoint)?;
+        self.indexed_graph
+            .graph()
+            .filter_chain_txouts(
+                &self.chain,
+                self.chain.tip().block_id(),
+                core::iter::once(((), outpoint)),
+            )
+            .map(|(_, full_txo)| new_local_utxo(keychain, index, full_txo))
+            .next()
+    }
+
     /// Inserts a [`TxOut`] at [`OutPoint`] into the wallet's transaction graph.
     ///
     /// This is used for providing a previous output's value so that we can use [`calculate_fee`]
@@ -1417,8 +1433,28 @@ impl Wallet {
 
         fee_amount += fee_rate * tx.weight();
 
+        let must_spend: Vec<_> = params
+            .utxos
+            .iter()
+            .flat_map(|outpoint| {
+                self.get_utxo(*outpoint)
+                    .or_else(|| self.get_output(*outpoint))
+                    .map(|output| {
+                        let desc = self.public_descriptor(output.keychain);
+                        let satisfaction_weight = desc
+                            .max_weight_to_satisfy()
+                            .expect("descriptor should be satisfiable");
+                        WeightedUtxo {
+                            utxo: Utxo::Local(output),
+                            satisfaction_weight,
+                        }
+                    })
+            })
+            .chain(params.foreign_utxos.clone())
+            .collect();
+
         let (required_utxos, optional_utxos) =
-            self.preselect_utxos(&params, Some(current_height.to_consensus_u32()));
+            self.preselect_utxos(must_spend, &params, Some(current_height.to_consensus_u32()));
 
         // get drain script
         let mut drain_index = Option::<(KeychainKind, u32)>::None;
@@ -1618,60 +1654,34 @@ impl Wallet {
             .map_err(|_| BuildFeeBumpError::FeeRateUnavailable)?;
 
         // remove the inputs from the tx and process them
-        let original_txin = tx.input.drain(..).collect::<Vec<_>>();
-        let original_utxos = original_txin
-            .iter()
-            .map(|txin| -> Result<_, BuildFeeBumpError> {
-                let prev_tx = graph
-                    .get_tx(txin.previous_output.txid)
-                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
-                let txout = &prev_tx.output[txin.previous_output.vout as usize];
+        let mut utxos = vec![];
+        let mut foreign_utxos = vec![];
 
-                let chain_position = chain_positions
-                    .get(&txin.previous_output.txid)
-                    .cloned()
-                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
-
-                let weighted_utxo = match txout_index.index_of_spk(txout.script_pubkey.clone()) {
-                    Some(&(keychain, derivation_index)) => {
-                        let satisfaction_weight = self
-                            .public_descriptor(keychain)
-                            .max_weight_to_satisfy()
-                            .unwrap();
-                        WeightedUtxo {
-                            utxo: Utxo::Local(LocalOutput {
-                                outpoint: txin.previous_output,
-                                txout: txout.clone(),
-                                keychain,
-                                is_spent: true,
-                                derivation_index,
-                                chain_position,
-                            }),
-                            satisfaction_weight,
-                        }
-                    }
-                    None => {
-                        let satisfaction_weight = Weight::from_wu_usize(
-                            serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len(),
-                        );
-                        WeightedUtxo {
-                            utxo: Utxo::Foreign {
-                                outpoint: txin.previous_output,
-                                sequence: txin.sequence,
-                                psbt_input: Box::new(psbt::Input {
-                                    witness_utxo: Some(txout.clone()),
-                                    non_witness_utxo: Some(prev_tx.as_ref().clone()),
-                                    ..Default::default()
-                                }),
-                            },
-                            satisfaction_weight,
-                        }
-                    }
-                };
-
-                Ok(weighted_utxo)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        for txin in tx.input.drain(..) {
+            let prev_tx = graph
+                .get_tx(txin.previous_output.txid)
+                .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
+            let txout = &prev_tx.output[txin.previous_output.vout as usize];
+            if self.is_mine(txout.script_pubkey.clone()) {
+                utxos.push(txin.previous_output);
+                continue;
+            }
+            let satisfaction_weight = Weight::from_wu_usize(
+                serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len(),
+            );
+            foreign_utxos.push(WeightedUtxo {
+                utxo: Utxo::Foreign {
+                    outpoint: txin.previous_output,
+                    sequence: txin.sequence,
+                    psbt_input: Box::new(psbt::Input {
+                        witness_utxo: Some(txout.clone()),
+                        non_witness_utxo: Some(prev_tx.as_ref().clone()),
+                        ..Default::default()
+                    }),
+                },
+                satisfaction_weight,
+            });
+        }
 
         if tx.output.len() > 1 {
             let mut change_index = None;
@@ -1684,21 +1694,20 @@ impl Wallet {
                     _ => {}
                 }
             }
-
             if let Some(change_index) = change_index {
                 tx.output.remove(change_index);
             }
         }
 
         let params = TxParams {
-            // TODO: figure out what rbf option should be?
             version: Some(tx.version),
             recipients: tx
                 .output
                 .into_iter()
                 .map(|txout| (txout.script_pubkey, txout.value))
                 .collect(),
-            utxos: original_utxos,
+            utxos,
+            foreign_utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
                 absolute: fee,
                 rate: fee_rate,
@@ -1993,13 +2002,13 @@ impl Wallet {
     /// transaction and any further that may be used if needed.
     fn preselect_utxos(
         &self,
+        utxos: Vec<WeightedUtxo>,
         params: &TxParams,
         current_height: Option<u32>,
     ) -> (Vec<WeightedUtxo>, Vec<WeightedUtxo>) {
         let TxParams {
             change_policy,
             unspendable,
-            utxos,
             drain_wallet,
             manually_selected_only,
             bumping_fee,
