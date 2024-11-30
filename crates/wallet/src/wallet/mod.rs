@@ -1791,7 +1791,7 @@ impl Wallet {
 
         // attempt to finalize
         if sign_options.try_finalize {
-            self.finalize_psbt(psbt, sign_options)
+            self.finalize_psbt(psbt)
         } else {
             Ok(false)
         }
@@ -1834,11 +1834,7 @@ impl Wallet {
     /// Returns `true` if the PSBT could be finalized, and `false` otherwise.
     ///
     /// The [`SignOptions`] can be used to tweak the behavior of the finalizer.
-    pub fn finalize_psbt(
-        &self,
-        psbt: &mut Psbt,
-        _sign_options: SignOptions,
-    ) -> Result<bool, SignerError> {
+    pub fn finalize_psbt(&self, psbt: &mut Psbt) -> Result<bool, SignerError> {
         let tx = &psbt.unsigned_tx;
         let mut finished = true;
 
