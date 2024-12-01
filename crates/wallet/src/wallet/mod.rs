@@ -1037,12 +1037,22 @@ impl Wallet {
     ///
     /// // get confirmation status of transaction
     /// match wallet_tx.chain_position {
-    ///     ChainPosition::Confirmed(anchor) => println!(
+    ///     ChainPosition::Confirmed {
+    ///         anchor,
+    ///         transitively: None,
+    ///     } => println!(
     ///         "tx is confirmed at height {}, we know this since {}:{} is in the best chain",
     ///         anchor.block_id.height, anchor.block_id.height, anchor.block_id.hash,
     ///     ),
-    ///     ChainPosition::Unconfirmed(last_seen) => println!(
-    ///         "tx is last seen at {}, it is unconfirmed as it is not anchored in the best chain",
+    ///     ChainPosition::Confirmed {
+    ///         anchor,
+    ///         transitively: Some(_),
+    ///     } => println!(
+    ///         "tx is an ancestor of a tx anchored in {}:{}",
+    ///         anchor.block_id.height, anchor.block_id.hash,
+    ///     ),
+    ///     ChainPosition::Unconfirmed { last_seen } => println!(
+    ///         "tx is last seen at {:?}, it is unconfirmed as it is not anchored in the best chain",
     ///         last_seen,
     ///     ),
     /// }
@@ -1590,7 +1600,7 @@ impl Wallet {
         let pos = graph
             .get_chain_position(&self.chain, chain_tip, txid)
             .ok_or(BuildFeeBumpError::TransactionNotFound(txid))?;
-        if let ChainPosition::Confirmed(_) = pos {
+        if pos.is_confirmed() {
             return Err(BuildFeeBumpError::TransactionConfirmed(txid));
         }
 
@@ -1840,9 +1850,10 @@ impl Wallet {
                 .indexed_graph
                 .graph()
                 .get_chain_position(&self.chain, chain_tip, input.previous_output.txid)
-                .map(|chain_position| match chain_position {
-                    ChainPosition::Confirmed(a) => a.block_id.height,
-                    ChainPosition::Unconfirmed(_) => u32::MAX,
+                .map(|chain_position| {
+                    chain_position
+                        .confirmation_height_upper_bound()
+                        .unwrap_or(u32::MAX)
                 });
             let current_height = sign_options
                 .assume_height
@@ -2032,9 +2043,10 @@ impl Wallet {
                     );
                     if let Some(current_height) = current_height {
                         match chain_position {
-                            ChainPosition::Confirmed(a) => {
+                            ChainPosition::Confirmed { anchor, .. } => {
                                 // https://github.com/bitcoin/bitcoin/blob/c5e67be03bb06a5d7885c55db1f016fbf2333fe3/src/validation.cpp#L373-L375
-                                spendable &= (current_height.saturating_sub(a.block_id.height))
+                                spendable &= (current_height
+                                    .saturating_sub(anchor.block_id.height))
                                     >= COINBASE_MATURITY;
                             }
                             ChainPosition::Unconfirmed { .. } => spendable = false,

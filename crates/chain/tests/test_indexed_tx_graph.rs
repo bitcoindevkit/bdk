@@ -293,7 +293,7 @@ fn test_list_owned_txouts() {
             let confirmed_txouts_txid = txouts
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Confirmed(_)) {
+                    if matches!(full_txout.chain_position, ChainPosition::Confirmed { .. }) {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -304,7 +304,7 @@ fn test_list_owned_txouts() {
             let unconfirmed_txouts_txid = txouts
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
+                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed { .. }) {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -315,7 +315,7 @@ fn test_list_owned_txouts() {
             let confirmed_utxos_txid = utxos
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Confirmed(_)) {
+                    if matches!(full_txout.chain_position, ChainPosition::Confirmed { .. }) {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -326,7 +326,7 @@ fn test_list_owned_txouts() {
             let unconfirmed_utxos_txid = utxos
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed(_)) {
+                    if matches!(full_txout.chain_position, ChainPosition::Unconfirmed { .. }) {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -618,7 +618,7 @@ fn test_get_chain_position() {
             },
             anchor: None,
             last_seen: Some(2),
-            exp_pos: Some(ChainPosition::Unconfirmed(2)),
+            exp_pos: Some(ChainPosition::Unconfirmed { last_seen: Some(2) }),
         },
         TestCase {
             name: "tx anchor in best chain - confirmed",
@@ -631,7 +631,10 @@ fn test_get_chain_position() {
             },
             anchor: Some(blocks[1]),
             last_seen: None,
-            exp_pos: Some(ChainPosition::Confirmed(blocks[1])),
+            exp_pos: Some(ChainPosition::Confirmed {
+                anchor: blocks[1],
+                transitively: None,
+            }),
         },
         TestCase {
             name: "tx unknown anchor with last_seen - unconfirmed",
@@ -644,7 +647,7 @@ fn test_get_chain_position() {
             },
             anchor: Some(block_id!(2, "B'")),
             last_seen: Some(2),
-            exp_pos: Some(ChainPosition::Unconfirmed(2)),
+            exp_pos: Some(ChainPosition::Unconfirmed { last_seen: Some(2) }),
         },
         TestCase {
             name: "tx unknown anchor - no chain pos",

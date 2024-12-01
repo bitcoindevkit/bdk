@@ -15,16 +15,30 @@ use crate::Anchor;
     ))
 )]
 pub enum ChainPosition<A> {
-    /// The chain data is seen as confirmed, and in anchored by `A`.
-    Confirmed(A),
-    /// The chain data is not confirmed and last seen in the mempool at this timestamp.
-    Unconfirmed(u64),
+    /// The chain data is confirmed as it is anchored in the best chain by `A`.
+    Confirmed {
+        /// The [`Anchor`].
+        anchor: A,
+        /// Whether the chain data is anchored transitively by a child transaction.
+        ///
+        /// If the value is `Some`, it means we have incomplete data. We can only deduce that the
+        /// chain data is confirmed at a block equal to or lower than the block referenced by `A`.
+        transitively: Option<Txid>,
+    },
+    /// The chain data is not confirmed.
+    Unconfirmed {
+        /// When the chain data is last seen in the mempool.
+        ///
+        /// This value will be `None` if the chain data was never seen in the mempool and only seen
+        /// in a conflicting chain.
+        last_seen: Option<u64>,
+    },
 }
 
 impl<A> ChainPosition<A> {
     /// Returns whether [`ChainPosition`] is confirmed or not.
     pub fn is_confirmed(&self) -> bool {
-        matches!(self, Self::Confirmed(_))
+        matches!(self, Self::Confirmed { .. })
     }
 }
 
@@ -32,8 +46,14 @@ impl<A: Clone> ChainPosition<&A> {
     /// Maps a [`ChainPosition<&A>`] into a [`ChainPosition<A>`] by cloning the contents.
     pub fn cloned(self) -> ChainPosition<A> {
         match self {
-            ChainPosition::Confirmed(a) => ChainPosition::Confirmed(a.clone()),
-            ChainPosition::Unconfirmed(last_seen) => ChainPosition::Unconfirmed(last_seen),
+            ChainPosition::Confirmed {
+                anchor,
+                transitively,
+            } => ChainPosition::Confirmed {
+                anchor: anchor.clone(),
+                transitively,
+            },
+            ChainPosition::Unconfirmed { last_seen } => ChainPosition::Unconfirmed { last_seen },
         }
     }
 }
@@ -42,8 +62,10 @@ impl<A: Anchor> ChainPosition<A> {
     /// Determines the upper bound of the confirmation height.
     pub fn confirmation_height_upper_bound(&self) -> Option<u32> {
         match self {
-            ChainPosition::Confirmed(a) => Some(a.confirmation_height_upper_bound()),
-            ChainPosition::Unconfirmed(_) => None,
+            ChainPosition::Confirmed { anchor, .. } => {
+                Some(anchor.confirmation_height_upper_bound())
+            }
+            ChainPosition::Unconfirmed { .. } => None,
         }
     }
 }
@@ -73,14 +95,14 @@ impl<A: Anchor> FullTxOut<A> {
     /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
     pub fn is_mature(&self, tip: u32) -> bool {
         if self.is_on_coinbase {
-            let tx_height = match &self.chain_position {
-                ChainPosition::Confirmed(anchor) => anchor.confirmation_height_upper_bound(),
-                ChainPosition::Unconfirmed(_) => {
+            let conf_height = match self.chain_position.confirmation_height_upper_bound() {
+                Some(height) => height,
+                None => {
                     debug_assert!(false, "coinbase tx can never be unconfirmed");
                     return false;
                 }
             };
-            let age = tip.saturating_sub(tx_height);
+            let age = tip.saturating_sub(conf_height);
             if age + 1 < COINBASE_MATURITY {
                 return false;
             }
@@ -103,17 +125,21 @@ impl<A: Anchor> FullTxOut<A> {
             return false;
         }
 
-        let confirmation_height = match &self.chain_position {
-            ChainPosition::Confirmed(anchor) => anchor.confirmation_height_upper_bound(),
-            ChainPosition::Unconfirmed(_) => return false,
+        let conf_height = match self.chain_position.confirmation_height_upper_bound() {
+            Some(height) => height,
+            None => return false,
         };
-        if confirmation_height > tip {
+        if conf_height > tip {
             return false;
         }
 
         // if the spending tx is confirmed within tip height, the txout is no longer spendable
-        if let Some((ChainPosition::Confirmed(spending_anchor), _)) = &self.spent_by {
-            if spending_anchor.anchor_block().height <= tip {
+        if let Some(spend_height) = self
+            .spent_by
+            .as_ref()
+            .and_then(|(pos, _)| pos.confirmation_height_upper_bound())
+        {
+            if spend_height <= tip {
                 return false;
             }
         }
@@ -132,22 +158,32 @@ mod test {
 
     #[test]
     fn chain_position_ord() {
-        let unconf1 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed(10);
-        let unconf2 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed(20);
-        let conf1 = ChainPosition::Confirmed(ConfirmationBlockTime {
-            confirmation_time: 20,
-            block_id: BlockId {
-                height: 9,
-                ..Default::default()
+        let unconf1 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+            last_seen: Some(10),
+        };
+        let unconf2 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+            last_seen: Some(20),
+        };
+        let conf1 = ChainPosition::Confirmed {
+            anchor: ConfirmationBlockTime {
+                confirmation_time: 20,
+                block_id: BlockId {
+                    height: 9,
+                    ..Default::default()
+                },
             },
-        });
-        let conf2 = ChainPosition::Confirmed(ConfirmationBlockTime {
-            confirmation_time: 15,
-            block_id: BlockId {
-                height: 12,
-                ..Default::default()
+            transitively: None,
+        };
+        let conf2 = ChainPosition::Confirmed {
+            anchor: ConfirmationBlockTime {
+                confirmation_time: 15,
+                block_id: BlockId {
+                    height: 12,
+                    ..Default::default()
+                },
             },
-        });
+            transitively: None,
+        };
 
         assert!(unconf2 > unconf1, "higher last_seen means higher ord");
         assert!(unconf1 > conf1, "unconfirmed is higher ord than confirmed");

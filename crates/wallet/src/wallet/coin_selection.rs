@@ -754,7 +754,13 @@ mod test {
     const FEE_AMOUNT: u64 = 50;
 
     fn unconfirmed_utxo(value: u64, index: u32, last_seen: u64) -> WeightedUtxo {
-        utxo(value, index, ChainPosition::Unconfirmed(last_seen))
+        utxo(
+            value,
+            index,
+            ChainPosition::Unconfirmed {
+                last_seen: Some(last_seen),
+            },
+        )
     }
 
     fn confirmed_utxo(
@@ -766,13 +772,16 @@ mod test {
         utxo(
             value,
             index,
-            ChainPosition::Confirmed(ConfirmationBlockTime {
-                block_id: chain::BlockId {
-                    height: confirmation_height,
-                    hash: bitcoin::BlockHash::all_zeros(),
+            ChainPosition::Confirmed {
+                anchor: ConfirmationBlockTime {
+                    block_id: chain::BlockId {
+                        height: confirmation_height,
+                        hash: bitcoin::BlockHash::all_zeros(),
+                    },
+                    confirmation_time,
                 },
-                confirmation_time,
-            }),
+                transitively: None,
+            },
         )
     }
 
@@ -838,15 +847,18 @@ mod test {
                     is_spent: false,
                     derivation_index: rng.next_u32(),
                     chain_position: if rng.gen_bool(0.5) {
-                        ChainPosition::Confirmed(ConfirmationBlockTime {
-                            block_id: chain::BlockId {
-                                height: rng.next_u32(),
-                                hash: BlockHash::all_zeros(),
+                        ChainPosition::Confirmed {
+                            anchor: ConfirmationBlockTime {
+                                block_id: chain::BlockId {
+                                    height: rng.next_u32(),
+                                    hash: BlockHash::all_zeros(),
+                                },
+                                confirmation_time: rng.next_u64(),
                             },
-                            confirmation_time: rng.next_u64(),
-                        })
+                            transitively: None,
+                        }
                     } else {
-                        ChainPosition::Unconfirmed(0)
+                        ChainPosition::Unconfirmed { last_seen: Some(0) }
                     },
                 }),
             });
@@ -871,7 +883,7 @@ mod test {
                     keychain: KeychainKind::External,
                     is_spent: false,
                     derivation_index: 42,
-                    chain_position: ChainPosition::Unconfirmed(0),
+                    chain_position: ChainPosition::Unconfirmed { last_seen: Some(0) },
                 }),
             })
             .collect()
@@ -1228,7 +1240,7 @@ mod test {
         optional.push(utxo(
             500_000,
             3,
-            ChainPosition::<ConfirmationBlockTime>::Unconfirmed(0),
+            ChainPosition::<ConfirmationBlockTime>::Unconfirmed { last_seen: Some(0) },
         ));
 
         // Defensive assertions, for sanity and in case someone changes the test utxos vector.
@@ -1590,13 +1602,16 @@ mod test {
                     keychain: KeychainKind::External,
                     is_spent: false,
                     derivation_index: 0,
-                    chain_position: ChainPosition::Confirmed(ConfirmationBlockTime {
-                        block_id: BlockId {
-                            height: 12345,
-                            hash: BlockHash::all_zeros(),
+                    chain_position: ChainPosition::Confirmed {
+                        anchor: ConfirmationBlockTime {
+                            block_id: BlockId {
+                                height: 12345,
+                                hash: BlockHash::all_zeros(),
+                            },
+                            confirmation_time: 12345,
                         },
-                        confirmation_time: 12345,
-                    }),
+                        transitively: None,
+                    },
                 }),
             }
         }

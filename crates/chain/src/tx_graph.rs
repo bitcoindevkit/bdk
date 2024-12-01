@@ -770,7 +770,12 @@ impl<A: Anchor> TxGraph<A> {
 
         for anchor in anchors {
             match chain.is_block_in_chain(anchor.anchor_block(), chain_tip)? {
-                Some(true) => return Ok(Some(ChainPosition::Confirmed(anchor))),
+                Some(true) => {
+                    return Ok(Some(ChainPosition::Confirmed {
+                        anchor,
+                        transitively: None,
+                    }))
+                }
                 _ => continue,
             }
         }
@@ -877,7 +882,9 @@ impl<A: Anchor> TxGraph<A> {
             }
         }
 
-        Ok(Some(ChainPosition::Unconfirmed(last_seen)))
+        Ok(Some(ChainPosition::Unconfirmed {
+            last_seen: Some(last_seen),
+        }))
     }
 
     /// Get the position of the transaction in `chain` with tip `chain_tip`.
@@ -1146,14 +1153,14 @@ impl<A: Anchor> TxGraph<A> {
             let (spk_i, txout) = res?;
 
             match &txout.chain_position {
-                ChainPosition::Confirmed(_) => {
+                ChainPosition::Confirmed { .. } => {
                     if txout.is_confirmed_and_spendable(chain_tip.height) {
                         confirmed += txout.txout.value;
                     } else if !txout.is_mature(chain_tip.height) {
                         immature += txout.txout.value;
                     }
                 }
-                ChainPosition::Unconfirmed(_) => {
+                ChainPosition::Unconfirmed { .. } => {
                     if trust_predicate(&spk_i, txout.txout.script_pubkey) {
                         trusted_pending += txout.txout.value;
                     } else {
