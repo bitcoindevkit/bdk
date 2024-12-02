@@ -141,7 +141,7 @@ pub struct TxGraph<A = ()> {
     anchors: BTreeSet<(A, Txid)>,
     last_seen: HashMap<Txid, u64>,
 
-    // This atrocity exists so that `TxGraph::outspends()` can return a reference.
+    // This exists so that `TxGraph::outspends()` can return a reference to an empty set of `Txid`s.
     // FIXME: This can be removed once `HashSet::new` is a const fn.
     empty_outspends: HashSet<Txid>,
 }
