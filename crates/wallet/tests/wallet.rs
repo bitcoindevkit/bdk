@@ -248,11 +248,11 @@ fn wallet_should_persist_anchors_and_recover() {
     };
     let txid = small_output_tx.compute_txid();
     insert_tx(&mut wallet, small_output_tx);
-    let anchor = ConfirmationBlockTime {
+    let expected_anchor = ConfirmationBlockTime {
         block_id: wallet.latest_checkpoint().block_id(),
         confirmation_time: 200,
     };
-    insert_anchor(&mut wallet, txid, anchor);
+    insert_anchor(&mut wallet, txid, expected_anchor);
     assert!(wallet.persist(&mut db).unwrap());
 
     // should recover persisted wallet
@@ -266,13 +266,18 @@ fn wallet_should_persist_anchors_and_recover() {
         .unwrap()
         .expect("must have loaded changeset");
     // stored anchor should be retrieved in the same condition it was persisted
-    assert_eq!(
-        wallet
-            .get_tx(txid)
-            .expect("should retrieve stored tx")
-            .chain_position,
-        ChainPosition::Confirmed(&anchor),
-    );
+    if let ChainPosition::Confirmed {
+        anchor: &obtained_anchor,
+        ..
+    } = wallet
+        .get_tx(txid)
+        .expect("should retrieve stored tx")
+        .chain_position
+    {
+        assert_eq!(obtained_anchor, expected_anchor)
+    } else {
+        panic!("Should have got ChainPosition::Confirmed)");
+    }
 }
 
 #[test]
