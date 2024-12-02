@@ -17,15 +17,14 @@ use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
 use bitcoin::constants::{ChainHash, COINBASE_MATURITY};
 use bitcoin::hashes::Hash;
 use bitcoin::key::Secp256k1;
-use bitcoin::psbt;
 use bitcoin::script::PushBytesBuf;
 use bitcoin::sighash::{EcdsaSighashType, TapSighashType};
 use bitcoin::taproot::TapNodeHash;
 use bitcoin::{
-    absolute, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint, ScriptBuf,
-    Sequence, Transaction, TxIn, TxOut, Txid, Weight,
+    absolute, psbt, relative, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint,
+    ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid,
 };
-use miniscript::{descriptor::KeyMap, Descriptor, DescriptorPublicKey};
+use miniscript::{descriptor::KeyMap, plan::Assets, Descriptor, DescriptorPublicKey};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
@@ -550,6 +549,7 @@ fn test_create_tx_version_1_csv() {
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
+        .add_assets(Assets::new().older(relative::LockTime::from_height(6)))
         .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
         .version(1);
     assert!(matches!(builder.finish(), Err(CreateTxError::Version1Csv)));
@@ -601,6 +601,14 @@ fn test_create_tx_fee_sniping_locktime_last_sync() {
 #[test]
 fn test_create_tx_default_locktime_cltv() {
     let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv());
+    // wallet can satisfy its own timelock if the local height is great enough
+    insert_checkpoint(
+        &mut wallet,
+        BlockId {
+            height: 100_000,
+            hash: BlockHash::all_zeros(),
+        },
+    );
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
@@ -614,7 +622,9 @@ fn test_create_tx_locktime_cltv_timestamp() {
     let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv_timestamp());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
-    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
+    builder
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
+        .add_assets(Assets::new().after(absolute::LockTime::from_consensus(1734230218)));
     let mut psbt = builder.finish().unwrap();
 
     assert_eq!(psbt.unsigned_tx.lock_time.to_consensus_u32(), 1_734_230_218);
@@ -627,11 +637,17 @@ fn test_create_tx_locktime_cltv_timestamp() {
 #[test]
 fn test_create_tx_custom_locktime() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
+    insert_checkpoint(
+        &mut wallet,
+        BlockId {
+            height: 630_001,
+            hash: BlockHash::all_zeros(),
+        },
+    );
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
         .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
-        .current_height(630_001)
         .nlocktime(absolute::LockTime::from_height(630_000).unwrap());
     let psbt = builder.finish().unwrap();
 
@@ -647,6 +663,7 @@ fn test_create_tx_custom_locktime_compatible_with_cltv() {
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
+        .add_assets(Assets::new().after(absolute::LockTime::from_consensus(100_000)))
         .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
         .nlocktime(absolute::LockTime::from_height(630_000).unwrap());
     let psbt = builder.finish().unwrap();
@@ -660,6 +677,7 @@ fn test_create_tx_custom_locktime_incompatible_with_cltv() {
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
+        .add_assets(Assets::new().after(absolute::LockTime::from_consensus(100_000)))
         .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
         .nlocktime(absolute::LockTime::from_height(50000).unwrap());
     assert!(matches!(builder.finish(),
@@ -674,6 +692,7 @@ fn test_create_tx_custom_csv() {
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
+        .add_assets(Assets::new().older(relative::LockTime::from_height(6)))
         .set_exact_sequence(Sequence(42))
         .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
     let psbt = builder.finish().unwrap();
@@ -686,7 +705,9 @@ fn test_create_tx_no_rbf_csv() {
     let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_csv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
-    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
+    builder
+        .add_assets(Assets::new().older(relative::LockTime::from_height(6)))
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
     let psbt = builder.finish().unwrap();
 
     assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(6));
@@ -698,6 +719,7 @@ fn test_create_tx_incompatible_csv() {
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
     builder
+        .add_assets(Assets::new().older(relative::LockTime::from_height(6)))
         .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
         .set_exact_sequence(Sequence(3));
     assert!(matches!(builder.finish(),
@@ -710,7 +732,9 @@ fn test_create_tx_with_default_rbf_csv() {
     let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_csv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
-    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
+    builder
+        .add_assets(Assets::new().older(relative::LockTime::from_height(6)))
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
     let psbt = builder.finish().unwrap();
     // When CSV is enabled it takes precedence over the rbf value (unless forced by the user).
     // It will be set to the OP_CSV value, in this case 6
@@ -722,8 +746,10 @@ fn test_create_tx_no_rbf_cltv() {
     let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv());
     let addr = wallet.next_unused_address(KeychainKind::External);
     let mut builder = wallet.build_tx();
-    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
-    builder.set_exact_sequence(Sequence(0xFFFFFFFE));
+    builder
+        .add_assets(Assets::new().after(absolute::LockTime::from_consensus(100_000)))
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
+        .set_exact_sequence(Sequence(0xFFFFFFFE));
     let psbt = builder.finish().unwrap();
 
     assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFE));
@@ -1303,96 +1329,30 @@ fn test_create_tx_manually_selected_insufficient() {
 }
 
 #[test]
-#[should_panic(expected = "SpendingPolicyRequired(External)")]
-fn test_create_tx_policy_path_required() {
-    let (mut wallet, _) = get_funded_wallet_single(get_test_a_or_b_plus_csv());
+fn test_create_tx_spend_assets_required() {
+    use bdk_wallet::error::PlanError;
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_csv());
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx();
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(10_000));
-    builder.finish().unwrap();
-}
 
-#[test]
-fn test_create_tx_policy_path_no_csv() {
-    let (descriptor, change_descriptor) = get_test_wpkh_and_change_desc();
-    let mut wallet = Wallet::create(descriptor, change_descriptor)
-        .network(Network::Regtest)
-        .create_wallet_no_persist()
-        .expect("wallet");
+    // the wallet's only utxo has not reached the required age of 6 blocks
+    let res = builder.finish();
+    assert!(matches!(res, Err(CreateTxError::Plan(PlanError::Plan(_)))));
 
-    let tx = Transaction {
-        version: transaction::Version::non_standard(0),
-        lock_time: absolute::LockTime::ZERO,
-        input: vec![],
-        output: vec![TxOut {
-            script_pubkey: wallet
-                .next_unused_address(KeychainKind::External)
-                .script_pubkey(),
-            value: Amount::from_sat(50_000),
-        }],
+    // now advance the local chain by 6 blocks
+    let local_tip = wallet.latest_checkpoint().height();
+    let new_tip = BlockId {
+        height: local_tip + 6,
+        hash: BlockHash::all_zeros(),
     };
-    insert_tx(&mut wallet, tx);
-
-    let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
-    let root_id = external_policy.id;
-    // child #0 is just the key "A"
-    let path = vec![(root_id, vec![0])].into_iter().collect();
-
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
-        .unwrap()
-        .assume_checked();
+    insert_checkpoint(&mut wallet, new_tip);
     let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(30_000))
-        .policy_path(path, KeychainKind::External);
-    let psbt = builder.finish().unwrap();
-
-    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFD));
-}
-
-#[test]
-fn test_create_tx_policy_path_use_csv() {
-    let (mut wallet, _) = get_funded_wallet_single(get_test_a_or_b_plus_csv());
-
-    let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
-    let root_id = external_policy.id;
-    // child #1 is or(pk(B),older(144))
-    let path = vec![(root_id, vec![1])].into_iter().collect();
-
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
-        .unwrap()
-        .assume_checked();
-    let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(30_000))
-        .policy_path(path, KeychainKind::External);
-    let psbt = builder.finish().unwrap();
-
-    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(144));
-}
-
-#[test]
-fn test_create_tx_policy_path_ignored_subtree_with_csv() {
-    let (mut wallet, _) = get_funded_wallet_single("wsh(or_d(pk(cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu),or_i(and_v(v:pkh(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(30)),and_v(v:pkh(cMnkdebixpXMPfkcNEjjGin7s94hiehAH4mLbYkZoh9KSiNNmqC8),older(90)))))");
-
-    let external_policy = wallet.policies(KeychainKind::External).unwrap().unwrap();
-    let root_id = external_policy.id;
-    // child #0 is pk(cRjo6jqfVNP33HhSS76UhXETZsGTZYx8FMFvR9kpbtCSV1PmdZdu)
-    let path = vec![(root_id, vec![0])].into_iter().collect();
-
-    let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
-        .unwrap()
-        .assume_checked();
-    let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), Amount::from_sat(30_000))
-        .policy_path(path, KeychainKind::External);
-    let psbt = builder.finish().unwrap();
-
-    assert_eq!(psbt.unsigned_tx.input[0].sequence, Sequence(0xFFFFFFFD));
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(10_000));
+    let _psbt = builder.finish().unwrap();
 }
 
 #[test]
@@ -2155,8 +2115,8 @@ fn test_bump_fee_drain_wallet() {
 }
 
 #[test]
-#[should_panic(expected = "InsufficientFunds")]
 fn test_bump_fee_remove_output_manually_selected_only() {
+    use bdk_wallet::coin_selection::InsufficientFunds;
     let (mut wallet, _) = get_funded_wallet_wpkh();
     // receive an extra tx so that our wallet has two utxos. then we manually pick only one of
     // them, and make sure that `bump_fee` doesn't try to add more. This fails because we've
@@ -2209,7 +2169,11 @@ fn test_bump_fee_remove_output_manually_selected_only() {
     builder
         .manually_selected_only()
         .fee_rate(FeeRate::from_sat_per_vb_unchecked(255));
-    builder.finish().unwrap();
+    let res = builder.finish();
+    assert!(matches!(
+        res,
+        Err(CreateTxError::CoinSelection(InsufficientFunds { .. }))
+    ));
 }
 
 #[test]
@@ -2281,7 +2245,7 @@ fn test_bump_fee_add_input() {
         sent_received.1
     );
 
-    assert_fee_rate!(psbt, fee.unwrap_or(Amount::ZERO), FeeRate::from_sat_per_vb_unchecked(50), @add_signature);
+    assert_fee_rate!(psbt, fee.unwrap_or(Amount::ZERO), feerate_unchecked(50.2), @add_signature);
 }
 
 #[test]
@@ -2401,7 +2365,7 @@ fn test_bump_fee_no_change_add_input_and_change() {
         Amount::from_sat(75_000) - original_send_all_amount - fee.unwrap_or(Amount::ZERO)
     );
 
-    assert_fee_rate!(psbt, fee.unwrap_or(Amount::ZERO), FeeRate::from_sat_per_vb_unchecked(50), @add_signature);
+    assert_fee_rate!(psbt, fee.unwrap_or(Amount::ZERO), feerate_unchecked(50.2), @add_signature);
 }
 
 #[test]
@@ -2422,7 +2386,6 @@ fn test_bump_fee_add_input_change_dust() {
     for txin in &mut tx.input {
         txin.witness.push([0x00; P2WPKH_FAKE_WITNESS_SIZE]); // to get realistic weight
     }
-    let original_tx_weight = tx.weight();
     assert_eq!(tx.input.len(), 1);
     assert_eq!(tx.output.len(), 2);
     let txid = tx.compute_txid();
@@ -2432,18 +2395,9 @@ fn test_bump_fee_add_input_change_dust() {
     // We set a fee high enough that during rbf we are forced to add
     // a new input and also that we have to remove the change
     // that we had previously
+    // fee_absolute = 50_000 + 25_000 - 45_000
 
-    // We calculate the new weight as:
-    //   original weight
-    // + extra input weight: 160 WU = (32 (prevout) + 4 (vout) + 4 (nsequence)) * 4
-    // + input satisfaction weight: 112 WU = 106 (witness) + 2 (witness len) + (1 (script len)) * 4
-    // - change output weight: 124 WU = (8 (value) + 1 (script len) + 22 (script)) * 4
-    let new_tx_weight =
-        original_tx_weight + Weight::from_wu(160) + Weight::from_wu(112) - Weight::from_wu(124);
-    // two inputs (50k, 25k) and one output (45k) - epsilon
-    // We use epsilon here to avoid asking for a slightly too high feerate
-    let fee_abs = 50_000 + 25_000 - 45_000 - 10;
-    builder.fee_rate(Amount::from_sat(fee_abs) / new_tx_weight);
+    builder.fee_absolute(Amount::from_sat(30_000));
     let psbt = builder.finish().unwrap();
     let sent_received =
         wallet.sent_and_received(&psbt.clone().extract_tx().expect("failed to extract tx"));
@@ -3324,15 +3278,8 @@ fn test_taproot_psbt_populate_tap_key_origins_repeated_key() {
     let (mut wallet, _) = get_funded_wallet(get_test_tr_repeated_key(), get_test_tr_single_sig());
     let addr = wallet.reveal_next_address(KeychainKind::External);
 
-    let path = vec![("rn4nre9c".to_string(), vec![0])]
-        .into_iter()
-        .collect();
-
     let mut builder = wallet.build_tx();
-    builder
-        .drain_to(addr.script_pubkey())
-        .drain_wallet()
-        .policy_path(path, KeychainKind::External);
+    builder.drain_to(addr.script_pubkey()).drain_wallet();
     let psbt = builder.finish().unwrap();
 
     let mut input_key_origins = psbt.inputs[0]
@@ -3895,9 +3842,7 @@ fn test_spend_coinbase() {
         .unwrap()
         .assume_checked();
     let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), balance.immature / 2)
-        .current_height(confirmation_height);
+    builder.add_recipient(addr.script_pubkey(), balance.immature / 2);
     assert!(matches!(
         builder.finish(),
         Err(CreateTxError::CoinSelection(
@@ -3909,10 +3854,15 @@ fn test_spend_coinbase() {
     ));
 
     // Still unspendable...
+    insert_checkpoint(
+        &mut wallet,
+        BlockId {
+            height: not_yet_mature_time,
+            hash: BlockHash::all_zeros(),
+        },
+    );
     let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), balance.immature / 2)
-        .current_height(not_yet_mature_time);
+    builder.add_recipient(addr.script_pubkey(), balance.immature / 2);
     assert_matches!(
         builder.finish(),
         Err(CreateTxError::CoinSelection(
@@ -3923,6 +3873,7 @@ fn test_spend_coinbase() {
         ))
     );
 
+    // Finally the coinbase matures
     insert_checkpoint(
         &mut wallet,
         BlockId {
@@ -3941,20 +3892,16 @@ fn test_spend_coinbase() {
         }
     );
     let mut builder = wallet.build_tx();
-    builder
-        .add_recipient(addr.script_pubkey(), balance.confirmed / 2)
-        .current_height(maturity_time);
+    builder.add_recipient(addr.script_pubkey(), balance.confirmed / 2);
     builder.finish().unwrap();
 }
 
 #[test]
 fn test_allow_dust_limit() {
-    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv());
-
+    let (mut wallet, _) = get_funded_wallet_wpkh();
     let addr = wallet.next_unused_address(KeychainKind::External);
 
     let mut builder = wallet.build_tx();
-
     builder.add_recipient(addr.script_pubkey(), Amount::ZERO);
 
     assert_matches!(
@@ -3963,7 +3910,6 @@ fn test_allow_dust_limit() {
     );
 
     let mut builder = wallet.build_tx();
-
     builder
         .allow_dust(true)
         .add_recipient(addr.script_pubkey(), Amount::ZERO);

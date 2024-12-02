@@ -11,13 +11,12 @@
 
 //! Errors that can be thrown by the [`Wallet`](crate::wallet::Wallet)
 
-use crate::descriptor::policy::PolicyError;
-use crate::descriptor::DescriptorError;
+use crate::descriptor::{self, DescriptorError};
 use crate::wallet::coin_selection;
-use crate::{descriptor, KeychainKind};
 use alloc::string::String;
 use bitcoin::{absolute, psbt, Amount, OutPoint, Sequence, Txid};
 use core::fmt;
+use miniscript::{DefiniteDescriptorKey, Descriptor};
 
 /// Errors returned by miniscript when updating inconsistent PSBTs
 #[derive(Debug, Clone)]
@@ -43,6 +42,27 @@ impl fmt::Display for MiniscriptPsbtError {
 #[cfg(feature = "std")]
 impl std::error::Error for MiniscriptPsbtError {}
 
+/// Error when preparing the conditions of a spending plan
+#[derive(Debug, Clone)]
+pub enum PlanError {
+    /// Attempted to mix height- and time-based locktimes
+    MixedTimelockUnits,
+    /// Error creating a spend [`Plan`](miniscript::plan::Plan)
+    Plan(Descriptor<DefiniteDescriptorKey>),
+}
+
+impl fmt::Display for PlanError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MixedTimelockUnits => write!(f, "cannot mix locktime units"),
+            Self::Plan(d) => write!(f, "failed to create plan for descriptor {}", d),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for PlanError {}
+
 #[derive(Debug)]
 /// Error returned from [`TxBuilder::finish`]
 ///
@@ -50,10 +70,6 @@ impl std::error::Error for MiniscriptPsbtError {}
 pub enum CreateTxError {
     /// There was a problem with the descriptors passed in
     Descriptor(DescriptorError),
-    /// There was a problem while extracting and manipulating policies
-    Policy(PolicyError),
-    /// Spending policy is not compatible with this [`KeychainKind`]
-    SpendingPolicyRequired(KeychainKind),
     /// Requested invalid transaction version '0'
     Version0,
     /// Requested transaction version `1`, but at least `2` is needed to use OP_CSV
@@ -104,16 +120,14 @@ pub enum CreateTxError {
     MissingNonWitnessUtxo(OutPoint),
     /// Miniscript PSBT error
     MiniscriptPsbt(MiniscriptPsbtError),
+    /// Error creating a spending plan
+    Plan(PlanError),
 }
 
 impl fmt::Display for CreateTxError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Descriptor(e) => e.fmt(f),
-            Self::Policy(e) => e.fmt(f),
-            CreateTxError::SpendingPolicyRequired(keychain_kind) => {
-                write!(f, "Spending policy required: {:?}", keychain_kind)
-            }
             CreateTxError::Version0 => {
                 write!(f, "Invalid version `0`")
             }
@@ -171,6 +185,9 @@ impl fmt::Display for CreateTxError {
             CreateTxError::MiniscriptPsbt(err) => {
                 write!(f, "Miniscript PSBT error: {}", err)
             }
+            CreateTxError::Plan(e) => {
+                write!(f, "{}", e)
+            }
         }
     }
 }
@@ -178,12 +195,6 @@ impl fmt::Display for CreateTxError {
 impl From<descriptor::error::Error> for CreateTxError {
     fn from(err: descriptor::error::Error) -> Self {
         CreateTxError::Descriptor(err)
-    }
-}
-
-impl From<PolicyError> for CreateTxError {
-    fn from(err: PolicyError) -> Self {
-        CreateTxError::Policy(err)
     }
 }
 

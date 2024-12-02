@@ -63,6 +63,7 @@ use crate::descriptor::ExtractPolicy;
 use crate::keys::ExtScriptContext;
 use crate::wallet::signer::{SignerId, SignersContainer};
 use crate::wallet::utils::{After, Older, SecpCtx};
+use crate::Condition;
 
 use super::checksum::calc_checksum;
 use super::error::Error;
@@ -444,18 +445,6 @@ pub struct Policy {
     pub contribution: Satisfaction,
 }
 
-/// An extra condition that must be satisfied but that is out of control of the user
-/// TODO: use `bitcoin::LockTime` and `bitcoin::Sequence`
-#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Default, Serialize)]
-pub struct Condition {
-    /// Optional CheckSequenceVerify condition
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub csv: Option<Sequence>,
-    /// Optional timelock condition
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timelock: Option<absolute::LockTime>,
-}
-
 impl Condition {
     fn merge_nlocktime(
         a: absolute::LockTime,
@@ -478,7 +467,7 @@ impl Condition {
         }
     }
 
-    pub(crate) fn merge(mut self, other: &Condition) -> Result<Self, PolicyError> {
+    fn merge(mut self, other: &Condition) -> Result<Self, PolicyError> {
         match (self.csv, other.csv) {
             (Some(a), Some(b)) => self.csv = Some(Self::merge_nsequence(a, b)?),
             (None, any) => self.csv = any,

@@ -11,10 +11,14 @@
 
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::{absolute, relative, Amount, Script, Sequence};
-
+use miniscript::plan::Assets;
 use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
-
 use rand_core::RngCore;
+
+use crate::error::PlanError;
+
+/// `Secp256k1` context with `All` capabilities
+pub(crate) type SecpCtx = Secp256k1<All>;
 
 /// Trait to check if a value is below the dust limit.
 /// We are performing dust value calculation for a given script public key using rust-bitcoin to
@@ -72,6 +76,14 @@ pub(crate) fn check_nsequence_rbf(sequence: Sequence, csv: Sequence) -> bool {
     true
 }
 
+pub fn merge_nsequence(a: Sequence, b: Sequence) -> Result<Sequence, PlanError> {
+    if a.is_time_locked() != b.is_time_locked() {
+        Err(PlanError::MixedTimelockUnits)
+    } else {
+        Ok(a.max(b))
+    }
+}
+
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for After {
     fn check_after(&self, n: absolute::LockTime) -> bool {
         if let Some(current_height) = self.current_height {
@@ -118,7 +130,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Older {
     }
 }
 
-// The Knuth shuffling algorithm based on the original [Fisher-Yates method](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle)
+/// The Knuth shuffling algorithm based on the original [Fisher-Yates method](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle)
 pub(crate) fn shuffle_slice<T>(list: &mut [T], rng: &mut impl RngCore) {
     if list.is_empty() {
         return;
@@ -131,7 +143,29 @@ pub(crate) fn shuffle_slice<T>(list: &mut [T], rng: &mut impl RngCore) {
     }
 }
 
-pub(crate) type SecpCtx = Secp256k1<All>;
+/// Implemented for [`Assets`] to allow extending one instance with a reference of the same type.
+pub(crate) trait AssetsExt {
+    /// Extend `self` with the contents of `other`.
+    fn extend(&mut self, other: &Self);
+}
+
+impl AssetsExt for Assets {
+    /// Extend `self` with the contents of `other`. Note that if present, this preferentially
+    /// uses the absolute and relative timelocks of `other`.
+    fn extend(&mut self, other: &Assets) {
+        self.keys.extend(other.keys.clone());
+        self.sha256_preimages.extend(other.sha256_preimages.clone());
+        self.hash256_preimages
+            .extend(other.hash256_preimages.clone());
+        self.ripemd160_preimages
+            .extend(other.ripemd160_preimages.clone());
+        self.hash160_preimages
+            .extend(other.hash160_preimages.clone());
+
+        self.absolute_timelock = other.absolute_timelock.or(self.absolute_timelock);
+        self.relative_timelock = other.relative_timelock.or(self.relative_timelock);
+    }
+}
 
 #[cfg(test)]
 mod test {
