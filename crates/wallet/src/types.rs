@@ -10,13 +10,16 @@
 // licenses.
 
 use alloc::boxed::Box;
-use chain::{ChainPosition, ConfirmationBlockTime};
 use core::convert::AsRef;
+use serde::{Deserialize, Serialize};
 
 use bitcoin::transaction::{OutPoint, Sequence, TxOut};
-use bitcoin::{psbt, Weight};
+use bitcoin::{absolute, psbt, relative, Weight};
+use chain::{ChainPosition, ConfirmationBlockTime};
+use miniscript::plan::Plan;
 
-use serde::{Deserialize, Serialize};
+use crate::error::PlanError;
+use crate::utils::merge_nsequence;
 
 /// Types of keychains
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -77,6 +80,31 @@ pub struct WeightedUtxo {
     pub utxo: Utxo,
 }
 
+/// A [`Utxo`] and accompanying [`Plan`]
+#[derive(Debug, Clone)]
+pub struct PlannedUtxo {
+    /// plan
+    pub plan: Plan,
+    /// utxo
+    pub utxo: Utxo,
+}
+
+impl PlannedUtxo {
+    /// Create new [`PlannedUtxo`]
+    pub fn new(plan: Plan, utxo: Utxo) -> Self {
+        Self { plan, utxo }
+    }
+
+    /// Get a weighted utxo
+    pub fn weighted_utxo(&self) -> WeightedUtxo {
+        let wu = self.plan.satisfaction_weight();
+        WeightedUtxo {
+            satisfaction_weight: Weight::from_wu_usize(wu),
+            utxo: self.utxo.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// An unspent transaction output (UTXO).
 pub enum Utxo {
@@ -131,5 +159,68 @@ impl Utxo {
             Utxo::Local(_) => None,
             Utxo::Foreign { sequence, .. } => Some(*sequence),
         }
+    }
+}
+
+/// Represents a condition that must be satisfied
+#[derive(Hash, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Default, serde::Serialize)]
+pub struct Condition {
+    /// sequence value used as the argument to `OP_CHECKSEQUENCEVERIFY`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub csv: Option<Sequence>,
+    /// absolute timelock value used as the argument to `OP_CHECKLOCKTIMEVERIFY`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timelock: Option<absolute::LockTime>,
+}
+
+impl Condition {
+    /// Merges two absolute locktimes. Errors if `a` and `b` do not have the same unit.
+    pub(crate) fn merge_abs_locktime(
+        a: Option<absolute::LockTime>,
+        b: Option<absolute::LockTime>,
+    ) -> Result<Option<absolute::LockTime>, PlanError> {
+        match (a, b) {
+            (None, b) => Ok(b),
+            (a, None) => Ok(a),
+            (Some(a), Some(b)) => {
+                if a.is_block_height() != b.is_block_height() {
+                    Err(PlanError::MixedTimelockUnits)
+                } else if b > a {
+                    Ok(Some(b))
+                } else {
+                    Ok(Some(a))
+                }
+            }
+        }
+    }
+
+    /// Merges two relative locktimes. Errors if `a` and `b` do not have the same unit.
+    pub(crate) fn merge_rel_locktime(
+        a: Option<relative::LockTime>,
+        b: Option<relative::LockTime>,
+    ) -> Result<Option<relative::LockTime>, PlanError> {
+        match (a, b) {
+            (a, None) => Ok(a),
+            (None, b) => Ok(b),
+            (Some(a), Some(b)) => {
+                let seq = merge_nsequence(a.to_sequence(), b.to_sequence())?;
+                Ok(seq.to_relative_lock_time())
+            }
+        }
+    }
+
+    /// Merges the conditions of `other` with `self` keeping the greater of the two
+    /// for each individual condition. Locktime types must not be mixed or else a
+    /// [`PlanError`] is returned.
+    pub(crate) fn merge_condition(mut self, other: Condition) -> Result<Self, PlanError> {
+        self.timelock = Self::merge_abs_locktime(self.timelock, other.timelock)?;
+
+        match (self.csv, other.csv) {
+            (Some(a), Some(b)) => self.csv = Some(merge_nsequence(a, b)?),
+            (None, b) => self.csv = b,
+            _ => {}
+        }
+
+        Ok(self)
     }
 }

@@ -11,10 +11,15 @@
 
 use bitcoin::secp256k1::{All, Secp256k1};
 use bitcoin::{absolute, relative, Amount, Script, Sequence};
-
+use miniscript::plan::Assets;
 use miniscript::{MiniscriptKey, Satisfier, ToPublicKey};
-
 use rand_core::RngCore;
+
+use crate::error::PlanError;
+use crate::Condition;
+
+/// `Secp256k1` context with `All` capabilities
+pub(crate) type SecpCtx = Secp256k1<All>;
 
 /// Trait to check if a value is below the dust limit.
 /// We are performing dust value calculation for a given script public key using rust-bitcoin to
@@ -72,6 +77,14 @@ pub(crate) fn check_nsequence_rbf(sequence: Sequence, csv: Sequence) -> bool {
     true
 }
 
+pub fn merge_nsequence(a: Sequence, b: Sequence) -> Result<Sequence, PlanError> {
+    if a.is_time_locked() != b.is_time_locked() {
+        Err(PlanError::MixedTimelockUnits)
+    } else {
+        Ok(a.max(b))
+    }
+}
+
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for After {
     fn check_after(&self, n: absolute::LockTime) -> bool {
         if let Some(current_height) = self.current_height {
@@ -118,7 +131,7 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Older {
     }
 }
 
-// The Knuth shuffling algorithm based on the original [Fisher-Yates method](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle)
+/// The Knuth shuffling algorithm based on the original [Fisher-Yates method](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle)
 pub(crate) fn shuffle_slice<T>(list: &mut [T], rng: &mut impl RngCore) {
     if list.is_empty() {
         return;
@@ -131,7 +144,31 @@ pub(crate) fn shuffle_slice<T>(list: &mut [T], rng: &mut impl RngCore) {
     }
 }
 
-pub(crate) type SecpCtx = Secp256k1<All>;
+/// Implemented for [`Assets`] to allow extending one instance with a reference of the same type.
+pub(crate) trait AssetsExt {
+    /// Extend `self` with the contents of `other`.
+    fn extend(&mut self, other: &Self) -> Result<(), PlanError>;
+}
+
+impl AssetsExt for Assets {
+    fn extend(&mut self, other: &Assets) -> Result<(), PlanError> {
+        self.keys.extend(other.keys.clone());
+        self.sha256_preimages.extend(other.sha256_preimages.clone());
+        self.hash256_preimages
+            .extend(other.hash256_preimages.clone());
+        self.ripemd160_preimages
+            .extend(other.ripemd160_preimages.clone());
+        self.hash160_preimages
+            .extend(other.hash160_preimages.clone());
+
+        self.absolute_timelock =
+            Condition::merge_abs_locktime(self.absolute_timelock, other.absolute_timelock)?;
+        self.relative_timelock =
+            Condition::merge_rel_locktime(self.relative_timelock, other.relative_timelock)?;
+
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -139,8 +176,8 @@ mod test {
     // otherwise it's time-based
     pub(crate) const SEQUENCE_LOCKTIME_TYPE_FLAG: u32 = 1 << 22;
 
-    use super::{check_nsequence_rbf, shuffle_slice, IsDust};
-    use crate::bitcoin::{Address, Network, Sequence};
+    use super::{check_nsequence_rbf, shuffle_slice, AssetsExt, IsDust};
+    use crate::bitcoin::{absolute, relative, Address, Network, Sequence};
     use alloc::vec::Vec;
     use core::str::FromStr;
     use rand::{rngs::StdRng, thread_rng, SeedableRng};
@@ -246,5 +283,27 @@ mod test {
         let mut test: Vec<u8> = vec![0, 1, 2, 4, 5];
         shuffle_slice(&mut test, &mut rng);
         assert_eq!(test, &[0, 4, 1, 2, 5]);
+    }
+
+    #[test]
+    fn cannot_extend_assets_with_different_lock_type() {
+        use miniscript::plan::Assets;
+        let mut assets = Assets::new();
+        let height_lock = absolute::LockTime::from_consensus(100_000);
+        assert!(height_lock.is_block_height());
+        let time_lock = absolute::LockTime::from_consensus(500_000_001);
+        assert!(time_lock.is_block_time());
+
+        assets = assets.after(height_lock);
+        assets.extend(&Assets::new().after(time_lock)).unwrap_err();
+
+        let mut assets = Assets::new();
+        let height_lock = relative::LockTime::from_consensus(6).unwrap();
+        assert!(height_lock.is_block_height());
+        let time_lock = relative::LockTime::from_seconds_floor(42 * 512).unwrap();
+        assert!(time_lock.is_block_time());
+
+        assets = assets.older(height_lock);
+        assets.extend(&Assets::new().older(time_lock)).unwrap_err();
     }
 }

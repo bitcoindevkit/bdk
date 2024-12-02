@@ -36,8 +36,9 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
-use alloc::{boxed::Box, string::String, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
+use miniscript::plan::Assets;
 
 use alloc::sync::Arc;
 
@@ -50,9 +51,10 @@ use bitcoin::{
 use rand_core::RngCore;
 
 use super::coin_selection::CoinSelectionAlgorithm;
-use super::utils::shuffle_slice;
+use super::error::PlanError;
+use super::utils::{shuffle_slice, AssetsExt};
 use super::{CreateTxError, Wallet};
-use crate::collections::{BTreeMap, HashSet};
+use crate::collections::HashSet;
 use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 
 /// A transaction builder
@@ -117,14 +119,13 @@ pub struct TxBuilder<'a, Cs> {
 
 /// The parameters for transaction creation sans coin selection algorithm.
 //TODO: TxParams should eventually be exposed publicly.
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub(crate) struct TxParams {
     pub(crate) recipients: Vec<(ScriptBuf, Amount)>,
     pub(crate) drain_wallet: bool,
     pub(crate) drain_to: Option<ScriptBuf>,
     pub(crate) fee_policy: Option<FeePolicy>,
-    pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
+    pub(crate) assets: Option<Assets>,
     pub(crate) utxos: Vec<OutPoint>,
     pub(crate) foreign_utxos: Vec<WeightedUtxo>,
     pub(crate) unspendable: HashSet<OutPoint>,
@@ -139,7 +140,6 @@ pub(crate) struct TxParams {
     pub(crate) add_global_xpubs: bool,
     pub(crate) include_output_redeem_witness_script: bool,
     pub(crate) bumping_fee: Option<PreviousFee>,
-    pub(crate) current_height: Option<absolute::LockTime>,
     pub(crate) allow_dust: bool,
 }
 
@@ -189,82 +189,6 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// excess might not be viable.
     pub fn fee_absolute(&mut self, fee_amount: Amount) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
-        self
-    }
-
-    /// Set the policy path to use while creating the transaction for a given keychain.
-    ///
-    /// This method accepts a map where the key is the policy node id (see
-    /// [`Policy::id`](crate::descriptor::Policy::id)) and the value is the list of the indexes of
-    /// the items that are intended to be satisfied from the policy node (see
-    /// [`SatisfiableItem::Thresh::items`](crate::descriptor::policy::SatisfiableItem::Thresh::items)).
-    ///
-    /// ## Example
-    ///
-    /// An example of when the policy path is needed is the following descriptor:
-    /// `wsh(thresh(2,pk(A),sj:and_v(v:pk(B),n:older(6)),snj:and_v(v:pk(C),after(630000))))`,
-    /// derived from the miniscript policy `thresh(2,pk(A),and(pk(B),older(6)),and(pk(C),after(630000)))`.
-    /// It declares three descriptor fragments, and at the top level it uses `thresh()` to
-    /// ensure that at least two of them are satisfied. The individual fragments are:
-    ///
-    /// 1. `pk(A)`
-    /// 2. `and(pk(B),older(6))`
-    /// 3. `and(pk(C),after(630000))`
-    ///
-    /// When those conditions are combined in pairs, it's clear that the transaction needs to be created
-    /// differently depending on how the user intends to satisfy the policy afterwards:
-    ///
-    /// * If fragments `1` and `2` are used, the transaction will need to use a specific
-    ///   `n_sequence` in order to spend an `OP_CSV` branch.
-    /// * If fragments `1` and `3` are used, the transaction will need to use a specific `locktime`
-    ///   in order to spend an `OP_CLTV` branch.
-    /// * If fragments `2` and `3` are used, the transaction will need both.
-    ///
-    /// When the spending policy is represented as a tree (see
-    /// [`Wallet::policies`](super::Wallet::policies)), every node
-    /// is assigned a unique identifier that can be used in the policy path to specify which of
-    /// the node's children the user intends to satisfy: for instance, assuming the `thresh()`
-    /// root node of this example has an id of `aabbccdd`, the policy path map would look like:
-    ///
-    /// `{ "aabbccdd" => [0, 1] }`
-    ///
-    /// where the key is the node's id, and the value is a list of the children that should be
-    /// used, in no particular order.
-    ///
-    /// If a particularly complex descriptor has multiple ambiguous thresholds in its structure,
-    /// multiple entries can be added to the map, one for each node that requires an explicit path.
-    ///
-    /// ```
-    /// # use std::str::FromStr;
-    /// # use std::collections::BTreeMap;
-    /// # use bitcoin::*;
-    /// # use bdk_wallet::*;
-    /// # let to_address =
-    /// Address::from_str("2N4eQYCbKUHCCTUjBJeHcJp9ok6J2GZsTDt")
-    ///     .unwrap()
-    ///     .assume_checked();
-    /// # let mut wallet = doctest_wallet!();
-    /// let mut path = BTreeMap::new();
-    /// path.insert("aabbccdd".to_string(), vec![0, 1]);
-    ///
-    /// let builder = wallet
-    ///     .build_tx()
-    ///     .add_recipient(to_address.script_pubkey(), Amount::from_sat(50_000))
-    ///     .policy_path(path, KeychainKind::External);
-    ///
-    /// # Ok::<(), anyhow::Error>(())
-    /// ```
-    pub fn policy_path(
-        &mut self,
-        policy_path: BTreeMap<String, Vec<usize>>,
-        keychain: KeychainKind,
-    ) -> &mut Self {
-        let to_update = match keychain {
-            KeychainKind::Internal => &mut self.params.internal_policy_path,
-            KeychainKind::External => &mut self.params.external_policy_path,
-        };
-
-        *to_update = Some(policy_path);
         self
     }
 
@@ -391,6 +315,92 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         });
 
         Ok(self)
+    }
+
+    /// Add [`Assets`] to the current collection of wallet assets.
+    ///
+    /// Note that the resulting assets will include all of the wallet's "key" assets,
+    /// which are the ones that it can trivially infer by scanning the pubkeys of a
+    /// descriptor. Therefore this method is available for providing additional assets
+    /// that are required to complete a spending plan.
+    ///
+    /// See [`set_assets`] to specify an exact set of assets.
+    ///
+    /// # Example
+    ///
+    /// We have a descriptor defined by the policy `and(pk(A),older(144))`. This means
+    /// that a UTXO owned by the wallet needs to be at least 144 blocks old before it can
+    /// be spent. However if we want to create a transaction that spends an output before it
+    /// is technically mature, we can convince the wallet to consider the condition satisfied
+    /// and then broadcast it later when the timelock is met.
+    ///
+    /// ```rust,no_run
+    /// # use bitcoin::relative;
+    /// # use bdk_wallet::*;
+    /// # use miniscript::plan::Assets;
+    /// # let mut wallet = doctest_wallet!();
+    /// let rel_locktime = relative::LockTime::from_height(144);
+    ///
+    /// let mut builder = wallet.build_tx();
+    /// builder
+    ///     .add_assets(Assets::new().older(rel_locktime))
+    ///     .expect("first addition should always work");
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// A [`PlanError`] is returned if attempting to combine timelocks with incompatible
+    /// types, for example adding a time-based relative locktime to a height-based relative
+    /// locktime.
+    ///
+    /// [`set_assets`]: Self::set_assets
+    pub fn add_assets(&mut self, assets: Assets) -> Result<&mut Self, PlanError> {
+        let mut new = match self.params.assets {
+            None => self.wallet.assets(),
+            Some(ref existing) => {
+                let mut new = Assets::new();
+                new.extend(existing)?;
+                new
+            }
+        };
+        new.extend(&assets)?;
+        self.params.assets = Some(new);
+        Ok(self)
+    }
+
+    /// Set the spend [`Assets`].
+    ///
+    /// This should be used to specify a particular spending path where multiple paths
+    /// may exist, in which case all of the assets required to complete a spending plan
+    /// must be known at this point. See also [`add_assets`](Self::add_assets).
+    ///
+    /// # Example
+    ///
+    /// We have a descriptor defined by the policy `or(pk(A),and(pk(B),after(1732934156)))`
+    /// and we want to create a transaction using the second spending path, that is we intend
+    /// to produce a signature for `B` and build a transaction that will be valid after
+    /// the time `1732934156`.
+    ///
+    /// ```rust,no_run
+    /// # use std::str::FromStr;
+    /// # use bitcoin::{absolute, bip32::*};
+    /// # use bdk_wallet::*;
+    /// # use miniscript::plan::*;
+    /// # let mut wallet = doctest_wallet!();
+    /// # let mut builder = wallet.build_tx();
+    /// let fingerprint = Fingerprint::from_hex("f6a5cb8b").unwrap();
+    /// let derivation_path = DerivationPath::from_str("86h/0h/0h/0").unwrap();
+    /// let origin = (fingerprint, derivation_path);
+    /// let abs_locktime = absolute::LockTime::from_consensus(1732934156);
+    ///
+    /// let mut assets = Assets::new();
+    /// assets.keys.insert((origin, CanSign::default()));
+    /// assets = assets.after(abs_locktime);
+    /// builder.set_assets(assets);
+    /// ```
+    pub fn set_assets(&mut self, assets: Assets) -> &mut Self {
+        self.params.assets = Some(assets);
+        self
     }
 
     /// Only spend utxos added by [`add_utxo`].
@@ -535,23 +545,6 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// "older" (OP_CSV) operator and the given `nsequence` is lower than the CSV value.
     pub fn set_exact_sequence(&mut self, n_sequence: Sequence) -> &mut Self {
         self.params.sequence = Some(n_sequence);
-        self
-    }
-
-    /// Set the current blockchain height.
-    ///
-    /// This will be used to:
-    /// 1. Set the nLockTime for preventing fee sniping.
-    ///    **Note**: This will be ignored if you manually specify a nlocktime using [`TxBuilder::nlocktime`].
-    /// 2. Decide whether coinbase outputs are mature or not. If the coinbase outputs are not
-    ///    mature at `current_height`, we ignore them in the coin selection.
-    ///    If you want to create a transaction that spends immature coinbase inputs, manually
-    ///    add them using [`TxBuilder::add_utxos`].
-    ///
-    /// In both cases, if you don't provide a current height, we use the last sync height.
-    pub fn current_height(&mut self, height: u32) -> &mut Self {
-        self.params.current_height =
-            Some(absolute::LockTime::from_height(height).expect("Invalid height"));
         self
     }
 
