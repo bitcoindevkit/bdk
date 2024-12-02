@@ -3,7 +3,13 @@
 use crate::*;
 use core::str::FromStr;
 
-use alloc::{borrow::ToOwned, boxed::Box, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    borrow::ToOwned,
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use bitcoin::consensus::{Decodable, Encodable};
 use rusqlite;
 use rusqlite::named_params;
@@ -55,17 +61,15 @@ fn set_schema_version(
 pub fn migrate_schema(
     db_tx: &Transaction,
     schema_name: &str,
-    versioned_scripts: &[&[&str]],
+    versioned_scripts: &[String],
 ) -> rusqlite::Result<()> {
     init_schemas_table(db_tx)?;
     let current_version = schema_version(db_tx, schema_name)?;
     let exec_from = current_version.map_or(0_usize, |v| v as usize + 1);
     let scripts_to_exec = versioned_scripts.iter().enumerate().skip(exec_from);
-    for (version, &script) in scripts_to_exec {
+    for (version, script) in scripts_to_exec {
         set_schema_version(db_tx, schema_name, version as u32)?;
-        for statement in script {
-            db_tx.execute(statement, ())?;
-        }
+        db_tx.execute_batch(script)?;
     }
     Ok(())
 }
@@ -205,57 +209,68 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
     /// Name of table that stores [`Anchor`]s.
     pub const ANCHORS_TABLE_NAME: &'static str = "bdk_anchors";
 
+    /// Get v0 of sqlite [tx_graph::ChangeSet] schema
+    pub fn schema_v0() -> String {
+        // full transactions
+        let create_txs_table = format!(
+            "CREATE TABLE {} ( \
+            txid TEXT PRIMARY KEY NOT NULL, \
+            raw_tx BLOB, \
+            last_seen INTEGER \
+            ) STRICT",
+            Self::TXS_TABLE_NAME,
+        );
+        // floating txouts
+        let create_txouts_table = format!(
+            "CREATE TABLE {} ( \
+            txid TEXT NOT NULL, \
+            vout INTEGER NOT NULL, \
+            value INTEGER NOT NULL, \
+            script BLOB NOT NULL, \
+            PRIMARY KEY (txid, vout) \
+            ) STRICT",
+            Self::TXOUTS_TABLE_NAME,
+        );
+        // anchors
+        let create_anchors_table = format!(
+            "CREATE TABLE {} ( \
+            txid TEXT NOT NULL REFERENCES {} (txid), \
+            block_height INTEGER NOT NULL, \
+            block_hash TEXT NOT NULL, \
+            anchor BLOB NOT NULL, \
+            PRIMARY KEY (txid, block_height, block_hash) \
+            ) STRICT",
+            Self::ANCHORS_TABLE_NAME,
+            Self::TXS_TABLE_NAME,
+        );
+
+        format!("{create_txs_table}; {create_txouts_table}; {create_anchors_table}")
+    }
+
+    /// Get v1 of sqlite [tx_graph::ChangeSet] schema
+    pub fn schema_v1() -> String {
+        let add_confirmation_time_column = format!(
+            "ALTER TABLE {} ADD COLUMN confirmation_time INTEGER DEFAULT -1 NOT NULL",
+            Self::ANCHORS_TABLE_NAME,
+        );
+        let extract_confirmation_time_from_anchor_column = format!(
+            "UPDATE {} SET confirmation_time = json_extract(anchor, '$.confirmation_time')",
+            Self::ANCHORS_TABLE_NAME,
+        );
+        let drop_anchor_column = format!(
+            "ALTER TABLE {} DROP COLUMN anchor",
+            Self::ANCHORS_TABLE_NAME,
+        );
+        format!("{add_confirmation_time_column}; {extract_confirmation_time_from_anchor_column}; {drop_anchor_column}")
+    }
+
     /// Initialize sqlite tables.
     pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        let schema_v0: &[&str] = &[
-            // full transactions
-            &format!(
-                "CREATE TABLE {} ( \
-                txid TEXT PRIMARY KEY NOT NULL, \
-                raw_tx BLOB, \
-                last_seen INTEGER \
-                ) STRICT",
-                Self::TXS_TABLE_NAME,
-            ),
-            // floating txouts
-            &format!(
-                "CREATE TABLE {} ( \
-                txid TEXT NOT NULL, \
-                vout INTEGER NOT NULL, \
-                value INTEGER NOT NULL, \
-                script BLOB NOT NULL, \
-                PRIMARY KEY (txid, vout) \
-                ) STRICT",
-                Self::TXOUTS_TABLE_NAME,
-            ),
-            // anchors
-            &format!(
-                "CREATE TABLE {} ( \
-                txid TEXT NOT NULL REFERENCES {} (txid), \
-                block_height INTEGER NOT NULL, \
-                block_hash TEXT NOT NULL, \
-                anchor BLOB NOT NULL, \
-                PRIMARY KEY (txid, block_height, block_hash) \
-                ) STRICT",
-                Self::ANCHORS_TABLE_NAME,
-                Self::TXS_TABLE_NAME,
-            ),
-        ];
-        let schema_v1: &[&str] = &[
-            &format!(
-                "ALTER TABLE {} ADD COLUMN confirmation_time INTEGER DEFAULT -1 NOT NULL",
-                Self::ANCHORS_TABLE_NAME,
-            ),
-            &format!(
-                "UPDATE {} SET confirmation_time = json_extract(anchor, '$.confirmation_time')",
-                Self::ANCHORS_TABLE_NAME,
-            ),
-            &format!(
-                "ALTER TABLE {} DROP COLUMN anchor",
-                Self::ANCHORS_TABLE_NAME,
-            ),
-        ];
-        migrate_schema(db_tx, Self::SCHEMA_NAME, &[schema_v0, schema_v1])
+        migrate_schema(
+            db_tx,
+            Self::SCHEMA_NAME,
+            &[Self::schema_v0(), Self::schema_v1()],
+        )
     }
 
     /// Construct a [`TxGraph`] from an sqlite database.
@@ -406,19 +421,21 @@ impl local_chain::ChangeSet {
     /// Name of sqlite table that stores blocks of [`LocalChain`](local_chain::LocalChain).
     pub const BLOCKS_TABLE_NAME: &'static str = "bdk_blocks";
 
+    /// Get v0 of sqlite [local_chain::ChangeSet] schema
+    pub fn schema_v0() -> String {
+        // blocks
+        format!(
+            "CREATE TABLE {} ( \
+            block_height INTEGER PRIMARY KEY NOT NULL, \
+            block_hash TEXT NOT NULL \
+            ) STRICT",
+            Self::BLOCKS_TABLE_NAME,
+        )
+    }
+
     /// Initialize sqlite tables for persisting [`local_chain::LocalChain`].
     pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        let schema_v0: &[&str] = &[
-            // blocks
-            &format!(
-                "CREATE TABLE {} ( \
-                block_height INTEGER PRIMARY KEY NOT NULL, \
-                block_hash TEXT NOT NULL \
-                ) STRICT",
-                Self::BLOCKS_TABLE_NAME,
-            ),
-        ];
-        migrate_schema(db_tx, Self::SCHEMA_NAME, &[schema_v0])
+        migrate_schema(db_tx, Self::SCHEMA_NAME, &[Self::schema_v0()])
     }
 
     /// Construct a [`LocalChain`](local_chain::LocalChain) from sqlite database.
@@ -480,20 +497,21 @@ impl keychain_txout::ChangeSet {
     /// Name for table that stores last revealed indices per descriptor id.
     pub const LAST_REVEALED_TABLE_NAME: &'static str = "bdk_descriptor_last_revealed";
 
+    /// Get v0 of sqlite [keychain_txout::ChangeSet] schema
+    pub fn schema_v0() -> String {
+        format!(
+            "CREATE TABLE {} ( \
+            descriptor_id TEXT PRIMARY KEY NOT NULL, \
+            last_revealed INTEGER NOT NULL \
+            ) STRICT",
+            Self::LAST_REVEALED_TABLE_NAME,
+        )
+    }
+
     /// Initialize sqlite tables for persisting
     /// [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex).
     pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        let schema_v0: &[&str] = &[
-            // last revealed
-            &format!(
-                "CREATE TABLE {} ( \
-                descriptor_id TEXT PRIMARY KEY NOT NULL, \
-                last_revealed INTEGER NOT NULL \
-                ) STRICT",
-                Self::LAST_REVEALED_TABLE_NAME,
-            ),
-        ];
-        migrate_schema(db_tx, Self::SCHEMA_NAME, &[schema_v0])
+        migrate_schema(db_tx, Self::SCHEMA_NAME, &[Self::schema_v0()])
     }
 
     /// Construct [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex) from sqlite database

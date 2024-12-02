@@ -1,3 +1,4 @@
+use alloc::string::String;
 use bdk_chain::{
     indexed_tx_graph, keychain_txout, local_chain, tx_graph, ConfirmationBlockTime, Merge,
 };
@@ -71,9 +72,9 @@ impl ChangeSet {
     /// Name of table to store wallet descriptors and network.
     pub const WALLET_TABLE_NAME: &'static str = "bdk_wallet";
 
-    /// Initialize sqlite tables for wallet tables.
-    pub fn init_sqlite_tables(db_tx: &chain::rusqlite::Transaction) -> chain::rusqlite::Result<()> {
-        let schema_v0: &[&str] = &[&format!(
+    /// Get v0 sqlite [ChangeSet] schema
+    pub fn schema_v0() -> String {
+        format!(
             "CREATE TABLE {} ( \
                 id INTEGER PRIMARY KEY NOT NULL CHECK (id = 0), \
                 descriptor TEXT, \
@@ -81,8 +82,16 @@ impl ChangeSet {
                 network TEXT \
                 ) STRICT;",
             Self::WALLET_TABLE_NAME,
-        )];
-        crate::rusqlite_impl::migrate_schema(db_tx, Self::WALLET_SCHEMA_NAME, &[schema_v0])?;
+        )
+    }
+
+    /// Initialize sqlite tables for wallet tables.
+    pub fn init_sqlite_tables(db_tx: &chain::rusqlite::Transaction) -> chain::rusqlite::Result<()> {
+        crate::rusqlite_impl::migrate_schema(
+            db_tx,
+            Self::WALLET_SCHEMA_NAME,
+            &[Self::schema_v0()],
+        )?;
 
         bdk_chain::local_chain::ChangeSet::init_sqlite_tables(db_tx)?;
         bdk_chain::tx_graph::ChangeSet::<ConfirmationBlockTime>::init_sqlite_tables(db_tx)?;
