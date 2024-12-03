@@ -45,6 +45,27 @@ fn test_tx_conflict_handling() {
 
     let scenarios = [
         Scenario {
+            name: "only A exists, no other txs",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    last_seen: None,
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["A"]),
+            exp_chain_txouts: HashSet::from([("A", 0)]),
+            exp_unspents: HashSet::from([("A", 0)]),
+            exp_balance: Balance {
+                immature: Amount::ZERO,
+                trusted_pending: Amount::from_sat(10000),
+                untrusted_pending: Amount::ZERO,
+                confirmed: Amount::ZERO,
+            },
+        },
+        Scenario {
             name: "coinbase tx cannot be in mempool and be unconfirmed",
             tx_templates: &[
                 TxTemplate {
@@ -317,6 +338,41 @@ fn test_tx_conflict_handling() {
                 trusted_pending: Amount::ZERO,
                 untrusted_pending: Amount::ZERO,
                 confirmed: Amount::from_sat(50000),
+            },
+        },
+        Scenario {
+            name: "confirmed tx conflicts with unconfirmed",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    last_seen: None,
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(100),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B'",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    anchors: &[block_id!(1, "B")],
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["A", "B'"]),
+            exp_chain_txouts: HashSet::from([("A", 0), ("B'", 0)]),
+            exp_unspents: HashSet::from([("B'", 0)]),
+            exp_balance: Balance {
+                immature: Amount::ZERO,
+                trusted_pending: Amount::ZERO,
+                untrusted_pending: Amount::ZERO,
+                confirmed: Amount::from_sat(30000),
             },
         },
         Scenario {
