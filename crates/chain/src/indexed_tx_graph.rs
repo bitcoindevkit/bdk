@@ -13,7 +13,7 @@ use crate::{
 /// The [`IndexedTxGraph`] combines a [`TxGraph`] and an [`Indexer`] implementation.
 ///
 /// It ensures that [`TxGraph`] and [`Indexer`] are updated atomically.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IndexedTxGraph<A, I> {
     /// Transaction index.
     pub index: I,
