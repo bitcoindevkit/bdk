@@ -422,6 +422,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ) -> Result<(), Error> {
         let mut no_dup = HashSet::<Txid>::new();
         for tx in &tx_update.txs {
+            // Do not try fetch `previous_output`s of coinbase transactions. This will always error
+            // and make our full-scan/sync request fail.
+            if tx.is_coinbase() {
+                continue;
+            }
             if no_dup.insert(tx.compute_txid()) {
                 for vin in &tx.input {
                     let outpoint = vin.previous_output;
