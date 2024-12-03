@@ -29,7 +29,7 @@ serde_json = { version = "1", optional = true }
 rand = "0.8"
 proptest = "1.2.0"
 bdk_testenv = { path = "../testenv", default-features = false }
-
+criterion = { version = "0.2" }
 
 [features]
 default = ["std", "miniscript"]
@@ -37,3 +37,7 @@ std = ["bitcoin/std", "miniscript?/std", "bdk_core/std"]
 serde = ["dep:serde", "bitcoin/serde", "miniscript?/serde", "bdk_core/serde"]
 hashbrown = ["bdk_core/hashbrown"]
 rusqlite = ["std", "dep:rusqlite", "serde", "serde_json"]
+
+[[bench]]
+name = "canonicalization"
+harness = false
