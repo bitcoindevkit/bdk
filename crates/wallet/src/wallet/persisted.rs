@@ -291,7 +291,7 @@ impl WalletPersister for bdk_chain::rusqlite::Connection {
 #[derive(Debug)]
 pub enum FileStoreError {
     /// Error when loading from the store.
-    Load(bdk_file_store::AggregateChangesetsError<ChangeSet>),
+    Load(bdk_file_store::StoreErrorWithDump<ChangeSet>),
     /// Error when writing to the store.
     Write(std::io::Error),
 }
@@ -316,15 +316,13 @@ impl WalletPersister for bdk_file_store::Store<ChangeSet> {
 
     fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error> {
         persister
-            .aggregate_changesets()
+            .dump()
             .map(Option::unwrap_or_default)
             .map_err(FileStoreError::Load)
     }
 
     fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
-        persister
-            .append_changeset(changeset)
-            .map_err(FileStoreError::Write)
+        persister.append(changeset).map_err(FileStoreError::Write)
     }
 }
 
