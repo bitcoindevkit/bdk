@@ -80,6 +80,20 @@ cargo update -p indexmap --precise "2.5.0"
 cargo update -p security-framework-sys --precise "2.11.1"
 ```
 
+## Troubleshooting Tests
+
+If tests are failing with `cargo test` it could be an issue related to tests that use bitcoind or electrsd running in parallel. This is known to affect MacOS users running tests locally. To force tests to run in series you can try:
+
+```
+cargo test -- --test-threads=1
+```
+
+or
+
+```
+RUST_TEST_THREADS=1 cargo test
+```
+
 ## License
 
 Licensed under either of
