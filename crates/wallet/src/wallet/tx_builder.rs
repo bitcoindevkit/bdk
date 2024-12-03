@@ -36,8 +36,7 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
-use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use core::cell::RefCell;
+use alloc::{boxed::Box, string::String, vec::Vec};
 use core::fmt;
 
 use alloc::sync::Arc;
@@ -111,7 +110,7 @@ use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 /// [`coin_selection`]: Self::coin_selection
 #[derive(Debug)]
 pub struct TxBuilder<'a, Cs> {
-    pub(crate) wallet: Rc<RefCell<&'a mut Wallet>>,
+    pub(crate) wallet: &'a mut Wallet,
     pub(crate) params: TxParams,
     pub(crate) coin_selection: Cs,
 }
@@ -158,16 +157,6 @@ pub(crate) enum FeePolicy {
 impl Default for FeePolicy {
     fn default() -> Self {
         FeePolicy::FeeRate(FeeRate::BROADCAST_MIN)
-    }
-}
-
-impl<'a, Cs: Clone> Clone for TxBuilder<'a, Cs> {
-    fn clone(&self) -> Self {
-        TxBuilder {
-            wallet: self.wallet.clone(),
-            params: self.params.clone(),
-            coin_selection: self.coin_selection.clone(),
-        }
     }
 }
 
@@ -286,7 +275,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, AddUtxoError> {
         {
-            let wallet = self.wallet.borrow();
+            let wallet = &mut self.wallet;
             let utxos = outpoints
                 .iter()
                 .map(|outpoint| {
@@ -682,9 +671,7 @@ impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs> {
     /// **WARNING**: To avoid change address reuse you must persist the changes resulting from one
     /// or more calls to this method before closing the wallet. See [`Wallet::reveal_next_address`].
     pub fn finish_with_aux_rand(self, rng: &mut impl RngCore) -> Result<Psbt, CreateTxError> {
-        self.wallet
-            .borrow_mut()
-            .create_tx(self.coin_selection, self.params, rng)
+        self.wallet.create_tx(self.coin_selection, self.params, rng)
     }
 }
 
@@ -750,7 +737,7 @@ impl fmt::Display for AddForeignUtxoError {
 #[cfg(feature = "std")]
 impl std::error::Error for AddForeignUtxoError {}
 
-type TxSort<T> = dyn Fn(&T, &T) -> core::cmp::Ordering;
+type TxSort<T> = dyn (Fn(&T, &T) -> core::cmp::Ordering) + Send + Sync;
 
 /// Ordering of the transaction's inputs and outputs
 #[derive(Clone, Default)]

@@ -1205,7 +1205,7 @@ impl Wallet {
     /// [`TxBuilder`]: crate::TxBuilder
     pub fn build_tx(&mut self) -> TxBuilder<'_, DefaultCoinSelectionAlgorithm> {
         TxBuilder {
-            wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
+            wallet: self,
             params: TxParams::default(),
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
         }
@@ -1711,7 +1711,7 @@ impl Wallet {
         };
 
         Ok(TxBuilder {
-            wallet: alloc::rc::Rc::new(core::cell::RefCell::new(self)),
+            wallet: self,
             params,
             coin_selection: DefaultCoinSelectionAlgorithm::default(),
         })
