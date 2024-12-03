@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.3.0" }
-electrum-client = { version = "0.21", features = [ "proxy" ], default-features = false }
+electrum-client = { version = "0.22", features = [ "proxy" ], default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv" }
