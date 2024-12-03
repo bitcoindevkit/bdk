@@ -267,7 +267,7 @@ fn wallet_should_persist_anchors_and_recover() {
         .expect("must have loaded changeset");
     // stored anchor should be retrieved in the same condition it was persisted
     if let ChainPosition::Confirmed {
-        anchor: &obtained_anchor,
+        anchor: obtained_anchor,
         ..
     } = wallet
         .get_tx(txid)
