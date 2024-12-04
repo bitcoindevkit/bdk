@@ -10,17 +10,24 @@ The extension traits are primarily intended to satisfy [`SyncRequest`]s with [`s
 
 For blocking-only:
 ```toml
-bdk_esplora = { version = "0.3", features = ["blocking"] }
+bdk_esplora = { version = "0.19", features = ["blocking"] }
 ```
 
 For async-only:
 ```toml
-bdk_esplora = { version = "0.3", features = ["async"] }
+bdk_esplora = { version = "0.19", features = ["async"] }
 ```
 
 For async-only (with https):
+
+You can additionally specify to use either rustls or native-tls, e.g. `async-https-native`, and this applies to both async and blocking features.
 ```toml
-bdk_esplora = { version = "0.3", features = ["async-https"] }
+bdk_esplora = { version = "0.19", features = ["async-https"] }
+```
+
+For async-only (with tokio):
+```toml
+bdk_esplora = { version = "0.19", features = ["async", "tokio"] }
 ```
 
 To use the extension traits:
@@ -34,7 +41,7 @@ use bdk_esplora::EsploraExt;
 use bdk_esplora::EsploraAsyncExt;
 ```
 
-For full examples, refer to [`example-crates/wallet_esplora_blocking`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_blocking) and [`example-crates/wallet_esplora_async`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/wallet_esplora_async).
+For full examples, refer to [`example_wallet_esplora_blocking`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_wallet_esplora_blocking) and [`example_wallet_esplora_async`](https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_wallet_esplora_async).
 
 [`esplora-client`]: https://docs.rs/esplora-client/
 [`bdk_chain`]: https://docs.rs/bdk-chain/
