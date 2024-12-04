@@ -626,4 +626,96 @@ mod test {
 
         Ok(())
     }
+
+    #[test]
+    fn v0_to_v1_schema_migration_is_backward_compatible() -> anyhow::Result<()> {
+        type ChangeSet = tx_graph::ChangeSet<ConfirmationBlockTime>;
+        let mut conn = rusqlite::Connection::open_in_memory()?;
+
+        // Create initial database with v0 sqlite schema
+        {
+            let db_tx = conn.transaction()?;
+            migrate_schema(&db_tx, ChangeSet::SCHEMA_NAME, &[ChangeSet::schema_v0()])?;
+            db_tx.commit()?;
+        }
+
+        let tx = bitcoin::Transaction {
+            version: transaction::Version::TWO,
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut::NULL],
+        };
+        let tx = Arc::new(tx);
+        let txid = tx.compute_txid();
+        let anchor = ConfirmationBlockTime {
+            block_id: BlockId {
+                height: 21,
+                hash: hash!("anchor"),
+            },
+            confirmation_time: 1342,
+        };
+
+        // Persist anchor with v0 sqlite schema
+        {
+            let changeset = ChangeSet {
+                anchors: [(anchor, txid)].into(),
+                ..Default::default()
+            };
+            let mut statement = conn.prepare_cached(&format!(
+                "REPLACE INTO {} (txid, block_height, block_hash, anchor)
+                 VALUES(
+                    :txid,
+                    :block_height,
+                    :block_hash,
+                    jsonb('{{
+                        \"block_id\": {{\"height\": {},\"hash\":\"{}\"}},
+                        \"confirmation_time\": {}
+                    }}')
+                 )",
+                ChangeSet::ANCHORS_TABLE_NAME,
+                anchor.block_id.height,
+                anchor.block_id.hash,
+                anchor.confirmation_time,
+            ))?;
+            let mut statement_txid = conn.prepare_cached(&format!(
+                "INSERT OR IGNORE INTO {}(txid) VALUES(:txid)",
+                ChangeSet::TXS_TABLE_NAME,
+            ))?;
+            for (anchor, txid) in &changeset.anchors {
+                let anchor_block = anchor.anchor_block();
+                statement_txid.execute(named_params! {
+                    ":txid": Impl(*txid)
+                })?;
+                match statement.execute(named_params! {
+                    ":txid": Impl(*txid),
+                    ":block_height": anchor_block.height,
+                    ":block_hash": Impl(anchor_block.hash),
+                }) {
+                    Ok(updated) => assert_eq!(updated, 1),
+                    Err(err) => panic!("update failed: {}", err),
+                }
+            }
+        }
+
+        // Apply v1 sqlite schema to tables with data
+        {
+            let db_tx = conn.transaction()?;
+            migrate_schema(
+                &db_tx,
+                ChangeSet::SCHEMA_NAME,
+                &[ChangeSet::schema_v0(), ChangeSet::schema_v1()],
+            )?;
+            db_tx.commit()?;
+        }
+
+        // Loading changeset from sqlite should succeed
+        {
+            let db_tx = conn.transaction()?;
+            let changeset = ChangeSet::from_sqlite(&db_tx)?;
+            db_tx.commit()?;
+            assert!(changeset.anchors.contains(&(anchor, txid)));
+        }
+
+        Ok(())
+    }
 }
