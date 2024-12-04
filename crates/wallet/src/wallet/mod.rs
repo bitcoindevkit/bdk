@@ -732,10 +732,10 @@ impl Wallet {
     }
 
     /// Get the next unused address for the given `keychain`, i.e. the address with the lowest
-    /// derivation index that hasn't been used.
+    /// derivation index that hasn't been used in a transaction.
     ///
-    /// This will attempt to derive and reveal a new address if no newly revealed addresses
-    /// are available. See also [`reveal_next_address`](Self::reveal_next_address).
+    /// This will attempt to reveal a new address if all previously revealed addresses have
+    /// been used, in which case the returned address will be the same as calling [`Wallet::reveal_next_address`].
     ///
     /// **WARNING**: To avoid address reuse you must persist the changes resulting from one or more
     /// calls to this method before closing the wallet. See [`Wallet::reveal_next_address`].
