@@ -61,7 +61,7 @@ fn set_schema_version(
 pub fn migrate_schema(
     db_tx: &Transaction,
     schema_name: &str,
-    versioned_scripts: &[String],
+    versioned_scripts: &[&str],
 ) -> rusqlite::Result<()> {
     init_schemas_table(db_tx)?;
     let current_version = schema_version(db_tx, schema_name)?;
@@ -269,7 +269,7 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
         migrate_schema(
             db_tx,
             Self::SCHEMA_NAME,
-            &[Self::schema_v0(), Self::schema_v1()],
+            &[&Self::schema_v0(), &Self::schema_v1()],
         )
     }
 
@@ -435,7 +435,7 @@ impl local_chain::ChangeSet {
 
     /// Initialize sqlite tables for persisting [`local_chain::LocalChain`].
     pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        migrate_schema(db_tx, Self::SCHEMA_NAME, &[Self::schema_v0()])
+        migrate_schema(db_tx, Self::SCHEMA_NAME, &[&Self::schema_v0()])
     }
 
     /// Construct a [`LocalChain`](local_chain::LocalChain) from sqlite database.
@@ -511,7 +511,7 @@ impl keychain_txout::ChangeSet {
     /// Initialize sqlite tables for persisting
     /// [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex).
     pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        migrate_schema(db_tx, Self::SCHEMA_NAME, &[Self::schema_v0()])
+        migrate_schema(db_tx, Self::SCHEMA_NAME, &[&Self::schema_v0()])
     }
 
     /// Construct [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex) from sqlite database
@@ -635,7 +635,7 @@ mod test {
         // Create initial database with v0 sqlite schema
         {
             let db_tx = conn.transaction()?;
-            migrate_schema(&db_tx, ChangeSet::SCHEMA_NAME, &[ChangeSet::schema_v0()])?;
+            migrate_schema(&db_tx, ChangeSet::SCHEMA_NAME, &[&ChangeSet::schema_v0()])?;
             db_tx.commit()?;
         }
 
@@ -703,7 +703,7 @@ mod test {
             migrate_schema(
                 &db_tx,
                 ChangeSet::SCHEMA_NAME,
-                &[ChangeSet::schema_v0(), ChangeSet::schema_v1()],
+                &[&ChangeSet::schema_v0(), &ChangeSet::schema_v1()],
             )?;
             db_tx.commit()?;
         }

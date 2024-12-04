@@ -90,7 +90,7 @@ impl ChangeSet {
         crate::rusqlite_impl::migrate_schema(
             db_tx,
             Self::WALLET_SCHEMA_NAME,
-            &[Self::schema_v0()],
+            &[&Self::schema_v0()],
         )?;
 
         bdk_chain::local_chain::ChangeSet::init_sqlite_tables(db_tx)?;
