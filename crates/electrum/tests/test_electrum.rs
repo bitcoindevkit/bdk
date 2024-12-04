@@ -525,3 +525,37 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_sync_with_coinbase() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    // Setup address.
+    let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
+    let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
+
+    // Setup receiver.
+    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+        let mut recv_index = SpkTxOutIndex::default();
+        recv_index.insert_spk((), spk_to_track.clone());
+        recv_index
+    });
+
+    // Mine some blocks.
+    env.mine_blocks(101, Some(addr_to_track))?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    // Check to see if electrum syncs properly.
+    assert!(sync_with_electrum(
+        &client,
+        [spk_to_track.clone()],
+        &mut recv_chain,
+        &mut recv_graph,
+    )
+    .is_ok());
+
+    Ok(())
+}

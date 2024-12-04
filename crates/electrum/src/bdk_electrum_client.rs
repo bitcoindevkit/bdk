@@ -531,3 +531,45 @@ fn chain_update(
     }
     Ok(tip)
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{bdk_electrum_client::TxUpdate, BdkElectrumClient};
+    use bdk_chain::bitcoin::{OutPoint, Transaction, TxIn};
+    use bdk_core::collections::BTreeMap;
+    use bdk_testenv::{utils::new_tx, TestEnv};
+    use std::sync::Arc;
+
+    #[cfg(feature = "default")]
+    #[test]
+    fn test_fetch_prev_txout_with_coinbase() {
+        let env = TestEnv::new().unwrap();
+        let electrum_client =
+            electrum_client::Client::new(env.electrsd.electrum_url.as_str()).unwrap();
+        let client = BdkElectrumClient::new(electrum_client);
+
+        // Create a coinbase transaction.
+        let coinbase_tx = Transaction {
+            input: vec![TxIn {
+                previous_output: OutPoint::null(),
+                ..Default::default()
+            }],
+            ..new_tx(0)
+        };
+
+        assert!(coinbase_tx.is_coinbase());
+
+        // Test that `fetch_prev_txout` does not process coinbase transactions. Calling
+        // `fetch_prev_txout` on a coinbase transaction will trigger a `fetch_tx` on a transaction
+        // with a txid of all zeros. If `fetch_prev_txout` attempts to fetch this transaction, this
+        // assertion will fail.
+        let mut tx_update = TxUpdate {
+            txs: vec![Arc::new(coinbase_tx)],
+            ..Default::default()
+        };
+        assert!(client.fetch_prev_txout(&mut tx_update).is_ok());
+
+        // Ensure that the txouts are empty.
+        assert_eq!(tx_update.txouts, BTreeMap::default());
+    }
+}
