@@ -2011,7 +2011,6 @@ impl Wallet {
         let must_only_use_confirmed_tx = bumping_fee.is_some();
         let must_use_all_available = *drain_wallet;
 
-        let chain_tip = self.chain.tip().block_id();
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos();
@@ -2029,27 +2028,18 @@ impl Wallet {
             return (must_spend, vec![]);
         }
 
-        let canon_txs = self
-            .indexed_graph
-            .graph()
-            .list_canonical_txs(&self.chain, chain_tip)
-            .map(|canon_tx| (canon_tx.tx_node.txid, canon_tx))
-            .collect::<HashMap<Txid, _>>();
-
         let satisfies_confirmed = may_spend
             .iter()
             .map(|u| -> bool {
                 let txid = u.0.outpoint.txid;
-                let (chain_position, tx) = match canon_txs.get(&txid) {
-                    Some(CanonicalTx {
-                        chain_position,
-                        tx_node,
-                    }) => (chain_position, tx_node.tx.clone()),
+                let tx = match self.indexed_graph.graph().get_tx(txid) {
+                    Some(tx) => tx,
                     None => return false,
                 };
 
                 // Whether the UTXO is mature and, if needed, confirmed
                 let mut spendable = true;
+                let chain_position = u.0.chain_position;
                 if must_only_use_confirmed_tx && !chain_position.is_confirmed() {
                     return false;
                 }
