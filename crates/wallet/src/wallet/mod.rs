@@ -1996,7 +1996,6 @@ impl Wallet {
         let must_only_use_confirmed_tx = bumping_fee.is_some();
         let must_use_all_available = *drain_wallet;
 
-        let chain_tip = self.chain.tip().block_id();
         //    must_spend <- manually selected utxos
         //    may_spend  <- all other available utxos
         let mut may_spend = self.get_available_utxos();
@@ -2022,17 +2021,10 @@ impl Wallet {
                     Some(tx) => tx,
                     None => return false,
                 };
-                let chain_position = match self.indexed_graph.graph().get_chain_position(
-                    &self.chain,
-                    chain_tip,
-                    txid,
-                ) {
-                    Some(chain_position) => chain_position.cloned(),
-                    None => return false,
-                };
 
                 // Whether the UTXO is mature and, if needed, confirmed
                 let mut spendable = true;
+                let chain_position = u.0.chain_position;
                 if must_only_use_confirmed_tx && !chain_position.is_confirmed() {
                     return false;
                 }
