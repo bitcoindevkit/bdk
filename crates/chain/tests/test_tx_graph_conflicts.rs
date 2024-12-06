@@ -663,6 +663,29 @@ fn test_tx_conflict_handling() {
                 confirmed: Amount::from_sat(8000),
                 ..Default::default()
             }
+        },
+        Scenario {
+            name: "tx anchored in orphaned block and not seen in mempool should be canon",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "root",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10_000, None)],
+                    anchors: &[block_id!(1, "B")],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx",
+                    inputs: &[TxInTemplate::PrevTx("root", 0)],
+                    outputs: &[TxOutTemplate::new(9000, Some(0))],
+                    anchors: &[block_id!(6, "not G")],
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["root", "tx"]),
+            exp_chain_txouts: HashSet::from([("tx", 0)]),
+            exp_unspents: HashSet::from([("tx", 0)]),
+            exp_balance: Balance { trusted_pending: Amount::from_sat(9000), ..Default::default() }
         }
     ];
 
