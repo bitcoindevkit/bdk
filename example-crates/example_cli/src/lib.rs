@@ -421,12 +421,8 @@ pub fn planned_utxos<O: ChainOracle>(
     let outpoints = graph.index.outpoints();
     graph
         .graph()
-        .try_filter_chain_unspents(chain, chain_tip, outpoints.iter().cloned())
-        .filter_map(|r| -> Option<Result<PlanUtxo, _>> {
-            let (k, i, full_txo) = match r {
-                Err(err) => return Some(Err(err)),
-                Ok(((k, i), full_txo)) => (k, i, full_txo),
-            };
+        .try_filter_chain_unspents(chain, chain_tip, outpoints.iter().cloned())?
+        .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
             let desc = graph
                 .index
                 .keychains()
@@ -560,26 +556,18 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 } => {
                     let txouts = graph
                         .graph()
-                        .try_filter_chain_txouts(chain, chain_tip, outpoints.iter().cloned())
-                        .filter(|r| match r {
-                            Ok((_, full_txo)) => match (spent, unspent) {
-                                (true, false) => full_txo.spent_by.is_some(),
-                                (false, true) => full_txo.spent_by.is_none(),
-                                _ => true,
-                            },
-                            // always keep errored items
-                            Err(_) => true,
+                        .try_filter_chain_txouts(chain, chain_tip, outpoints.iter().cloned())?
+                        .filter(|(_, full_txo)| match (spent, unspent) {
+                            (true, false) => full_txo.spent_by.is_some(),
+                            (false, true) => full_txo.spent_by.is_none(),
+                            _ => true,
                         })
-                        .filter(|r| match r {
-                            Ok((_, full_txo)) => match (confirmed, unconfirmed) {
-                                (true, false) => full_txo.chain_position.is_confirmed(),
-                                (false, true) => !full_txo.chain_position.is_confirmed(),
-                                _ => true,
-                            },
-                            // always keep errored items
-                            Err(_) => true,
+                        .filter(|(_, full_txo)| match (confirmed, unconfirmed) {
+                            (true, false) => full_txo.chain_position.is_confirmed(),
+                            (false, true) => !full_txo.chain_position.is_confirmed(),
+                            _ => true,
                         })
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .collect::<Vec<_>>();
 
                     for (spk_i, full_txo) in txouts {
                         let addr = Address::from_script(&full_txo.txout.script_pubkey, network)?;

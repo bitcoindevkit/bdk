@@ -185,7 +185,7 @@ fn insert_tx_graph_doesnt_count_coinbase_as_spent() {
         output: vec![],
     };
 
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let changeset = graph.insert_tx(tx);
     assert!(!changeset.is_empty());
     assert!(graph.outspends(OutPoint::null()).is_empty());
@@ -216,8 +216,8 @@ fn insert_tx_graph_keeps_track_of_spend() {
         output: vec![],
     };
 
-    let mut graph1 = TxGraph::<()>::default();
-    let mut graph2 = TxGraph::<()>::default();
+    let mut graph1 = TxGraph::<ConfirmationBlockTime>::default();
+    let mut graph2 = TxGraph::<ConfirmationBlockTime>::default();
 
     // insert in different order
     let _ = graph1.insert_tx(tx1.clone());
@@ -245,7 +245,7 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
         output: vec![TxOut::NULL],
     };
 
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let _ = graph.insert_tx(tx.clone());
     assert_eq!(
         graph
@@ -257,7 +257,7 @@ fn insert_tx_can_retrieve_full_tx_from_graph() {
 
 #[test]
 fn insert_tx_displaces_txouts() {
-    let mut tx_graph = TxGraph::<()>::default();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
 
     let tx = Transaction {
         version: transaction::Version::ONE,
@@ -284,7 +284,7 @@ fn insert_tx_displaces_txouts() {
 
 #[test]
 fn insert_txout_does_not_displace_tx() {
-    let mut tx_graph = TxGraph::<()>::default();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
     let tx = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
@@ -340,7 +340,7 @@ fn insert_txout_does_not_displace_tx() {
 
 #[test]
 fn test_calculate_fee() {
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let intx1 = Transaction {
         version: transaction::Version::ONE,
         lock_time: absolute::LockTime::ZERO,
@@ -694,7 +694,7 @@ fn test_conflicting_descendants() {
     let txid_a = tx_a.compute_txid();
     let txid_b = tx_b.compute_txid();
 
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let _ = graph.insert_tx(tx_a);
     let _ = graph.insert_tx(tx_b);
 
@@ -770,7 +770,7 @@ fn test_descendants_no_repeat() {
         })
         .collect::<Vec<_>>();
 
-    let mut graph = TxGraph::<()>::default();
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
     let mut expected_txids = Vec::new();
 
     // these are NOT descendants of `tx_a`
@@ -877,63 +877,77 @@ fn test_chain_spends() {
         );
     }
 
-    // Assert that confirmed spends are returned correctly.
-    assert_eq!(
-        graph.get_chain_spend(
-            &local_chain,
-            tip.block_id(),
-            OutPoint::new(tx_0.compute_txid(), 0)
-        ),
-        Some((
-            ChainPosition::Confirmed {
-                anchor: &ConfirmationBlockTime {
-                    block_id: BlockId {
-                        hash: tip.get(98).unwrap().hash(),
-                        height: 98,
+    let build_canonical_spends =
+        |chain: &LocalChain, tx_graph: &TxGraph<ConfirmationBlockTime>| -> HashMap<OutPoint, _> {
+            tx_graph
+                .filter_chain_txouts(
+                    chain,
+                    tip.block_id(),
+                    tx_graph.all_txouts().map(|(op, _)| ((), op)),
+                )
+                .filter_map(|(_, full_txo)| Some((full_txo.outpoint, full_txo.spent_by?)))
+                .collect()
+        };
+    let build_canonical_positions = |chain: &LocalChain,
+                                     tx_graph: &TxGraph<ConfirmationBlockTime>|
+     -> HashMap<Txid, ChainPosition<ConfirmationBlockTime>> {
+        tx_graph
+            .list_canonical_txs(chain, tip.block_id())
+            .map(|canon_tx| (canon_tx.tx_node.txid, canon_tx.chain_position))
+            .collect()
+    };
+
+    {
+        let canonical_spends = build_canonical_spends(&local_chain, &graph);
+        let canonical_positions = build_canonical_positions(&local_chain, &graph);
+
+        // Assert that confirmed spends are returned correctly.
+        assert_eq!(
+            canonical_spends
+                .get(&OutPoint::new(tx_0.compute_txid(), 0))
+                .cloned(),
+            Some((
+                ChainPosition::Confirmed {
+                    anchor: ConfirmationBlockTime {
+                        block_id: tip.get(98).unwrap().block_id(),
+                        confirmation_time: 100
                     },
+                    transitively: None,
+                },
+                tx_1.compute_txid(),
+            )),
+        );
+        // Check if chain position is returned correctly.
+        assert_eq!(
+            canonical_positions.get(&tx_0.compute_txid()).cloned(),
+            Some(ChainPosition::Confirmed {
+                anchor: ConfirmationBlockTime {
+                    block_id: tip.get(95).unwrap().block_id(),
                     confirmation_time: 100
                 },
                 transitively: None
-            },
-            tx_1.compute_txid(),
-        )),
-    );
-
-    // Check if chain position is returned correctly.
-    assert_eq!(
-        graph.get_chain_position(&local_chain, tip.block_id(), tx_0.compute_txid()),
-        // Some(ObservedAs::Confirmed(&local_chain.get_block(95).expect("block expected"))),
-        Some(ChainPosition::Confirmed {
-            anchor: &ConfirmationBlockTime {
-                block_id: BlockId {
-                    hash: tip.get(95).unwrap().hash(),
-                    height: 95,
-                },
-                confirmation_time: 100
-            },
-            transitively: None
-        })
-    );
+            })
+        );
+    }
 
     // Mark the unconfirmed as seen and check correct ObservedAs status is returned.
     let _ = graph.insert_seen_at(tx_2.compute_txid(), 1234567);
+    {
+        let canonical_spends = build_canonical_spends(&local_chain, &graph);
 
-    // Check chain spend returned correctly.
-    assert_eq!(
-        graph
-            .get_chain_spend(
-                &local_chain,
-                tip.block_id(),
-                OutPoint::new(tx_0.compute_txid(), 1)
-            )
-            .unwrap(),
-        (
-            ChainPosition::Unconfirmed {
-                last_seen: Some(1234567)
-            },
-            tx_2.compute_txid()
-        )
-    );
+        // Check chain spend returned correctly.
+        assert_eq!(
+            canonical_spends
+                .get(&OutPoint::new(tx_0.compute_txid(), 1))
+                .cloned(),
+            Some((
+                ChainPosition::Unconfirmed {
+                    last_seen: Some(1234567)
+                },
+                tx_2.compute_txid()
+            ))
+        );
+    }
 
     // A conflicting transaction that conflicts with tx_1.
     let tx_1_conflict = Transaction {
@@ -944,11 +958,14 @@ fn test_chain_spends() {
         ..new_tx(0)
     };
     let _ = graph.insert_tx(tx_1_conflict.clone());
+    {
+        let canonical_positions = build_canonical_positions(&local_chain, &graph);
 
-    // Because this tx conflicts with an already confirmed transaction, chain position should return none.
-    assert!(graph
-        .get_chain_position(&local_chain, tip.block_id(), tx_1_conflict.compute_txid())
-        .is_none());
+        // Because this tx conflicts with an already confirmed transaction, chain position should return none.
+        assert!(canonical_positions
+            .get(&tx_1_conflict.compute_txid())
+            .is_none());
+    }
 
     // Another conflicting tx that conflicts with tx_2.
     let tx_2_conflict = Transaction {
@@ -958,42 +975,39 @@ fn test_chain_spends() {
         }],
         ..new_tx(0)
     };
-
     // Insert in graph and mark it as seen.
     let _ = graph.insert_tx(tx_2_conflict.clone());
     let _ = graph.insert_seen_at(tx_2_conflict.compute_txid(), 1234568);
+    {
+        let canonical_spends = build_canonical_spends(&local_chain, &graph);
+        let canonical_positions = build_canonical_positions(&local_chain, &graph);
 
-    // This should return a valid observation with correct last seen.
-    assert_eq!(
-        graph
-            .get_chain_position(&local_chain, tip.block_id(), tx_2_conflict.compute_txid())
-            .expect("position expected"),
-        ChainPosition::Unconfirmed {
-            last_seen: Some(1234568)
-        }
-    );
-
-    // Chain_spend now catches the new transaction as the spend.
-    assert_eq!(
-        graph
-            .get_chain_spend(
-                &local_chain,
-                tip.block_id(),
-                OutPoint::new(tx_0.compute_txid(), 1)
-            )
-            .expect("expect observation"),
-        (
-            ChainPosition::Unconfirmed {
+        // This should return a valid observation with correct last seen.
+        assert_eq!(
+            canonical_positions
+                .get(&tx_2_conflict.compute_txid())
+                .cloned(),
+            Some(ChainPosition::Unconfirmed {
                 last_seen: Some(1234568)
-            },
-            tx_2_conflict.compute_txid()
-        )
-    );
+            })
+        );
 
-    // Chain position of the `tx_2` is now none, as it is older than `tx_2_conflict`
-    assert!(graph
-        .get_chain_position(&local_chain, tip.block_id(), tx_2.compute_txid())
-        .is_none());
+        // Chain_spend now catches the new transaction as the spend.
+        assert_eq!(
+            canonical_spends
+                .get(&OutPoint::new(tx_0.compute_txid(), 1))
+                .cloned(),
+            Some((
+                ChainPosition::Unconfirmed {
+                    last_seen: Some(1234568)
+                },
+                tx_2_conflict.compute_txid()
+            ))
+        );
+
+        // Chain position of the `tx_2` is now none, as it is older than `tx_2_conflict`
+        assert!(canonical_positions.get(&tx_2.compute_txid()).is_none());
+    }
 }
 
 /// Ensure that `last_seen` values only increase during [`Merge::merge`].
@@ -1112,6 +1126,12 @@ fn call_map_anchors_with_non_deterministic_anchor() {
         pub non_deterministic_field: u32,
     }
 
+    impl Anchor for NonDeterministicAnchor {
+        fn anchor_block(&self) -> BlockId {
+            self.anchor_block
+        }
+    }
+
     let template = [
         TxTemplate {
             tx_name: "tx1",
@@ -1168,11 +1188,13 @@ fn call_map_anchors_with_non_deterministic_anchor() {
     }
     assert!(new_txs.next().is_none());
 
-    let new_graph_anchors: Vec<_> = new_graph
+    let mut new_graph_anchors: Vec<_> = new_graph
         .all_anchors()
         .iter()
-        .map(|i| i.0.anchor_block)
+        .flat_map(|(_, anchors)| anchors)
+        .map(|a| a.anchor_block)
         .collect();
+    new_graph_anchors.sort();
     assert_eq!(
         new_graph_anchors,
         vec![
