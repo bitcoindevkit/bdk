@@ -94,7 +94,7 @@ use crate::collections::*;
 use crate::BlockId;
 use crate::CanonicalIter;
 use crate::CanonicalReason;
-use crate::LastSeenIn;
+use crate::ObservedIn;
 use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
@@ -207,10 +207,10 @@ impl Default for TxNodeInternal {
     }
 }
 
-/// A transaction that is included in the chain, or is still in mempool.
+/// A transaction that is deemed to be part of the canonical history.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CanonicalTx<'a, T, A> {
-    /// How the transaction is observed as (confirmed or unconfirmed).
+    /// How the transaction is observed in the canonical chain (confirmed or unconfirmed).
     pub chain_position: ChainPosition<A>,
     /// The transaction node (as part of the graph).
     pub tx_node: TxNode<'a, T, A>,
@@ -840,11 +840,11 @@ impl<A: Anchor> TxGraph<A> {
                             transitively: None,
                         },
                     },
-                    CanonicalReason::LastSeen { last_seen, .. } => match last_seen {
-                        LastSeenIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
+                    CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
+                        ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
                             last_seen: Some(last_seen),
                         },
-                        LastSeenIn::Block(_) => ChainPosition::Unconfirmed { last_seen: None },
+                        ObservedIn::Block(_) => ChainPosition::Unconfirmed { last_seen: None },
                     },
                 };
                 Ok(CanonicalTx {

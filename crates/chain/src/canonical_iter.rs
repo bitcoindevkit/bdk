@@ -155,16 +155,16 @@ impl<'g, A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'g, A, C> {
 
             if let Some((txid, tx, last_seen)) = self.pending_last_seen.next() {
                 if !self.is_canonicalized(txid) {
-                    let lsi = LastSeenIn::Mempool(last_seen);
-                    self.mark_canonical(tx, CanonicalReason::from_last_seen(lsi));
+                    let observed_in = ObservedIn::Mempool(last_seen);
+                    self.mark_canonical(tx, CanonicalReason::from_observed_in(observed_in));
                 }
                 continue;
             }
 
             if let Some((txid, tx, height)) = self.pending_remaining.pop_front() {
                 if !self.is_canonicalized(txid) {
-                    let lsi = LastSeenIn::Block(height);
-                    self.mark_canonical(tx, CanonicalReason::from_last_seen(lsi));
+                    let observed_in = ObservedIn::Block(height);
+                    self.mark_canonical(tx, CanonicalReason::from_observed_in(observed_in));
                 }
                 continue;
             }
@@ -174,13 +174,12 @@ impl<'g, A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'g, A, C> {
     }
 }
 
-/// Represents when and where a given transaction is last seen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, core::hash::Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
-pub enum LastSeenIn {
-    /// The transaction was last seen in a block of height.
+/// Represents when and where a transaction was last observed in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ObservedIn {
+    /// The transaction was last observed in a block of height.
     Block(u32),
-    /// The transaction was last seen in the mempool at the given unix timestamp.
+    /// The transaction was last observed in the mempool at the given unix timestamp.
     Mempool(u64),
 }
 
@@ -194,12 +193,12 @@ pub enum CanonicalReason<A> {
         /// Whether the anchor is of the transaction's descendant.
         descendant: Option<Txid>,
     },
-    /// This transaction does not conflict with any other transaction with a more recent `last_seen`
-    /// value or one that is anchored in the best chain.
-    LastSeen {
-        /// The [`LastSeenIn`] value of the transaction.
-        last_seen: LastSeenIn,
-        /// Whether the [`LastSeenIn`] value is of the transaction's descendant.
+    /// This transaction does not conflict with any other transaction with a more recent
+    /// [`ObservedIn`] value or one that is anchored in the best chain.
+    ObservedIn {
+        /// The [`ObservedIn`] value of the transaction.
+        observed_in: ObservedIn,
+        /// Whether the [`ObservedIn`] value is of the transaction's descendant.
         descendant: Option<Txid>,
     },
 }
@@ -214,16 +213,16 @@ impl<A: Clone> CanonicalReason<A> {
     }
 
     /// Constructs a [`CanonicalReason`] from a `last_seen` value.
-    pub fn from_last_seen(last_seen: LastSeenIn) -> Self {
-        Self::LastSeen {
-            last_seen,
+    pub fn from_observed_in(observed_in: ObservedIn) -> Self {
+        Self::ObservedIn {
+            observed_in,
             descendant: None,
         }
     }
 
     /// Contruct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
     ///
-    /// This signals that either the [`LastSeenIn`] or [`Anchor`] value belongs to the transaction's
+    /// This signals that either the [`ObservedIn`] or [`Anchor`] value belongs to the transaction's
     /// descendant, but is transitively relevant.
     pub fn to_transitive(&self, descendant: Txid) -> Self {
         match self {
@@ -231,19 +230,22 @@ impl<A: Clone> CanonicalReason<A> {
                 anchor: anchor.clone(),
                 descendant: Some(descendant),
             },
-            CanonicalReason::LastSeen { last_seen, .. } => Self::LastSeen {
-                last_seen: *last_seen,
+            CanonicalReason::ObservedIn {
+                observed_in: last_seen,
+                ..
+            } => Self::ObservedIn {
+                observed_in: *last_seen,
                 descendant: Some(descendant),
             },
         }
     }
 
-    /// This signals that either the [`LastSeenIn`] or [`Anchor`] value belongs to the transaction's
+    /// This signals that either the [`ObservedIn`] or [`Anchor`] value belongs to the transaction's
     /// descendant.
     pub fn descendant(&self) -> &Option<Txid> {
         match self {
             CanonicalReason::Anchor { descendant, .. } => descendant,
-            CanonicalReason::LastSeen { descendant, .. } => descendant,
+            CanonicalReason::ObservedIn { descendant, .. } => descendant,
         }
     }
 }
