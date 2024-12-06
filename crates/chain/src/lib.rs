@@ -100,27 +100,3 @@ impl<T> core::ops::Deref for Impl<T> {
         &self.0
     }
 }
-
-/// A wrapper that we use to impl remote traits for types in our crate or dependency crates that impl [`Anchor`].
-pub struct AnchorImpl<T>(pub T);
-
-impl<T> AnchorImpl<T> {
-    /// Returns the inner `T`.
-    pub fn into_inner(self) -> T {
-        self.0
-    }
-}
-
-impl<T> From<T> for AnchorImpl<T> {
-    fn from(value: T) -> Self {
-        Self(value)
-    }
-}
-
-impl<T> core::ops::Deref for AnchorImpl<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
