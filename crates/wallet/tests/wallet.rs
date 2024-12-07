@@ -45,6 +45,95 @@ const P2WPKH_FAKE_WITNESS_SIZE: usize = 106;
 const DB_MAGIC: &[u8] = &[0x21, 0x24, 0x48];
 
 #[test]
+fn cancel_tx_frees_spent_inputs() -> anyhow::Result<()> {
+    use bdk_wallet::TxOrdering;
+    let (desc, change_desc) = get_test_wpkh_and_change_desc();
+    let mut alice = Wallet::create(desc, change_desc)
+        .network(Network::Regtest)
+        .create_wallet_no_persist()?;
+    let (desc, change_desc) = get_test_tr_single_sig_xprv_and_change_desc();
+    let (mut bob, _) = get_funded_wallet(desc, change_desc);
+
+    // Bob sends a tx to alice at time 1
+    let recip = alice
+        .next_unused_address(KeychainKind::External)
+        .script_pubkey();
+    let mut b = bob.build_tx();
+    b.add_recipient(recip, Amount::from_sat(10_000));
+    b.ordering(TxOrdering::Untouched);
+    let mut psbt = b.finish()?;
+    bob.sign(&mut psbt, SignOptions::default())?;
+    let tx = Arc::new(psbt.extract_tx()?);
+    let txid = tx.compute_txid();
+    let outpoint_1 = OutPoint::new(txid, 0);
+    alice.apply_unconfirmed_txs([(tx.clone(), 1)]);
+
+    // Alice sees the pending tx
+    assert_eq!(alice.balance().total().to_sat(), 10_000);
+    assert_eq!(alice.balance().untrusted_pending.to_sat(), 10_000);
+
+    // `cancel_tx` should abandon the outputs
+    alice.cancel_tx(&tx);
+    assert_eq!(alice.balance().total(), Amount::ZERO);
+
+    // the tx confirms anyway
+    let new_tip = alice.latest_checkpoint().height() + 1;
+    let block = BlockId {
+        height: new_tip,
+        hash: BlockHash::all_zeros(),
+    };
+    insert_checkpoint(&mut alice, block);
+    let anchor = ConfirmationBlockTime {
+        block_id: block,
+        confirmation_time: 1,
+    };
+    insert_anchor(&mut alice, txid, anchor);
+    assert_eq!(alice.balance().confirmed.to_sat(), 10_000);
+
+    // Now alice creates tx2 to herself
+    let recip = alice
+        .next_unused_address(KeychainKind::External)
+        .script_pubkey();
+    let mut b = alice.build_tx();
+    b.add_recipient(recip, Amount::from_sat(9800));
+    b.ordering(TxOrdering::Untouched);
+    let mut psbt = b.finish()?;
+    alice.sign(&mut psbt, SignOptions::default())?;
+    let tx2 = psbt.extract_tx()?;
+    let outpoint_2 = OutPoint::new(tx2.compute_txid(), 0);
+    insert_tx(&mut alice, tx2.clone());
+    assert_eq!(alice.balance().total().to_sat(), 9800);
+    assert_eq!(alice.balance().untrusted_pending.to_sat(), 9800);
+    assert_eq!(alice.list_unspent().collect::<Vec<_>>().len(), 1);
+    assert_eq!(alice.list_unspent().next().unwrap().outpoint, outpoint_2);
+
+    // Alice cancels tx2 to free the spent input (outpoint 1)
+    alice.cancel_tx(&tx2);
+    assert_eq!(alice.balance().total().to_sat(), 10_000);
+    assert_eq!(alice.balance().confirmed.to_sat(), 10_000);
+    assert_eq!(alice.list_unspent().collect::<Vec<_>>().len(), 1);
+    assert_eq!(alice.list_unspent().next().unwrap().outpoint, outpoint_1);
+
+    // tx2 confirms anyway, alice should see outpoint 2
+    let new_tip = alice.latest_checkpoint().height() + 1;
+    let block = BlockId {
+        height: new_tip,
+        hash: BlockHash::all_zeros(),
+    };
+    insert_checkpoint(&mut alice, block);
+    let anchor = ConfirmationBlockTime {
+        block_id: block,
+        confirmation_time: 2,
+    };
+    insert_anchor(&mut alice, tx2.compute_txid(), anchor);
+    assert_eq!(alice.balance().total().to_sat(), 9800);
+    assert_eq!(alice.list_unspent().collect::<Vec<_>>().len(), 1);
+    assert_eq!(alice.list_unspent().next().unwrap().outpoint, outpoint_2);
+
+    Ok(())
+}
+
+#[test]
 fn wallet_is_persisted() -> anyhow::Result<()> {
     fn run<Db, CreateDb, OpenDb>(
         filename: &str,

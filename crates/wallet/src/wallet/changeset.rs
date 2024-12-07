@@ -1,7 +1,10 @@
 use bdk_chain::{
     indexed_tx_graph, keychain_txout, local_chain, tx_graph, ConfirmationBlockTime, Merge,
 };
+use bitcoin::Txid;
 use miniscript::{Descriptor, DescriptorPublicKey};
+
+use crate::wallet::tx_details;
 
 type IndexedTxGraphChangeSet =
     indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>;
@@ -15,6 +18,9 @@ pub struct ChangeSet {
     pub change_descriptor: Option<Descriptor<DescriptorPublicKey>>,
     /// Stores the network type of the transaction data.
     pub network: Option<bitcoin::Network>,
+    /// Details and metadata of wallet transactions
+    pub tx_details: Option<tx_details::ChangeSet>,
+
     /// Changes to the [`LocalChain`](local_chain::LocalChain).
     pub local_chain: local_chain::ChangeSet,
     /// Changes to [`TxGraph`](tx_graph::TxGraph).
@@ -49,6 +55,12 @@ impl Merge for ChangeSet {
             self.network = other.network;
         }
 
+        match (&mut self.tx_details, other.tx_details) {
+            (None, b) => self.tx_details = b,
+            (Some(a), Some(b)) => Merge::merge(a, b),
+            _ => {}
+        }
+
         Merge::merge(&mut self.local_chain, other.local_chain);
         Merge::merge(&mut self.tx_graph, other.tx_graph);
         Merge::merge(&mut self.indexer, other.indexer);
@@ -58,6 +70,7 @@ impl Merge for ChangeSet {
         self.descriptor.is_none()
             && self.change_descriptor.is_none()
             && self.network.is_none()
+            && (self.tx_details.is_none() || self.tx_details.as_ref().unwrap().is_empty())
             && self.local_chain.is_empty()
             && self.tx_graph.is_empty()
             && self.indexer.is_empty()
@@ -70,6 +83,8 @@ impl ChangeSet {
     pub const WALLET_SCHEMA_NAME: &'static str = "bdk_wallet";
     /// Name of table to store wallet descriptors and network.
     pub const WALLET_TABLE_NAME: &'static str = "bdk_wallet";
+    /// Name of table to store wallet tx details
+    pub const TX_DETAILS_TABLE_NAME: &'static str = "bdk_tx_details";
 
     /// Initialize sqlite tables for wallet tables.
     pub fn init_sqlite_tables(db_tx: &chain::rusqlite::Transaction) -> chain::rusqlite::Result<()> {
@@ -82,7 +97,19 @@ impl ChangeSet {
                 ) STRICT;",
             Self::WALLET_TABLE_NAME,
         )];
-        crate::rusqlite_impl::migrate_schema(db_tx, Self::WALLET_SCHEMA_NAME, &[schema_v0])?;
+        // schema_v1 adds a table for tx-details
+        let schema_v1: &[&str] = &[&format!(
+            "CREATE TABLE {} ( \
+                txid TEXT PRIMARY KEY NOT NULL, \
+                is_canceled INTEGER DEFAULT 0 \
+                ) STRICT;",
+            Self::TX_DETAILS_TABLE_NAME,
+        )];
+        crate::rusqlite_impl::migrate_schema(
+            db_tx,
+            Self::WALLET_SCHEMA_NAME,
+            &[schema_v0, schema_v1],
+        )?;
 
         bdk_chain::local_chain::ChangeSet::init_sqlite_tables(db_tx)?;
         bdk_chain::tx_graph::ChangeSet::<ConfirmationBlockTime>::init_sqlite_tables(db_tx)?;
@@ -118,6 +145,30 @@ impl ChangeSet {
             changeset.change_descriptor = change_desc.map(Impl::into_inner);
             changeset.network = network.map(Impl::into_inner);
         }
+
+        // select tx details
+        let mut change = tx_details::ChangeSet::default();
+        let mut stmt = db_tx.prepare_cached(&format!(
+            "SELECT txid, is_canceled FROM {}",
+            Self::TX_DETAILS_TABLE_NAME,
+        ))?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, Impl<Txid>>("txid")?,
+                row.get::<_, bool>("is_canceled")?,
+            ))
+        })?;
+        for res in rows {
+            let (Impl(txid), is_canceled) = res?;
+            let det = tx_details::Details { is_canceled };
+            let record = tx_details::Record::Details(det);
+            change.records.push((txid, record));
+        }
+        changeset.tx_details = if change.is_empty() {
+            None
+        } else {
+            Some(change)
+        };
 
         changeset.local_chain = local_chain::ChangeSet::from_sqlite(db_tx)?;
         changeset.tx_graph = tx_graph::ChangeSet::<_>::from_sqlite(db_tx)?;
@@ -167,6 +218,21 @@ impl ChangeSet {
             })?;
         }
 
+        // persist tx details
+        let mut cancel_tx_stmt = db_tx.prepare_cached(&format!(
+            "REPLACE INTO {}(txid, is_canceled) VALUES(:txid, 1)",
+            Self::TX_DETAILS_TABLE_NAME,
+        ))?;
+        if let Some(change) = &self.tx_details {
+            for (txid, record) in &change.records {
+                if record == &tx_details::Record::Canceled {
+                    cancel_tx_stmt.execute(named_params! {
+                        ":txid": Impl(*txid),
+                    })?;
+                }
+            }
+        }
+
         self.local_chain.persist_to_sqlite(db_tx)?;
         self.tx_graph.persist_to_sqlite(db_tx)?;
         self.indexer.persist_to_sqlite(db_tx)?;
@@ -206,6 +272,15 @@ impl From<keychain_txout::ChangeSet> for ChangeSet {
     fn from(indexer: keychain_txout::ChangeSet) -> Self {
         Self {
             indexer,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<tx_details::ChangeSet> for ChangeSet {
+    fn from(value: tx_details::ChangeSet) -> Self {
+        Self {
+            tx_details: Some(value),
             ..Default::default()
         }
     }
