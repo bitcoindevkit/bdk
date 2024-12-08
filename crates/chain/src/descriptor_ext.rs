@@ -1,5 +1,6 @@
 use crate::miniscript::{Descriptor, DescriptorPublicKey};
 use bitcoin::hashes::{hash_newtype, sha256, Hash};
+use bitcoin::Amount;
 
 hash_newtype! {
     /// Represents the unique ID of a descriptor.
@@ -13,9 +14,9 @@ hash_newtype! {
 
 /// A trait to extend the functionality of a miniscript descriptor.
 pub trait DescriptorExt {
-    /// Returns the minimum value (in satoshis) at which an output is broadcastable.
+    /// Returns the minimum [`Amount`] at which an output is broadcast-able.
     /// Panics if the descriptor wildcard is hardened.
-    fn dust_value(&self) -> u64;
+    fn dust_value(&self) -> Amount;
 
     /// Returns the descriptor ID, calculated as the sha256 hash of the spk derived from the
     /// descriptor at index 0.
@@ -23,12 +24,11 @@ pub trait DescriptorExt {
 }
 
 impl DescriptorExt for Descriptor<DescriptorPublicKey> {
-    fn dust_value(&self) -> u64 {
+    fn dust_value(&self) -> Amount {
         self.at_derivation_index(0)
             .expect("descriptor can't have hardened derivation")
             .script_pubkey()
             .minimal_non_dust()
-            .to_sat()
     }
 
     fn descriptor_id(&self) -> DescriptorId {
