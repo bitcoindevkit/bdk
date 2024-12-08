@@ -57,6 +57,7 @@ mod params;
 mod persisted;
 pub mod signer;
 pub mod tx_builder;
+mod tx_details;
 pub(crate) mod utils;
 
 use crate::collections::{BTreeMap, HashMap};
@@ -76,6 +77,7 @@ use crate::wallet::{
     error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError},
     signer::{SignOptions, SignerError, SignerOrdering, SignersContainer, TransactionSigner},
     tx_builder::{FeePolicy, TxBuilder, TxParams},
+    tx_details::TxDetails,
     utils::{check_nsequence_rbf, After, Older, SecpCtx},
 };
 
@@ -112,6 +114,7 @@ pub struct Wallet {
     stage: ChangeSet,
     network: Network,
     secp: SecpCtx,
+    tx_details: TxDetails,
 }
 
 /// An update to [`Wallet`].
@@ -409,6 +412,7 @@ impl Wallet {
         let change_descriptor = index.get_descriptor(KeychainKind::Internal).cloned();
         let indexed_graph = IndexedTxGraph::new(index);
         let indexed_graph_changeset = indexed_graph.initial_changeset();
+        let tx_details = TxDetails::default();
 
         let stage = ChangeSet {
             descriptor,
@@ -417,6 +421,7 @@ impl Wallet {
             tx_graph: indexed_graph_changeset.tx_graph,
             indexer: indexed_graph_changeset.indexer,
             network: Some(network),
+            ..Default::default()
         };
 
         Ok(Wallet {
@@ -427,6 +432,7 @@ impl Wallet {
             indexed_graph,
             stage,
             secp,
+            tx_details,
         })
     }
 
@@ -609,6 +615,11 @@ impl Wallet {
         indexed_graph.apply_changeset(changeset.indexer.into());
         indexed_graph.apply_changeset(changeset.tx_graph.into());
 
+        let mut tx_details = TxDetails::default();
+        if let Some(change) = changeset.tx_details {
+            tx_details.apply_changeset(change);
+        }
+
         let stage = ChangeSet::default();
 
         Ok(Some(Wallet {
@@ -619,6 +630,7 @@ impl Wallet {
             stage,
             network,
             secp,
+            tx_details,
         }))
     }
 
@@ -815,14 +827,34 @@ impl Wallet {
 
     /// Return the list of unspent outputs of this wallet
     pub fn list_unspent(&self) -> impl Iterator<Item = LocalOutput> + '_ {
+        self._list_unspent()
+            .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
+    }
+
+    /// `list_unspent` that accounts for canceled txs
+    fn _list_unspent(
+        &self,
+    ) -> impl Iterator<Item = ((KeychainKind, u32), FullTxOut<ConfirmationBlockTime>)> + '_ {
         self.indexed_graph
             .graph()
-            .filter_chain_unspents(
+            .filter_chain_txouts(
                 &self.chain,
                 self.chain.tip().block_id(),
                 self.indexed_graph.index.outpoints().iter().cloned(),
             )
-            .map(|((k, i), full_txo)| new_local_utxo(k, i, full_txo))
+            .filter(|(_, txo)| {
+                txo.chain_position.is_confirmed() || !self.is_canceled_tx(&txo.outpoint.txid)
+            })
+            .filter(|(_, txo)| {
+                match txo.spent_by {
+                    // keep unspent
+                    None => true,
+                    // keep if spent by a canceled tx
+                    Some((pos, spend_txid)) => {
+                        self.is_canceled_tx(&spend_txid) && !pos.is_confirmed()
+                    }
+                }
+            })
     }
 
     /// List all relevant outputs (includes both spent and unspent, confirmed and unconfirmed).
@@ -1103,12 +1135,38 @@ impl Wallet {
     /// Return the balance, separated into available, trusted-pending, untrusted-pending and immature
     /// values.
     pub fn balance(&self) -> Balance {
-        self.indexed_graph.graph().balance(
-            &self.chain,
-            self.chain.tip().block_id(),
-            self.indexed_graph.index.outpoints().iter().cloned(),
-            |&(k, _), _| k == KeychainKind::Internal,
-        )
+        let mut immature = Amount::ZERO;
+        let mut trusted_pending = Amount::ZERO;
+        let mut untrusted_pending = Amount::ZERO;
+        let mut confirmed = Amount::ZERO;
+
+        let chain_tip = self.latest_checkpoint().height();
+
+        for (indexed, txo) in self._list_unspent() {
+            match &txo.chain_position {
+                ChainPosition::Confirmed { .. } => {
+                    if txo.is_confirmed_and_spendable(chain_tip) {
+                        confirmed += txo.txout.value;
+                    } else if !txo.is_mature(chain_tip) {
+                        immature += txo.txout.value;
+                    }
+                }
+                ChainPosition::Unconfirmed { .. } => {
+                    if let (KeychainKind::Internal, _) = indexed {
+                        trusted_pending += txo.txout.value;
+                    } else {
+                        untrusted_pending += txo.txout.value;
+                    }
+                }
+            }
+        }
+
+        Balance {
+            immature,
+            trusted_pending,
+            untrusted_pending,
+            confirmed,
+        }
     }
 
     /// Add an external signer
@@ -1937,10 +1995,18 @@ impl Wallet {
             .0
     }
 
+    /// Whether the transaction with `txid` was canceled
+    fn is_canceled_tx(&self, txid: &Txid) -> bool {
+        self.tx_details
+            .map
+            .get(txid)
+            .map(|v| v.is_canceled)
+            .unwrap_or(false)
+    }
+
     /// Informs the wallet that you no longer intend to broadcast a tx that was built from it.
     ///
     /// This frees up the change address used when creating the tx for use in future transactions.
-    // TODO: Make this free up reserved utxos when that's implemented
     pub fn cancel_tx(&mut self, tx: &Transaction) {
         let txout_index = &mut self.indexed_graph.index;
         for txout in &tx.output {
@@ -1950,6 +2016,8 @@ impl Wallet {
                 txout_index.unmark_used(*keychain, *index);
             }
         }
+        self.stage
+            .merge(self.tx_details.cancel_tx(tx.compute_txid()).into());
     }
 
     fn get_descriptor_for_txout(&self, txout: &TxOut) -> Option<DerivedDescriptor> {
