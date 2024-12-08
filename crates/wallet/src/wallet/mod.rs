@@ -1453,15 +1453,15 @@ impl Wallet {
 
         let coin_selection = coin_selection
             .coin_select(
-                required_utxos.clone(),
-                optional_utxos.clone(),
+                required_utxos,
+                optional_utxos,
                 fee_rate,
-                outgoing.to_sat() + fee_amount.to_sat(),
+                outgoing + fee_amount,
                 &drain_script,
                 rng,
             )
             .map_err(CreateTxError::CoinSelection)?;
-        fee_amount += Amount::from_sat(coin_selection.fee_amount);
+        fee_amount += coin_selection.fee_amount;
         let excess = &coin_selection.excess;
 
         tx.input = coin_selection
@@ -1492,7 +1492,9 @@ impl Wallet {
                 {
                     return Err(CreateTxError::CoinSelection(InsufficientFunds {
                         needed: *dust_threshold,
-                        available: remaining_amount.saturating_sub(*change_fee),
+                        available: remaining_amount
+                            .checked_sub(*change_fee)
+                            .unwrap_or_default(),
                     }));
                 }
             } else {
@@ -1503,16 +1505,16 @@ impl Wallet {
         match excess {
             NoChange {
                 remaining_amount, ..
-            } => fee_amount += Amount::from_sat(*remaining_amount),
+            } => fee_amount += *remaining_amount,
             Change { amount, fee } => {
                 if self.is_mine(drain_script.clone()) {
-                    received += Amount::from_sat(*amount);
+                    received += *amount;
                 }
-                fee_amount += Amount::from_sat(*fee);
+                fee_amount += *fee;
 
                 // create drain output
                 let drain_output = TxOut {
-                    value: Amount::from_sat(*amount),
+                    value: *amount,
                     script_pubkey: drain_script,
                 };
 

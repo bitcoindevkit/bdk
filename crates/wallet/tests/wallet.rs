@@ -3838,7 +3838,7 @@ fn test_spend_coinbase() {
         Err(CreateTxError::CoinSelection(
             coin_selection::InsufficientFunds {
                 needed: _,
-                available: 0
+                available: Amount::ZERO
             }
         ))
     ));
@@ -3853,7 +3853,7 @@ fn test_spend_coinbase() {
         Err(CreateTxError::CoinSelection(
             coin_selection::InsufficientFunds {
                 needed: _,
-                available: 0
+                available: Amount::ZERO
             }
         ))
     );
