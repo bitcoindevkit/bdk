@@ -324,7 +324,7 @@ where
         .expect("must exist")
         .1;
 
-    let min_drain_value = change_desc.dust_value();
+    let min_drain_value = change_desc.dust_value().to_sat();
 
     let target = Target {
         outputs: TargetOutputs::fund_outputs(
