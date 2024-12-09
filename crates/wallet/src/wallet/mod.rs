@@ -1399,17 +1399,11 @@ impl Wallet {
         }
 
         let mut outgoing = Amount::ZERO;
-        let mut received = Amount::ZERO;
-
         let recipients = params.recipients.iter().map(|(r, v)| (r, *v));
 
         for (index, (script_pubkey, value)) in recipients.enumerate() {
             if !params.allow_dust && value.is_dust(script_pubkey) && !script_pubkey.is_op_return() {
                 return Err(CreateTxError::OutputBelowDustLimit(index));
-            }
-
-            if self.is_mine(script_pubkey.clone()) {
-                received += value;
             }
 
             let new_out = TxOut {
@@ -1467,9 +1461,8 @@ impl Wallet {
                 rng,
             )
             .map_err(CreateTxError::CoinSelection)?;
-        fee_amount += coin_selection.fee_amount;
-        let excess = &coin_selection.excess;
 
+        let excess = &coin_selection.excess;
         tx.input = coin_selection
             .selected
             .iter()
@@ -1508,28 +1501,19 @@ impl Wallet {
             }
         }
 
-        match excess {
-            Excess::NoChange {
-                remaining_amount, ..
-            } => fee_amount += *remaining_amount,
-            Excess::Change { amount, fee } => {
-                if self.is_mine(drain_script.clone()) {
-                    received += *amount;
-                }
-                fee_amount += *fee;
+        // if there's change, create and add a change output
+        if let Excess::Change { amount, .. } = excess {
+            // create drain output
+            let drain_output = TxOut {
+                value: *amount,
+                script_pubkey: drain_script,
+            };
 
-                // create drain output
-                let drain_output = TxOut {
-                    value: *amount,
-                    script_pubkey: drain_script,
-                };
-
-                // TODO: We should pay attention when adding a new output: this might increase
-                // the length of the "number of vouts" parameter by 2 bytes, potentially making
-                // our feerate too low
-                tx.output.push(drain_output);
-            }
-        };
+            // TODO: We should pay attention when adding a new output: this might increase
+            // the length of the "number of vouts" parameter by 2 bytes, potentially making
+            // our feerate too low
+            tx.output.push(drain_output);
+        }
 
         // sort input/outputs according to the chosen algorithm
         params.ordering.sort_tx_with_aux_rand(&mut tx, rng);
