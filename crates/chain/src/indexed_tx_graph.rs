@@ -1,5 +1,6 @@
 //! Contains the [`IndexedTxGraph`] and associated types. Refer to the
 //! [`IndexedTxGraph`] documentation for more.
+use crate::collections::HashSet;
 use core::fmt::Debug;
 
 use alloc::{sync::Arc, vec::Vec};
@@ -178,7 +179,7 @@ where
 
         let mut tx_graph = tx_graph::ChangeSet::default();
         for (tx, anchors) in txs {
-            if self.index.is_tx_relevant(&tx) {
+            if self.index.is_tx_relevant(&tx) || self.graph.direct_conflicts(&tx).next().is_some() {
                 let txid = tx.compute_txid();
                 tx_graph.merge(self.graph.insert_tx(tx.clone()));
                 for anchor in anchors {
@@ -218,10 +219,37 @@ where
             indexer.merge(self.index.index_tx(tx));
         }
 
+        // It is possible that a spk-relevant transaction can be replaced with a non-spk-relevant
+        // transaction. Furthermore, the existence of the replacement transaction may mean that the
+        // original spk-relevant transaction is evicted. Therefore, we need to include the new
+        // non-spk-relevant transaction in the graph.
+        //
+        // `relevant_spends` keeps tracks of outpoints that are associated with spk-relevant
+        // transactions in `unconfirmed_txs`. This allows us to detect non-spk-relevant replacements
+        // when both the original and the replacement are introduced together.
+        let mut relevant_spends = HashSet::<OutPoint>::new();
+
+        let mut indexer_changeset = I::ChangeSet::default();
+        for (tx, _) in &txs {
+            indexer_changeset.merge(self.index.index_tx(tx));
+
+            if self.index.is_tx_relevant(tx) && !tx.is_coinbase() {
+                relevant_spends.extend(tx.input.iter().map(|txin| txin.previous_output));
+            }
+        }
+
         let graph = self.graph.batch_insert_unconfirmed(
             txs.into_iter()
-                .filter(|(tx, _)| self.index.is_tx_relevant(tx))
-                .map(|(tx, seen_at)| (tx.clone(), seen_at)),
+                .filter(|(tx, _)| {
+                    self.index.is_tx_relevant(tx)
+                        || tx
+                            .input
+                            .iter()
+                            .any(|txin| relevant_spends.contains(&txin.previous_output))
+                        || self.graph.direct_conflicts(tx).next().is_some()
+                })
+                .map(|(tx, seen_at)| (tx.clone(), seen_at))
+                .collect::<Vec<_>>(),
         );
 
         ChangeSet {
@@ -278,7 +306,8 @@ where
         let mut changeset = ChangeSet::<A, I::ChangeSet>::default();
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
             changeset.indexer.merge(self.index.index_tx(tx));
-            if self.index.is_tx_relevant(tx) {
+
+            if self.index.is_tx_relevant(tx) || self.graph.direct_conflicts(tx).next().is_some() {
                 let txid = tx.compute_txid();
                 let anchor = TxPosInBlock {
                     block,
