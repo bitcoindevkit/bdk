@@ -525,8 +525,8 @@ fn test_list_owned_txouts() {
 }
 
 /// Given a `LocalChain`, `IndexedTxGraph`, and a `Transaction`, when we insert some anchor
-/// (possibly non-canonical) and/or a last-seen timestamp into the graph, we expect the
-/// result of `get_chain_position` in these cases:
+/// (possibly non-canonical) and/or a last-seen timestamp into the graph, we check the canonical
+/// position of the tx:
 ///
 /// - tx with no anchors or last_seen has no `ChainPosition`
 /// - tx with any last_seen will be `Unconfirmed`
@@ -561,9 +561,8 @@ fn test_get_chain_position() {
     let cp = CheckPoint::from_block_ids(blocks.clone()).unwrap();
     let chain = LocalChain::from_tip(cp).unwrap();
 
-    // The test will insert a transaction into the indexed tx graph
-    // along with any anchors and timestamps, then check the value
-    // returned by `get_chain_position`.
+    // The test will insert a transaction into the indexed tx graph along with any anchors and
+    // timestamps, then check the tx's canonical position is expected.
     fn run(
         chain: &LocalChain,
         graph: &mut IndexedTxGraph<BlockId, SpkTxOutIndex<u32>>,
