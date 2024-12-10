@@ -634,20 +634,25 @@ impl<A: Anchor> TxGraph<A> {
     /// The [`ChangeSet`] returned will be empty if graph already knows that `txid` exists in
     /// `anchor`.
     pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> ChangeSet<A> {
+        // These two variables are used to determine how to modify the `txid`'s entry in
+        // `txs_by_highest_conf_heights`.
+        // We want to remove `(old_top_h?, txid)` and insert `(new_top_h?, txid)`.
         let mut old_top_h = None;
         let mut new_top_h = anchor.confirmation_height_upper_bound();
 
         let is_changed = match self.anchors.entry(txid) {
             hash_map::Entry::Occupied(mut e) => {
-                fn top_anchor_height<A: Anchor>(anchors: &BTreeSet<A>) -> Option<u32> {
-                    anchors
-                        .iter()
-                        .last()
-                        .map(Anchor::confirmation_height_upper_bound)
+                old_top_h = e
+                    .get()
+                    .iter()
+                    .last()
+                    .map(Anchor::confirmation_height_upper_bound);
+                if let Some(old_top_h) = old_top_h {
+                    if old_top_h > new_top_h {
+                        new_top_h = old_top_h;
+                    }
                 }
-                old_top_h = top_anchor_height(e.get());
                 let is_changed = e.get_mut().insert(anchor.clone());
-                new_top_h = top_anchor_height(e.get()).expect("must have anchor");
                 is_changed
             }
             hash_map::Entry::Vacant(e) => {
@@ -658,7 +663,12 @@ impl<A: Anchor> TxGraph<A> {
 
         let mut changeset = ChangeSet::<A>::default();
         if is_changed {
-            if old_top_h != Some(new_top_h) {
+            let new_top_is_changed = match old_top_h {
+                None => true,
+                Some(old_top_h) if old_top_h != new_top_h => true,
+                _ => false,
+            };
+            if new_top_is_changed {
                 if let Some(prev_top_h) = old_top_h {
                     self.txs_by_highest_conf_heights.remove(&(prev_top_h, txid));
                 }
