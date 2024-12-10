@@ -47,6 +47,10 @@ bdk_file_store = { path = "../file_store" }
 anyhow = "1"
 rand = "^0.8"
 
+# temporary dev-dependencies for testing purposes
+bdk_bitcoind_rpc = { path = "../bitcoind_rpc" }
+bdk_testenv = { path = "../testenv" }
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
