@@ -13,9 +13,10 @@ pub struct CanonicalIter<'g, A, C> {
     chain: &'g C,
     chain_tip: BlockId,
 
-    pending_anchored: Box<dyn Iterator<Item = (Txid, Arc<Transaction>, &'g BTreeSet<A>)> + 'g>,
-    pending_last_seen: Box<dyn Iterator<Item = (Txid, Arc<Transaction>, u64)> + 'g>,
-    pending_remaining: VecDeque<(Txid, Arc<Transaction>, u32)>,
+    unprocessed_txs_with_anchors:
+        Box<dyn Iterator<Item = (Txid, Arc<Transaction>, &'g BTreeSet<A>)> + 'g>,
+    unprocessed_txs_with_last_seens: Box<dyn Iterator<Item = (Txid, Arc<Transaction>, u64)> + 'g>,
+    unprocessed_txs_left_over: VecDeque<(Txid, Arc<Transaction>, u32)>,
 
     canonical: HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>,
     not_canonical: HashSet<Txid>,
@@ -41,9 +42,9 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
             tx_graph,
             chain,
             chain_tip,
-            pending_anchored,
-            pending_last_seen,
-            pending_remaining: VecDeque::new(),
+            unprocessed_txs_with_anchors: pending_anchored,
+            unprocessed_txs_with_last_seens: pending_last_seen,
+            unprocessed_txs_left_over: VecDeque::new(),
             canonical: HashMap::new(),
             not_canonical: HashSet::new(),
             queue: VecDeque::new(),
@@ -67,18 +68,20 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 .chain
                 .is_block_in_chain(anchor.anchor_block(), self.chain_tip)?;
             if in_chain_opt == Some(true) {
-                self.mark_canonical(tx, CanonicalReason::from_anchor(anchor.clone()));
+                self.mark_canonical(txid, tx, CanonicalReason::from_anchor(anchor.clone()));
                 return Ok(());
             }
         }
         // cannot determine
-        self.pending_remaining.push_back((
+        self.unprocessed_txs_left_over.push_back((
             txid,
             tx,
             anchors
                 .iter()
                 .last()
-                .unwrap()
+                .expect(
+                    "tx taken from `unprocessed_txs_with_anchors` so it must atleast have an anchor",
+                )
                 .confirmation_height_upper_bound(),
         ));
         Ok(())
@@ -86,8 +89,8 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
 
     /// Marks a transaction and it's ancestors as canoncial. Mark all conflicts of these as
     /// `not_canonical`.
-    fn mark_canonical(&mut self, tx: Arc<Transaction>, reason: CanonicalReason<A>) {
-        let starting_txid = tx.compute_txid();
+    fn mark_canonical(&mut self, txid: Txid, tx: Arc<Transaction>, reason: CanonicalReason<A>) {
+        let starting_txid = txid;
         let mut is_root = true;
         TxAncestors::new_include_root(
             self.tx_graph,
@@ -126,11 +129,11 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 Some(())
             },
         )
-        .for_each(|_| {})
+        .run_until_finished()
     }
 }
 
-impl<'g, A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'g, A, C> {
+impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
     type Item = Result<(Txid, Arc<Transaction>, CanonicalReason<A>), C::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -144,7 +147,7 @@ impl<'g, A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'g, A, C> {
                 return Some(Ok((txid, tx, reason)));
             }
 
-            if let Some((txid, tx, anchors)) = self.pending_anchored.next() {
+            if let Some((txid, tx, anchors)) = self.unprocessed_txs_with_anchors.next() {
                 if !self.is_canonicalized(txid) {
                     if let Err(err) = self.scan_anchors(txid, tx, anchors) {
                         return Some(Err(err));
@@ -153,18 +156,18 @@ impl<'g, A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'g, A, C> {
                 continue;
             }
 
-            if let Some((txid, tx, last_seen)) = self.pending_last_seen.next() {
+            if let Some((txid, tx, last_seen)) = self.unprocessed_txs_with_last_seens.next() {
                 if !self.is_canonicalized(txid) {
                     let observed_in = ObservedIn::Mempool(last_seen);
-                    self.mark_canonical(tx, CanonicalReason::from_observed_in(observed_in));
+                    self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
                 }
                 continue;
             }
 
-            if let Some((txid, tx, height)) = self.pending_remaining.pop_front() {
+            if let Some((txid, tx, height)) = self.unprocessed_txs_left_over.pop_front() {
                 if !self.is_canonicalized(txid) {
                     let observed_in = ObservedIn::Block(height);
-                    self.mark_canonical(tx, CanonicalReason::from_observed_in(observed_in));
+                    self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
                 }
                 continue;
             }
@@ -212,7 +215,7 @@ impl<A: Clone> CanonicalReason<A> {
         }
     }
 
-    /// Constructs a [`CanonicalReason`] from a `last_seen` value.
+    /// Constructs a [`CanonicalReason`] from an `observed_in` value.
     pub fn from_observed_in(observed_in: ObservedIn) -> Self {
         Self::ObservedIn {
             observed_in,
@@ -230,11 +233,8 @@ impl<A: Clone> CanonicalReason<A> {
                 anchor: anchor.clone(),
                 descendant: Some(descendant),
             },
-            CanonicalReason::ObservedIn {
-                observed_in: last_seen,
-                ..
-            } => Self::ObservedIn {
-                observed_in: *last_seen,
+            CanonicalReason::ObservedIn { observed_in, .. } => Self::ObservedIn {
+                observed_in: *observed_in,
                 descendant: Some(descendant),
             },
         }
