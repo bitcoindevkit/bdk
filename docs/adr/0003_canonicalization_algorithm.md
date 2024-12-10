@@ -62,9 +62,9 @@ The algorithm's premise is as follows:
 5. A transaction with a higher last-seen has precedence.
 6. Last-seen values are transitive. A transaction's real last-seen value is the max between it's last-seen value all of it's descendants.
 
-Like Option 3's algorithm, we maintain two mutually-exclusive `txid` sets: `canoncial` and `not_canonical`.
+Like Option 3's algorithm, we maintain two mutually-exclusive `txid` sets: `canonical` and `not_canonical`.
 
-Imagine a method `mark_canonical(A)` that is based on premise 1 and 2. This method will mark transaction `A` and all of it's ancestors as canonical. For each transaction that is marked canonical, we can iterate all of it's conflicts and mark those as `non_canonical`. If a transaction already exists in `canoncial` or `not_canonical`, we can break early, avoiding duplicate work.
+Imagine a method `mark_canonical(A)` that is based on premise 1 and 2. This method will mark transaction `A` and all of it's ancestors as canonical. For each transaction that is marked canonical, we can iterate all of it's conflicts and mark those as `non_canonical`. If a transaction already exists in `canonical` or `not_canonical`, we can break early, avoiding duplicate work.
 
 This algorithm iterates transactions in 3 runs.
 

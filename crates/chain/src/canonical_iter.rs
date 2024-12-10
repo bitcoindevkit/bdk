@@ -87,7 +87,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
         Ok(())
     }
 
-    /// Marks a transaction and it's ancestors as canoncial. Mark all conflicts of these as
+    /// Marks a transaction and it's ancestors as canonical. Mark all conflicts of these as
     /// `not_canonical`.
     fn mark_canonical(&mut self, txid: Txid, tx: Arc<Transaction>, reason: CanonicalReason<A>) {
         let starting_txid = txid;
