@@ -1844,6 +1844,9 @@ impl Wallet {
             .graph()
             .list_canonical_txs(&self.chain, chain_tip)
             .filter(|canon_tx| prev_txids.contains(&canon_tx.tx_node.txid))
+            // This is for a small performance gain. Although `.filter` filters out excess txs, it
+            // will still consume the internal `CanonicalIter` entirely. Having a `.take` here
+            // allows us to stop further unnecessary canonicalization.
             .take(prev_txids.len())
             .map(|canon_tx| {
                 let txid = canon_tx.tx_node.txid;
