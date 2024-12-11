@@ -81,10 +81,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("confirmed_genesis", 0), ("confirmed_conflict", 0)]),
             exp_unspents: HashSet::from([("confirmed_conflict", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
-                trusted_pending: Amount::ZERO,
-                untrusted_pending: Amount::ZERO,
                 confirmed: Amount::from_sat(20000),
+                ..Default::default()
             },
         },
         Scenario {
@@ -413,12 +411,13 @@ fn test_tx_conflict_handling() {
                     inputs: &[TxInTemplate::Bogus],
                     outputs: &[TxOutTemplate::new(10000, Some(0))],
                     anchors: &[block_id!(1, "B")],
-                    last_seen: None,
+                    ..Default::default()
                 },
                 TxTemplate {
                     tx_name: "B",
                     inputs: &[TxInTemplate::PrevTx("A", 0)],
                     outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    last_seen: Some(2),
                     ..Default::default()
                 },
                 TxTemplate {
@@ -432,6 +431,7 @@ fn test_tx_conflict_handling() {
                     tx_name: "C",
                     inputs: &[TxInTemplate::PrevTx("B'", 0)],
                     outputs: &[TxOutTemplate::new(30000, Some(3))],
+                    last_seen: Some(1),
                     ..Default::default()
                 },
             ],
@@ -591,6 +591,102 @@ fn test_tx_conflict_handling() {
                 confirmed: Amount::from_sat(50000),
             },
         },
+        Scenario {
+            name: "transitively confirmed ancestors",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "first",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(1000, Some(0))],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "second",
+                    inputs: &[TxInTemplate::PrevTx("first", 0)],
+                    outputs: &[TxOutTemplate::new(900, Some(0))],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "anchored",
+                    inputs: &[TxInTemplate::PrevTx("second", 0)],
+                    outputs: &[TxOutTemplate::new(800, Some(0))],
+                    anchors: &[block_id!(3, "D")],
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["first", "second", "anchored"]),
+            exp_chain_txouts: HashSet::from([("first", 0), ("second", 0), ("anchored", 0)]),
+            exp_unspents: HashSet::from([("anchored", 0)]),
+            exp_balance: Balance {
+                immature: Amount::ZERO,
+                trusted_pending: Amount::ZERO,
+                untrusted_pending: Amount::ZERO,
+                confirmed: Amount::from_sat(800),
+            }
+        },
+        Scenario {
+            name: "transitively anchored txs should have priority over last seen",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "root",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10_000, Some(0))],
+                    anchors: &[block_id!(1, "B")],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "last_seen_conflict",
+                    inputs: &[TxInTemplate::PrevTx("root", 0)],
+                    outputs: &[TxOutTemplate::new(9900, Some(1))],
+                    last_seen: Some(1000),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "transitively_anchored_conflict",
+                    inputs: &[TxInTemplate::PrevTx("root", 0)],
+                    outputs: &[TxOutTemplate::new(9000, Some(1))],
+                    last_seen: Some(100),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "anchored",
+                    inputs: &[TxInTemplate::PrevTx("transitively_anchored_conflict", 0)],
+                    outputs: &[TxOutTemplate::new(8000, Some(2))],
+                    anchors: &[block_id!(4, "E")],
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["root", "transitively_anchored_conflict", "anchored"]),
+            exp_chain_txouts: HashSet::from([("root", 0), ("transitively_anchored_conflict", 0), ("anchored", 0)]),
+            exp_unspents: HashSet::from([("anchored", 0)]),
+            exp_balance: Balance {
+                confirmed: Amount::from_sat(8000),
+                ..Default::default()
+            }
+        },
+        Scenario {
+            name: "tx anchored in orphaned block and not seen in mempool should be canon",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "root",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10_000, None)],
+                    anchors: &[block_id!(1, "B")],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "tx",
+                    inputs: &[TxInTemplate::PrevTx("root", 0)],
+                    outputs: &[TxOutTemplate::new(9000, Some(0))],
+                    anchors: &[block_id!(6, "not G")],
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["root", "tx"]),
+            exp_chain_txouts: HashSet::from([("tx", 0)]),
+            exp_unspents: HashSet::from([("tx", 0)]),
+            exp_balance: Balance { trusted_pending: Amount::from_sat(9000), ..Default::default() }
+        }
     ];
 
     for scenario in scenarios {

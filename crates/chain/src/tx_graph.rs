@@ -20,8 +20,7 @@
 //! identifying and traversing conflicts and descendants of a given transaction. Some [`TxGraph`]
 //! methods only consider transactions that are "canonical" (i.e., in the best chain or in mempool).
 //! We decide which transactions are canonical based on the transaction's anchors and the
-//! `last_seen` (as unconfirmed) timestamp; see the [`try_get_chain_position`] documentation for
-//! more details.
+//! `last_seen` (as unconfirmed) timestamp.
 //!
 //! The [`ChangeSet`] reports changes made to a [`TxGraph`]; it can be used to either save to
 //! persistent storage, or to be applied to another [`TxGraph`].
@@ -89,15 +88,18 @@
 //! let changeset = graph.apply_update(update);
 //! assert!(changeset.is_empty());
 //! ```
-//! [`try_get_chain_position`]: TxGraph::try_get_chain_position
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::collections::*;
 use crate::BlockId;
+use crate::CanonicalIter;
+use crate::CanonicalReason;
+use crate::ObservedIn;
 use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use bdk_core::ConfirmationBlockTime;
 pub use bdk_core::TxUpdate;
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
@@ -106,7 +108,7 @@ use core::{
     ops::{Deref, RangeInclusive},
 };
 
-impl<A> From<TxGraph<A>> for TxUpdate<A> {
+impl<A: Ord> From<TxGraph<A>> for TxUpdate<A> {
     fn from(graph: TxGraph<A>) -> Self {
         Self {
             txs: graph.full_txs().map(|tx_node| tx_node.tx).collect(),
@@ -114,13 +116,17 @@ impl<A> From<TxGraph<A>> for TxUpdate<A> {
                 .floating_txouts()
                 .map(|(op, txo)| (op, txo.clone()))
                 .collect(),
-            anchors: graph.anchors,
+            anchors: graph
+                .anchors
+                .into_iter()
+                .flat_map(|(txid, anchors)| anchors.into_iter().map(move |a| (a, txid)))
+                .collect(),
             seen_ats: graph.last_seen.into_iter().collect(),
         }
     }
 }
 
-impl<A: Ord + Clone> From<TxUpdate<A>> for TxGraph<A> {
+impl<A: Anchor> From<TxUpdate<A>> for TxGraph<A> {
     fn from(update: TxUpdate<A>) -> Self {
         let mut graph = TxGraph::<A>::default();
         let _ = graph.apply_update_at(update, None);
@@ -134,16 +140,19 @@ impl<A: Ord + Clone> From<TxUpdate<A>> for TxGraph<A> {
 ///
 /// [module-level documentation]: crate::tx_graph
 #[derive(Clone, Debug, PartialEq)]
-pub struct TxGraph<A = ()> {
-    // all transactions that the graph is aware of in format: `(tx_node, tx_anchors)`
-    txs: HashMap<Txid, (TxNodeInternal, BTreeSet<A>)>,
+pub struct TxGraph<A = ConfirmationBlockTime> {
+    txs: HashMap<Txid, TxNodeInternal>,
     spends: BTreeMap<OutPoint, HashSet<Txid>>,
-    anchors: BTreeSet<(A, Txid)>,
+    anchors: HashMap<Txid, BTreeSet<A>>,
     last_seen: HashMap<Txid, u64>,
 
-    // This atrocity exists so that `TxGraph::outspends()` can return a reference.
-    // FIXME: This can be removed once `HashSet::new` is a const fn.
+    txs_by_highest_conf_heights: BTreeSet<(u32, Txid)>,
+    txs_by_last_seen: BTreeSet<(u64, Txid)>,
+
+    // The following fields exist so that methods can return references to empty sets.
+    // FIXME: This can be removed once `HashSet::new` and `BTreeSet::new` are const fns.
     empty_outspends: HashSet<Txid>,
+    empty_anchors: BTreeSet<A>,
 }
 
 impl<A> Default for TxGraph<A> {
@@ -153,7 +162,10 @@ impl<A> Default for TxGraph<A> {
             spends: Default::default(),
             anchors: Default::default(),
             last_seen: Default::default(),
+            txs_by_highest_conf_heights: Default::default(),
+            txs_by_last_seen: Default::default(),
             empty_outspends: Default::default(),
+            empty_anchors: Default::default(),
         }
     }
 }
@@ -195,11 +207,11 @@ impl Default for TxNodeInternal {
     }
 }
 
-/// A transaction that is included in the chain, or is still in mempool.
+/// A transaction that is deemed to be part of the canonical history.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CanonicalTx<'a, T, A> {
-    /// How the transaction is observed as (confirmed or unconfirmed).
-    pub chain_position: ChainPosition<&'a A>,
+    /// How the transaction is observed in the canonical chain (confirmed or unconfirmed).
+    pub chain_position: ChainPosition<A>,
     /// The transaction node (as part of the graph).
     pub tx_node: TxNode<'a, T, A>,
 }
@@ -238,7 +250,7 @@ impl<A> TxGraph<A> {
     ///
     /// This includes txouts of both full transactions as well as floating transactions.
     pub fn all_txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
-        self.txs.iter().flat_map(|(txid, (tx, _))| match tx {
+        self.txs.iter().flat_map(|(txid, tx)| match tx {
             TxNodeInternal::Whole(tx) => tx
                 .as_ref()
                 .output
@@ -260,7 +272,7 @@ impl<A> TxGraph<A> {
     pub fn floating_txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
         self.txs
             .iter()
-            .filter_map(|(txid, (tx_node, _))| match tx_node {
+            .filter_map(|(txid, tx_node)| match tx_node {
                 TxNodeInternal::Whole(_) => None,
                 TxNodeInternal::Partial(txouts) => Some(
                     txouts
@@ -273,17 +285,15 @@ impl<A> TxGraph<A> {
 
     /// Iterate over all full transactions in the graph.
     pub fn full_txs(&self) -> impl Iterator<Item = TxNode<'_, Arc<Transaction>, A>> {
-        self.txs
-            .iter()
-            .filter_map(|(&txid, (tx, anchors))| match tx {
-                TxNodeInternal::Whole(tx) => Some(TxNode {
-                    txid,
-                    tx: tx.clone(),
-                    anchors,
-                    last_seen_unconfirmed: self.last_seen.get(&txid).copied(),
-                }),
-                TxNodeInternal::Partial(_) => None,
-            })
+        self.txs.iter().filter_map(|(&txid, tx)| match tx {
+            TxNodeInternal::Whole(tx) => Some(TxNode {
+                txid,
+                tx: tx.clone(),
+                anchors: self.anchors.get(&txid).unwrap_or(&self.empty_anchors),
+                last_seen_unconfirmed: self.last_seen.get(&txid).copied(),
+            }),
+            TxNodeInternal::Partial(_) => None,
+        })
     }
 
     /// Iterate over graph transactions with no anchors or last-seen.
@@ -311,10 +321,10 @@ impl<A> TxGraph<A> {
     /// Get a transaction node by txid. This only returns `Some` for full transactions.
     pub fn get_tx_node(&self, txid: Txid) -> Option<TxNode<'_, Arc<Transaction>, A>> {
         match &self.txs.get(&txid)? {
-            (TxNodeInternal::Whole(tx), anchors) => Some(TxNode {
+            TxNodeInternal::Whole(tx) => Some(TxNode {
                 txid,
                 tx: tx.clone(),
-                anchors,
+                anchors: self.anchors.get(&txid).unwrap_or(&self.empty_anchors),
                 last_seen_unconfirmed: self.last_seen.get(&txid).copied(),
             }),
             _ => None,
@@ -323,7 +333,7 @@ impl<A> TxGraph<A> {
 
     /// Obtains a single tx output (if any) at the specified outpoint.
     pub fn get_txout(&self, outpoint: OutPoint) -> Option<&TxOut> {
-        match &self.txs.get(&outpoint.txid)?.0 {
+        match &self.txs.get(&outpoint.txid)? {
             TxNodeInternal::Whole(tx) => tx.as_ref().output.get(outpoint.vout as usize),
             TxNodeInternal::Partial(txouts) => txouts.get(&outpoint.vout),
         }
@@ -333,7 +343,7 @@ impl<A> TxGraph<A> {
     ///
     /// Returns a [`BTreeMap`] of vout to output of the provided `txid`.
     pub fn tx_outputs(&self, txid: Txid) -> Option<BTreeMap<u32, &TxOut>> {
-        Some(match &self.txs.get(&txid)?.0 {
+        Some(match &self.txs.get(&txid)? {
             TxNodeInternal::Whole(tx) => tx
                 .as_ref()
                 .output
@@ -432,7 +442,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each `Transaction`
     /// it visits and decide whether to visit ancestors.
-    pub fn walk_ancestors<'g, T, F, O>(&'g self, tx: T, walk_map: F) -> TxAncestors<'g, A, F>
+    pub fn walk_ancestors<'g, T, F, O>(&'g self, tx: T, walk_map: F) -> TxAncestors<'g, A, F, O>
     where
         T: Into<Arc<Transaction>>,
         F: FnMut(usize, Arc<Transaction>) -> Option<O> + 'g,
@@ -450,7 +460,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it visits
     /// and decide whether to visit descendants.
-    pub fn walk_descendants<'g, F, O>(&'g self, txid: Txid, walk_map: F) -> TxDescendants<A, F>
+    pub fn walk_descendants<'g, F, O>(&'g self, txid: Txid, walk_map: F) -> TxDescendants<A, F, O>
     where
         F: FnMut(usize, Txid) -> Option<O> + 'g,
     {
@@ -467,7 +477,7 @@ impl<A> TxGraph<A> {
         &'g self,
         tx: &'g Transaction,
         walk_map: F,
-    ) -> TxDescendants<A, F>
+    ) -> TxDescendants<A, F, O>
     where
         F: FnMut(usize, Txid) -> Option<O> + 'g,
     {
@@ -496,7 +506,7 @@ impl<A> TxGraph<A> {
     }
 
     /// Get all transaction anchors known by [`TxGraph`].
-    pub fn all_anchors(&self) -> &BTreeSet<(A, Txid)> {
+    pub fn all_anchors(&self) -> &HashMap<Txid, BTreeSet<A>> {
         &self.anchors
     }
 
@@ -506,12 +516,12 @@ impl<A> TxGraph<A> {
     }
 }
 
-impl<A: Clone + Ord> TxGraph<A> {
+impl<A: Anchor> TxGraph<A> {
     /// Transform the [`TxGraph`] to have [`Anchor`]s of another type.
     ///
     /// This takes in a closure of signature `FnMut(A) -> A2` which is called for each [`Anchor`] to
     /// transform it.
-    pub fn map_anchors<A2: Clone + Ord, F>(self, f: F) -> TxGraph<A2>
+    pub fn map_anchors<A2: Anchor, F>(self, f: F) -> TxGraph<A2>
     where
         F: FnMut(A) -> A2,
     {
@@ -540,7 +550,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// [`apply_changeset`]: Self::apply_changeset
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
-        let (tx_node, _) = self.txs.entry(outpoint.txid).or_default();
+        let tx_node = self.txs.entry(outpoint.txid).or_default();
         match tx_node {
             TxNodeInternal::Whole(_) => {
                 // ignore this txout we have the full one already.
@@ -573,7 +583,7 @@ impl<A: Clone + Ord> TxGraph<A> {
         let txid = tx.compute_txid();
         let mut changeset = ChangeSet::<A>::default();
 
-        let (tx_node, _) = self.txs.entry(txid).or_default();
+        let tx_node = self.txs.entry(txid).or_default();
         match tx_node {
             TxNodeInternal::Whole(existing_tx) => {
                 debug_assert_eq!(
@@ -624,14 +634,46 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The [`ChangeSet`] returned will be empty if graph already knows that `txid` exists in
     /// `anchor`.
     pub fn insert_anchor(&mut self, txid: Txid, anchor: A) -> ChangeSet<A> {
+        // These two variables are used to determine how to modify the `txid`'s entry in
+        // `txs_by_highest_conf_heights`.
+        // We want to remove `(old_top_h?, txid)` and insert `(new_top_h?, txid)`.
+        let mut old_top_h = None;
+        let mut new_top_h = anchor.confirmation_height_upper_bound();
+
+        let is_changed = match self.anchors.entry(txid) {
+            hash_map::Entry::Occupied(mut e) => {
+                old_top_h = e
+                    .get()
+                    .iter()
+                    .last()
+                    .map(Anchor::confirmation_height_upper_bound);
+                if let Some(old_top_h) = old_top_h {
+                    if old_top_h > new_top_h {
+                        new_top_h = old_top_h;
+                    }
+                }
+                let is_changed = e.get_mut().insert(anchor.clone());
+                is_changed
+            }
+            hash_map::Entry::Vacant(e) => {
+                e.insert(core::iter::once(anchor.clone()).collect());
+                true
+            }
+        };
+
         let mut changeset = ChangeSet::<A>::default();
-        if self.anchors.insert((anchor.clone(), txid)) {
-            let (_tx_node, anchors) = self.txs.entry(txid).or_default();
-            let _inserted = anchors.insert(anchor.clone());
-            debug_assert!(
-                _inserted,
-                "anchors in `.anchors` and `.txs` should be consistent"
-            );
+        if is_changed {
+            let new_top_is_changed = match old_top_h {
+                None => true,
+                Some(old_top_h) if old_top_h != new_top_h => true,
+                _ => false,
+            };
+            if new_top_is_changed {
+                if let Some(prev_top_h) = old_top_h {
+                    self.txs_by_highest_conf_heights.remove(&(prev_top_h, txid));
+                }
+                self.txs_by_highest_conf_heights.insert((new_top_h, txid));
+            }
             changeset.anchors.insert((anchor, txid));
         }
         changeset
@@ -641,10 +683,29 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// Note that [`TxGraph`] only keeps track of the latest `seen_at`.
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
+        let mut old_last_seen = None;
+        let is_changed = match self.last_seen.entry(txid) {
+            hash_map::Entry::Occupied(mut e) => {
+                let last_seen = e.get_mut();
+                old_last_seen = Some(*last_seen);
+                let change = *last_seen < seen_at;
+                if change {
+                    *last_seen = seen_at;
+                }
+                change
+            }
+            hash_map::Entry::Vacant(e) => {
+                e.insert(seen_at);
+                true
+            }
+        };
+
         let mut changeset = ChangeSet::<A>::default();
-        let last_seen = self.last_seen.entry(txid).or_default();
-        if seen_at > *last_seen {
-            *last_seen = seen_at;
+        if is_changed {
+            if let Some(old_last_seen) = old_last_seen {
+                self.txs_by_last_seen.remove(&(old_last_seen, txid));
+            }
+            self.txs_by_last_seen.insert((seen_at, txid));
             changeset.last_seen.insert(txid, seen_at);
         }
         changeset
@@ -711,7 +772,11 @@ impl<A: Clone + Ord> TxGraph<A> {
                 .floating_txouts()
                 .map(|(op, txout)| (op, txout.clone()))
                 .collect(),
-            anchors: self.anchors.clone(),
+            anchors: self
+                .anchors
+                .iter()
+                .flat_map(|(txid, anchors)| anchors.iter().map(|a| (a.clone(), *txid)))
+                .collect(),
             last_seen: self.last_seen.iter().map(|(&k, &v)| (k, v)).collect(),
         }
     }
@@ -734,224 +799,6 @@ impl<A: Clone + Ord> TxGraph<A> {
 }
 
 impl<A: Anchor> TxGraph<A> {
-    /// Get the position of the transaction in `chain` with tip `chain_tip`.
-    ///
-    /// Chain data is fetched from `chain`, a [`ChainOracle`] implementation.
-    ///
-    /// This method returns `Ok(None)` if the transaction is not found in the chain, and no longer
-    /// belongs in the mempool. The following factors are used to approximate whether an
-    /// unconfirmed transaction exists in the mempool (not evicted):
-    ///
-    /// 1. Unconfirmed transactions that conflict with confirmed transactions are evicted.
-    /// 2. Unconfirmed transactions that spend from transactions that are evicted, are also
-    ///    evicted.
-    /// 3. Given two conflicting unconfirmed transactions, the transaction with the lower
-    ///    `last_seen_unconfirmed` parameter is evicted. A transaction's `last_seen_unconfirmed`
-    ///    parameter is the max of all it's descendants' `last_seen_unconfirmed` parameters. If the
-    ///    final `last_seen_unconfirmed`s are the same, the transaction with the lower `txid` (by
-    ///    lexicographical order) is evicted.
-    ///
-    /// # Error
-    ///
-    /// An error will occur if the [`ChainOracle`] implementation (`chain`) fails. If the
-    /// [`ChainOracle`] is infallible, [`get_chain_position`] can be used instead.
-    ///
-    /// [`get_chain_position`]: Self::get_chain_position
-    pub fn try_get_chain_position<C: ChainOracle>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        txid: Txid,
-    ) -> Result<Option<ChainPosition<&A>>, C::Error> {
-        let (tx_node, anchors) = match self.txs.get(&txid) {
-            Some(v) => v,
-            None => return Ok(None),
-        };
-
-        for anchor in anchors {
-            match chain.is_block_in_chain(anchor.anchor_block(), chain_tip)? {
-                Some(true) => {
-                    return Ok(Some(ChainPosition::Confirmed {
-                        anchor,
-                        transitively: None,
-                    }))
-                }
-                _ => continue,
-            }
-        }
-
-        // If no anchors are in best chain and we don't have a last_seen, we can return
-        // early because by definition the tx doesn't have a chain position.
-        let last_seen = match self.last_seen.get(&txid) {
-            Some(t) => *t,
-            None => return Ok(None),
-        };
-
-        // The tx is not anchored to a block in the best chain, which means that it
-        // might be in mempool, or it might have been dropped already.
-        // Let's check conflicts to find out!
-        let tx = match tx_node {
-            TxNodeInternal::Whole(tx) => {
-                // A coinbase tx that is not anchored in the best chain cannot be unconfirmed and
-                // should always be filtered out.
-                if tx.is_coinbase() {
-                    return Ok(None);
-                }
-                tx.clone()
-            }
-            TxNodeInternal::Partial(_) => {
-                // Partial transactions (outputs only) cannot have conflicts.
-                return Ok(None);
-            }
-        };
-
-        // We want to retrieve all the transactions that conflict with us, plus all the
-        // transactions that conflict with our unconfirmed ancestors, since they conflict with us
-        // as well.
-        // We only traverse unconfirmed ancestors since conflicts of confirmed transactions
-        // cannot be in the best chain.
-
-        // First of all, we retrieve all our ancestors. Since we're using `new_include_root`, the
-        // resulting array will also include `tx`
-        let unconfirmed_ancestor_txs =
-            TxAncestors::new_include_root(self, tx.clone(), |_, ancestor_tx: Arc<Transaction>| {
-                let tx_node = self.get_tx_node(ancestor_tx.as_ref().compute_txid())?;
-                // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
-                // the best chain)
-                for block in tx_node.anchors {
-                    match chain.is_block_in_chain(block.anchor_block(), chain_tip) {
-                        Ok(Some(true)) => return None,
-                        Err(e) => return Some(Err(e)),
-                        _ => continue,
-                    }
-                }
-                Some(Ok(tx_node))
-            })
-            .collect::<Result<Vec<_>, C::Error>>()?;
-
-        // We determine our tx's last seen, which is the max between our last seen,
-        // and our unconf descendants' last seen.
-        let unconfirmed_descendants_txs = TxDescendants::new_include_root(
-            self,
-            tx.as_ref().compute_txid(),
-            |_, descendant_txid: Txid| {
-                let tx_node = self.get_tx_node(descendant_txid)?;
-                // We're filtering the ancestors to keep only the unconfirmed ones (= no anchors in
-                // the best chain)
-                for block in tx_node.anchors {
-                    match chain.is_block_in_chain(block.anchor_block(), chain_tip) {
-                        Ok(Some(true)) => return None,
-                        Err(e) => return Some(Err(e)),
-                        _ => continue,
-                    }
-                }
-                Some(Ok(tx_node))
-            },
-        )
-        .collect::<Result<Vec<_>, C::Error>>()?;
-
-        let tx_last_seen = unconfirmed_descendants_txs
-            .iter()
-            .max_by_key(|tx| tx.last_seen_unconfirmed)
-            .map(|tx| tx.last_seen_unconfirmed)
-            .expect("descendants always includes at least one transaction (the root tx");
-
-        // Now we traverse our ancestors and consider all their conflicts
-        for tx_node in unconfirmed_ancestor_txs {
-            // We retrieve all the transactions conflicting with this specific ancestor
-            let conflicting_txs =
-                self.walk_conflicts(tx_node.tx.as_ref(), |_, txid| self.get_tx_node(txid));
-
-            // If a conflicting tx is in the best chain, or has `last_seen` higher than this ancestor, then
-            // this tx cannot exist in the best chain
-            for conflicting_tx in conflicting_txs {
-                for block in conflicting_tx.anchors {
-                    if chain.is_block_in_chain(block.anchor_block(), chain_tip)? == Some(true) {
-                        return Ok(None);
-                    }
-                }
-                if conflicting_tx.last_seen_unconfirmed > tx_last_seen {
-                    return Ok(None);
-                }
-                if conflicting_tx.last_seen_unconfirmed == Some(last_seen)
-                    && conflicting_tx.as_ref().compute_txid() > tx.as_ref().compute_txid()
-                {
-                    // Conflicting tx has priority if txid of conflicting tx > txid of original tx
-                    return Ok(None);
-                }
-            }
-        }
-
-        Ok(Some(ChainPosition::Unconfirmed {
-            last_seen: Some(last_seen),
-        }))
-    }
-
-    /// Get the position of the transaction in `chain` with tip `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_get_chain_position`].
-    ///
-    /// [`try_get_chain_position`]: Self::try_get_chain_position
-    pub fn get_chain_position<C: ChainOracle<Error = Infallible>>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        txid: Txid,
-    ) -> Option<ChainPosition<&A>> {
-        self.try_get_chain_position(chain, chain_tip, txid)
-            .expect("error is infallible")
-    }
-
-    /// Get the txid of the spending transaction and where the spending transaction is observed in
-    /// the `chain` of `chain_tip`.
-    ///
-    /// If no in-chain transaction spends `outpoint`, `None` will be returned.
-    ///
-    /// # Error
-    ///
-    /// An error will occur only if the [`ChainOracle`] implementation (`chain`) fails.
-    ///
-    /// If the [`ChainOracle`] is infallible, [`get_chain_spend`] can be used instead.
-    ///
-    /// [`get_chain_spend`]: Self::get_chain_spend
-    pub fn try_get_chain_spend<C: ChainOracle>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        outpoint: OutPoint,
-    ) -> Result<Option<(ChainPosition<&A>, Txid)>, C::Error> {
-        if self
-            .try_get_chain_position(chain, chain_tip, outpoint.txid)?
-            .is_none()
-        {
-            return Ok(None);
-        }
-        if let Some(spends) = self.spends.get(&outpoint) {
-            for &txid in spends {
-                if let Some(observed_at) = self.try_get_chain_position(chain, chain_tip, txid)? {
-                    return Ok(Some((observed_at, txid)));
-                }
-            }
-        }
-        Ok(None)
-    }
-
-    /// Get the txid of the spending transaction and where the spending transaction is observed in
-    /// the `chain` of `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_get_chain_spend`]
-    ///
-    /// [`try_get_chain_spend`]: Self::try_get_chain_spend
-    pub fn get_chain_spend<C: ChainOracle<Error = Infallible>>(
-        &self,
-        chain: &C,
-        static_block: BlockId,
-        outpoint: OutPoint,
-    ) -> Option<(ChainPosition<&A>, Txid)> {
-        self.try_get_chain_spend(chain, static_block, outpoint)
-            .expect("error is infallible")
-    }
-
     /// List graph transactions that are in `chain` with `chain_tip`.
     ///
     /// Each transaction is represented as a [`CanonicalTx`] that contains where the transaction is
@@ -970,15 +817,51 @@ impl<A: Anchor> TxGraph<A> {
         chain: &'a C,
         chain_tip: BlockId,
     ) -> impl Iterator<Item = Result<CanonicalTx<'a, Arc<Transaction>, A>, C::Error>> {
-        self.full_txs().filter_map(move |tx| {
-            self.try_get_chain_position(chain, chain_tip, tx.txid)
-                .map(|v| {
-                    v.map(|observed_in| CanonicalTx {
-                        chain_position: observed_in,
-                        tx_node: tx,
-                    })
+        self.canonical_iter(chain, chain_tip).flat_map(move |res| {
+            res.map(|(txid, _, canonical_reason)| {
+                let tx_node = self.get_tx_node(txid).expect("must contain tx");
+                let chain_position = match canonical_reason {
+                    CanonicalReason::Anchor { anchor, descendant } => match descendant {
+                        Some(_) => {
+                            let direct_anchor = tx_node
+                                .anchors
+                                .iter()
+                                .find_map(|a| -> Option<Result<A, C::Error>> {
+                                    match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
+                                        Ok(Some(true)) => Some(Ok(a.clone())),
+                                        Ok(Some(false)) | Ok(None) => None,
+                                        Err(err) => Some(Err(err)),
+                                    }
+                                })
+                                .transpose()?;
+                            match direct_anchor {
+                                Some(anchor) => ChainPosition::Confirmed {
+                                    anchor,
+                                    transitively: None,
+                                },
+                                None => ChainPosition::Confirmed {
+                                    anchor,
+                                    transitively: descendant,
+                                },
+                            }
+                        }
+                        None => ChainPosition::Confirmed {
+                            anchor,
+                            transitively: None,
+                        },
+                    },
+                    CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
+                        ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
+                            last_seen: Some(last_seen),
+                        },
+                        ObservedIn::Block(_) => ChainPosition::Unconfirmed { last_seen: None },
+                    },
+                };
+                Ok(CanonicalTx {
+                    chain_position,
+                    tx_node,
                 })
-                .transpose()
+            })
         })
     }
 
@@ -993,7 +876,7 @@ impl<A: Anchor> TxGraph<A> {
         chain_tip: BlockId,
     ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
         self.try_list_canonical_txs(chain, chain_tip)
-            .map(|r| r.expect("oracle is infallible"))
+            .map(|res| res.expect("infallible"))
     }
 
     /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
@@ -1020,44 +903,80 @@ impl<A: Anchor> TxGraph<A> {
         chain: &'a C,
         chain_tip: BlockId,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
-        outpoints
-            .into_iter()
-            .map(
-                move |(spk_i, op)| -> Result<Option<(OI, FullTxOut<_>)>, C::Error> {
-                    let tx_node = match self.get_tx_node(op.txid) {
-                        Some(n) => n,
-                        None => return Ok(None),
-                    };
+    ) -> Result<impl Iterator<Item = (OI, FullTxOut<A>)> + 'a, C::Error> {
+        let mut canon_txs = HashMap::<Txid, CanonicalTx<Arc<Transaction>, A>>::new();
+        let mut canon_spends = HashMap::<OutPoint, Txid>::new();
+        for r in self.try_list_canonical_txs(chain, chain_tip) {
+            let canonical_tx = r?;
+            let txid = canonical_tx.tx_node.txid;
 
-                    let txout = match tx_node.tx.as_ref().output.get(op.vout as usize) {
-                        Some(txout) => txout.clone(),
-                        None => return Ok(None),
-                    };
-
-                    let chain_position =
-                        match self.try_get_chain_position(chain, chain_tip, op.txid)? {
-                            Some(pos) => pos.cloned(),
-                            None => return Ok(None),
-                        };
-
-                    let spent_by = self
-                        .try_get_chain_spend(chain, chain_tip, op)?
-                        .map(|(a, txid)| (a.cloned(), txid));
-
-                    Ok(Some((
-                        spk_i,
-                        FullTxOut {
-                            outpoint: op,
-                            txout,
-                            chain_position,
-                            spent_by,
-                            is_on_coinbase: tx_node.tx.is_coinbase(),
-                        },
-                    )))
+            if !canonical_tx.tx_node.tx.is_coinbase() {
+                for txin in &canonical_tx.tx_node.tx.input {
+                    let _res = canon_spends.insert(txin.previous_output, txid);
+                    assert!(
+                        _res.is_none(),
+                        "tried to replace {:?} with {:?}",
+                        _res,
+                        txid
+                    );
+                }
+            }
+            canon_txs.insert(txid, canonical_tx);
+        }
+        Ok(outpoints.into_iter().filter_map(move |(spk_i, outpoint)| {
+            let canon_tx = canon_txs.get(&outpoint.txid)?;
+            let txout = canon_tx
+                .tx_node
+                .tx
+                .output
+                .get(outpoint.vout as usize)
+                .cloned()?;
+            let chain_position = canon_tx.chain_position.clone();
+            let spent_by = canon_spends.get(&outpoint).map(|spend_txid| {
+                let spend_tx = canon_txs
+                    .get(spend_txid)
+                    .cloned()
+                    .expect("must be canonical");
+                (spend_tx.chain_position, *spend_txid)
+            });
+            let is_on_coinbase = canon_tx.tx_node.is_coinbase();
+            Some((
+                spk_i,
+                FullTxOut {
+                    outpoint,
+                    txout,
+                    chain_position,
+                    spent_by,
+                    is_on_coinbase,
                 },
-            )
-            .filter_map(Result::transpose)
+            ))
+        }))
+    }
+
+    /// List txids by descending anchor height order.
+    ///
+    /// If multiple anchors exist for a txid, the highest anchor height will be used. Transactions
+    /// without anchors are excluded.
+    pub fn txids_by_descending_anchor_height(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (u32, Txid)> + '_ {
+        self.txs_by_highest_conf_heights.iter().copied().rev()
+    }
+
+    /// List txids by descending last-seen order.
+    ///
+    /// Transactions without last-seens are excluded.
+    pub fn txids_by_descending_last_seen(&self) -> impl ExactSizeIterator<Item = (u64, Txid)> + '_ {
+        self.txs_by_last_seen.iter().copied().rev()
+    }
+
+    /// Returns a [`CanonicalIter`].
+    pub fn canonical_iter<'a, C: ChainOracle>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+    ) -> CanonicalIter<'a, A, C> {
+        CanonicalIter::new(self, chain, chain_tip)
     }
 
     /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
@@ -1073,7 +992,7 @@ impl<A: Anchor> TxGraph<A> {
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, outpoints)
-            .map(|r| r.expect("oracle is infallible"))
+            .expect("oracle is infallible")
     }
 
     /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
@@ -1099,14 +1018,10 @@ impl<A: Anchor> TxGraph<A> {
         chain: &'a C,
         chain_tip: BlockId,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = Result<(OI, FullTxOut<A>), C::Error>> + 'a {
-        self.try_filter_chain_txouts(chain, chain_tip, outpoints)
-            .filter(|r| match r {
-                // keep unspents, drop spents
-                Ok((_, full_txo)) => full_txo.spent_by.is_none(),
-                // keep errors
-                Err(_) => true,
-            })
+    ) -> Result<impl Iterator<Item = (OI, FullTxOut<A>)> + 'a, C::Error> {
+        Ok(self
+            .try_filter_chain_txouts(chain, chain_tip, outpoints)?
+            .filter(|(_, full_txo)| full_txo.spent_by.is_none()))
     }
 
     /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
@@ -1122,7 +1037,7 @@ impl<A: Anchor> TxGraph<A> {
         txouts: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_chain_unspents(chain, chain_tip, txouts)
-            .map(|r| r.expect("oracle is infallible"))
+            .expect("oracle is infallible")
     }
 
     /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
@@ -1149,9 +1064,7 @@ impl<A: Anchor> TxGraph<A> {
         let mut untrusted_pending = Amount::ZERO;
         let mut confirmed = Amount::ZERO;
 
-        for res in self.try_filter_chain_unspents(chain, chain_tip, outpoints) {
-            let (spk_i, txout) = res?;
-
+        for (spk_i, txout) in self.try_filter_chain_unspents(chain, chain_tip, outpoints)? {
             match &txout.chain_position {
                 ChainPosition::Confirmed { .. } => {
                     if txout.is_confirmed_and_spendable(chain_tip.height) {
@@ -1328,14 +1241,20 @@ impl<A> AsRef<TxGraph<A>> for TxGraph<A> {
 /// Returned by the [`walk_ancestors`] method of [`TxGraph`].
 ///
 /// [`walk_ancestors`]: TxGraph::walk_ancestors
-pub struct TxAncestors<'g, A, F> {
+pub struct TxAncestors<'g, A, F, O>
+where
+    F: FnMut(usize, Arc<Transaction>) -> Option<O>,
+{
     graph: &'g TxGraph<A>,
     visited: HashSet<Txid>,
     queue: VecDeque<(usize, Arc<Transaction>)>,
     filter_map: F,
 }
 
-impl<'g, A, F> TxAncestors<'g, A, F> {
+impl<'g, A, F, O> TxAncestors<'g, A, F, O>
+where
+    F: FnMut(usize, Arc<Transaction>) -> Option<O>,
+{
     /// Creates a `TxAncestors` that includes the starting `Transaction` when iterating.
     pub(crate) fn new_include_root(
         graph: &'g TxGraph<A>,
@@ -1410,6 +1329,11 @@ impl<'g, A, F> TxAncestors<'g, A, F> {
         ancestors
     }
 
+    /// Traverse all ancestors that are not filtered out by the provided closure.
+    pub fn run_until_finished(self) {
+        self.for_each(|_| {})
+    }
+
     fn populate_queue(&mut self, depth: usize, tx: Arc<Transaction>) {
         let ancestors = tx
             .input
@@ -1422,7 +1346,7 @@ impl<'g, A, F> TxAncestors<'g, A, F> {
     }
 }
 
-impl<'g, A, F, O> Iterator for TxAncestors<'g, A, F>
+impl<'g, A, F, O> Iterator for TxAncestors<'g, A, F, O>
 where
     F: FnMut(usize, Arc<Transaction>) -> Option<O>,
 {
@@ -1448,14 +1372,20 @@ where
 /// Returned by the [`walk_descendants`] method of [`TxGraph`].
 ///
 /// [`walk_descendants`]: TxGraph::walk_descendants
-pub struct TxDescendants<'g, A, F> {
+pub struct TxDescendants<'g, A, F, O>
+where
+    F: FnMut(usize, Txid) -> Option<O>,
+{
     graph: &'g TxGraph<A>,
     visited: HashSet<Txid>,
     queue: VecDeque<(usize, Txid)>,
     filter_map: F,
 }
 
-impl<'g, A, F> TxDescendants<'g, A, F> {
+impl<'g, A, F, O> TxDescendants<'g, A, F, O>
+where
+    F: FnMut(usize, Txid) -> Option<O>,
+{
     /// Creates a `TxDescendants` that includes the starting `txid` when iterating.
     #[allow(unused)]
     pub(crate) fn new_include_root(graph: &'g TxGraph<A>, txid: Txid, filter_map: F) -> Self {
@@ -1519,9 +1449,12 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
         }
         descendants
     }
-}
 
-impl<'g, A, F> TxDescendants<'g, A, F> {
+    /// Traverse all descendants that are not filtered out by the provided closure.
+    pub fn run_until_finished(self) {
+        self.for_each(|_| {})
+    }
+
     fn populate_queue(&mut self, depth: usize, txid: Txid) {
         let spend_paths = self
             .graph
@@ -1533,7 +1466,7 @@ impl<'g, A, F> TxDescendants<'g, A, F> {
     }
 }
 
-impl<'g, A, F, O> Iterator for TxDescendants<'g, A, F>
+impl<'g, A, F, O> Iterator for TxDescendants<'g, A, F, O>
 where
     F: FnMut(usize, Txid) -> Option<O>,
 {

@@ -267,7 +267,7 @@ fn wallet_should_persist_anchors_and_recover() {
         .expect("must have loaded changeset");
     // stored anchor should be retrieved in the same condition it was persisted
     if let ChainPosition::Confirmed {
-        anchor: &obtained_anchor,
+        anchor: obtained_anchor,
         ..
     } = wallet
         .get_tx(txid)
@@ -1223,7 +1223,7 @@ fn test_create_tx_add_utxo() {
     let txid = small_output_tx.compute_txid();
     insert_tx(&mut wallet, small_output_tx);
     let anchor = ConfirmationBlockTime {
-        block_id: wallet.latest_checkpoint().block_id(),
+        block_id: wallet.latest_checkpoint().get(2000).unwrap().block_id(),
         confirmation_time: 200,
     };
     insert_anchor(&mut wallet, txid, anchor);
@@ -1270,7 +1270,7 @@ fn test_create_tx_manually_selected_insufficient() {
     let txid = small_output_tx.compute_txid();
     insert_tx(&mut wallet, small_output_tx.clone());
     let anchor = ConfirmationBlockTime {
-        block_id: wallet.latest_checkpoint().block_id(),
+        block_id: wallet.latest_checkpoint().get(2000).unwrap().block_id(),
         confirmation_time: 200,
     };
     insert_anchor(&mut wallet, txid, anchor);
@@ -1496,11 +1496,7 @@ fn test_create_tx_increment_change_index() {
             .create_wallet_no_persist()
             .unwrap();
         // fund wallet
-        receive_output(
-            &mut wallet,
-            amount,
-            ChainPosition::Unconfirmed { last_seen: Some(0) },
-        );
+        receive_output(&mut wallet, amount, ReceiveTo::Mempool(0));
         // create tx
         let mut builder = wallet.build_tx();
         builder.add_recipient(recipient.clone(), Amount::from_sat(test.to_send));
@@ -2164,12 +2160,15 @@ fn test_bump_fee_remove_output_manually_selected_only() {
         }],
     };
 
+    let position: ChainPosition<ConfirmationBlockTime> =
+        wallet.transactions().last().unwrap().chain_position;
     insert_tx(&mut wallet, init_tx.clone());
-    let anchor = ConfirmationBlockTime {
-        block_id: wallet.latest_checkpoint().block_id(),
-        confirmation_time: 200,
-    };
-    insert_anchor(&mut wallet, init_tx.compute_txid(), anchor);
+    match position {
+        ChainPosition::Confirmed { anchor, .. } => {
+            insert_anchor(&mut wallet, init_tx.compute_txid(), anchor)
+        }
+        other => panic!("all wallet txs must be confirmed: {:?}", other),
+    }
 
     let outpoint = OutPoint {
         txid: init_tx.compute_txid(),
@@ -2213,12 +2212,13 @@ fn test_bump_fee_add_input() {
         }],
     };
     let txid = init_tx.compute_txid();
+    let pos: ChainPosition<ConfirmationBlockTime> =
+        wallet.transactions().last().unwrap().chain_position;
     insert_tx(&mut wallet, init_tx);
-    let anchor = ConfirmationBlockTime {
-        block_id: wallet.latest_checkpoint().block_id(),
-        confirmation_time: 200,
-    };
-    insert_anchor(&mut wallet, txid, anchor);
+    match pos {
+        ChainPosition::Confirmed { anchor, .. } => insert_anchor(&mut wallet, txid, anchor),
+        other => panic!("all wallet txs must be confirmed: {:?}", other),
+    }
 
     let addr = Address::from_str("2N1Ffz3WaNzbeLFBb51xyFMHYSEUXcbiSoX")
         .unwrap()
@@ -2605,11 +2605,7 @@ fn test_bump_fee_unconfirmed_inputs_only() {
     let psbt = builder.finish().unwrap();
     // Now we receive one transaction with 0 confirmations. We won't be able to use that for
     // fee bumping, as it's still unconfirmed!
-    receive_output(
-        &mut wallet,
-        25_000,
-        ChainPosition::Unconfirmed { last_seen: Some(0) },
-    );
+    receive_output(&mut wallet, 25_000, ReceiveTo::Mempool(0));
     let mut tx = psbt.extract_tx().expect("failed to extract tx");
     let txid = tx.compute_txid();
     for txin in &mut tx.input {
@@ -2634,11 +2630,7 @@ fn test_bump_fee_unconfirmed_input() {
         .assume_checked();
     // We receive a tx with 0 confirmations, which will be used as an input
     // in the drain tx.
-    receive_output(
-        &mut wallet,
-        25_000,
-        ChainPosition::Unconfirmed { last_seen: Some(0) },
-    );
+    receive_output(&mut wallet, 25_000, ReceiveTo::Mempool(0));
     let mut builder = wallet.build_tx();
     builder.drain_wallet().drain_to(addr.script_pubkey());
     let psbt = builder.finish().unwrap();
@@ -3048,7 +3040,7 @@ fn test_next_unused_address() {
     assert_eq!(next_unused_addr.index, 0);
 
     // use the above address
-    receive_output_in_latest_block(&mut wallet, 25_000);
+    receive_output(&mut wallet, 25_000, ReceiveTo::Mempool(0));
 
     assert_eq!(
         wallet
@@ -4108,17 +4100,14 @@ fn test_keychains_with_overlapping_spks() {
         .last()
         .unwrap()
         .address;
-    let chain_position = ChainPosition::Confirmed {
-        anchor: ConfirmationBlockTime {
-            block_id: BlockId {
-                height: 2000,
-                hash: BlockHash::all_zeros(),
-            },
-            confirmation_time: 0,
+    let anchor = ConfirmationBlockTime {
+        block_id: BlockId {
+            height: 2000,
+            hash: BlockHash::all_zeros(),
         },
-        transitively: None,
+        confirmation_time: 0,
     };
-    let _outpoint = receive_output_to_address(&mut wallet, addr, 8000, chain_position);
+    let _outpoint = receive_output_to_address(&mut wallet, addr, 8000, anchor);
     assert_eq!(wallet.balance().confirmed, Amount::from_sat(58000));
 }
 
@@ -4207,11 +4196,7 @@ fn single_descriptor_wallet_can_create_tx_and_receive_change() {
         .unwrap();
     assert_eq!(wallet.keychains().count(), 1);
     let amt = Amount::from_sat(5_000);
-    receive_output(
-        &mut wallet,
-        2 * amt.to_sat(),
-        ChainPosition::Unconfirmed { last_seen: Some(2) },
-    );
+    receive_output(&mut wallet, 2 * amt.to_sat(), ReceiveTo::Mempool(2));
     // create spend tx that produces a change output
     let addr = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")
         .unwrap()
@@ -4237,11 +4222,7 @@ fn single_descriptor_wallet_can_create_tx_and_receive_change() {
 #[test]
 fn test_transactions_sort_by() {
     let (mut wallet, _txid) = get_funded_wallet_wpkh();
-    receive_output(
-        &mut wallet,
-        25_000,
-        ChainPosition::Unconfirmed { last_seen: Some(0) },
-    );
+    receive_output(&mut wallet, 25_000, ReceiveTo::Mempool(0));
 
     // sort by chain position, unconfirmed then confirmed by descending block height
     let sorted_txs: Vec<WalletTx> =

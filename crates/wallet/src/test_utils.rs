@@ -4,7 +4,7 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 use core::str::FromStr;
 
-use bdk_chain::{tx_graph, BlockId, ChainPosition, ConfirmationBlockTime};
+use bdk_chain::{tx_graph, BlockId, ConfirmationBlockTime};
 use bitcoin::{
     absolute, hashes::Hash, transaction, Address, Amount, BlockHash, FeeRate, Network, OutPoint,
     Transaction, TxIn, TxOut, Txid,
@@ -224,32 +224,43 @@ pub fn feerate_unchecked(sat_vb: f64) -> FeeRate {
     FeeRate::from_sat_per_kwu(sat_kwu)
 }
 
+/// Input parameter for [`receive_output`].
+pub enum ReceiveTo {
+    /// Receive tx to mempool at this `last_seen` timestamp.
+    Mempool(u64),
+    /// Receive tx to block with this anchor.
+    Block(ConfirmationBlockTime),
+}
+
+impl From<ConfirmationBlockTime> for ReceiveTo {
+    fn from(value: ConfirmationBlockTime) -> Self {
+        Self::Block(value)
+    }
+}
+
 /// Receive a tx output with the given value in the latest block
 pub fn receive_output_in_latest_block(wallet: &mut Wallet, value: u64) -> OutPoint {
     let latest_cp = wallet.latest_checkpoint();
     let height = latest_cp.height();
-    let anchor = if height == 0 {
-        ChainPosition::Unconfirmed { last_seen: Some(0) }
-    } else {
-        ChainPosition::Confirmed {
-            anchor: ConfirmationBlockTime {
-                block_id: latest_cp.block_id(),
-                confirmation_time: 0,
-            },
-            transitively: None,
-        }
-    };
-    receive_output(wallet, value, anchor)
+    assert!(height > 0, "cannot receive tx into genesis block");
+    receive_output(
+        wallet,
+        value,
+        ConfirmationBlockTime {
+            block_id: latest_cp.block_id(),
+            confirmation_time: 0,
+        },
+    )
 }
 
 /// Receive a tx output with the given value and chain position
 pub fn receive_output(
     wallet: &mut Wallet,
     value: u64,
-    pos: ChainPosition<ConfirmationBlockTime>,
+    receive_to: impl Into<ReceiveTo>,
 ) -> OutPoint {
     let addr = wallet.next_unused_address(KeychainKind::External).address;
-    receive_output_to_address(wallet, addr, value, pos)
+    receive_output_to_address(wallet, addr, value, receive_to)
 }
 
 /// Receive a tx output to an address with the given value and chain position
@@ -257,7 +268,7 @@ pub fn receive_output_to_address(
     wallet: &mut Wallet,
     addr: Address,
     value: u64,
-    pos: ChainPosition<ConfirmationBlockTime>,
+    receive_to: impl Into<ReceiveTo>,
 ) -> OutPoint {
     let tx = Transaction {
         version: transaction::Version::ONE,
@@ -272,15 +283,9 @@ pub fn receive_output_to_address(
     let txid = tx.compute_txid();
     insert_tx(wallet, tx);
 
-    match pos {
-        ChainPosition::Confirmed { anchor, .. } => {
-            insert_anchor(wallet, txid, anchor);
-        }
-        ChainPosition::Unconfirmed { last_seen } => {
-            if let Some(last_seen) = last_seen {
-                insert_seen_at(wallet, txid, last_seen);
-            }
-        }
+    match receive_to.into() {
+        ReceiveTo::Block(anchor) => insert_anchor(wallet, txid, anchor),
+        ReceiveTo::Mempool(last_seen) => insert_seen_at(wallet, txid, last_seen),
     }
 
     OutPoint { txid, vout: 0 }
