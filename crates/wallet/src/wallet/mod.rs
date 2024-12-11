@@ -68,11 +68,7 @@ use crate::descriptor::{
 use crate::psbt::PsbtUtils;
 use crate::types::*;
 use crate::wallet::{
-    coin_selection::{
-        DefaultCoinSelectionAlgorithm,
-        Excess::{self, Change, NoChange},
-        InsufficientFunds,
-    },
+    coin_selection::{DefaultCoinSelectionAlgorithm, Excess, InsufficientFunds},
     error::{BuildFeeBumpError, CreateTxError, MiniscriptPsbtError},
     signer::{SignOptions, SignerError, SignerOrdering, SignersContainer, TransactionSigner},
     tx_builder::{FeePolicy, TxBuilder, TxParams},
@@ -1447,15 +1443,15 @@ impl Wallet {
 
         let coin_selection = coin_selection
             .coin_select(
-                required_utxos.clone(),
-                optional_utxos.clone(),
+                required_utxos,
+                optional_utxos,
                 fee_rate,
-                outgoing.to_sat() + fee_amount.to_sat(),
+                outgoing + fee_amount,
                 &drain_script,
                 rng,
             )
             .map_err(CreateTxError::CoinSelection)?;
-        fee_amount += Amount::from_sat(coin_selection.fee_amount);
+        fee_amount += coin_selection.fee_amount;
         let excess = &coin_selection.excess;
 
         tx.input = coin_selection
@@ -1478,7 +1474,7 @@ impl Wallet {
             // Otherwise, we don't know who we should send the funds to, and how much
             // we should send!
             if params.drain_to.is_some() && (params.drain_wallet || !params.utxos.is_empty()) {
-                if let NoChange {
+                if let Excess::NoChange {
                     dust_threshold,
                     remaining_amount,
                     change_fee,
@@ -1486,7 +1482,9 @@ impl Wallet {
                 {
                     return Err(CreateTxError::CoinSelection(InsufficientFunds {
                         needed: *dust_threshold,
-                        available: remaining_amount.saturating_sub(*change_fee),
+                        available: remaining_amount
+                            .checked_sub(*change_fee)
+                            .unwrap_or_default(),
                     }));
                 }
             } else {
@@ -1495,18 +1493,18 @@ impl Wallet {
         }
 
         match excess {
-            NoChange {
+            Excess::NoChange {
                 remaining_amount, ..
-            } => fee_amount += Amount::from_sat(*remaining_amount),
-            Change { amount, fee } => {
+            } => fee_amount += *remaining_amount,
+            Excess::Change { amount, fee } => {
                 if self.is_mine(drain_script.clone()) {
-                    received += Amount::from_sat(*amount);
+                    received += *amount;
                 }
-                fee_amount += Amount::from_sat(*fee);
+                fee_amount += *fee;
 
                 // create drain output
                 let drain_output = TxOut {
-                    value: Amount::from_sat(*amount),
+                    value: *amount,
                     script_pubkey: drain_script,
                 };
 
