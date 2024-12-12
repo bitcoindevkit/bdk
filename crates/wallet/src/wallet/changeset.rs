@@ -1,4 +1,3 @@
-use alloc::string::String;
 use bdk_chain::{
     indexed_tx_graph, keychain_txout, local_chain, tx_graph, ConfirmationBlockTime, Merge,
 };
@@ -73,7 +72,7 @@ impl ChangeSet {
     pub const WALLET_TABLE_NAME: &'static str = "bdk_wallet";
 
     /// Get v0 sqlite [ChangeSet] schema
-    pub fn schema_v0() -> String {
+    pub fn schema_v0() -> alloc::string::String {
         format!(
             "CREATE TABLE {} ( \
                 id INTEGER PRIMARY KEY NOT NULL CHECK (id = 0), \

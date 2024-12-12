@@ -460,7 +460,11 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it visits
     /// and decide whether to visit descendants.
-    pub fn walk_descendants<'g, F, O>(&'g self, txid: Txid, walk_map: F) -> TxDescendants<A, F, O>
+    pub fn walk_descendants<'g, F, O>(
+        &'g self,
+        txid: Txid,
+        walk_map: F,
+    ) -> TxDescendants<'g, A, F, O>
     where
         F: FnMut(usize, Txid) -> Option<O> + 'g,
     {
@@ -477,7 +481,7 @@ impl<A> TxGraph<A> {
         &'g self,
         tx: &'g Transaction,
         walk_map: F,
-    ) -> TxDescendants<A, F, O>
+    ) -> TxDescendants<'g, A, F, O>
     where
         F: FnMut(usize, Txid) -> Option<O> + 'g,
     {
@@ -495,7 +499,7 @@ impl<A> TxGraph<A> {
     pub fn direct_conflicts<'g>(
         &'g self,
         tx: &'g Transaction,
-    ) -> impl Iterator<Item = (usize, Txid)> + '_ {
+    ) -> impl Iterator<Item = (usize, Txid)> + 'g {
         let txid = tx.compute_txid();
         tx.input
             .iter()
