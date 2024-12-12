@@ -15,6 +15,51 @@ fn parse_descriptor(s: &str) -> (Descriptor<DescriptorPublicKey>, KeyMap) {
 }
 
 #[test]
+fn spend_path_from_assets() {
+    use std::str::FromStr;
+
+    // Test the plan result for each spending path given the policy
+    //  thresh(2,pk(A),and(pk(B),older(6)),and(pk(C),after(630000)))
+
+    let a = "020ffa2c93a3eeed29768a338694da24ad60aa18e06eaf193e7945ad097f21d953";
+    let pka = DescriptorPublicKey::from_str(a).unwrap();
+    let b = "03f7781a611d88a5f98301ca3de3b33f6c856e4572cea2fefa8b274fe2fc516d3e";
+    let pkb = DescriptorPublicKey::from_str(b).unwrap();
+    let c = "02bc273a1aca4c50c43572dce6d4857523915bdf09d5f5f4dcedea7c1f9cc41099";
+    let pkc = DescriptorPublicKey::from_str(c).unwrap();
+
+    let (desc, _) = parse_descriptor("wsh(thresh(2,pk(020ffa2c93a3eeed29768a338694da24ad60aa18e06eaf193e7945ad097f21d953),snj:and_v(v:pk(03f7781a611d88a5f98301ca3de3b33f6c856e4572cea2fefa8b274fe2fc516d3e),older(6)),snj:and_v(v:pk(02bc273a1aca4c50c43572dce6d4857523915bdf09d5f5f4dcedea7c1f9cc41099),after(850000))))#09tf9qx0");
+
+    // A + B
+    let def = desc.at_derivation_index(0).unwrap();
+    let assets = Assets::new()
+        .add(vec![pka.clone(), pkb.clone()])
+        .older(relative::LockTime::from_height(6));
+    let plan = def.plan(&assets).unwrap();
+    assert!(plan.absolute_timelock.is_none());
+    assert_eq!(plan.relative_timelock.unwrap().to_sequence(), Sequence(6));
+
+    // A + C
+    let def = desc.at_derivation_index(0).unwrap();
+    let assets = Assets::new()
+        .add(vec![pka.clone(), pkc.clone()])
+        .after(absolute::LockTime::from_consensus(850_000));
+    let plan = def.plan(&assets).unwrap();
+    assert!(plan.relative_timelock.is_none());
+    assert_eq!(plan.absolute_timelock.unwrap().to_consensus_u32(), 850_000);
+
+    // B + C
+    let def = desc.at_derivation_index(0).unwrap();
+    let assets = Assets::new()
+        .add(vec![pkb, pkc])
+        .older(relative::LockTime::from_height(6))
+        .after(absolute::LockTime::from_consensus(850_000));
+    let plan = def.plan(&assets).unwrap();
+    assert_eq!(plan.relative_timelock.unwrap().to_sequence(), Sequence(6));
+    assert_eq!(plan.absolute_timelock.unwrap().to_consensus_u32(), 850_000);
+}
+
+#[test]
 fn construct_plan_from_assets() {
     // technically this is tested in rust-miniscript and is only
     // here for demonstration
