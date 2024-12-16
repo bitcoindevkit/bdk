@@ -254,7 +254,7 @@ impl<P: AsyncWalletPersister> PersistedWallet<P> {
 }
 
 #[cfg(feature = "rusqlite")]
-impl<'c> WalletPersister for bdk_chain::rusqlite::Transaction<'c> {
+impl WalletPersister for bdk_chain::rusqlite::Transaction<'_> {
     type Error = bdk_chain::rusqlite::Error;
 
     fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error> {

@@ -39,7 +39,7 @@ pub struct Config<'a> {
     pub electrsd: electrsd::Conf<'a>,
 }
 
-impl<'a> Default for Config<'a> {
+impl Default for Config<'_> {
     /// Use the default configuration plus set `http_enabled = true` for [`electrsd::Conf`]
     /// which is required for testing `bdk_esplora`.
     fn default() -> Self {

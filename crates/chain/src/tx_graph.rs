@@ -183,7 +183,7 @@ pub struct TxNode<'a, T, A> {
     pub last_seen_unconfirmed: Option<u64>,
 }
 
-impl<'a, T, A> Deref for TxNode<'a, T, A> {
+impl<T, A> Deref for TxNode<'_, T, A> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -1350,7 +1350,7 @@ where
     }
 }
 
-impl<'g, A, F, O> Iterator for TxAncestors<'g, A, F, O>
+impl<A, F, O> Iterator for TxAncestors<'_, A, F, O>
 where
     F: FnMut(usize, Arc<Transaction>) -> Option<O>,
 {
@@ -1470,7 +1470,7 @@ where
     }
 }
 
-impl<'g, A, F, O> Iterator for TxDescendants<'g, A, F, O>
+impl<A, F, O> Iterator for TxDescendants<'_, A, F, O>
 where
     F: FnMut(usize, Txid) -> Option<O>,
 {
