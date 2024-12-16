@@ -16,12 +16,13 @@ jobs:
         run: echo "rust_version=$(cat rust-version)" >> $GITHUB_OUTPUT
   
   build-test:
+    needs: prepare
     name: Build and test
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust:
-          - version: stable
+          - version: ${{ needs.prepare.outputs.rust_version }}
             clippy: true
           - version: 1.63.0 # MSRV
         features:
@@ -60,6 +61,7 @@ jobs:
         run: cargo test --workspace --exclude 'example_*' ${{ matrix.features }}
 
   check-no-std:
+    needs: prepare
     name: Check no_std
     runs-on: ubuntu-latest
     steps:
@@ -68,7 +70,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
           override: true
           profile: minimal
           # target: "thumbv6m-none-eabi"
@@ -88,6 +90,7 @@ jobs:
         run: cargo check --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
 
   check-wasm:
+    needs: prepare
     name: Check WASM
     runs-on: ubuntu-20.04
     env:
@@ -103,7 +106,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: stable
+            toolchain: ${{ needs.prepare.outputs.rust_version }}
             override: true
             profile: minimal
             target: "wasm32-unknown-unknown"
@@ -117,6 +120,7 @@ jobs:
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown,async
 
   fmt:
+    needs: prepare
     name: Rust fmt
     runs-on: ubuntu-latest
     steps:
@@ -125,7 +129,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: stable
+            toolchain: ${{ needs.prepare.outputs.rust_version }}
             override: true
             profile: minimal
             components: rustfmt
@@ -153,6 +157,7 @@ jobs:
           args: --all-features --all-targets -- -D warnings
 
   build-examples:
+    needs: prepare
     name: Build & Test Examples
     runs-on: ubuntu-latest
     strategy:
@@ -172,7 +177,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
           override: true
           profile: minimal
       - name: Rust Cache
