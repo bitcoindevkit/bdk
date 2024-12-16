@@ -59,7 +59,6 @@ pub mod signer;
 pub mod tx_builder;
 pub(crate) mod utils;
 
-use crate::collections::{BTreeMap, HashMap, HashSet};
 use crate::descriptor::{
     check_wallet_descriptor, error::Error as DescriptorError, policy::BuildSatisfaction,
     DerivedDescriptor, DescriptorMeta, ExtendedDescriptor, ExtractPolicy, IntoWalletDescriptor,
@@ -73,6 +72,10 @@ use crate::wallet::{
     signer::{SignOptions, SignerError, SignerOrdering, SignersContainer, TransactionSigner},
     tx_builder::{FeePolicy, TxBuilder, TxParams},
     utils::{check_nsequence_rbf, After, Older, SecpCtx},
+};
+use crate::{
+    collections::{BTreeMap, HashMap, HashSet},
+    descriptor::error::MismatchError,
 };
 
 // re-exports
@@ -372,6 +375,14 @@ impl Wallet {
         let genesis_hash = params
             .genesis_hash
             .unwrap_or(genesis_block(network).block_hash());
+
+        if genesis_hash.ne(&genesis_block(network).block_hash()) {
+            return Err(DescriptorError::Mismatch(MismatchError::Genesis {
+                network: genesis_block(network).block_hash(),
+                parameter: genesis_hash,
+            }));
+        }
+
         let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
 
         let (descriptor, mut descriptor_keymap) = (params.descriptor)(&secp, network)?;
@@ -503,6 +514,14 @@ impl Wallet {
             if chain.genesis_hash() != exp_genesis_hash {
                 return Err(LoadError::Mismatch(LoadMismatch::Genesis {
                     loaded: chain.genesis_hash(),
+                    expected: exp_genesis_hash,
+                }));
+            }
+
+            let network_genesis_hash = genesis_block(network).block_hash();
+            if network_genesis_hash != exp_genesis_hash {
+                return Err(LoadError::Mismatch(LoadMismatch::Genesis {
+                    loaded: network_genesis_hash,
                     expected: exp_genesis_hash,
                 }));
             }

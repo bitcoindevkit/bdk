@@ -6,6 +6,7 @@ use anyhow::Context;
 use assert_matches::assert_matches;
 use bdk_chain::{BlockId, ChainPosition, ConfirmationBlockTime};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
+use bdk_wallet::descriptor::error::MismatchError;
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
 use bdk_wallet::error::CreateTxError;
 use bdk_wallet::psbt::PsbtUtils;
@@ -352,6 +353,24 @@ fn test_error_external_and_internal_are_the_same() {
         matches!(err, Err(DescriptorError::ExternalAndInternalAreTheSame)),
         "expected same descriptors error, got {:?}",
         err,
+    );
+}
+
+#[test]
+fn test_create_genesis_hash_and_network_consistency() {
+    let (external_desc, internal_desc) = get_test_tr_single_sig_xprv_and_change_desc();
+    let mainnet_genesis_hash = BlockHash::from_byte_array(ChainHash::BITCOIN.to_bytes());
+    let err = Wallet::create(external_desc, internal_desc)
+        .genesis_hash(mainnet_genesis_hash)
+        .network(Network::Regtest)
+        .create_wallet_no_persist();
+
+    assert!(
+        matches!(
+            &err,
+            Err(DescriptorError::Mismatch(MismatchError::Genesis { .. }))
+        ),
+        "unexpected network and genesis_hash parameter check result: `genesis_hash` network (Mainnet) does not match network parameter (Regtest)",
     );
 }
 
