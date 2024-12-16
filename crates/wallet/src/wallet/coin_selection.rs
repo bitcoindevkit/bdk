@@ -898,7 +898,7 @@ mod test {
             .collect()
     }
 
-    fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut Vec<WeightedUtxo>) -> Amount {
+    fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut [WeightedUtxo]) -> Amount {
         let utxos_picked_len = rng.gen_range(2..utxos.len() / 2);
         utxos.shuffle(&mut rng);
         utxos[..utxos_picked_len]
