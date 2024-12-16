@@ -9,6 +9,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Set default toolchain
         run: rustup default nightly
       - name: Set profile
@@ -36,6 +38,7 @@ jobs:
       - name: Checkout `bitcoindevkit.org`
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ssh-key: ${{ secrets.DOCS_PUSH_SSH_KEY }}
           repository: bitcoindevkit/bitcoindevkit.org
           ref: master
