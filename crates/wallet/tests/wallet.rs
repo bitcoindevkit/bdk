@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use bdk_chain::{BlockId, ChainPosition, ConfirmationBlockTime};
+use bdk_chain::{BlockId, ChainPosition, ConfirmationBlockTime, TxUpdate};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
 use bdk_wallet::error::CreateTxError;
@@ -12,7 +12,7 @@ use bdk_wallet::psbt::PsbtUtils;
 use bdk_wallet::signer::{SignOptions, SignerError};
 use bdk_wallet::test_utils::*;
 use bdk_wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::{AddressInfo, Balance, ChangeSet, Wallet, WalletPersister, WalletTx};
+use bdk_wallet::{AddressInfo, Balance, ChangeSet, Update, Wallet, WalletPersister, WalletTx};
 use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
 use bitcoin::constants::{ChainHash, COINBASE_MATURITY};
 use bitcoin::hashes::Hash;
@@ -4238,4 +4238,53 @@ fn test_transactions_sort_by() {
 fn test_tx_builder_is_send_safe() {
     let (mut wallet, _txid) = get_funded_wallet_wpkh();
     let _box: Box<dyn Send + Sync> = Box::new(wallet.build_tx());
+}
+
+#[test]
+fn test_wallet_transactions_relevant() {
+    let (mut test_wallet, _txid) = get_funded_wallet_wpkh();
+    let relevant_tx_count_before = test_wallet.transactions().count();
+    let full_tx_count_before = test_wallet.tx_graph().full_txs().count();
+    let chain_tip = test_wallet.local_chain().tip().block_id();
+    let canonical_tx_count_before = test_wallet
+        .tx_graph()
+        .list_canonical_txs(test_wallet.local_chain(), chain_tip)
+        .count();
+
+    // add not relevant transaction to test wallet
+    let (other_external_desc, other_internal_desc) = get_test_tr_single_sig_xprv_and_change_desc();
+    let (other_wallet, other_txid) = get_funded_wallet(other_internal_desc, other_external_desc);
+    let other_tx_node = other_wallet.get_tx(other_txid).unwrap().tx_node;
+    let other_tx_confirmationblocktime = other_tx_node.anchors.iter().last().unwrap();
+    let other_tx_update = TxUpdate {
+        txs: vec![other_tx_node.tx],
+        txouts: Default::default(),
+        anchors: [(*other_tx_confirmationblocktime, other_txid)].into(),
+        seen_ats: [(other_txid, other_tx_confirmationblocktime.confirmation_time)].into(),
+    };
+    let test_wallet_update = Update {
+        last_active_indices: Default::default(),
+        tx_update: other_tx_update,
+        chain: None,
+    };
+    test_wallet.apply_update(test_wallet_update).unwrap();
+
+    // verify transaction from other wallet was added but is not it relevant transactions list.
+    let relevant_tx_count_after = test_wallet.transactions().count();
+    let full_tx_count_after = test_wallet.tx_graph().full_txs().count();
+    let canonical_tx_count_after = test_wallet
+        .tx_graph()
+        .list_canonical_txs(test_wallet.local_chain(), chain_tip)
+        .count();
+
+    assert_eq!(relevant_tx_count_before, relevant_tx_count_after);
+    assert!(!test_wallet
+        .transactions()
+        .any(|wallet_tx| wallet_tx.tx_node.txid == other_txid));
+    assert!(test_wallet
+        .tx_graph()
+        .list_canonical_txs(test_wallet.local_chain(), chain_tip)
+        .any(|wallet_tx| wallet_tx.tx_node.txid == other_txid));
+    assert!(full_tx_count_before < full_tx_count_after);
+    assert!(canonical_tx_count_before < canonical_tx_count_after);
 }
