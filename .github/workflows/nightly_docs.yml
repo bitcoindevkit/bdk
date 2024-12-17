@@ -10,7 +10,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
       - name: Set default toolchain
-        run: rustup default nightly-2024-05-12
+        run: rustup default nightly
       - name: Set profile
         run: rustup set profile minimal
       - name: Update toolchain
