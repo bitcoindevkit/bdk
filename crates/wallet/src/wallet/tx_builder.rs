@@ -644,7 +644,7 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     }
 }
 
-impl<'a, Cs: CoinSelectionAlgorithm> TxBuilder<'a, Cs> {
+impl<Cs: CoinSelectionAlgorithm> TxBuilder<'_, Cs> {
     /// Finish building the transaction.
     ///
     /// Uses the thread-local random number generator (rng).

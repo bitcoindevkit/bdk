@@ -21,7 +21,7 @@ pub enum SyncItem<'i, I> {
     OutPoint(OutPoint),
 }
 
-impl<'i, I: core::fmt::Debug + core::any::Any> core::fmt::Display for SyncItem<'i, I> {
+impl<I: core::fmt::Debug + core::any::Any> core::fmt::Display for SyncItem<'_, I> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SyncItem::Spk(i, spk) => {
@@ -485,7 +485,7 @@ struct KeychainSpkIter<'r, K> {
     inspect: &'r mut Box<InspectFullScan<K>>,
 }
 
-impl<'r, K: Ord + Clone> Iterator for KeychainSpkIter<'r, K> {
+impl<K: Ord + Clone> Iterator for KeychainSpkIter<'_, K> {
     type Item = Indexed<ScriptBuf>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -511,7 +511,7 @@ impl<'r, I, Item> SyncIter<'r, I, Item> {
 
 impl<'r, I, Item> ExactSizeIterator for SyncIter<'r, I, Item> where SyncIter<'r, I, Item>: Iterator {}
 
-impl<'r, I> Iterator for SyncIter<'r, I, ScriptBuf> {
+impl<I> Iterator for SyncIter<'_, I, ScriptBuf> {
     type Item = ScriptBuf;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -524,7 +524,7 @@ impl<'r, I> Iterator for SyncIter<'r, I, ScriptBuf> {
     }
 }
 
-impl<'r, I> Iterator for SyncIter<'r, I, Txid> {
+impl<I> Iterator for SyncIter<'_, I, Txid> {
     type Item = Txid;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -537,7 +537,7 @@ impl<'r, I> Iterator for SyncIter<'r, I, Txid> {
     }
 }
 
-impl<'r, I> Iterator for SyncIter<'r, I, OutPoint> {
+impl<I> Iterator for SyncIter<'_, I, OutPoint> {
     type Item = OutPoint;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -76,7 +76,7 @@ pub trait Anchor: core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash:
     }
 }
 
-impl<'a, A: Anchor> Anchor for &'a A {
+impl<A: Anchor> Anchor for &A {
     fn anchor_block(&self) -> BlockId {
         <A as Anchor>::anchor_block(self)
     }
@@ -112,13 +112,13 @@ pub struct TxPosInBlock<'b> {
     pub tx_pos: usize,
 }
 
-impl<'b> From<TxPosInBlock<'b>> for BlockId {
+impl From<TxPosInBlock<'_>> for BlockId {
     fn from(pos: TxPosInBlock) -> Self {
         pos.block_id
     }
 }
 
-impl<'b> From<TxPosInBlock<'b>> for ConfirmationBlockTime {
+impl From<TxPosInBlock<'_>> for ConfirmationBlockTime {
     fn from(pos: TxPosInBlock) -> Self {
         Self {
             block_id: pos.block_id,
