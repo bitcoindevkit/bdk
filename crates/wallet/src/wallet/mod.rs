@@ -19,6 +19,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use chain::Indexer;
 use core::{cmp::Ordering, fmt, mem, ops::Deref};
 
 use bdk_chain::{
@@ -1062,14 +1063,30 @@ impl Wallet {
             .find(|tx| tx.tx_node.txid == txid)
     }
 
-    /// Iterate over the transactions in the wallet.
+    /// Iterate over relevant and canonical transactions in the wallet.
+    ///
+    /// A transaction is relevant when it spends from or spends to at least one tracked output. A
+    /// transaction is canonical when it is confirmed in the best chain, or does not conflict
+    /// with any transaction confirmed in the best chain.
+    ///
+    /// To iterate over all transactions, including those that are irrelevant and not canonical, use
+    /// [`TxGraph::full_txs`].
+    ///
+    /// To iterate over all canonical transactions, including those that are irrelevant, use
+    /// [`TxGraph::list_canonical_txs`].
     pub fn transactions(&self) -> impl Iterator<Item = WalletTx> + '_ {
-        self.indexed_graph
-            .graph()
+        let tx_graph = self.indexed_graph.graph();
+        let tx_index = &self.indexed_graph.index;
+        tx_graph
             .list_canonical_txs(&self.chain, self.chain.tip().block_id())
+            .filter(|c_tx| tx_index.is_tx_relevant(&c_tx.tx_node.tx))
     }
 
-    /// Array of transactions in the wallet sorted with a comparator function.
+    /// Array of relevant and canonical transactions in the wallet sorted with a comparator
+    /// function.
+    ///
+    /// This is a helper method equivalent to collecting the result of [`Wallet::transactions`]
+    /// into a [`Vec`] and then sorting it.
     ///
     /// # Example
     ///
