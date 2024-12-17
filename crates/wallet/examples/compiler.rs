@@ -30,7 +30,6 @@ use bdk_wallet::{KeychainKind, Wallet};
 /// can be derived from the policy.
 ///
 /// This example demonstrates the interaction between a bdk wallet and miniscript policy.
-
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn Error>> {
     // We start with a miniscript policy string

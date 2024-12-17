@@ -25,7 +25,6 @@ use bdk_wallet::signer::SignersContainer;
 ///
 /// This example demos a Policy output for a 2of2 multisig between between 2 parties, where the wallet holds
 /// one of the Extend Private key.
-
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), Box<dyn Error>> {
     let secp = bitcoin::secp256k1::Secp256k1::new();

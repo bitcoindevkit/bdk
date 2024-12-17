@@ -145,9 +145,7 @@ impl IntoWalletDescriptor for (ExtendedDescriptor, KeyMap) {
             network: Network,
         }
 
-        impl<'s, 'd> miniscript::Translator<DescriptorPublicKey, String, DescriptorError>
-            for Translator<'s, 'd>
-        {
+        impl miniscript::Translator<DescriptorPublicKey, String, DescriptorError> for Translator<'_, '_> {
             fn pk(&mut self, pk: &DescriptorPublicKey) -> Result<String, DescriptorError> {
                 let secp = &self.secp;
 

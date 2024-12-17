@@ -33,7 +33,7 @@ impl<'t, T> EntryIter<'t, T> {
     }
 }
 
-impl<'t, T> Iterator for EntryIter<'t, T>
+impl<T> Iterator for EntryIter<'_, T>
 where
     T: serde::de::DeserializeOwned,
 {
@@ -71,7 +71,7 @@ where
     }
 }
 
-impl<'t, T> Drop for EntryIter<'t, T> {
+impl<T> Drop for EntryIter<'_, T> {
     fn drop(&mut self) {
         // This syncs the underlying file's offset with the buffer's position. This way, we
         // maintain the correct position to start the next read/write.
