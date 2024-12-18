@@ -559,3 +559,120 @@ fn test_sync_with_coinbase() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_check_fee_calculation() -> anyhow::Result<()> {
+    const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
+    const FEE_AMOUNT: Amount = Amount::from_sat(1650);
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
+    let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
+
+    // Setup receiver.
+    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+        let mut recv_index = SpkTxOutIndex::default();
+        recv_index.insert_spk((), spk_to_track.clone());
+        recv_index
+    });
+
+    // Mine some blocks.
+    env.mine_blocks(101, None)?;
+
+    // Send a preliminary tx such that the new utxo in Core's wallet
+    // becomes the input of the next tx
+    let new_addr = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .assume_checked();
+    let prev_amt = SEND_AMOUNT + FEE_AMOUNT;
+    env.send(&new_addr, prev_amt)?;
+    let prev_block_hash = env.mine_blocks(1, None)?.into_iter().next();
+
+    let txid = env.send(&addr_to_track, SEND_AMOUNT)?;
+
+    // Mine a block to confirm sent tx.
+    let block_hash = env.mine_blocks(1, None)?.into_iter().next();
+
+    // Look at the tx we just sent, it should have 1 input and 1 output
+    let tx = env
+        .rpc_client()
+        .get_raw_transaction_info(&txid, block_hash.as_ref())?;
+    assert_eq!(tx.vin.len(), 1);
+    assert_eq!(tx.vout.len(), 1);
+    let vin = &tx.vin[0];
+    let prev_txid = vin.txid.unwrap();
+    let vout = vin.vout.unwrap();
+    let outpoint = bdk_chain::bitcoin::OutPoint::new(prev_txid, vout);
+
+    // Get the txout of the previous tx
+    let prev_tx = env
+        .rpc_client()
+        .get_raw_transaction_info(&prev_txid, prev_block_hash.as_ref())?;
+    let txout = prev_tx
+        .vout
+        .iter()
+        .find(|txout| txout.value == prev_amt)
+        .unwrap();
+    let script_pubkey = ScriptBuf::from_bytes(txout.script_pub_key.hex.to_vec());
+    let txout = bdk_chain::bitcoin::TxOut {
+        value: txout.value,
+        script_pubkey,
+    };
+
+    // Sync up to tip.
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+    let _ = sync_with_electrum(
+        &client,
+        [spk_to_track.clone()],
+        &mut recv_chain,
+        &mut recv_graph,
+    )?;
+
+    // Check the graph update contains the right floating txout
+    let graph_txout = recv_graph
+        .graph()
+        .all_txouts()
+        .find(|(_op, txout)| txout.value == prev_amt)
+        .unwrap();
+    assert_eq!(graph_txout, (outpoint, &txout));
+
+    // Check to see if tx is confirmed.
+    assert_eq!(
+        get_balance(&recv_chain, &recv_graph)?,
+        Balance {
+            confirmed: SEND_AMOUNT,
+            ..Balance::default()
+        },
+    );
+
+    for tx in recv_graph.graph().full_txs() {
+        // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
+        // floating txouts available from the transaction's previous outputs.
+        let fee = recv_graph
+            .graph()
+            .calculate_fee(&tx.tx)
+            .expect("fee must exist");
+
+        // Check the fee calculated fee matches the initial fee amount
+        assert_eq!(fee, FEE_AMOUNT);
+
+        // Retrieve the fee in the transaction data from `bitcoind`.
+        let tx_fee = env
+            .bitcoind
+            .client
+            .get_transaction(&tx.txid, None)
+            .expect("Tx must exist")
+            .fee
+            .expect("Fee must exist")
+            .abs()
+            .to_sat() as u64;
+
+        // Check that the calculated fee matches the fee from the transaction data.
+        assert_eq!(fee, Amount::from_sat(tx_fee)); // 1650sat
+    }
+    Ok(())
+}
