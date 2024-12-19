@@ -212,7 +212,6 @@ mod test {
         fs,
         io::{Seek, Write},
     };
-    use tempfile::NamedTempFile;
 
     const TEST_MAGIC_BYTES_LEN: usize = 12;
     const TEST_MAGIC_BYTES: [u8; TEST_MAGIC_BYTES_LEN] =
@@ -238,11 +237,11 @@ mod test {
 
     #[test]
     fn load_fails_if_file_is_too_short() {
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(&TEST_MAGIC_BYTES[..TEST_MAGIC_BYTES_LEN - 1])
-            .expect("should write");
+        let tempdir = tempfile::tempdir().unwrap();
+        let file_path = tempdir.path().join("db_file");
+        fs::write(&file_path, &TEST_MAGIC_BYTES[..TEST_MAGIC_BYTES_LEN - 1]).expect("should write");
 
-        match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, file.path()) {
+        match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path) {
             Err(StoreErrorWithDump {
                 error: StoreError::Io(e),
                 ..
@@ -255,11 +254,11 @@ mod test {
     fn load_fails_if_magic_bytes_are_invalid() {
         let invalid_magic_bytes = "ldkfs0000000";
 
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(invalid_magic_bytes.as_bytes())
-            .expect("should write");
+        let tempdir = tempfile::tempdir().unwrap();
+        let file_path = tempdir.path().join("db_file");
+        fs::write(&file_path, invalid_magic_bytes.as_bytes()).expect("should write");
 
-        match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, file.path()) {
+        match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path) {
             Err(StoreErrorWithDump {
                 error: StoreError::InvalidMagicBytes { got, .. },
                 ..
