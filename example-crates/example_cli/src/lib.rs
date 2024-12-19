@@ -789,7 +789,7 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
         Commands::Generate { network } => generate_bip86_helper(network).map(|_| None),
         // try load
         _ => {
-            let (changeset, db) =
+            let (db, changeset) =
                 Store::<ChangeSet>::load(db_magic, db_path).context("could not open file store")?;
 
             let changeset = changeset.expect("should not be empty");

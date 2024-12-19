@@ -22,7 +22,7 @@ const ELECTRUM_URL: &str = "ssl://electrum.blockstream.info:60002";
 fn main() -> Result<(), anyhow::Error> {
     let db_path = "bdk-electrum-example.db";
 
-    let (_, mut db) = Store::<bdk_wallet::ChangeSet>::load_or_create(DB_MAGIC.as_bytes(), db_path)?;
+    let (mut db, _) = Store::<bdk_wallet::ChangeSet>::load_or_create(DB_MAGIC.as_bytes(), db_path)?;
 
     let wallet_opt = Wallet::load()
         .descriptor(KeychainKind::External, Some(EXTERNAL_DESC))

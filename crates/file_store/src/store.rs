@@ -65,7 +65,7 @@ where
     ///
     /// [`create`]: Store::create
     /// [`load`]: Store::load
-    pub fn load<P>(magic: &[u8], file_path: P) -> Result<(Option<C>, Self), StoreErrorWithDump<C>>
+    pub fn load<P>(magic: &[u8], file_path: P) -> Result<(Self, Option<C>), StoreErrorWithDump<C>>
     where
         P: AsRef<Path>,
     {
@@ -92,7 +92,7 @@ where
         // Get aggregated changeset
         let aggregated_changeset = store.dump()?;
 
-        Ok((aggregated_changeset, store))
+        Ok((store, aggregated_changeset))
     }
 
     /// Aggregate [`Store`] changesets and return them as a single changeset.
@@ -133,7 +133,7 @@ where
     pub fn load_or_create<P>(
         magic: &[u8],
         file_path: P,
-    ) -> Result<(Option<C>, Self), StoreErrorWithDump<C>>
+    ) -> Result<(Self, Option<C>), StoreErrorWithDump<C>>
     where
         P: AsRef<Path>,
     {
@@ -141,7 +141,7 @@ where
             Self::load(magic, file_path)
         } else {
             Self::create(magic, file_path)
-                .map(|store| (Option::<C>::None, store))
+                .map(|store| (store, Option::<C>::None))
                 .map_err(|err: StoreError| StoreErrorWithDump {
                     changeset: Option::<C>::None,
                     error: err,
@@ -371,7 +371,7 @@ mod test {
         let changeset = BTreeSet::from(["hello".to_string(), "world".to_string()]);
 
         {
-            let (_, mut store) =
+            let (mut store, _) =
                 Store::<TestChangeSet>::load_or_create(&TEST_MAGIC_BYTES, &file_path)
                     .expect("must create");
             assert!(file_path.exists());
@@ -379,7 +379,7 @@ mod test {
         }
 
         {
-            let (recovered_changeset, _) =
+            let (_, recovered_changeset) =
                 Store::<TestChangeSet>::load_or_create(&TEST_MAGIC_BYTES, &file_path)
                     .expect("must load");
             assert_eq!(recovered_changeset, Some(changeset));
@@ -444,7 +444,7 @@ mod test {
 
             // load file again - this time we should successfully aggregate all changesets
             {
-                let (aggregated_changeset, _) =
+                let (_, aggregated_changeset) =
                     Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).unwrap();
                 assert_eq!(
                     aggregated_changeset,
@@ -480,7 +480,7 @@ mod test {
 
         {
             // open store
-            let (_, mut store) = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path)
+            let (mut store, _) = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path)
                 .expect("failed to load store");
 
             // now append the second changeset
@@ -502,7 +502,7 @@ mod test {
         }
 
         // Open the store again to verify file pointer position at the end of the file
-        let (_, mut store) = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path)
+        let (mut store, _) = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path)
             .expect("should load correctly");
 
         // get the current position of file pointer just after loading store
