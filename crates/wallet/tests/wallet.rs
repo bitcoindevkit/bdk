@@ -116,10 +116,7 @@ fn wallet_is_persisted() -> anyhow::Result<()> {
     run(
         "store.db",
         |path| Ok(bdk_file_store::Store::create(DB_MAGIC, path)?),
-        |path| {
-            let (_, store) = bdk_file_store::Store::load(DB_MAGIC, path)?;
-            Ok(store)
-        },
+        |path| Ok(bdk_file_store::Store::load(DB_MAGIC, path)?.1),
     )?;
     run::<bdk_chain::rusqlite::Connection, _, _>(
         "store.sqlite",
@@ -211,10 +208,7 @@ fn wallet_load_checks() -> anyhow::Result<()> {
     run(
         "store.db",
         |path| Ok(bdk_file_store::Store::<ChangeSet>::create(DB_MAGIC, path)?),
-        |path| {
-            let (_, store) = bdk_file_store::Store::<ChangeSet>::load(DB_MAGIC, path)?;
-            Ok(store)
-        },
+        |path| Ok(bdk_file_store::Store::load(DB_MAGIC, path)?.1),
     )?;
     run(
         "store.sqlite",
