@@ -9,7 +9,7 @@ use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
-    tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt,
+    tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt, Indexer,
 };
 use bdk_testenv::{
     block_id, hash,
@@ -97,6 +97,97 @@ fn insert_relevant_txs() {
     };
 
     assert_eq!(graph.initial_changeset(), initial_changeset);
+}
+
+/// Ensure that [`IndexedTxGraph::batch_insert_relevant`] adds transactions that are direct
+/// conflicts with transactions in our graph but are not directly relevant to it.
+///
+/// The graph contains three transactions (A, B, and conflicting_tx), with A and B being relevant
+/// because B spends from A. This test verifies that `conflicting_tx` is inserted into the graph
+/// solely because it is directly conflicting with B.
+#[test]
+fn insert_relevant_conflicting_txs() {
+    use bdk_chain::indexer::keychain_txout;
+    let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[0])
+        .expect("must be valid");
+    let spk_0 = descriptor.at_derivation_index(0).unwrap().script_pubkey();
+    let spk_1 = descriptor.at_derivation_index(9).unwrap().script_pubkey();
+
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new(
+        KeychainTxOutIndex::new(10),
+    );
+    let _ = graph
+        .index
+        .insert_descriptor((), descriptor.clone())
+        .unwrap();
+
+    let conflicting_prev_tx = Transaction {
+        output: vec![TxOut {
+            value: Amount::from_sat(10_000),
+            script_pubkey: spk_0,
+        }],
+        ..new_tx(0)
+    };
+
+    let tx_a = Transaction {
+        output: vec![TxOut {
+            value: Amount::from_sat(10_000),
+            script_pubkey: spk_1,
+        }],
+        ..new_tx(1)
+    };
+
+    let tx_b = Transaction {
+        input: vec![
+            TxIn {
+                previous_output: OutPoint::new(conflicting_prev_tx.compute_txid(), 0),
+                ..Default::default()
+            },
+            TxIn {
+                previous_output: OutPoint::new(tx_a.compute_txid(), 0),
+                ..Default::default()
+            },
+        ],
+        ..new_tx(2)
+    };
+
+    let conflicting_tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(conflicting_prev_tx.compute_txid(), 0),
+            ..Default::default()
+        }],
+        ..new_tx(3)
+    };
+
+    // We add only `tx_a`, `tx_b`, and `conflicting_tx` into the graph. `tx_a` and `tx_b` are
+    // relevant to our graph, because `tx_b` spends from `tx_a`. `conflicting_tx` is not directly
+    // relevant to our graph because it does not spend from `tx_a`. However, `tx_b` and
+    // `conflicting_tx` conflict, because they both spend from the same output of
+    // `conflicting_prev_tx`.
+    let txs = [tx_a, tx_b, conflicting_tx.clone()];
+
+    let changeset = graph.batch_insert_relevant(txs.iter().cloned().map(|tx| (tx, None)));
+
+    // Confirm that `conflicting_tx` is added to `ChangeSet` only due to it being a conflicting
+    // transaction, and not because it is directly relevant to our graph.
+    assert!(!graph.index.is_tx_relevant(&conflicting_tx));
+    assert!(graph
+        .graph()
+        .direct_conflicts(&conflicting_tx)
+        .next()
+        .is_some());
+
+    let expected_changeset = indexed_tx_graph::ChangeSet {
+        tx_graph: tx_graph::ChangeSet::<ConfirmationBlockTime> {
+            txs: txs.iter().cloned().map(Arc::new).collect(),
+            ..Default::default()
+        },
+        indexer: keychain_txout::ChangeSet {
+            last_revealed: [(descriptor.descriptor_id(), 9_u32)].into(),
+        },
+    };
+
+    assert_eq!(changeset, expected_changeset);
 }
 
 /// Ensure consistency IndexedTxGraph list_* and balance methods. These methods lists

@@ -178,7 +178,7 @@ where
 
         let mut tx_graph = tx_graph::ChangeSet::default();
         for (tx, anchors) in txs {
-            if self.index.is_tx_relevant(&tx) {
+            if self.index.is_tx_relevant(&tx) || self.graph.direct_conflicts(&tx).next().is_some() {
                 let txid = tx.compute_txid();
                 tx_graph.merge(self.graph.insert_tx(tx.clone()));
                 for anchor in anchors {
@@ -218,11 +218,13 @@ where
             indexer.merge(self.index.index_tx(tx));
         }
 
-        let graph = self.graph.batch_insert_unconfirmed(
-            txs.into_iter()
-                .filter(|(tx, _)| self.index.is_tx_relevant(tx))
-                .map(|(tx, seen_at)| (tx.clone(), seen_at)),
-        );
+        let mut relevant_txs = Vec::new();
+        for (tx, seen_at) in txs.into_iter() {
+            if self.index.is_tx_relevant(&tx) || self.graph.direct_conflicts(&tx).next().is_some() {
+                relevant_txs.push((tx.clone(), seen_at));
+            }
+        }
+        let graph = self.graph.batch_insert_unconfirmed(relevant_txs);
 
         ChangeSet {
             tx_graph: graph,
@@ -278,7 +280,8 @@ where
         let mut changeset = ChangeSet::<A, I::ChangeSet>::default();
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
             changeset.indexer.merge(self.index.index_tx(tx));
-            if self.index.is_tx_relevant(tx) {
+
+            if self.index.is_tx_relevant(tx) || self.graph.direct_conflicts(tx).next().is_some() {
                 let txid = tx.compute_txid();
                 let anchor = TxPosInBlock {
                     block,
