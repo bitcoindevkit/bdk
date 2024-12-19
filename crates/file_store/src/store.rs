@@ -157,8 +157,8 @@ where
     /// first chunk of valid changesets.
     ///
     /// If garbage data is written and then valid changesets, the next load will still only
-    /// retrieve the first chunk of valid changesets. The recovery of those valied changesets after
-    /// the garbage data is responsability of the user
+    /// retrieve the first chunk of valid changesets. The recovery of those valid changesets after
+    /// the garbage data is responsibility of the user.
     pub fn append(&mut self, changeset: &C) -> Result<(), io::Error> {
         // no need to write anything if changeset is empty
         if changeset.is_empty() {
