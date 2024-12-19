@@ -1,6 +1,6 @@
 [package]
 name = "bdk_file_store"
-version = "0.18.0"
+version = "0.18.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/bitcoindevkit/bdk"
@@ -14,7 +14,7 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bdk_core = { path = "../core", version = "0.4.0", features = ["serde"]}
+bdk_core = { path = "../core", version = "0.4.1", features = ["serde"]}
 bincode = { version = "1" }
 serde = { version = "1", features = ["derive"] }
 
