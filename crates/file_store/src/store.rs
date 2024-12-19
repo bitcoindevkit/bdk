@@ -14,10 +14,7 @@ use std::{
 /// > ⚠ This is a development/testing database. It does not natively support backwards compatible
 /// > BDK version upgrades so should not be used in production.
 #[derive(Debug)]
-pub struct Store<C>
-where
-    C: Sync + Send,
-{
+pub struct Store<C> {
     magic_len: usize,
     db_file: File,
     marker: PhantomData<C>,
@@ -25,11 +22,7 @@ where
 
 impl<C> Store<C>
 where
-    C: Merge
-        + serde::Serialize
-        + serde::de::DeserializeOwned
-        + core::marker::Send
-        + core::marker::Sync,
+    C: Merge + serde::Serialize + serde::de::DeserializeOwned,
 {
     /// Create a new [`Store`] file in write-only mode; error if the file exists.
     ///
