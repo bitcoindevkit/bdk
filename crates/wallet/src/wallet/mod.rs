@@ -19,7 +19,6 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use chain::Indexer;
 use core::{cmp::Ordering, fmt, mem, ops::Deref};
 
 use bdk_chain::{
@@ -32,7 +31,7 @@ use bdk_chain::{
     },
     tx_graph::{CalculateFeeError, CanonicalTx, TxGraph, TxUpdate},
     BlockId, ChainPosition, ConfirmationBlockTime, DescriptorExt, FullTxOut, Indexed,
-    IndexedTxGraph, Merge,
+    IndexedTxGraph, Indexer, Merge,
 };
 use bitcoin::{
     absolute,
