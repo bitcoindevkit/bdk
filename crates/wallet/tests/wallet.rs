@@ -610,6 +610,21 @@ fn test_create_tx_default_locktime_cltv() {
 }
 
 #[test]
+fn test_create_tx_locktime_cltv_timestamp() {
+    let (mut wallet, _) = get_funded_wallet_single(get_test_single_sig_cltv_timestamp());
+    let addr = wallet.next_unused_address(KeychainKind::External);
+    let mut builder = wallet.build_tx();
+    builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
+    let mut psbt = builder.finish().unwrap();
+
+    assert_eq!(psbt.unsigned_tx.lock_time.to_consensus_u32(), 1_734_230_218);
+
+    let finalized = wallet.sign(&mut psbt, SignOptions::default()).unwrap();
+
+    assert!(finalized);
+}
+
+#[test]
 fn test_create_tx_custom_locktime() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let addr = wallet.next_unused_address(KeychainKind::External);

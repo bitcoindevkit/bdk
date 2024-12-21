@@ -160,6 +160,13 @@ pub fn get_test_single_sig_cltv() -> &'static str {
     "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(100000)))"
 }
 
+/// `wsh` descriptor with policy `and(pk(A),after(1_734_230_218))`
+// the parameter passed to miniscript fragment `after` has to equal or greater than 500_000_000
+// in order to use a lock based on unix time
+pub fn get_test_single_sig_cltv_timestamp() -> &'static str {
+    "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),after(1734230218)))"
+}
+
 /// taproot single key descriptor
 pub fn get_test_tr_single_sig() -> &'static str {
     "tr(cNJmN3fH9DDbDt131fQNkVakkpzawJBSeybCUNmP1BovpmGQ45xG)"
