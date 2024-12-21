@@ -1,20 +1,22 @@
 #![cfg(feature = "miniscript")]
 
-#[macro_use]
-mod common;
-
 use bdk_chain::{Balance, BlockId};
-use bdk_testenv::{block_id, hash, local_chain};
+use bdk_testenv::{
+    block_id, hash, local_chain,
+    tx_template::{init_graph, TxInTemplate, TxOutTemplate, TxTemplate},
+};
 use bitcoin::{Amount, OutPoint, ScriptBuf};
-use common::*;
-use std::collections::{BTreeSet, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{BTreeSet, HashSet},
+};
 
 #[allow(dead_code)]
 struct Scenario<'a> {
     /// Name of the test scenario
     name: &'a str,
     /// Transaction templates
-    tx_templates: &'a [TxTemplate<'a, BlockId>],
+    tx_templates: &'a [TxTemplate<BlockId>],
     /// Names of txs that must exist in the output of `list_canonical_txs`
     exp_chain_txs: HashSet<&'a str>,
     /// Outpoints that must exist in the output of `filter_chain_txouts`
@@ -48,32 +50,32 @@ fn test_tx_conflict_handling() {
             name: "coinbase tx cannot be in mempool and be unconfirmed",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "unconfirmed_coinbase",
-                    inputs: &[TxInTemplate::Coinbase],
-                    outputs: &[TxOutTemplate::new(5000, Some(0))],
+                    tx_name: Cow::Borrowed("unconfirmed_coinbase"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Coinbase]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(5000, Some(0))]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "confirmed_genesis",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(1))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("confirmed_genesis"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(1))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "unconfirmed_conflict",
-                    inputs: &[
-                        TxInTemplate::PrevTx("confirmed_genesis", 0), 
-                        TxInTemplate::PrevTx("unconfirmed_coinbase", 0)
-                    ],
-                    outputs: &[TxOutTemplate::new(20000, Some(2))],
+                    tx_name: Cow::Borrowed("unconfirmed_conflict"),
+                    inputs: Cow::Borrowed(&[
+                        TxInTemplate::PrevTx(Cow::Borrowed("confirmed_genesis"), 0), 
+                        TxInTemplate::PrevTx(Cow::Borrowed("unconfirmed_coinbase"), 0)
+                    ]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(2))]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "confirmed_conflict",
-                    inputs: &[TxInTemplate::PrevTx("confirmed_genesis", 0)],
-                    outputs: &[TxOutTemplate::new(20000, Some(3))],
-                    anchors: &[block_id!(4, "E")],
+                    tx_name: Cow::Borrowed("confirmed_conflict"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("confirmed_genesis"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(3))]),
+                    anchors: Cow::Owned(vec![block_id!(4, "E")]),
                     ..Default::default()
                 },
             ],
@@ -89,23 +91,23 @@ fn test_tx_conflict_handling() {
             name: "2 unconfirmed txs with same last_seens conflict",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "tx1",
-                    outputs: &[TxOutTemplate::new(40000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("tx1"),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(40000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_1",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-                    outputs: &[TxOutTemplate::new(20000, Some(2))],
+                    tx_name: Cow::Borrowed("tx_conflict_1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(2))]),
                     last_seen: Some(300),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_2",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-                    outputs: &[TxOutTemplate::new(30000, Some(3))],
+                    tx_name: Cow::Borrowed("tx_conflict_2"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(3))]),
                     last_seen: Some(300),
                     ..Default::default()
                 },
@@ -125,23 +127,23 @@ fn test_tx_conflict_handling() {
             name: "2 unconfirmed txs with different last_seens conflict",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "tx1",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0)), TxOutTemplate::new(10000, Some(1))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("tx1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0)), TxOutTemplate::new(10000, Some(1))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_1",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(20000, Some(2))],
+                    tx_name: Cow::Borrowed("tx_conflict_1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0), TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(2))]),
                     last_seen: Some(200),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_2",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0),  TxInTemplate::PrevTx("tx1", 1)],
-                    outputs: &[TxOutTemplate::new(30000, Some(3))],
+                    tx_name: Cow::Borrowed("tx_conflict_2"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0),  TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 1)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(3))]),
                     last_seen: Some(300),
                     ..Default::default()
                 },
@@ -160,30 +162,30 @@ fn test_tx_conflict_handling() {
             name: "3 unconfirmed txs with different last_seens conflict",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "tx1",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("tx1"),
+                    inputs: Cow::Owned(vec![TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_1",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("tx_conflict_1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0), TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     last_seen: Some(200),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_2",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    tx_name: Cow::Borrowed("tx_conflict_2"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(2))]),
                     last_seen: Some(300),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_3",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-                    outputs: &[TxOutTemplate::new(40000, Some(3))],
+                    tx_name: Cow::Borrowed("tx_conflict_3"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(40000, Some(3))]),
                     last_seen: Some(400),
                     ..Default::default()
                 },
@@ -202,24 +204,24 @@ fn test_tx_conflict_handling() {
             name: "unconfirmed tx conflicts with tx in orphaned block, orphaned higher last_seen",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "tx1",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("tx1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_1",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("tx_conflict_1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0), TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     last_seen: Some(200),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_orphaned_conflict",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-                    outputs: &[TxOutTemplate::new(30000, Some(2))],
-                    anchors: &[block_id!(4, "Orphaned Block")],
+                    tx_name: Cow::Borrowed("tx_orphaned_conflict"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(2))]),
+                    anchors: Cow::Owned(vec![block_id!(4, "Orphaned Block")]),
                     last_seen: Some(300),
                 },
             ],
@@ -237,24 +239,24 @@ fn test_tx_conflict_handling() {
             name: "unconfirmed tx conflicts with tx in orphaned block, orphaned lower last_seen",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "tx1",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("tx1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_1",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("tx_conflict_1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0), TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     last_seen: Some(200),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_orphaned_conflict",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-                    outputs: &[TxOutTemplate::new(30000, Some(2))],
-                    anchors: &[block_id!(4, "Orphaned Block")],
+                    tx_name: Cow::Borrowed("tx_orphaned_conflict"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(2))]),
+                    anchors: Cow::Owned(vec![block_id!(4, "Orphaned Block")]),
                     last_seen: Some(100),
                 },
             ],
@@ -272,38 +274,38 @@ fn test_tx_conflict_handling() {
             name: "multiple unconfirmed txs conflict with a confirmed tx",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "tx1",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("tx1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_1",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0), TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("tx_conflict_1"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0), TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     last_seen: Some(200),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_2",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    tx_name: Cow::Borrowed("tx_conflict_2"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(2))]),
                     last_seen: Some(300),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_conflict_3",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-                    outputs: &[TxOutTemplate::new(40000, Some(3))],
+                    tx_name: Cow::Borrowed("tx_conflict_3"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(40000, Some(3))]),
                     last_seen: Some(400),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx_confirmed_conflict",
-                    inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-                    outputs: &[TxOutTemplate::new(50000, Some(4))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("tx_confirmed_conflict"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(50000, Some(4))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     ..Default::default()
                 },
             ],
@@ -321,30 +323,30 @@ fn test_tx_conflict_handling() {
             name: "B and B' spend A and conflict, C spends B, all the transactions are unconfirmed, B' has higher last_seen than B",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "A",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
+                    tx_name: Cow::Borrowed("A"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
                     last_seen: Some(22),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "B",
-                    inputs: &[TxInTemplate::PrevTx("A", 0)],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("B"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     last_seen: Some(23),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "B'",
-                    inputs: &[TxInTemplate::PrevTx("A", 0)],
-                    outputs: &[TxOutTemplate::new(20000, Some(2))],
+                    tx_name: Cow::Borrowed("B'"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(2))]),
                     last_seen: Some(24),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "C",
-                    inputs: &[TxInTemplate::PrevTx("B", 0)],
-                    outputs: &[TxOutTemplate::new(30000, Some(3))],
+                    tx_name: Cow::Borrowed("C"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("B"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(3))]),
                     last_seen: Some(25),
                     ..Default::default()
                 },
@@ -366,29 +368,29 @@ fn test_tx_conflict_handling() {
             name: "B and B' spend A and conflict, C spends B, A and B' are in best chain",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "A",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("A"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "B",
-                    inputs: &[TxInTemplate::PrevTx("A", 0)],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("B"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "B'",
-                    inputs: &[TxInTemplate::PrevTx("A", 0)],
-                    outputs: &[TxOutTemplate::new(20000, Some(2))],
-                    anchors: &[block_id!(4, "E")],
+                    tx_name: Cow::Borrowed("B'"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(2))]),
+                    anchors: Cow::Owned(vec![block_id!(4, "E")]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "C",
-                    inputs: &[TxInTemplate::PrevTx("B", 0)],
-                    outputs: &[TxOutTemplate::new(30000, Some(3))],
+                    tx_name: Cow::Borrowed("C"),
+                    inputs: Cow::Owned(vec![TxInTemplate::PrevTx(Cow::Borrowed("B"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(3))]),
                     ..Default::default()
                 },
             ],
@@ -407,30 +409,30 @@ fn test_tx_conflict_handling() {
             name: "B and B' spend A and conflict, C spends B', A and B' are in best chain",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "A",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("A"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "B",
-                    inputs: &[TxInTemplate::PrevTx("A", 0)],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("B"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     last_seen: Some(2),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "B'",
-                    inputs: &[TxInTemplate::PrevTx("A", 0)],
-                    outputs: &[TxOutTemplate::new(20000, Some(2))],
-                    anchors: &[block_id!(4, "E")],
+                    tx_name: Cow::Borrowed("B'"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(2))]),
+                    anchors: Cow::Owned(vec![block_id!(4, "E")]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "C",
-                    inputs: &[TxInTemplate::PrevTx("B'", 0)],
-                    outputs: &[TxOutTemplate::new(30000, Some(3))],
+                    tx_name: Cow::Borrowed("C"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("B'"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(3))]),
                     last_seen: Some(1),
                     ..Default::default()
                 },
@@ -454,33 +456,33 @@ fn test_tx_conflict_handling() {
             name: "B and B' spend A and conflict, C spends both B and B', A is in best chain",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "A",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("A"),
+                    inputs: Cow::Owned(vec![TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "B",
-                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("B"),
+                    inputs: Cow::Owned(vec![TxInTemplate::PrevTx(Cow::Borrowed("A"), 0), TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     last_seen: Some(200),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "B'",
-                    inputs: &[TxInTemplate::PrevTx("A", 0)],
-                    outputs: &[TxOutTemplate::new(30000, Some(2))],
+                    tx_name: Cow::Borrowed("B'"),
+                    inputs: Cow::Owned(vec![TxInTemplate::PrevTx(Cow::Borrowed("A"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(2))]),
                     last_seen: Some(300),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "C",
-                    inputs: &[
-                        TxInTemplate::PrevTx("B", 0),
-                        TxInTemplate::PrevTx("B'", 0),
-                    ],
-                    outputs: &[TxOutTemplate::new(20000, Some(3))],
+                    tx_name: Cow::Borrowed("C"),
+                    inputs: Cow::Owned(vec![
+                        TxInTemplate::PrevTx(Cow::Borrowed("B"), 0),
+                        TxInTemplate::PrevTx(Cow::Borrowed("B'"), 0),
+                    ]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(3))]),
                     ..Default::default()
                 },
             ],
@@ -499,33 +501,33 @@ fn test_tx_conflict_handling() {
             name: "B and B' spend A and conflict, B' is confirmed, C spends both B and B', A is in best chain",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "A",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("A"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "B",
-                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("B"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0), TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     last_seen: Some(200),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "B'",
-                    inputs: &[TxInTemplate::PrevTx("A", 0)],
-                    outputs: &[TxOutTemplate::new(50000, Some(4))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("B'"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(50000, Some(4))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "C",
-                    inputs: &[
-                        TxInTemplate::PrevTx("B", 0),
-                        TxInTemplate::PrevTx("B'", 0),
-                    ],
-                    outputs: &[TxOutTemplate::new(20000, Some(5))],
+                    tx_name: Cow::Borrowed("C"),
+                    inputs: Cow::Borrowed(&[
+                        TxInTemplate::PrevTx(Cow::Borrowed("B"), 0),
+                        TxInTemplate::PrevTx(Cow::Borrowed("B'"), 0),
+                    ]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(5))]),
                     ..Default::default()
                 },
             ],
@@ -544,39 +546,39 @@ fn test_tx_conflict_handling() {
             name: "B and B' spend A and conflict, B' is confirmed, C spends both B and B', D spends C, A is in best chain",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "A",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("A"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     last_seen: None,
                 },
                 TxTemplate {
-                    tx_name: "B",
-                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(20000, Some(1))],
+                    tx_name: Cow::Borrowed("B"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0), TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(1))]),
                     last_seen: Some(200),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "B'",
-                    inputs: &[TxInTemplate::PrevTx("A", 0)],
-                    outputs: &[TxOutTemplate::new(50000, Some(4))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("B'"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("A"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(50000, Some(4))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "C",
-                    inputs: &[
-                        TxInTemplate::PrevTx("B", 0),
-                        TxInTemplate::PrevTx("B'", 0),
-                    ],
-                    outputs: &[TxOutTemplate::new(20000, Some(5))],
+                    tx_name: Cow::Borrowed("C"),
+                    inputs: Cow::Borrowed(&[
+                        TxInTemplate::PrevTx(Cow::Borrowed("B"), 0),
+                        TxInTemplate::PrevTx(Cow::Borrowed("B'"), 0),
+                    ]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(5))]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "D",
-                    inputs: &[TxInTemplate::PrevTx("C", 0)],
-                    outputs: &[TxOutTemplate::new(20000, Some(6))],
+                    tx_name: Cow::Borrowed("D"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("C"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(6))]),
                     ..Default::default()
                 },
             ],
@@ -595,22 +597,22 @@ fn test_tx_conflict_handling() {
             name: "transitively confirmed ancestors",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "first",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(1000, Some(0))],
+                    tx_name: Cow::Borrowed("first"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(1000, Some(0))]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "second",
-                    inputs: &[TxInTemplate::PrevTx("first", 0)],
-                    outputs: &[TxOutTemplate::new(900, Some(0))],
+                    tx_name: Cow::Borrowed("second"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("first"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(900, Some(0))]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "anchored",
-                    inputs: &[TxInTemplate::PrevTx("second", 0)],
-                    outputs: &[TxOutTemplate::new(800, Some(0))],
-                    anchors: &[block_id!(3, "D")],
+                    tx_name: Cow::Borrowed("anchored"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("second"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(800, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(3, "D")]),
                     ..Default::default()
                 },
             ],
@@ -628,31 +630,31 @@ fn test_tx_conflict_handling() {
             name: "transitively anchored txs should have priority over last seen",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "root",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10_000, Some(0))],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("root"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10_000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "last_seen_conflict",
-                    inputs: &[TxInTemplate::PrevTx("root", 0)],
-                    outputs: &[TxOutTemplate::new(9900, Some(1))],
+                    tx_name: Cow::Borrowed("last_seen_conflict"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("root"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(9900, Some(1))]),
                     last_seen: Some(1000),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "transitively_anchored_conflict",
-                    inputs: &[TxInTemplate::PrevTx("root", 0)],
-                    outputs: &[TxOutTemplate::new(9000, Some(1))],
+                    tx_name: Cow::Borrowed("transitively_anchored_conflict"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("root"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(9000, Some(1))]),
                     last_seen: Some(100),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "anchored",
-                    inputs: &[TxInTemplate::PrevTx("transitively_anchored_conflict", 0)],
-                    outputs: &[TxOutTemplate::new(8000, Some(2))],
-                    anchors: &[block_id!(4, "E")],
+                    tx_name: Cow::Borrowed("anchored"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("transitively_anchored_conflict"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(8000, Some(2))]),
+                    anchors: Cow::Owned(vec![block_id!(4, "E")]),
                     ..Default::default()
                 },
             ],
@@ -668,17 +670,17 @@ fn test_tx_conflict_handling() {
             name: "tx anchored in orphaned block and not seen in mempool should be canon",
             tx_templates: &[
                 TxTemplate {
-                    tx_name: "root",
-                    inputs: &[TxInTemplate::Bogus],
-                    outputs: &[TxOutTemplate::new(10_000, None)],
-                    anchors: &[block_id!(1, "B")],
+                    tx_name: Cow::Borrowed("root"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(10_000, None)]),
+                    anchors: Cow::Owned(vec![block_id!(1, "B")]),
                     ..Default::default()
                 },
                 TxTemplate {
-                    tx_name: "tx",
-                    inputs: &[TxInTemplate::PrevTx("root", 0)],
-                    outputs: &[TxOutTemplate::new(9000, Some(0))],
-                    anchors: &[block_id!(6, "not G")],
+                    tx_name: Cow::Borrowed("tx"),
+                    inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("root"), 0)]),
+                    outputs: Cow::Owned(vec![TxOutTemplate::new(9000, Some(0))]),
+                    anchors: Cow::Owned(vec![block_id!(6, "not G")]),
                     ..Default::default()
                 },
             ],
@@ -690,7 +692,7 @@ fn test_tx_conflict_handling() {
     ];
 
     for scenario in scenarios {
-        let (tx_graph, spk_index, exp_tx_ids) = init_graph(scenario.tx_templates.iter());
+        let (tx_graph, spk_index, exp_tx_ids) = init_graph(scenario.tx_templates.iter().cloned());
 
         let txs = tx_graph
             .list_canonical_txs(&local_chain, chain_tip)
@@ -699,7 +701,7 @@ fn test_tx_conflict_handling() {
         let exp_txs = scenario
             .exp_chain_txs
             .iter()
-            .map(|txid| *exp_tx_ids.get(txid).expect("txid must exist"))
+            .map(|txid| *exp_tx_ids.get(*txid).expect("txid must exist"))
             .collect::<BTreeSet<_>>();
         assert_eq!(
             txs, exp_txs,
@@ -719,7 +721,7 @@ fn test_tx_conflict_handling() {
             .exp_chain_txouts
             .iter()
             .map(|(txid, vout)| OutPoint {
-                txid: *exp_tx_ids.get(txid).expect("txid must exist"),
+                txid: *exp_tx_ids.get(*txid).expect("txid must exist"),
                 vout: *vout,
             })
             .collect::<BTreeSet<_>>();
@@ -741,7 +743,7 @@ fn test_tx_conflict_handling() {
             .exp_unspents
             .iter()
             .map(|(txid, vout)| OutPoint {
-                txid: *exp_tx_ids.get(txid).expect("txid must exist"),
+                txid: *exp_tx_ids.get(*txid).expect("txid must exist"),
                 vout: *vout,
             })
             .collect::<BTreeSet<_>>();
