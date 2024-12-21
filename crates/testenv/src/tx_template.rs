@@ -1,33 +1,41 @@
 #![cfg(feature = "miniscript")]
 
-use bdk_testenv::utils::DESCRIPTORS;
-use rand::distributions::{Alphanumeric, DistString};
-use std::collections::HashMap;
-
-use bdk_chain::{spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor};
-use bitcoin::{
-    locktime::absolute::LockTime, secp256k1::Secp256k1, transaction, Amount, OutPoint, ScriptBuf,
-    Sequence, Transaction, TxIn, TxOut, Txid, Witness,
+use crate::utils::DESCRIPTORS;
+use bdk_chain::{
+    bitcoin::{
+        self, locktime::absolute::LockTime, secp256k1::Secp256k1, transaction, Amount, OutPoint,
+        ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness,
+    },
+    miniscript::Descriptor,
+    spk_txout::SpkTxOutIndex,
+    tx_graph::TxGraph,
+    Anchor,
 };
-use miniscript::Descriptor;
+use rand::distributions::{Alphanumeric, DistString};
+use std::borrow::Cow;
+use std::collections::HashMap;
 
 /// Template for creating a transaction in `TxGraph`.
 ///
 /// The incentive for transaction templates is to create a transaction history in a simple manner to
 /// avoid having to explicitly hash previous transactions to form previous outpoints of later
 /// transactions.
-#[derive(Clone, Copy, Default)]
-pub struct TxTemplate<'a, A> {
+#[derive(Clone, Default)]
+pub struct TxTemplate<A>
+where
+    A: Clone + 'static,
+{
     /// Uniquely identifies the transaction, before it can have a txid.
-    pub tx_name: &'a str,
-    pub inputs: &'a [TxInTemplate<'a>],
-    pub outputs: &'a [TxOutTemplate],
-    pub anchors: &'a [A],
+    pub tx_name: Cow<'static, str>,
+    pub inputs: Cow<'static, [TxInTemplate]>,
+    pub outputs: Cow<'static, [TxOutTemplate]>,
+    pub anchors: Cow<'static, [A]>,
     pub last_seen: Option<u64>,
 }
 
 #[allow(dead_code)]
-pub enum TxInTemplate<'a> {
+#[derive(Clone)]
+pub enum TxInTemplate {
     /// This will give a random txid and vout.
     Bogus,
 
@@ -36,9 +44,10 @@ pub enum TxInTemplate<'a> {
 
     /// Contains the `tx_name` and `vout` that we are spending. The rule is that we must only spend
     /// from tx of a previous `TxTemplate`.
-    PrevTx(&'a str, usize),
+    PrevTx(Cow<'static, str>, usize),
 }
 
+#[derive(Clone)]
 pub struct TxOutTemplate {
     pub value: u64,
     pub spk_index: Option<u32>, // some = get spk from SpkTxOutIndex, none = random spk
@@ -52,9 +61,13 @@ impl TxOutTemplate {
 }
 
 #[allow(dead_code)]
-pub fn init_graph<'a, A: Anchor + Clone + 'a>(
-    tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
-) -> (TxGraph<A>, SpkTxOutIndex<u32>, HashMap<&'a str, Txid>) {
+pub fn init_graph<A: Anchor + Clone + 'static>(
+    tx_templates: impl IntoIterator<Item = TxTemplate<A>>,
+) -> (
+    TxGraph<A>,
+    SpkTxOutIndex<u32>,
+    HashMap<Cow<'static, str>, Txid>,
+) {
     let (descriptor, _) =
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[2]).unwrap();
     let mut graph = TxGraph::<A>::default();
@@ -68,7 +81,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
                 .script_pubkey(),
         );
     });
-    let mut tx_ids = HashMap::<&'a str, Txid>::new();
+    let mut tx_ids = HashMap::<Cow<'static, str>, Txid>::new();
 
     for (bogus_txin_vout, tx_tmp) in tx_templates.into_iter().enumerate() {
         let tx = Transaction {
