@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use bdk_chain::{BlockId, ChainPosition, ConfirmationBlockTime, TxUpdate};
+use bdk_chain::{BlockId, ChainPosition, ConfirmationBlockTime};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
 use bdk_wallet::error::CreateTxError;
@@ -4254,22 +4254,13 @@ fn test_wallet_transactions_relevant() {
     // add not relevant transaction to test wallet
     let (other_external_desc, other_internal_desc) = get_test_tr_single_sig_xprv_and_change_desc();
     let (other_wallet, other_txid) = get_funded_wallet(other_internal_desc, other_external_desc);
-    let other_tx_node = other_wallet.get_tx(other_txid).unwrap().tx_node;
-    let other_tx_confirmationblocktime = other_tx_node.anchors.iter().last().unwrap();
-    let other_tx_update = TxUpdate {
-        txs: vec![other_tx_node.tx],
-        txouts: Default::default(),
-        anchors: [(*other_tx_confirmationblocktime, other_txid)].into(),
-        seen_ats: [(other_txid, other_tx_confirmationblocktime.confirmation_time)].into(),
-    };
     let test_wallet_update = Update {
-        last_active_indices: Default::default(),
-        tx_update: other_tx_update,
-        chain: None,
+        tx_update: other_wallet.tx_graph().clone().into(),
+        ..Default::default()
     };
     test_wallet.apply_update(test_wallet_update).unwrap();
 
-    // verify transaction from other wallet was added but is not it relevant transactions list.
+    // verify transaction from other wallet was added but is not in relevant transactions list.
     let relevant_tx_count_after = test_wallet.transactions().count();
     let full_tx_count_after = test_wallet.tx_graph().full_txs().count();
     let canonical_tx_count_after = test_wallet
