@@ -435,7 +435,7 @@ mod test {
                 for changeset in &changesets {
                     store.append(changeset).unwrap();
                 }
-                // this is the incomplete write
+                // this is the complete write
                 store
                     .db_file
                     .write_all(&last_changeset_bytes)
