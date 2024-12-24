@@ -466,7 +466,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     let ((spk_i, spk), index_changeset) =
                         spk_chooser(index, Keychain::External).expect("Must exist");
                     let db = &mut *db.lock().unwrap();
-                    db.append_changeset(&ChangeSet {
+                    db.append(&ChangeSet {
                         indexer: index_changeset,
                         ..Default::default()
                     })?;
@@ -629,7 +629,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     // If we're unable to persist this, then we don't want to broadcast.
                     {
                         let db = &mut *db.lock().unwrap();
-                        db.append_changeset(&ChangeSet {
+                        db.append(&ChangeSet {
                             indexer,
                             ..Default::default()
                         })?;
@@ -719,7 +719,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                             // We know the tx is at least unconfirmed now. Note if persisting here fails,
                             // it's not a big deal since we can always find it again from the
                             // blockchain.
-                            db.lock().unwrap().append_changeset(&ChangeSet {
+                            db.lock().unwrap().append(&ChangeSet {
                                 tx_graph: changeset.tx_graph,
                                 indexer: changeset.indexer,
                                 ..Default::default()
@@ -789,9 +789,10 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
         Commands::Generate { network } => generate_bip86_helper(network).map(|_| None),
         // try load
         _ => {
-            let mut db =
-                Store::<ChangeSet>::open(db_magic, db_path).context("could not open file store")?;
-            let changeset = db.aggregate_changesets()?.expect("db must not be empty");
+            let (db, changeset) =
+                Store::<ChangeSet>::load(db_magic, db_path).context("could not open file store")?;
+
+            let changeset = changeset.expect("should not be empty");
 
             let network = changeset.network.expect("changeset network");
 
@@ -866,8 +867,8 @@ where
             LocalChain::from_genesis_hash(constants::genesis_block(network).block_hash());
         changeset.network = Some(network);
         changeset.local_chain = chain_changeset;
-        let mut db = Store::<ChangeSet>::create_new(db_magic, db_path)?;
-        db.append_changeset(&changeset)?;
+        let mut db = Store::<ChangeSet>::create(db_magic, db_path)?;
+        db.append(&changeset)?;
         println!("New database {db_path}");
     }
 

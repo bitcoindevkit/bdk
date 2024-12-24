@@ -86,8 +86,8 @@ fn main() -> anyhow::Result<()> {
     );
 
     let start_load_wallet = Instant::now();
-    let mut db =
-        Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?;
+    let (mut db, _) =
+        Store::<bdk_wallet::ChangeSet>::load_or_create(DB_MAGIC.as_bytes(), args.db_path)?;
     let wallet_opt = Wallet::load()
         .descriptor(KeychainKind::External, Some(args.descriptor.clone()))
         .descriptor(KeychainKind::Internal, Some(args.change_descriptor.clone()))
