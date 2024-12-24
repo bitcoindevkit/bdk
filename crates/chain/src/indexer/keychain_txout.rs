@@ -7,11 +7,13 @@ use crate::{
     spk_client::{FullScanRequestBuilder, SyncRequestBuilder},
     spk_iter::BIP32_MAX_INDEX,
     spk_txout::SpkTxOutIndex,
-    DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
+    Anchor, CanonicalIter, ChainOracle, DescriptorExt, DescriptorId, Indexed, Indexer,
+    KeychainIndexed, SpkIterator,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::{
+    convert::Infallible,
     fmt::Debug,
     ops::{Bound, RangeBounds},
 };
@@ -879,6 +881,18 @@ pub trait SyncRequestBuilderExt<K> {
 
     /// Add [`Script`](bitcoin::Script)s that are revealed by the `indexer` but currently unused.
     fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self;
+
+    /// Add [`OutPoint`]s which are spent by unconfirmed transactions.
+    ///
+    /// This allows the chain source to detect transactions which are cancelled/replaced.
+    fn unconfirmed_outpoints<A, C>(
+        self,
+        canonical_iter: CanonicalIter<A, C>,
+        indexer: &KeychainTxOutIndex<K>,
+    ) -> Self
+    where
+        A: Anchor,
+        C: ChainOracle<Error = Infallible>;
 }
 
 impl<K: Clone + Ord + core::fmt::Debug> SyncRequestBuilderExt<K> for SyncRequestBuilder<(K, u32)> {
@@ -891,6 +905,37 @@ impl<K: Clone + Ord + core::fmt::Debug> SyncRequestBuilderExt<K> for SyncRequest
 
     fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self {
         self.spks_with_indexes(indexer.unused_spks())
+    }
+
+    fn unconfirmed_outpoints<A, C>(
+        self,
+        canonical_iter: CanonicalIter<A, C>,
+        indexer: &KeychainTxOutIndex<K>,
+    ) -> Self
+    where
+        A: Anchor,
+        C: ChainOracle<Error = Infallible>,
+    {
+        self.outpoints(
+            canonical_iter
+                .filter_map(|r| {
+                    let (_, tx, reason) = r.expect("infallible");
+                    match reason {
+                        crate::CanonicalReason::ObservedIn { .. }
+                            if indexer.is_tx_relevant(&tx) =>
+                        {
+                            Some(tx)
+                        }
+                        _ => None,
+                    }
+                })
+                .flat_map(|tx| {
+                    tx.input
+                        .iter()
+                        .map(|txin| txin.previous_output)
+                        .collect::<Vec<_>>()
+                }),
+        )
     }
 }
 
