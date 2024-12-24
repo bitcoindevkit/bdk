@@ -2445,11 +2445,37 @@ impl Wallet {
     /// This is the first step when performing a spk-based wallet partial sync, the returned
     /// [`SyncRequest`] collects all revealed script pubkeys from the wallet keychain needed to
     /// start a blockchain sync with a spk based blockchain client.
+    #[deprecated(
+        since = "1.1.0",
+        note = "start_sync_with_revealed_spks could not detect receiving transactions being replaced. Use start_sync instead"
+    )]
     pub fn start_sync_with_revealed_spks(&self) -> SyncRequestBuilder<(KeychainKind, u32)> {
         use bdk_chain::keychain_txout::SyncRequestBuilderExt;
         SyncRequest::builder()
             .chain_tip(self.chain.tip())
             .revealed_spks_from_indexer(&self.indexed_graph.index, ..)
+    }
+
+    /// Create a [`SyncRequest`] for this wallet.
+    ///
+    /// This assembles a request which initiates a sync against a spk-based chain source. This
+    /// request contains all revealed script pubkeys and unconfirmed spends.
+    ///
+    /// This request can detect when transactions get cancelled/replaced.
+    pub fn start_sync(&self) -> SyncRequestBuilder<(KeychainKind, u32)> {
+        use bdk_chain::keychain_txout::SyncRequestBuilderExt;
+
+        let chain = &self.chain;
+        let tx_graph = &self.indexed_graph.graph();
+        let tx_index = &self.indexed_graph.index;
+
+        SyncRequest::builder()
+            .chain_tip(chain.tip())
+            .revealed_spks_from_indexer(tx_index, ..)
+            .unconfirmed_outpoints(
+                tx_graph.canonical_iter(chain, chain.tip().block_id()),
+                tx_index,
+            )
     }
 
     /// Create a [`FullScanRequest] for this wallet.
