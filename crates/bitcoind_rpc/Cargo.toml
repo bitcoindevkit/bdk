@@ -28,3 +28,7 @@ bdk_chain = { path = "../chain" }
 default = ["std"]
 std = ["bitcoin/std", "bdk_core/std"]
 serde = ["bitcoin/serde", "bdk_core/serde"]
+
+[[example]]
+name = "filter_iter"
+required-features = ["std"]
