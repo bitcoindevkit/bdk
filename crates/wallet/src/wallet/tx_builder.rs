@@ -798,13 +798,13 @@ impl TxOrdering {
 
 /// Transaction version
 ///
-/// Has a default value of `1`
+/// Has a default value of `2`
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
 pub(crate) struct Version(pub(crate) i32);
 
 impl Default for Version {
     fn default() -> Self {
-        Version(1)
+        Version(2)
     }
 }
 
@@ -1066,8 +1066,8 @@ mod test {
     }
 
     #[test]
-    fn test_default_tx_version_1() {
+    fn test_default_tx_version_2() {
         let version = Version::default();
-        assert_eq!(version.0, 1);
+        assert_eq!(version.0, 2);
     }
 }
