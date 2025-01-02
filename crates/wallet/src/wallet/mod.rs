@@ -1289,7 +1289,6 @@ impl Wallet {
                 return Err(CreateTxError::Version1Csv)
             }
             Some(tx_builder::Version(x)) => x,
-            None if requirements.csv.is_some() => 2,
             None => 2,
         };
 
