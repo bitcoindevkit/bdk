@@ -1284,11 +1284,11 @@ impl Wallet {
             external_requirements.merge(&internal_requirements.unwrap_or_default())?;
 
         let version = match params.version {
-            Some(tx_builder::Version(0)) => return Err(CreateTxError::Version0),
-            Some(tx_builder::Version(1)) if requirements.csv.is_some() => {
+            Some(transaction::Version(0)) => return Err(CreateTxError::Version0),
+            Some(transaction::Version(1)) if requirements.csv.is_some() => {
                 return Err(CreateTxError::Version1Csv)
             }
-            Some(tx_builder::Version(x)) => x,
+            Some(transaction::Version(x)) => x,
             None => 2,
         };
 
@@ -1692,7 +1692,7 @@ impl Wallet {
 
         let params = TxParams {
             // TODO: figure out what rbf option should be?
-            version: Some(tx_builder::Version(tx.version.0)),
+            version: Some(transaction::Version::non_standard(tx.version.0)),
             recipients: tx
                 .output
                 .into_iter()
