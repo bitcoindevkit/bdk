@@ -44,8 +44,8 @@ use alloc::sync::Arc;
 use bitcoin::psbt::{self, Psbt};
 use bitcoin::script::PushBytes;
 use bitcoin::{
-    absolute, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid,
-    Weight,
+    absolute, transaction::Version, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction,
+    TxIn, TxOut, Txid, Weight,
 };
 use rand_core::RngCore;
 
@@ -796,18 +796,6 @@ impl TxOrdering {
     }
 }
 
-/// Transaction version
-///
-/// Has a default value of `1`
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
-pub(crate) struct Version(pub(crate) i32);
-
-impl Default for Version {
-    fn default() -> Self {
-        Version(1)
-    }
-}
-
 /// Policy regarding the use of change outputs when creating a transaction
 #[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
 pub enum ChangeSpendPolicy {
@@ -1063,11 +1051,5 @@ mod test {
 
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].keychain, KeychainKind::Internal);
-    }
-
-    #[test]
-    fn test_default_tx_version_1() {
-        let version = Version::default();
-        assert_eq!(version.0, 1);
     }
 }
