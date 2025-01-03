@@ -1285,11 +1285,11 @@ impl Wallet {
 
         let version = match params.version {
             Some(transaction::Version(0)) => return Err(CreateTxError::Version0),
-            Some(transaction::Version(1)) if requirements.csv.is_some() => {
+            Some(transaction::Version::ONE) if requirements.csv.is_some() => {
                 return Err(CreateTxError::Version1Csv)
             }
-            Some(transaction::Version(x)) => x,
-            None => 2,
+            Some(v) => v,
+            None => transaction::Version::TWO,
         };
 
         // We use a match here instead of a unwrap_or_else as it's way more readable :)
@@ -1387,7 +1387,7 @@ impl Wallet {
         };
 
         let mut tx = Transaction {
-            version: transaction::Version::non_standard(version),
+            version,
             lock_time,
             input: vec![],
             output: vec![],
@@ -1692,7 +1692,7 @@ impl Wallet {
 
         let params = TxParams {
             // TODO: figure out what rbf option should be?
-            version: Some(transaction::Version::non_standard(tx.version.0)),
+            version: Some(tx.version),
             recipients: tx
                 .output
                 .into_iter()
