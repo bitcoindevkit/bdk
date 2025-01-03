@@ -3531,6 +3531,7 @@ fn test_spend_from_wallet(mut wallet: Wallet) {
     builder.add_recipient(addr.script_pubkey(), Amount::from_sat(25_000));
     let mut psbt = builder.finish().unwrap();
 
+    assert_eq!(psbt.unsigned_tx.version.0, 2);
     assert!(
         wallet.sign(&mut psbt, Default::default()).unwrap(),
         "Unable to finalize tx"

@@ -2580,7 +2580,7 @@ macro_rules! doctest_wallet {
             .unwrap();
         let address = wallet.peek_address(KeychainKind::External, 0).address;
         let tx = Transaction {
-            version: transaction::Version::ONE,
+            version: transaction::Version::TWO,
             lock_time: absolute::LockTime::ZERO,
             input: vec![],
             output: vec![TxOut {
