@@ -28,7 +28,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
-          components: clippy
+          components: clippy, rustfmt
+      - name: Cargo update
+        run: cargo update
       - name: Build docs
         run: cargo rustdoc --verbose --features=compiler,electrum,esplora,use-esplora-blocking,compact_filters,rpc,key-value-db,sqlite,all-keys,verify,hardware-signer -- --cfg docsrs -Dwarnings
       - name: Upload artifact
