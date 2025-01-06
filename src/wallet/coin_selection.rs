@@ -119,8 +119,11 @@ use std::convert::TryInto;
 /// overridden
 #[cfg(not(test))]
 pub type DefaultCoinSelectionAlgorithm = BranchAndBoundCoinSelection;
+
+/// Default deterministic coin selection algorithm for testing used by [`TxBuilder`](super::tx_builder::TxBuilder) if not
+/// overridden
 #[cfg(test)]
-pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection; // make the tests more predictable
+pub type DefaultCoinSelectionAlgorithm = LargestFirstCoinSelection;
 
 // Base weight of a Txin, not counting the weight needed for satisfying it.
 // prev_txid (32 bytes) + prev_vout (4 bytes) + sequence (4 bytes)

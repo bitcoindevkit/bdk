@@ -214,6 +214,7 @@ pub(crate) trait DatabaseUtils: Database {
 impl<T: Database> DatabaseUtils for T {}
 
 #[cfg(test)]
+#[allow(missing_docs)]
 pub mod test {
     use bitcoin::consensus::encode::deserialize;
     use bitcoin::consensus::serialize;

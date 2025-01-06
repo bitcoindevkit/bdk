@@ -949,7 +949,7 @@ impl std::fmt::Display for KeyError {
 impl std::error::Error for KeyError {}
 
 #[cfg(test)]
-pub mod test {
+mod test {
     use bitcoin::bip32;
 
     use super::*;
