@@ -405,12 +405,13 @@ impl BatchDatabase for Tree {
 #[cfg(test)]
 mod test {
     use lazy_static::lazy_static;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Condvar, Mutex, Once};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use sled::{Db, Tree};
 
-    static mut COUNT: usize = 0;
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
 
     lazy_static! {
         static ref DB: Arc<(Mutex<Option<Db>>, Condvar)> =
@@ -419,33 +420,31 @@ mod test {
     }
 
     fn get_tree() -> Tree {
-        unsafe {
-            let cloned = DB.clone();
-            let (mutex, cvar) = &*cloned;
+        let cloned = DB.clone();
+        let (mutex, cvar) = &*cloned;
 
-            INIT.call_once(|| {
-                let mut db = mutex.lock().unwrap();
-
-                let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-                let mut dir = std::env::temp_dir();
-                dir.push(format!("mbw_{}", time.as_nanos()));
-
-                *db = Some(sled::open(dir).unwrap());
-                cvar.notify_all();
-            });
-
+        INIT.call_once(|| {
             let mut db = mutex.lock().unwrap();
-            while !db.is_some() {
-                db = cvar.wait(db).unwrap();
-            }
 
-            COUNT += 1;
+            let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+            let mut dir = std::env::temp_dir();
+            dir.push(format!("mbw_{}", time.as_nanos()));
 
-            db.as_ref()
-                .unwrap()
-                .open_tree(format!("tree_{}", COUNT))
-                .unwrap()
+            *db = Some(sled::open(dir).unwrap());
+            cvar.notify_all();
+        });
+
+        let mut db = mutex.lock().unwrap();
+        while !db.is_some() {
+            db = cvar.wait(db).unwrap();
         }
+
+        COUNT.fetch_add(1, Ordering::Relaxed);
+
+        db.as_ref()
+            .unwrap()
+            .open_tree(format!("tree_{}", COUNT.load(Ordering::Relaxed)))
+            .unwrap()
     }
 
     #[test]
