@@ -27,7 +27,6 @@ use bdk::wallet::signer::SignersContainer;
 ///
 /// This example demos a Policy output for a 2of2 multisig between between 2 parties, where the wallet holds
 /// one of the Extend Private key.
-
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init_from_env(
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
