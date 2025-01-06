@@ -24,6 +24,12 @@
   </h4>
 </div>
 
+## !! DEPRECATED !!
+
+The [bdk](https://crates.io/crates/bdk) library is now deprecated and replaced by [bdk_wallet](https://crates.io/crates/bdk_wallet). All projects should migrate to [bdk_wallet 1.0.0](https://crates.io/crates/bdk_wallet/1.0.0) or newer as soon as possible. For migration instructions see the ["Book of BDK"](https://bitcoindevkit.github.io/book-of-bdk/) chapter on ["Migrating from 0.x"](https://bitcoindevkit.github.io/book-of-bdk/getting-started/migrating/). 
+
+The BDK team will continue to publish `bdk` `0.30.x` bug fix releases as needed, but only for a limited time.
+
 ## About
 
 The `bdk` library aims to be the core building block for Bitcoin wallets of any kind.
