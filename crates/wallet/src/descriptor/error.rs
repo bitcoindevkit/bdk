@@ -43,6 +43,10 @@ pub enum Error {
     Hex(bitcoin::hex::HexToBytesError),
     /// The provided wallet descriptors are identical
     ExternalAndInternalAreTheSame,
+    /// Descriptor has already been assigned to a keychain so you can't assign it to another
+    DescriptorAlreadyAssigned,
+    /// The keychain is already assigned to a descriptor so you can't reassign it
+    KeychainAlreadyAssigned,
 }
 
 impl From<crate::keys::KeyError> for Error {
@@ -82,6 +86,12 @@ impl fmt::Display for Error {
             Self::Hex(err) => write!(f, "Hex decoding error: {}", err),
             Self::ExternalAndInternalAreTheSame => {
                 write!(f, "External and internal descriptors are the same")
+            }
+            Self::DescriptorAlreadyAssigned => {
+                write!(f, "attempt to re-assign descriptor already assigned")
+            }
+            Self::KeychainAlreadyAssigned => {
+                write!(f, "attempt to re-assign keychain already assigned")
             }
         }
     }
@@ -123,5 +133,22 @@ impl From<bitcoin::hex::HexToBytesError> for Error {
 impl From<crate::descriptor::policy::PolicyError> for Error {
     fn from(err: crate::descriptor::policy::PolicyError) -> Self {
         Error::Policy(err)
+    }
+}
+
+impl From<chain::keychain_txout::InsertDescriptorError> for Error {
+    fn from(err: chain::keychain_txout::InsertDescriptorError) -> Self {
+        match err {
+            chain::keychain_txout::InsertDescriptorError::DescriptorAlreadyAssigned { .. } => {
+                Error::DescriptorAlreadyAssigned
+            }
+            chain::keychain_txout::InsertDescriptorError::KeychainAlreadyAssigned { .. } => {
+                Error::KeychainAlreadyAssigned
+            }
+            chain::keychain_txout::InsertDescriptorError::Miniscript(err) => Error::Miniscript(err),
+            chain::keychain_txout::InsertDescriptorError::HardenedDerivationXpub => {
+                Error::HardenedDerivationXpub
+            }
+        }
     }
 }

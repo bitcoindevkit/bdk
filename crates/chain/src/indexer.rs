@@ -23,7 +23,10 @@ pub trait Indexer {
     fn index_tx(&mut self, tx: &Transaction) -> Self::ChangeSet;
 
     /// Apply changeset to itself.
-    fn apply_changeset(&mut self, changeset: Self::ChangeSet);
+    fn apply_changeset(
+        &mut self,
+        changeset: Self::ChangeSet,
+    ) -> Result<(), keychain_txout::InsertDescriptorError>;
 
     /// Determines the [`ChangeSet`](Indexer::ChangeSet) between `self` and an empty [`Indexer`].
     fn initial_changeset(&self) -> Self::ChangeSet;

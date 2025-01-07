@@ -8,6 +8,8 @@ use crate::{
 };
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 
+use super::keychain_txout::InsertDescriptorError;
+
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
 /// The basic idea is that you insert script pubkeys you care about into the index with
@@ -69,8 +71,12 @@ impl<I: Clone + Ord + core::fmt::Debug> Indexer for SpkTxOutIndex<I> {
 
     fn initial_changeset(&self) -> Self::ChangeSet {}
 
-    fn apply_changeset(&mut self, _changeset: Self::ChangeSet) {
+    fn apply_changeset(
+        &mut self,
+        _changeset: Self::ChangeSet,
+    ) -> Result<(), InsertDescriptorError> {
         // This applies nothing.
+        Ok(())
     }
 
     fn is_tx_relevant(&self, tx: &Transaction) -> bool {

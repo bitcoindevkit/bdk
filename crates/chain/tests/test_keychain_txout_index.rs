@@ -617,7 +617,9 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
         .insert_descriptor(TestKeychain::External, desc.clone())
         .expect("must insert keychain");
     for changeset in changesets {
-        indexer_a.apply_changeset(changeset.clone());
+        indexer_a
+            .apply_changeset(changeset.clone())
+            .expect("must apply changeset");
     }
 
     let mut indexer_b = KeychainTxOutIndex::<TestKeychain>::new(0);
@@ -632,7 +634,9 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
             agg
         })
         .expect("must aggregate changesets");
-    indexer_b.apply_changeset(aggregate_changesets);
+    indexer_b
+        .apply_changeset(aggregate_changesets)
+        .expect("must apply changeset");
 
     assert_eq!(
         indexer_a.keychains().collect::<Vec<_>>(),
