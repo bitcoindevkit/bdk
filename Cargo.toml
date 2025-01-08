@@ -130,7 +130,7 @@ path = "examples/policy.rs"
 [[example]]
 name = "rpcwallet"
 path = "examples/rpcwallet.rs"
-required-features = ["keys-bip39", "key-value-db", "rpc", "electrsd/bitcoind_22_0"]
+required-features = ["keys-bip39", "key-value-db", "rpc", "electrsd/bitcoind_22_1"]
 
 [[example]]
 name = "psbt_signer"

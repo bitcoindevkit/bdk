@@ -168,7 +168,7 @@ impl WalletSync for ElectrumBlockchain {
                     let needs_block_height = conftime_req
                         .request()
                         .filter_map(|txid| txid_to_height.get(txid).cloned())
-                        .filter(|height| block_times.contains_key(height))
+                        .filter(|height| !block_times.contains_key(height))
                         .take(chunk_size)
                         .collect::<HashSet<u32>>();
 

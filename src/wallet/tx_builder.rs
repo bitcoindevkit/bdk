@@ -167,7 +167,7 @@ impl std::default::Default for FeePolicy {
     }
 }
 
-impl<'a, Cs: Clone, Ctx, D> Clone for TxBuilder<'a, D, Cs, Ctx> {
+impl<Cs: Clone, Ctx, D> Clone for TxBuilder<'_, D, Cs, Ctx> {
     fn clone(&self) -> Self {
         TxBuilder {
             wallet: self.wallet,
@@ -584,7 +584,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>, Ctx: TxBuilderContext>
     }
 }
 
-impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, CreateTx> {
+impl<D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'_, D, Cs, CreateTx> {
     /// Replace the recipients already added with a new list
     pub fn set_recipients(&mut self, recipients: Vec<(ScriptBuf, u64)>) -> &mut Self {
         self.params.recipients = recipients;
@@ -658,7 +658,7 @@ impl<'a, D: BatchDatabase, Cs: CoinSelectionAlgorithm<D>> TxBuilder<'a, D, Cs, C
 }
 
 // methods supported only by bump_fee
-impl<'a, D: BatchDatabase> TxBuilder<'a, D, DefaultCoinSelectionAlgorithm, BumpFee> {
+impl<D: BatchDatabase> TxBuilder<'_, D, DefaultCoinSelectionAlgorithm, BumpFee> {
     /// Explicitly tells the wallet that it is allowed to reduce the amount of the output matching this
     /// `script_pubkey` in order to bump the transaction fee. Without specifying this the wallet
     /// will attempt to find a change output to shrink instead.

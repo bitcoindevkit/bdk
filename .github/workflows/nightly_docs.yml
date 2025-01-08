@@ -13,7 +13,7 @@ on:
 jobs:
   build_docs:
     name: Build docs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -28,7 +28,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
-          components: clippy
+          components: clippy, rustfmt
+      - name: Cargo update
+        run: cargo update
       - name: Build docs
         run: cargo rustdoc --verbose --features=compiler,electrum,esplora,use-esplora-blocking,compact_filters,rpc,key-value-db,sqlite,all-keys,verify,hardware-signer -- --cfg docsrs -Dwarnings
       - name: Upload artifact
@@ -41,7 +43,7 @@ jobs:
     name: 'Publish docs'
     if: github.ref == 'refs/heads/master'
     needs: [build_docs]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout `bitcoindevkit.org`
         uses: actions/checkout@v4

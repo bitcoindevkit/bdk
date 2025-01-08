@@ -35,7 +35,6 @@ use bdk::{KeychainKind, Wallet};
 /// can be derived from the policy.
 ///
 /// This example demonstrates the interaction between a bdk wallet and miniscript policy.
-
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init_from_env(
         env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
