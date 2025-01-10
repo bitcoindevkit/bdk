@@ -1901,8 +1901,11 @@ impl Wallet {
                         Ok(_) => {
                             // Set the UTXO fields, final script_sig and witness
                             // and clear everything else.
-                            let original = mem::take(&mut psbt.inputs[n]);
-                            let psbt_input = &mut psbt.inputs[n];
+                            let psbt_input = psbt
+                                .inputs
+                                .get_mut(n)
+                                .ok_or(SignerError::InputIndexOutOfRange)?;
+                            let original = mem::take(psbt_input);
                             psbt_input.non_witness_utxo = original.non_witness_utxo;
                             psbt_input.witness_utxo = original.witness_utxo;
                             if !tmp_input.script_sig.is_empty() {
