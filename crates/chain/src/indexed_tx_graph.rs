@@ -6,6 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
+    keychain_txout::InsertDescriptorError,
     tx_graph::{self, TxGraph},
     Anchor, BlockId, Indexer, Merge, TxPosInBlock,
 };
@@ -46,8 +47,11 @@ impl<A, I> IndexedTxGraph<A, I> {
 
 impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
     /// Applies the [`ChangeSet`] to the [`IndexedTxGraph`].
-    pub fn apply_changeset(&mut self, changeset: ChangeSet<A, I::ChangeSet>) {
-        self.index.apply_changeset(changeset.indexer);
+    pub fn apply_changeset(
+        &mut self,
+        changeset: ChangeSet<A, I::ChangeSet>,
+    ) -> Result<(), InsertDescriptorError> {
+        self.index.apply_changeset(changeset.indexer)?;
 
         for tx in &changeset.tx_graph.txs {
             self.index.index_tx(tx);
@@ -57,6 +61,7 @@ impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
         }
 
         self.graph.apply_changeset(changeset.tx_graph);
+        Ok(())
     }
 
     /// Determines the [`ChangeSet`] between `self` and an empty [`IndexedTxGraph`].

@@ -815,7 +815,7 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
                 graph.apply_changeset(indexed_tx_graph::ChangeSet {
                     tx_graph: changeset.tx_graph,
                     indexer: changeset.indexer,
-                });
+                })?;
                 graph
             });
 

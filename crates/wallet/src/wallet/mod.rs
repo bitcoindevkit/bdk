@@ -602,8 +602,12 @@ impl Wallet {
             .map_err(LoadError::Descriptor)?;
 
         let mut indexed_graph = IndexedTxGraph::new(index);
-        indexed_graph.apply_changeset(changeset.indexer.into());
-        indexed_graph.apply_changeset(changeset.tx_graph.into());
+        indexed_graph
+            .apply_changeset(changeset.indexer.into())
+            .map_err(|err| LoadError::Descriptor(err.into()))?;
+        indexed_graph
+            .apply_changeset(changeset.tx_graph.into())
+            .map_err(|err| LoadError::Descriptor(err.into()))?;
 
         let stage = ChangeSet::default();
 
@@ -2546,6 +2550,12 @@ fn create_indexer(
                     }
                     InsertDescriptorError::KeychainAlreadyAssigned { .. } => {
                         unreachable!("this is the first time we're assigning internal")
+                    }
+                    InsertDescriptorError::Miniscript(err) => {
+                        crate::descriptor::error::Error::Miniscript(err)
+                    }
+                    InsertDescriptorError::HardenedDerivationXpub => {
+                        crate::descriptor::error::Error::HardenedDerivationXpub
                     }
                 }
             })?);
