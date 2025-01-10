@@ -1284,13 +1284,12 @@ impl Wallet {
             external_requirements.merge(&internal_requirements.unwrap_or_default())?;
 
         let version = match params.version {
-            Some(tx_builder::Version(0)) => return Err(CreateTxError::Version0),
-            Some(tx_builder::Version(1)) if requirements.csv.is_some() => {
+            Some(transaction::Version(0)) => return Err(CreateTxError::Version0),
+            Some(transaction::Version::ONE) if requirements.csv.is_some() => {
                 return Err(CreateTxError::Version1Csv)
             }
-            Some(tx_builder::Version(x)) => x,
-            None if requirements.csv.is_some() => 2,
-            None => 1,
+            Some(v) => v,
+            None => transaction::Version::TWO,
         };
 
         // We use a match here instead of a unwrap_or_else as it's way more readable :)
@@ -1388,7 +1387,7 @@ impl Wallet {
         };
 
         let mut tx = Transaction {
-            version: transaction::Version::non_standard(version),
+            version,
             lock_time,
             input: vec![],
             output: vec![],
@@ -1693,7 +1692,7 @@ impl Wallet {
 
         let params = TxParams {
             // TODO: figure out what rbf option should be?
-            version: Some(tx_builder::Version(tx.version.0)),
+            version: Some(tx.version),
             recipients: tx
                 .output
                 .into_iter()
@@ -2584,7 +2583,7 @@ macro_rules! doctest_wallet {
             .unwrap();
         let address = wallet.peek_address(KeychainKind::External, 0).address;
         let tx = Transaction {
-            version: transaction::Version::ONE,
+            version: transaction::Version::TWO,
             lock_time: absolute::LockTime::ZERO,
             input: vec![],
             output: vec![TxOut {
