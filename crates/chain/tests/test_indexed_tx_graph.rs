@@ -3,12 +3,16 @@
 #[macro_use]
 mod common;
 
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
+    spk_txout::SpkTxOutIndex,
     tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt,
 };
 use bdk_testenv::{
@@ -97,6 +101,139 @@ fn insert_relevant_txs() {
     };
 
     assert_eq!(graph.initial_changeset(), initial_changeset);
+}
+
+/// Ensure that [`IndexedTxGraph::batch_insert_relevant`] adds transactions that are direct
+/// conflicts with transactions in our graph but are not directly tracked by our indexer.
+#[test]
+fn insert_relevant_conflicting_txs() {
+    let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[0])
+        .expect("must be valid");
+    let sender_spk = descriptor.at_derivation_index(0).unwrap().script_pubkey();
+    let receiver_spk = descriptor.at_derivation_index(9).unwrap().script_pubkey();
+
+    let sender_prev_tx = Transaction {
+        output: vec![TxOut {
+            value: Amount::from_sat(10_000),
+            script_pubkey: sender_spk,
+        }],
+        ..new_tx(0)
+    };
+
+    let send_tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(sender_prev_tx.compute_txid(), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(10_000),
+            script_pubkey: receiver_spk.clone(),
+        }],
+        ..new_tx(1)
+    };
+
+    let undo_send_tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(sender_prev_tx.compute_txid(), 0),
+            ..Default::default()
+        }],
+        ..new_tx(2)
+    };
+
+    // Given: An empty receiver IndexedTxGraph.
+    // When: batch_insert_relevant_unconfirmed is called with [send_tx, undo_send_tx].
+    // Assert: Both txs are included in the changeset.
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, SpkTxOutIndex<u32>>::new({
+        let mut index = SpkTxOutIndex::default();
+        let _ = index.insert_spk(0u32, receiver_spk.clone());
+        index
+    });
+    let txs = [send_tx.clone(), undo_send_tx.clone()];
+
+    let changeset = graph.batch_insert_relevant_unconfirmed(txs.iter().cloned().map(|tx| (tx, 0)));
+
+    let expected_changeset = indexed_tx_graph::ChangeSet {
+        tx_graph: tx_graph::ChangeSet::<ConfirmationBlockTime> {
+            txs: txs.iter().cloned().map(Arc::new).collect(),
+            last_seen: BTreeMap::from([
+                (send_tx.compute_txid(), 0_u64),
+                (undo_send_tx.compute_txid(), 0_u64),
+            ]),
+            ..Default::default()
+        },
+        indexer: (),
+    };
+    assert_eq!(changeset, expected_changeset);
+
+    // Given: An empty receiver IndexedTxGraph.
+    // When: batch_insert_relevant_unconfirmed is called with [undo_send_tx, send_tx].
+    // Assert: Both txs are included in the changeset.
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, SpkTxOutIndex<u32>>::new({
+        let mut index = SpkTxOutIndex::default();
+        let _ = index.insert_spk(0u32, receiver_spk.clone());
+        index
+    });
+    let txs = [undo_send_tx.clone(), send_tx.clone()];
+
+    let changeset = graph.batch_insert_relevant_unconfirmed(txs.iter().cloned().map(|tx| (tx, 0)));
+
+    let expected_changeset = indexed_tx_graph::ChangeSet {
+        tx_graph: tx_graph::ChangeSet::<ConfirmationBlockTime> {
+            txs: txs.iter().cloned().map(Arc::new).collect(),
+            last_seen: BTreeMap::from([
+                (undo_send_tx.compute_txid(), 0_u64),
+                (send_tx.compute_txid(), 0_u64),
+            ]),
+            ..Default::default()
+        },
+        indexer: (),
+    };
+    assert_eq!(changeset, expected_changeset);
+
+    // Given: A receiver IndexedTxGraph which already contains send_tx.
+    // When: batch_insert_relevant_unconfirmed is called with undo_send_tx.
+    // Assert: undo_send_tx is included in the returned changeset.
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, SpkTxOutIndex<u32>>::new({
+        let mut index = SpkTxOutIndex::default();
+        let _ = index.insert_spk(0u32, receiver_spk.clone());
+        index
+    });
+    let _ = graph.insert_tx(send_tx.clone());
+    let txs = [undo_send_tx.clone()];
+
+    let changeset = graph.batch_insert_relevant_unconfirmed(txs.iter().cloned().map(|tx| (tx, 0)));
+
+    let expected_changeset = indexed_tx_graph::ChangeSet {
+        tx_graph: tx_graph::ChangeSet::<ConfirmationBlockTime> {
+            txs: txs.iter().cloned().map(Arc::new).collect(),
+            last_seen: BTreeMap::from([(undo_send_tx.compute_txid(), 0_u64)]),
+            ..Default::default()
+        },
+        indexer: (),
+    };
+    assert_eq!(changeset, expected_changeset);
+
+    // Given: A receiver IndexedTxGraph which already contains send_tx.
+    // When: batch_insert_relevant is called with undo_send_tx.
+    // Assert: undo_send_tx is included in the returned changeset.
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, SpkTxOutIndex<u32>>::new({
+        let mut index = SpkTxOutIndex::default();
+        let _ = index.insert_spk(0u32, receiver_spk);
+        index
+    });
+    let _ = graph.insert_tx(send_tx);
+    let txs = [undo_send_tx.clone()];
+
+    let changeset = graph.batch_insert_relevant(txs.iter().cloned().map(|tx| (tx, None)));
+
+    let expected_changeset = indexed_tx_graph::ChangeSet {
+        tx_graph: tx_graph::ChangeSet::<ConfirmationBlockTime> {
+            txs: txs.iter().cloned().map(Arc::new).collect(),
+            ..Default::default()
+        },
+        indexer: (),
+    };
+    assert_eq!(changeset, expected_changeset);
 }
 
 /// Ensure consistency IndexedTxGraph list_* and balance methods. These methods lists
