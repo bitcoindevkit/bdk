@@ -1,4 +1,4 @@
-use bitcoin::{constants, Network};
+use bitcoin::{constants, Address, Amount, Network, ScriptBuf};
 
 use bdk_bitcoind_rpc::bip158::FilterIter;
 use bdk_core::{BlockId, CheckPoint};
@@ -105,6 +105,44 @@ fn get_tip_and_chain_update() -> anyhow::Result<()> {
         update_blocks.reverse();
         assert_eq!(update_blocks, test.exp, "{}", test.name);
     });
+
+    Ok(())
+}
+
+#[test]
+fn filter_iter_returns_matched_blocks() -> anyhow::Result<()> {
+    use bdk_bitcoind_rpc::bip158::{Event, EventInner};
+    let env = testenv()?;
+    let rpc = env.rpc_client();
+    let miner = rpc.get_new_address(None, None)?.assume_checked();
+    while rpc.get_block_count()? < 101 {
+        let _ = env.mine_blocks(1, Some(miner.clone()))?;
+    }
+
+    // send tx
+    let spk = ScriptBuf::from_hex("0014446906a6560d8ad760db3156706e72e171f3a2aa")?;
+    let txid = env.send(
+        &Address::from_script(&spk, Network::Regtest)?,
+        Amount::from_btc(0.42)?,
+    )?;
+    let _ = env.mine_blocks(1, Some(miner));
+
+    // match blocks
+    let mut iter = FilterIter::new_with_height(rpc, 1);
+    iter.add_spk(spk);
+    assert_eq!(iter.get_tip()?.unwrap().height, 102);
+
+    for res in iter {
+        let event = res?;
+        match event {
+            event if event.height() <= 101 => assert!(!event.is_match()),
+            Event::Block(EventInner { height, block }) => {
+                assert_eq!(height, 102);
+                assert!(block.txdata.iter().any(|tx| tx.compute_txid() == txid));
+            }
+            Event::NoMatch(_) => panic!("expected to match block 102"),
+        }
+    }
 
     Ok(())
 }
