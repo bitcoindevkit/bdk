@@ -36,7 +36,7 @@ use bdk_chain::{
 use bitcoin::{
     absolute,
     consensus::encode::serialize,
-    constants::{genesis_block, COINBASE_MATURITY},
+    constants::genesis_block,
     psbt,
     secp256k1::Secp256k1,
     sighash::{EcdsaSighashType, TapSighashType},
@@ -1417,8 +1417,19 @@ impl Wallet {
 
         fee_amount += fee_rate * tx.weight();
 
-        let (required_utxos, optional_utxos) =
-            self.preselect_utxos(&params, Some(current_height.to_consensus_u32()));
+        let (required_utxos, optional_utxos) = {
+            // NOTE: manual selection overrides unspendable
+            let mut required: Vec<WeightedUtxo> = params.utxos.values().cloned().collect();
+            let optional = self.filter_utxos(&params, current_height.to_consensus_u32());
+
+            // if drain_wallet is true, all UTxOs are required
+            if params.drain_wallet {
+                required.extend(optional);
+                (required, vec![])
+            } else {
+                (required, optional)
+            }
+        };
 
         // get drain script
         let mut drain_index = Option::<(KeychainKind, u32)>::None;
@@ -1446,9 +1457,6 @@ impl Wallet {
                 spk
             }
         };
-
-        let (required_utxos, optional_utxos) =
-            coin_selection::filter_duplicates(required_utxos, optional_utxos);
 
         let coin_selection = coin_selection
             .coin_select(
@@ -1618,60 +1626,71 @@ impl Wallet {
             .map_err(|_| BuildFeeBumpError::FeeRateUnavailable)?;
 
         // remove the inputs from the tx and process them
-        let original_txin = tx.input.drain(..).collect::<Vec<_>>();
-        let original_utxos = original_txin
-            .iter()
+        let utxos = tx
+            .input
+            .drain(..)
             .map(|txin| -> Result<_, BuildFeeBumpError> {
-                let prev_tx = graph
+                graph
+                    // Get previous transaction
                     .get_tx(txin.previous_output.txid)
-                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
-                let txout = &prev_tx.output[txin.previous_output.vout as usize];
+                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))
+                    // Get chain position
+                    .and_then(|prev_tx| {
+                        chain_positions
+                            .get(&txin.previous_output.txid)
+                            .cloned()
+                            .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))
+                            .map(|chain_position| (prev_tx, chain_position))
+                    })
+                    .map(|(prev_tx, chain_position)| {
+                        let txout = prev_tx.output[txin.previous_output.vout as usize].clone();
+                        match txout_index.index_of_spk(txout.script_pubkey.clone()) {
+                            Some(&(keychain, derivation_index)) => (
+                                txin.previous_output,
+                                WeightedUtxo {
+                                    satisfaction_weight: self
+                                        .public_descriptor(keychain)
+                                        .max_weight_to_satisfy()
+                                        .unwrap(),
+                                    utxo: Utxo::Local(LocalOutput {
+                                        outpoint: txin.previous_output,
+                                        txout: txout.clone(),
+                                        keychain,
+                                        is_spent: true,
+                                        derivation_index,
+                                        chain_position,
+                                    }),
+                                },
+                            ),
+                            None => {
+                                let satisfaction_weight = Weight::from_wu_usize(
+                                    serialize(&txin.script_sig).len() * 4
+                                        + serialize(&txin.witness).len(),
+                                );
 
-                let chain_position = chain_positions
-                    .get(&txin.previous_output.txid)
-                    .cloned()
-                    .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))?;
-
-                let weighted_utxo = match txout_index.index_of_spk(txout.script_pubkey.clone()) {
-                    Some(&(keychain, derivation_index)) => {
-                        let satisfaction_weight = self
-                            .public_descriptor(keychain)
-                            .max_weight_to_satisfy()
-                            .unwrap();
-                        WeightedUtxo {
-                            utxo: Utxo::Local(LocalOutput {
-                                outpoint: txin.previous_output,
-                                txout: txout.clone(),
-                                keychain,
-                                is_spent: true,
-                                derivation_index,
-                                chain_position,
-                            }),
-                            satisfaction_weight,
+                                (
+                                    txin.previous_output,
+                                    WeightedUtxo {
+                                        utxo: Utxo::Foreign {
+                                            outpoint: txin.previous_output,
+                                            sequence: txin.sequence,
+                                            psbt_input: Box::new(psbt::Input {
+                                                witness_utxo: txout
+                                                    .script_pubkey
+                                                    .witness_version()
+                                                    .map(|_| txout.clone()),
+                                                non_witness_utxo: Some(prev_tx.as_ref().clone()),
+                                                ..Default::default()
+                                            }),
+                                        },
+                                        satisfaction_weight,
+                                    },
+                                )
+                            }
                         }
-                    }
-                    None => {
-                        let satisfaction_weight = Weight::from_wu_usize(
-                            serialize(&txin.script_sig).len() * 4 + serialize(&txin.witness).len(),
-                        );
-                        WeightedUtxo {
-                            utxo: Utxo::Foreign {
-                                outpoint: txin.previous_output,
-                                sequence: txin.sequence,
-                                psbt_input: Box::new(psbt::Input {
-                                    witness_utxo: Some(txout.clone()),
-                                    non_witness_utxo: Some(prev_tx.as_ref().clone()),
-                                    ..Default::default()
-                                }),
-                            },
-                            satisfaction_weight,
-                        }
-                    }
-                };
-
-                Ok(weighted_utxo)
+                    })
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<HashMap<OutPoint, WeightedUtxo>, BuildFeeBumpError>>()?;
 
         if tx.output.len() > 1 {
             let mut change_index = None;
@@ -1698,7 +1717,7 @@ impl Wallet {
                 .into_iter()
                 .map(|txout| (txout.script_pubkey, txout.value))
                 .collect(),
-            utxos: original_utxos,
+            utxos,
             bumping_fee: Some(tx_builder::PreviousFee {
                 absolute: fee,
                 rate: fee_rate,
@@ -1976,117 +1995,52 @@ impl Wallet {
         descriptor.at_derivation_index(child).ok()
     }
 
-    fn get_available_utxos(&self) -> Vec<(LocalOutput, Weight)> {
-        self.list_unspent()
-            .map(|utxo| {
-                let keychain = utxo.keychain;
-                (utxo, {
-                    self.public_descriptor(keychain)
-                        .max_weight_to_satisfy()
-                        .unwrap()
-                })
-            })
-            .collect()
-    }
-
     /// Given the options returns the list of utxos that must be used to form the
     /// transaction and any further that may be used if needed.
-    fn preselect_utxos(
-        &self,
-        params: &TxParams,
-        current_height: Option<u32>,
-    ) -> (Vec<WeightedUtxo>, Vec<WeightedUtxo>) {
-        let TxParams {
-            change_policy,
-            unspendable,
-            utxos,
-            drain_wallet,
-            manually_selected_only,
-            bumping_fee,
-            ..
-        } = params;
-
-        let manually_selected = utxos.clone();
-        // we mandate confirmed transactions if we're bumping the fee
-        let must_only_use_confirmed_tx = bumping_fee.is_some();
-        let must_use_all_available = *drain_wallet;
-
-        //    must_spend <- manually selected utxos
-        //    may_spend  <- all other available utxos
-        let mut may_spend = self.get_available_utxos();
-
-        may_spend.retain(|may_spend| {
-            !manually_selected
-                .iter()
-                .any(|manually_selected| manually_selected.utxo.outpoint() == may_spend.0.outpoint)
-        });
-        let mut must_spend = manually_selected;
-
-        // NOTE: we are intentionally ignoring `unspendable` here. i.e manual
-        // selection overrides unspendable.
-        if *manually_selected_only {
-            return (must_spend, vec![]);
+    fn filter_utxos(&self, params: &TxParams, current_height: u32) -> Vec<WeightedUtxo> {
+        if params.manually_selected_only {
+            vec![]
+        // only process optional UTxOs if manually_selected_only is false
+        } else {
+            self.indexed_graph
+                .graph()
+                // get all unspent UTxOs from wallet
+                // NOTE: the UTxOs returned by the following method already belong to wallet as the
+                // call chain uses get_tx_node infallibly
+                .filter_chain_unspents(
+                    &self.chain,
+                    self.chain.tip().block_id(),
+                    self.indexed_graph.index.outpoints().iter().cloned(),
+                )
+                // only create LocalOutput if UTxO is mature
+                .filter_map(move |((k, i), full_txo)| {
+                    full_txo
+                        .is_mature(current_height)
+                        .then(|| new_local_utxo(k, i, full_txo))
+                })
+                // only process UTxOs not selected manually, they will be considered later in the chain
+                // NOTE: this avoid UTxOs in both required and optional list
+                .filter(|may_spend| !params.utxos.contains_key(&may_spend.outpoint))
+                // only add to optional UTxOs those which satisfy the change policy if we reuse change
+                .filter(|local_output| {
+                    self.keychains().count() == 1
+                        || params.change_policy.is_satisfied_by(local_output)
+                })
+                // only add to optional UTxOs those marked as spendable
+                .filter(|local_output| !params.unspendable.contains(&local_output.outpoint))
+                // if bumping fees only add to optional UTxOs those confirmed
+                .filter(|local_output| {
+                    params.bumping_fee.is_none() || local_output.chain_position.is_confirmed()
+                })
+                .map(|utxo| WeightedUtxo {
+                    satisfaction_weight: self
+                        .public_descriptor(utxo.keychain)
+                        .max_weight_to_satisfy()
+                        .unwrap(),
+                    utxo: Utxo::Local(utxo),
+                })
+                .collect()
         }
-
-        let satisfies_confirmed = may_spend
-            .iter()
-            .map(|u| -> bool {
-                let txid = u.0.outpoint.txid;
-                let tx = match self.indexed_graph.graph().get_tx(txid) {
-                    Some(tx) => tx,
-                    None => return false,
-                };
-
-                // Whether the UTXO is mature and, if needed, confirmed
-                let mut spendable = true;
-                let chain_position = u.0.chain_position;
-                if must_only_use_confirmed_tx && !chain_position.is_confirmed() {
-                    return false;
-                }
-                if tx.is_coinbase() {
-                    debug_assert!(
-                        chain_position.is_confirmed(),
-                        "coinbase must always be confirmed"
-                    );
-                    if let Some(current_height) = current_height {
-                        match chain_position {
-                            ChainPosition::Confirmed { anchor, .. } => {
-                                // https://github.com/bitcoin/bitcoin/blob/c5e67be03bb06a5d7885c55db1f016fbf2333fe3/src/validation.cpp#L373-L375
-                                let spend_height = current_height + 1;
-                                let coin_age_at_spend_height =
-                                    spend_height.saturating_sub(anchor.block_id.height);
-                                spendable &= coin_age_at_spend_height >= COINBASE_MATURITY;
-                            }
-                            ChainPosition::Unconfirmed { .. } => spendable = false,
-                        }
-                    }
-                }
-                spendable
-            })
-            .collect::<Vec<_>>();
-
-        let mut i = 0;
-        may_spend.retain(|u| {
-            let retain = (self.keychains().count() == 1 || change_policy.is_satisfied_by(&u.0))
-                && !unspendable.contains(&u.0.outpoint)
-                && satisfies_confirmed[i];
-            i += 1;
-            retain
-        });
-
-        let mut may_spend = may_spend
-            .into_iter()
-            .map(|(local_utxo, satisfaction_weight)| WeightedUtxo {
-                satisfaction_weight,
-                utxo: Utxo::Local(local_utxo),
-            })
-            .collect();
-
-        if must_use_all_available {
-            must_spend.append(&mut may_spend);
-        }
-
-        (must_spend, may_spend)
     }
 
     fn complete_transaction(
