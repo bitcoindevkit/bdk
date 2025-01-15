@@ -80,7 +80,7 @@ cargo update -p indexmap --precise "2.5.0"
 cargo update -p security-framework-sys --precise "2.11.1"
 cargo update -p csv --precise "1.3.0"
 cargo update -p unicode-width --precise "0.1.13"
-cargo update -p rustls@0.23.20 --precise "0.23.19"
+cargo update -p rustls@0.23.21 --precise "0.23.19"
 ```
 
 ## License
