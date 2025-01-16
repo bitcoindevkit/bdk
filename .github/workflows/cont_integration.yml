@@ -14,7 +14,7 @@ jobs:
       - name: "Read rust version"
         id: read_toolchain
         run: echo "rust_version=$(cat rust-version)" >> $GITHUB_OUTPUT
-  
+
   build-test:
     needs: prepare
     name: Build and test
@@ -24,7 +24,8 @@ jobs:
         rust:
           - version: ${{ needs.prepare.outputs.rust_version }}
             clippy: true
-          - version: 1.63.0 # MSRV
+          - version: 1.63.0 # Overall MSRV
+          - version: 1.75.0 # Specific MSRV for `bdk_electrum`
         features:
           - --no-default-features --features miniscript/no-std
           - --all-features
@@ -40,25 +41,38 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.7.5
       - name: Pin dependencies for MSRV
-        if: matrix.rust.version == '1.63.0'
         run: |
-          cargo update -p zstd-sys --precise "2.0.8+zstd.1.5.5"
-          cargo update -p time --precise "0.3.20"
-          cargo update -p home --precise "0.5.5"
-          cargo update -p proptest --precise "1.2.0"
-          cargo update -p url --precise "2.5.0"
-          cargo update -p cc --precise "1.0.105"
-          cargo update -p tokio --precise "1.38.1"
-          cargo update -p tokio-util --precise "0.7.11"
-          cargo update -p indexmap --precise "2.5.0"
-          cargo update -p security-framework-sys --precise "2.11.1"
-          cargo update -p csv --precise "1.3.0"
-          cargo update -p unicode-width --precise "0.1.13"
-          cargo update -p rustls@0.23.21 --precise "0.23.19"
+          if [ "${{matrix.rust.version}}" = '1.63.0' ]; then
+            cargo update -p zstd-sys --precise "2.0.8+zstd.1.5.5"
+            cargo update -p time --precise "0.3.20"
+            cargo update -p home --precise "0.5.5"
+            cargo update -p proptest --precise "1.2.0"
+            cargo update -p url --precise "2.5.0"
+            cargo update -p cc --precise "1.0.105"
+            cargo update -p tokio --precise "1.38.1"
+            cargo update -p tokio-util --precise "0.7.11"
+            cargo update -p indexmap --precise "2.5.0"
+            cargo update -p security-framework-sys --precise "2.11.1"
+            cargo update -p csv --precise "1.3.0"
+            cargo update -p unicode-width --precise "0.1.13"
+            cargo update -p rustls@0.23.21 --precise "0.23.19"
+          elif [ "${{matrix.rust.version}}" = '1.75.0' ]; then
+            cargo update -p home --precise "0.5.9"
+          fi
       - name: Build
-        run: cargo build --workspace --exclude 'example_*' ${{ matrix.features }}
+        run: |
+          if [ "${{matrix.rust.version}}" = '1.63.0' ]; then
+            cargo build --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
+          else
+            cargo build --workspace --exclude 'example_*' ${{ matrix.features }}
+          fi
       - name: Test
-        run: cargo test --workspace --exclude 'example_*' ${{ matrix.features }}
+        run: |
+          if [ "${{matrix.rust.version}}" = '1.63.0' ]; then
+            cargo test --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
+          else
+            cargo test --workspace --exclude 'example_*' ${{ matrix.features }}
+          fi
 
   check-no-std:
     needs: prepare
