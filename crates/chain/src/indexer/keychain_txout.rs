@@ -10,10 +10,16 @@ use crate::{
     DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
-use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{
+    bip32::ChildNumber, Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid,
+};
 use core::{
     fmt::Debug,
     ops::{Bound, RangeBounds},
+};
+use miniscript::{
+    descriptor::{DescriptorXKey, Wildcard},
+    ForEachKey,
 };
 
 use crate::Merge;
@@ -355,6 +361,23 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         keychain: K,
         descriptor: Descriptor<DescriptorPublicKey>,
     ) -> Result<bool, InsertDescriptorError<K>> {
+        // Ensure the keys don't contain any hardened derivation steps or hardened wildcards
+        let descriptor_contains_hardened_steps = descriptor.for_any_key(|k| {
+            if let DescriptorPublicKey::XPub(DescriptorXKey {
+                derivation_path,
+                wildcard,
+                ..
+            }) = k
+            {
+                return *wildcard == Wildcard::Hardened
+                    || derivation_path.into_iter().any(ChildNumber::is_hardened);
+            }
+            false
+        });
+        if descriptor_contains_hardened_steps {
+            return Err(InsertDescriptorError::HardenedDerivationXpub);
+        }
+        descriptor.sanity_check()?;
         let did = descriptor.descriptor_id();
         if !self.keychain_to_descriptor_id.contains_key(&keychain)
             && !self.descriptor_id_to_keychain.contains_key(&did)
@@ -776,7 +799,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 /// Error returned from [`KeychainTxOutIndex::insert_descriptor`]
 pub enum InsertDescriptorError<K> {
     /// The descriptor has already been assigned to a keychain so you can't assign it to another
@@ -793,6 +816,16 @@ pub enum InsertDescriptorError<K> {
         /// The descriptor that the keychain is already assigned to
         existing_assignment: Descriptor<DescriptorPublicKey>,
     },
+    /// Miniscript error
+    Miniscript(miniscript::Error),
+    /// The descriptor contains hardened derivation steps on public extended keys
+    HardenedDerivationXpub,
+}
+
+impl<K> From<miniscript::Error> for InsertDescriptorError<K> {
+    fn from(err: miniscript::Error) -> Self {
+        InsertDescriptorError::Miniscript(err)
+    }
 }
 
 impl<K: core::fmt::Debug> core::fmt::Display for InsertDescriptorError<K> {
@@ -816,6 +849,11 @@ impl<K: core::fmt::Debug> core::fmt::Display for InsertDescriptorError<K> {
                     "attempt to re-assign keychain {keychain:?} already assigned to {existing:?}"
                 )
             }
+            InsertDescriptorError::Miniscript(err) => write!(f, "Miniscript error: {}", err),
+            InsertDescriptorError::HardenedDerivationXpub => write!(
+                f,
+                "The descriptor contains hardened derivation steps on public extended keys"
+            ),
         }
     }
 }
