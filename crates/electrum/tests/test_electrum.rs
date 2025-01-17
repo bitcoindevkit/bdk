@@ -1,14 +1,20 @@
 use bdk_chain::{
-    bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
+    bitcoin::{hashes::Hash, secp256k1::Secp256k1, Address, Amount, ScriptBuf, WScriptHash},
+    indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
+    miniscript::Descriptor,
     spk_client::{FullScanRequest, SyncRequest, SyncResponse},
     spk_txout::SpkTxOutIndex,
     Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
 };
 use bdk_electrum::BdkElectrumClient;
-use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
+use bdk_testenv::{
+    anyhow,
+    bitcoincore_rpc::{json::CreateRawTransactionInput, RawTx, RpcApi},
+    TestEnv,
+};
 use core::time::Duration;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
 
 // Batch size for `sync_with_electrum`.
@@ -52,6 +58,140 @@ where
     let _ = graph.apply_update(update.tx_update.clone());
 
     Ok(update)
+}
+
+// This test simulates a transaction cancellation scenario using replace-by-fee (RBF) by
+// broadcasting a conflicting transaction with a higher fee, verifying that double spending is
+// correctly handled by the transaction graph.
+#[test]
+pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
+    use bdk_chain::keychain_txout::SyncRequestBuilderExt;
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    let (descriptor, _keymap) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)")
+        .expect("must be valid");
+
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new(
+        KeychainTxOutIndex::new(10),
+    );
+    let _ = graph
+        .index
+        .insert_descriptor((), descriptor.clone())
+        .unwrap();
+    let (chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+
+    // Derive the receiving address from the descriptor.
+    let ((_, receiver_spk), _) = graph.index.reveal_next_spk(()).unwrap();
+    let receiver_addr = Address::from_script(&receiver_spk, bdk_chain::bitcoin::Network::Regtest)?;
+
+    env.mine_blocks(101, None)?;
+
+    // Select a UTXO to use as an input for constructing our test transactions.
+    let utxos = env
+        .rpc_client()
+        .list_unspent(None, None, None, Some(false), None)?;
+    let selected_utxo = utxos
+        .into_iter()
+        .find(|utxo| utxo.amount >= Amount::from_sat(40_000))
+        .expect("Must have a UTXO with sufficient funds");
+
+    // Derive the sender's address from the selected UTXO.
+    let sender_spk = selected_utxo.script_pub_key.clone();
+    let sender_addr = Address::from_script(&sender_spk, bdk_chain::bitcoin::Network::Regtest)
+        .expect("Failed to derive address from UTXO");
+
+    // Setup the common input used by both `send_tx` and `undo_send_tx`.
+    let input = [CreateRawTransactionInput {
+        txid: selected_utxo.txid,
+        vout: selected_utxo.vout,
+        sequence: None,
+    }];
+
+    let utxo_amount = selected_utxo.amount.to_sat();
+
+    // Create output for `send_tx`, directing funds to the receiver address.
+    let output = HashMap::from([(
+        receiver_addr.to_string(),
+        Amount::from_sat(utxo_amount - 100_000),
+    )]);
+
+    // Create and sign the `send_tx` transaction.
+    let send_tx = env
+        .rpc_client()
+        .create_raw_transaction(&input, &output, None, Some(true))?;
+    let send_tx = env
+        .rpc_client()
+        .sign_raw_transaction_with_wallet(send_tx.raw_hex(), None, None)?
+        .transaction()?;
+
+    // Create the output for `undo_send_tx`, redirecting the funds back to the sender address. The
+    // amount is reduced to increase the transaction fee, ensuring that `undo_send_tx` can replace
+    // `send_tx` via RBF.
+    let output = HashMap::from([(
+        sender_addr.to_string(),
+        Amount::from_sat(utxo_amount - 150_000),
+    )]);
+
+    // Create and sign the `undo_send_tx` transaction.
+    let undo_send_tx =
+        env.rpc_client()
+            .create_raw_transaction(&input, &output, None, Some(true))?;
+    let undo_send_tx = env
+        .rpc_client()
+        .sign_raw_transaction_with_wallet(undo_send_tx.raw_hex(), None, None)?
+        .transaction()?;
+
+    // Broadcast the send transaction.
+    let send_txid = env.rpc_client().send_raw_transaction(send_tx.raw_hex())?;
+
+    env.wait_until_electrum_sees_txid(send_txid, Duration::from_secs(6))?;
+
+    // Sync and check that our sync result and graph update contain the `send_tx`.
+    let request = SyncRequest::builder()
+        .chain_tip(chain.tip())
+        .revealed_spks_from_indexer(&graph.index, ..)
+        .unconfirmed_outpoints(
+            graph.graph().canonical_iter(&chain, chain.tip().block_id()),
+            &graph.index,
+        );
+    let sync_result = client.sync(request, BATCH_SIZE, true)?;
+    assert!(sync_result
+        .tx_update
+        .txs
+        .iter()
+        .any(|tx| tx.compute_txid() == send_txid));
+
+    let changeset = graph.apply_update(sync_result.tx_update.clone());
+    assert!(changeset.tx_graph.txs.contains(&send_tx));
+
+    // Broadcast the `undo_send_txid` transaction to replace `send_tx`.
+    let undo_send_txid = env
+        .rpc_client()
+        .send_raw_transaction(undo_send_tx.raw_hex())?;
+
+    env.wait_until_electrum_sees_txid(undo_send_txid, Duration::from_secs(6))?;
+
+    // Sync and check that our sync result and graph update now contain `undo_send_tx`.
+    let request = SyncRequest::builder()
+        .chain_tip(chain.tip())
+        .revealed_spks_from_indexer(&graph.index, ..)
+        .unconfirmed_outpoints(
+            graph.graph().canonical_iter(&chain, chain.tip().block_id()),
+            &graph.index,
+        );
+    let sync_result = client.sync(request, BATCH_SIZE, true)?;
+    assert!(sync_result
+        .tx_update
+        .txs
+        .iter()
+        .any(|tx| tx.compute_txid() == undo_send_txid));
+
+    let changeset = graph.apply_update(sync_result.tx_update.clone());
+    assert!(changeset.tx_graph.txs.contains(&undo_send_tx));
+
+    Ok(())
 }
 
 #[test]
