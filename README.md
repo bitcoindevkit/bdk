@@ -63,7 +63,15 @@ Fully working examples of how to use these components are in `/example-crates`:
 [`bdk_chain`]: https://docs.rs/bdk-chain/
 
 ## Minimum Supported Rust Version (MSRV)
-This library should compile with any combination of features with Rust 1.63.0.
+The BDK library maintains a MSRV of 1.63.0. This includes the following crates 
+
+- `bdk_core`
+- `bdk_chain`
+- `bdk_bitcoind_rpc`.
+- `bdk_esplora`.
+- `bdk_wallet`.
+
+The MSRV of `bdk_electrum` is 1.75.0.
 
 To build with the MSRV you will need to pin dependencies as follows:
 
@@ -80,7 +88,6 @@ cargo update -p indexmap --precise "2.5.0"
 cargo update -p security-framework-sys --precise "2.11.1"
 cargo update -p csv --precise "1.3.0"
 cargo update -p unicode-width --precise "0.1.13"
-cargo update -p rustls@0.23.21 --precise "0.23.19"
 ```
 
 ## License
