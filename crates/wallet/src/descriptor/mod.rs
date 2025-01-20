@@ -804,6 +804,10 @@ mod test {
         assert!(desc.is_ok());
 
         let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)"
+            .into_wallet_descriptor(&secp, Network::Testnet4);
+        assert!(desc.is_ok());
+
+        let desc = "wpkh(tprv8ZgxMBicQKsPdpkqS7Eair4YxjcuuvDPNYmKX3sCniCf16tHEVrjjiSXEkFRnUH77yXc6ZcwHHcLNfjdi5qUvw3VDfgYiH5mNsj5izuiu2N/1/2/*)"
             .into_wallet_descriptor(&secp, Network::Regtest);
         assert!(desc.is_ok());
 

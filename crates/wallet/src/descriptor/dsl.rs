@@ -817,7 +817,7 @@ mod test {
     use crate::descriptor::{DescriptorError, DescriptorMeta};
     use crate::keys::{DescriptorKey, IntoDescriptorKey, ValidNetworks};
     use bitcoin::bip32;
-    use bitcoin::Network::{Bitcoin, Regtest, Signet, Testnet};
+    use bitcoin::Network::{Bitcoin, Regtest, Signet, Testnet, Testnet4};
     use bitcoin::PrivateKey;
 
     // test the descriptor!() macro
@@ -1115,7 +1115,10 @@ mod test {
         let (_desc, _key_map, valid_networks) = descriptor!(pkh(desc_key)).unwrap();
         assert_eq!(
             valid_networks,
-            [Testnet, Regtest, Signet].iter().cloned().collect()
+            [Testnet, Testnet4, Regtest, Signet]
+                .iter()
+                .cloned()
+                .collect()
         );
 
         let xprv = bip32::Xpriv::from_str("xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi").unwrap();
