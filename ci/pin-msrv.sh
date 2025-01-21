@@ -8,7 +8,7 @@ set -euo pipefail
 # To pin deps, switch toolchain to MSRV and execute the below updates
 
 # cargo clean
-# rustup default 1.63.0
+# rustup override set 1.63.0
 
 cargo update -p zstd-sys --precise "2.0.8+zstd.1.5.5"
 cargo update -p time --precise "0.3.20"

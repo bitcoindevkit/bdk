@@ -63,7 +63,7 @@ Fully working examples of how to use these components are in `/example-crates`:
 [`bdk_chain`]: https://docs.rs/bdk-chain/
 
 ## Minimum Supported Rust Version (MSRV)
-The BDK library maintains a MSRV of 1.63.0. This includes the following crates 
+The BDK library maintains a MSRV of 1.63.0. This includes the following crates:
 
 - `bdk_core`
 - `bdk_chain`
@@ -73,7 +73,7 @@ The BDK library maintains a MSRV of 1.63.0. This includes the following crates
 
 The MSRV of `bdk_electrum` is 1.75.0.
 
-To build with the MSRV of 1.63.0 you will need to pin dependencies by running the [`pin-msrv.sh`](./ci/pin-msrv.sh) script
+To build with the MSRV of 1.63.0 you will need to pin dependencies by running the [`pin-msrv.sh`](./ci/pin-msrv.sh) script.
 
 ## License
 
