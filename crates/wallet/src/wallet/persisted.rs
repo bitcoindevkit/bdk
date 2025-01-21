@@ -241,7 +241,7 @@ impl<P: AsyncWalletPersister> PersistedWallet<P> {
     /// Returns whether any new changes were persisted.
     ///
     /// If the `persister` errors, the staged changes will not be cleared.
-    pub async fn persist_async<'a>(&'a mut self, persister: &mut P) -> Result<bool, P::Error> {
+    pub async fn persist_async(&mut self, persister: &mut P) -> Result<bool, P::Error> {
         match self.inner.staged_mut() {
             Some(stage) => {
                 P::persist(persister, &*stage).await?;
