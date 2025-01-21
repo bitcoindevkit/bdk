@@ -545,8 +545,10 @@ impl std::error::Error for ApplyHeaderError {}
 
 /// Applies `update_tip` onto `original_tip`.
 ///
-/// On success, a tuple is returned `(changeset, can_replace)`. If `can_replace` is true, then the
-/// `update_tip` can replace the `original_tip`.
+/// On success, a tuple is returned `([`CheckPoint`], [`ChangeSet`])`.
+///
+/// [`CheckPoint`]: bdk_core::CheckPoint
+/// [`ChangeSet`]: bdk_chain::local_chain::CheckPoint
 fn merge_chains(
     original_tip: CheckPoint,
     update_tip: CheckPoint,
