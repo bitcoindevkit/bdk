@@ -9,19 +9,32 @@ use bdk_core::BlockId;
 use bitcoin::{Transaction, Txid};
 
 /// Modifies the canonicalization algorithm.
+#[non_exhaustive]
 #[derive(Debug, Default, Clone)]
 pub struct CanonicalizationMods {
     /// Transactions that will supercede all other transactions.
     ///
     /// In case of conflicting transactions within `assume_canonical`, transactions that appear
     /// later in the list (have higher index) have precedence.
+    ///
+    /// If the same transaction exists in both `assume_canonical` and `assume_not_canonical`,
+    /// `assume_not_canonical` will take precedence.
     pub assume_canonical: Vec<Txid>,
+
+    /// Transactions that will never be considered canonical.
+    ///
+    /// Descendants of these transactions will also be evicted.
+    ///
+    /// If the same transaction exists in both `assume_canonical` and `assume_not_canonical`,
+    /// `assume_not_canonical` will take precedence.
+    pub assume_not_canonical: Vec<Txid>,
 }
 
 impl CanonicalizationMods {
     /// No mods.
     pub const NONE: Self = Self {
         assume_canonical: Vec::new(),
+        assume_not_canonical: Vec::new(),
     };
 }
 
@@ -51,6 +64,10 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
         chain_tip: BlockId,
         mods: CanonicalizationMods,
     ) -> Self {
+        let mut not_canonical = HashSet::new();
+        for txid in mods.assume_not_canonical {
+            Self::_mark_not_canonical(tx_graph, &mut not_canonical, txid);
+        }
         let anchors = tx_graph.all_anchors();
         let unprocessed_assumed_txs = Box::new(
             mods.assume_canonical
@@ -77,7 +94,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
             unprocessed_seen_txs,
             unprocessed_leftover_txs: VecDeque::new(),
             canonical: HashMap::new(),
-            not_canonical: HashSet::new(),
+            not_canonical,
             queue: VecDeque::new(),
         }
     }
@@ -142,18 +159,11 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 // Any conflicts with a canonical tx can be added to `not_canonical`. Descendants
                 // of `not_canonical` txs can also be added to `not_canonical`.
                 for (_, conflict_txid) in self.tx_graph.direct_conflicts(&tx) {
-                    TxDescendants::new_include_root(
+                    Self::_mark_not_canonical(
                         self.tx_graph,
+                        &mut self.not_canonical,
                         conflict_txid,
-                        |_: usize, txid: Txid| -> Option<()> {
-                            if self.not_canonical.insert(txid) {
-                                Some(())
-                            } else {
-                                None
-                            }
-                        },
-                    )
-                    .run_until_finished()
+                    );
                 }
                 canonical_entry.insert((tx, this_reason));
                 self.queue.push_back(this_txid);
@@ -161,6 +171,17 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
             },
         )
         .run_until_finished()
+    }
+
+    fn _mark_not_canonical(tx_graph: &TxGraph<A>, not_canonical: &mut HashSet<Txid>, txid: Txid) {
+        TxDescendants::new_include_root(tx_graph, txid, |_: usize, txid: Txid| -> Option<()> {
+            if not_canonical.insert(txid) {
+                Some(())
+            } else {
+                None
+            }
+        })
+        .run_until_finished();
     }
 }
 
