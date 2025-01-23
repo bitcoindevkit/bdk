@@ -2559,3 +2559,73 @@ macro_rules! doctest_wallet {
         wallet
     }}
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::test_utils::get_test_tr_single_sig_xprv_and_change_desc;
+    use crate::test_utils::insert_tx;
+
+    #[test]
+    fn not_duplicated_utxos_across_optional_and_required() {
+        let (external_desc, internal_desc) = get_test_tr_single_sig_xprv_and_change_desc();
+
+        // create new wallet
+        let mut wallet = Wallet::create(external_desc, internal_desc)
+            .network(Network::Testnet)
+            .create_wallet_no_persist()
+            .unwrap();
+
+        let two_output_tx = Transaction {
+            input: vec![],
+            output: vec![
+                TxOut {
+                    script_pubkey: wallet
+                        .next_unused_address(KeychainKind::External)
+                        .script_pubkey(),
+                    value: Amount::from_sat(25_000),
+                },
+                TxOut {
+                    script_pubkey: wallet
+                        .next_unused_address(KeychainKind::External)
+                        .script_pubkey(),
+                    value: Amount::from_sat(75_000),
+                },
+            ],
+            version: transaction::Version::non_standard(0),
+            lock_time: absolute::LockTime::ZERO,
+        };
+
+        let txid = two_output_tx.compute_txid();
+        insert_tx(&mut wallet, two_output_tx);
+
+        let mut params = TxParams::default();
+        let output = wallet.get_utxo(OutPoint { txid, vout: 0 }).unwrap();
+        params.utxos.insert(
+            output.outpoint,
+            WeightedUtxo {
+                satisfaction_weight: wallet
+                    .public_descriptor(output.keychain)
+                    .max_weight_to_satisfy()
+                    .unwrap(),
+                utxo: Utxo::Local(output),
+            },
+        );
+        // enforce selection of first output in transaction
+        let received = wallet.filter_utxos(&params, wallet.latest_checkpoint().block_id().height);
+        // notice expected doesn't include the first output from two_output_tx as it should be
+        // filtered out
+        let expected = vec![wallet
+            .get_utxo(OutPoint { txid, vout: 1 })
+            .map(|utxo| WeightedUtxo {
+                satisfaction_weight: wallet
+                    .public_descriptor(utxo.keychain)
+                    .max_weight_to_satisfy()
+                    .unwrap(),
+                utxo: Utxo::Local(utxo),
+            })
+            .unwrap()];
+
+        assert_eq!(expected, received);
+    }
+}
