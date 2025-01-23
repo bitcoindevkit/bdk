@@ -590,11 +590,20 @@ impl<A: Anchor> TxGraph<A> {
         let tx_node = self.txs.entry(txid).or_default();
         match tx_node {
             TxNodeInternal::Whole(existing_tx) => {
-                debug_assert_eq!(
-                    existing_tx.as_ref(),
-                    tx.as_ref(),
-                    "tx of same txid should never change"
-                );
+                // We want to be able to replace an unsigned tx with a signed tx.
+                // The tx with more weight has precedence (and tiebreak with the actual tx data).
+                // We can also check whether the witness is valid and also prioritize signatures
+                // with less weight, but that is more work and this solution is good enough.
+                if existing_tx.as_ref() != tx.as_ref() {
+                    let (_, tx_with_precedence) = Ord::max(
+                        (existing_tx.weight(), existing_tx.as_ref()),
+                        (tx.weight(), tx.as_ref()),
+                    );
+                    if tx_with_precedence == tx.as_ref() {
+                        *existing_tx = tx.clone();
+                        changeset.txs.insert(tx);
+                    }
+                }
             }
             partial_tx => {
                 for txin in &tx.input {
