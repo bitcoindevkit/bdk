@@ -613,10 +613,65 @@ impl<A: Anchor> TxGraph<A> {
         changeset
     }
 
-    /// Inserts the given transaction into [`TxGraph`].
+    /// Insert the given transaction into [`TxGraph`].
     ///
-    /// The [`ChangeSet`] returned will be empty if `tx` already exists.
+    /// The [`ChangeSet`] returned will be empty if no changes are made to the graph.
+    ///
+    /// # Updating Existing Transactions
+    ///
+    /// An unsigned transaction can be inserted first and have it's witness fields updated with
+    /// further transaction insertions (given that the newly introduced transaction shares the same
+    /// txid as the original transaction).
+    ///
+    /// The witnesses of the newly introduced transaction will be merged with the witnesses of the
+    /// original transaction in a way where:
+    ///
+    /// * A non-empty witness has precedence over an empty witness.
+    /// * A smaller witness has precedence over a larger witness.
+    /// * If the witness sizes are the same, we prioritize the two witnesses with lexicographical
+    ///     order.
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A> {
+        // This returns `Some` only if the merged tx is different to the `original_tx`.
+        fn _merge_tx_witnesses(
+            original_tx: &Arc<Transaction>,
+            other_tx: &Arc<Transaction>,
+        ) -> Option<Arc<Transaction>> {
+            debug_assert_eq!(
+                original_tx.input.len(),
+                other_tx.input.len(),
+                "tx input count must be the same"
+            );
+            let merged_input = Iterator::zip(original_tx.input.iter(), other_tx.input.iter())
+                .map(|(original_txin, other_txin)| {
+                    let original_key = core::cmp::Reverse((
+                        original_txin.witness.is_empty(),
+                        original_txin.witness.size(),
+                        &original_txin.witness,
+                    ));
+                    let other_key = core::cmp::Reverse((
+                        other_txin.witness.is_empty(),
+                        other_txin.witness.size(),
+                        &other_txin.witness,
+                    ));
+                    if original_key > other_key {
+                        original_txin.clone()
+                    } else {
+                        other_txin.clone()
+                    }
+                })
+                .collect::<Vec<_>>();
+            if merged_input == original_tx.input {
+                return None;
+            }
+            if merged_input == other_tx.input {
+                return Some(other_tx.clone());
+            }
+            Some(Arc::new(Transaction {
+                input: merged_input,
+                ..(**original_tx).clone()
+            }))
+        }
+
         let tx: Arc<Transaction> = tx.into();
         let txid = tx.compute_txid();
         let mut changeset = ChangeSet::<A>::default();
@@ -624,11 +679,13 @@ impl<A: Anchor> TxGraph<A> {
         let tx_node = self.txs.entry(txid).or_default();
         match tx_node {
             TxNodeInternal::Whole(existing_tx) => {
-                debug_assert_eq!(
-                    existing_tx.as_ref(),
-                    tx.as_ref(),
-                    "tx of same txid should never change"
-                );
+                if existing_tx.as_ref() != tx.as_ref() {
+                    // Allowing updating witnesses of txs.
+                    if let Some(merged_tx) = _merge_tx_witnesses(existing_tx, &tx) {
+                        *existing_tx = merged_tx.clone();
+                        changeset.txs.insert(merged_tx);
+                    }
+                }
             }
             partial_tx => {
                 for txin in &tx.input {
