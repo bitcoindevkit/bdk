@@ -1087,4 +1087,17 @@ mod test {
         builder.fee_rate(FeeRate::from_sat_per_kwu(feerate + 250));
         let _ = builder.finish().unwrap();
     }
+
+    #[test]
+    fn not_duplicated_utxos_in_required_list() {
+        let mut params = TxParams::default();
+        let test_utxos = get_test_utxos();
+        for _ in 0..3 {
+            params.utxos.insert(test_utxos[0].clone());
+        }
+        assert_eq!(
+            vec![test_utxos[0].clone()],
+            params.utxos.into_iter().collect::<Vec<_>>()
+        );
+    }
 }
