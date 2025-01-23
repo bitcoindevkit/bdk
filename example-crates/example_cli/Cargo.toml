@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bdk_chain = { path = "../../crates/chain", features = ["serde", "miniscript"]}
+bdk_chain = { path = "../../crates/chain", version = "0.21.1", features = ["serde", "miniscript"] }
 bdk_coin_select = "0.3.0"
 bdk_file_store = { path = "../../crates/file_store" }
 bitcoin = { version = "0.32.0", features = ["base64"], default-features = false }

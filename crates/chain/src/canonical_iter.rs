@@ -4,8 +4,26 @@ use crate::{Anchor, ChainOracle, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use bdk_core::BlockId;
 use bitcoin::{Transaction, Txid};
+
+/// Modifies the canonicalization algorithm.
+#[derive(Debug, Default, Clone)]
+pub struct CanonicalizationMods {
+    /// Transactions that will supercede all other transactions.
+    ///
+    /// In case of conflicting transactions within `assume_canonical`, transactions that appear
+    /// later in the list (have higher index) have precedence.
+    pub assume_canonical: Vec<Txid>,
+}
+
+impl CanonicalizationMods {
+    /// No mods.
+    pub const NONE: Self = Self {
+        assume_canonical: Vec::new(),
+    };
+}
 
 /// Iterates over canonical txs.
 pub struct CanonicalIter<'g, A, C> {
@@ -13,6 +31,7 @@ pub struct CanonicalIter<'g, A, C> {
     chain: &'g C,
     chain_tip: BlockId,
 
+    unprocessed_assumed_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>)> + 'g>,
     unprocessed_anchored_txs:
         Box<dyn Iterator<Item = (Txid, Arc<Transaction>, &'g BTreeSet<A>)> + 'g>,
     unprocessed_seen_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>, u64)> + 'g>,
@@ -26,8 +45,19 @@ pub struct CanonicalIter<'g, A, C> {
 
 impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
     /// Constructs [`CanonicalIter`].
-    pub fn new(tx_graph: &'g TxGraph<A>, chain: &'g C, chain_tip: BlockId) -> Self {
+    pub fn new(
+        tx_graph: &'g TxGraph<A>,
+        chain: &'g C,
+        chain_tip: BlockId,
+        mods: CanonicalizationMods,
+    ) -> Self {
         let anchors = tx_graph.all_anchors();
+        let unprocessed_assumed_txs = Box::new(
+            mods.assume_canonical
+                .into_iter()
+                .rev()
+                .filter_map(|txid| Some((txid, tx_graph.get_tx(txid)?))),
+        );
         let unprocessed_anchored_txs = Box::new(
             tx_graph
                 .txids_by_descending_anchor_height()
@@ -42,6 +72,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
             tx_graph,
             chain,
             chain_tip,
+            unprocessed_assumed_txs,
             unprocessed_anchored_txs,
             unprocessed_seen_txs,
             unprocessed_leftover_txs: VecDeque::new(),
@@ -147,6 +178,12 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
                 return Some(Ok((txid, tx, reason)));
             }
 
+            if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
+                if !self.is_canonicalized(txid) {
+                    self.mark_canonical(txid, tx, CanonicalReason::assumed());
+                }
+            }
+
             if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
                 if !self.is_canonicalized(txid) {
                     if let Err(err) = self.scan_anchors(txid, tx, anchors) {
@@ -189,6 +226,12 @@ pub enum ObservedIn {
 /// The reason why a transaction is canonical.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalReason<A> {
+    /// This transaction is explicitly assumed to be canonical by the caller, superceding all other
+    /// canonicalization rules.
+    Assumed {
+        /// Whether it is a descendant that is assumed to be canonical.
+        descendant: Option<Txid>,
+    },
     /// This transaction is anchored in the best chain by `A`, and therefore canonical.
     Anchor {
         /// The anchor that anchored the transaction in the chain.
@@ -207,6 +250,12 @@ pub enum CanonicalReason<A> {
 }
 
 impl<A: Clone> CanonicalReason<A> {
+    /// Constructs a [`CanonicalReason`] for a transaction that is assumed to supercede all other
+    /// transactions.
+    pub fn assumed() -> Self {
+        Self::Assumed { descendant: None }
+    }
+
     /// Constructs a [`CanonicalReason`] from an `anchor`.
     pub fn from_anchor(anchor: A) -> Self {
         Self::Anchor {
@@ -229,6 +278,9 @@ impl<A: Clone> CanonicalReason<A> {
     /// descendant, but is transitively relevant.
     pub fn to_transitive(&self, descendant: Txid) -> Self {
         match self {
+            CanonicalReason::Assumed { .. } => Self::Assumed {
+                descendant: Some(descendant),
+            },
             CanonicalReason::Anchor { anchor, .. } => Self::Anchor {
                 anchor: anchor.clone(),
                 descendant: Some(descendant),
@@ -244,6 +296,7 @@ impl<A: Clone> CanonicalReason<A> {
     /// descendant.
     pub fn descendant(&self) -> &Option<Txid> {
         match self {
+            CanonicalReason::Assumed { descendant, .. } => descendant,
             CanonicalReason::Anchor { descendant, .. } => descendant,
             CanonicalReason::ObservedIn { descendant, .. } => descendant,
         }

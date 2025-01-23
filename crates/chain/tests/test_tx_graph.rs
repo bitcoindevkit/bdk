@@ -2,7 +2,7 @@
 
 #[macro_use]
 mod common;
-use bdk_chain::{collections::*, BlockId, ConfirmationBlockTime};
+use bdk_chain::{collections::*, BlockId, CanonicalizationMods, ConfirmationBlockTime};
 use bdk_chain::{
     local_chain::LocalChain,
     tx_graph::{self, CalculateFeeError},
@@ -953,6 +953,7 @@ fn test_chain_spends() {
                 .filter_chain_txouts(
                     chain,
                     tip.block_id(),
+                    CanonicalizationMods::NONE,
                     tx_graph.all_txouts().map(|(op, _)| ((), op)),
                 )
                 .filter_map(|(_, full_txo)| Some((full_txo.outpoint, full_txo.spent_by?)))
@@ -962,7 +963,7 @@ fn test_chain_spends() {
                                      tx_graph: &TxGraph<ConfirmationBlockTime>|
      -> HashMap<Txid, ChainPosition<ConfirmationBlockTime>> {
         tx_graph
-            .list_canonical_txs(chain, tip.block_id())
+            .list_canonical_txs(chain, tip.block_id(), CanonicalizationMods::NONE)
             .map(|canon_tx| (canon_tx.tx_node.txid, canon_tx.chain_position))
             .collect()
     };
@@ -1131,13 +1132,14 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
     let canonical_txs: Vec<_> = graph
-        .list_canonical_txs(&chain, chain.tip().block_id())
+        .list_canonical_txs(&chain, chain.tip().block_id(), CanonicalizationMods::NONE)
         .collect();
     assert!(canonical_txs.is_empty());
 
     // tx0 with seen_at should be returned by canonical txs
     let _ = graph.insert_seen_at(txids[0], 2);
-    let mut canonical_txs = graph.list_canonical_txs(&chain, chain.tip().block_id());
+    let mut canonical_txs =
+        graph.list_canonical_txs(&chain, chain.tip().block_id(), CanonicalizationMods::NONE);
     assert_eq!(
         canonical_txs.next().map(|tx| tx.tx_node.txid).unwrap(),
         txids[0]
@@ -1147,7 +1149,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     // tx1 with anchor is also canonical
     let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
     let canonical_txids: Vec<_> = graph
-        .list_canonical_txs(&chain, chain.tip().block_id())
+        .list_canonical_txs(&chain, chain.tip().block_id(), CanonicalizationMods::NONE)
         .map(|tx| tx.tx_node.txid)
         .collect();
     assert!(canonical_txids.contains(&txids[1]));

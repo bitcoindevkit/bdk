@@ -5,7 +5,7 @@ use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     local_chain::{CheckPoint, LocalChain},
     spk_txout::SpkTxOutIndex,
-    Balance, BlockId, IndexedTxGraph, Merge,
+    Balance, BlockId, CanonicalizationMods, IndexedTxGraph, Merge,
 };
 use bdk_testenv::{anyhow, TestEnv};
 use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};
@@ -306,9 +306,13 @@ fn get_balance(
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
-    let balance = recv_graph
-        .graph()
-        .balance(recv_chain, chain_tip, outpoints, |_, _| true);
+    let balance = recv_graph.graph().balance(
+        recv_chain,
+        chain_tip,
+        CanonicalizationMods::NONE,
+        outpoints,
+        |_, _| true,
+    );
     Ok(balance)
 }
 

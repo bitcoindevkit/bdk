@@ -3,7 +3,7 @@
 #[macro_use]
 mod common;
 
-use bdk_chain::{Balance, BlockId};
+use bdk_chain::{Balance, BlockId, CanonicalizationMods};
 use bdk_testenv::{block_id, hash, local_chain};
 use bitcoin::{Amount, OutPoint, ScriptBuf};
 use common::*;
@@ -693,7 +693,7 @@ fn test_tx_conflict_handling() {
         let (tx_graph, spk_index, exp_tx_ids) = init_graph(scenario.tx_templates.iter());
 
         let txs = tx_graph
-            .list_canonical_txs(&local_chain, chain_tip)
+            .list_canonical_txs(&local_chain, chain_tip, CanonicalizationMods::NONE)
             .map(|tx| tx.tx_node.txid)
             .collect::<BTreeSet<_>>();
         let exp_txs = scenario
@@ -711,6 +711,7 @@ fn test_tx_conflict_handling() {
             .filter_chain_txouts(
                 &local_chain,
                 chain_tip,
+                CanonicalizationMods::NONE,
                 spk_index.outpoints().iter().cloned(),
             )
             .map(|(_, full_txout)| full_txout.outpoint)
@@ -733,6 +734,7 @@ fn test_tx_conflict_handling() {
             .filter_chain_unspents(
                 &local_chain,
                 chain_tip,
+                CanonicalizationMods::NONE,
                 spk_index.outpoints().iter().cloned(),
             )
             .map(|(_, full_txout)| full_txout.outpoint)
@@ -754,6 +756,7 @@ fn test_tx_conflict_handling() {
         let balance = tx_graph.balance(
             &local_chain,
             chain_tip,
+            CanonicalizationMods::NONE,
             spk_index.outpoints().iter().cloned(),
             |_, spk: ScriptBuf| spk_index.index_of_spk(spk).is_some(),
         );

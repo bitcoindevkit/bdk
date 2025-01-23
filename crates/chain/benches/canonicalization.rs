@@ -1,3 +1,4 @@
+use bdk_chain::CanonicalizationMods;
 use bdk_chain::{keychain_txout::KeychainTxOutIndex, local_chain::LocalChain, IndexedTxGraph};
 use bdk_core::{BlockId, CheckPoint};
 use bdk_core::{ConfirmationBlockTime, TxUpdate};
@@ -92,7 +93,7 @@ fn setup<F: Fn(&mut KeychainTxGraph, &LocalChain)>(f: F) -> (KeychainTxGraph, Lo
 fn run_list_canonical_txs(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txs: usize) {
     let txs = tx_graph
         .graph()
-        .list_canonical_txs(chain, chain.tip().block_id());
+        .list_canonical_txs(chain, chain.tip().block_id(), CanonicalizationMods::NONE);
     assert_eq!(txs.count(), exp_txs);
 }
 
@@ -100,6 +101,7 @@ fn run_filter_chain_txouts(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_t
     let utxos = tx_graph.graph().filter_chain_txouts(
         chain,
         chain.tip().block_id(),
+        CanonicalizationMods::NONE,
         tx_graph.index.outpoints().clone(),
     );
     assert_eq!(utxos.count(), exp_txos);
@@ -109,6 +111,7 @@ fn run_filter_chain_unspents(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp
     let utxos = tx_graph.graph().filter_chain_unspents(
         chain,
         chain.tip().block_id(),
+        CanonicalizationMods::NONE,
         tx_graph.index.outpoints().clone(),
     );
     assert_eq!(utxos.count(), exp_utxos);
