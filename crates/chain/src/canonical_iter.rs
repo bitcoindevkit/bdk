@@ -17,10 +17,10 @@ pub struct CanonicalIter<'g, A, C> {
     chain: &'g C,
     chain_tip: BlockId,
 
-    unprocessed_txs_with_anchors:
+    unprocessed_anchored_txs:
         Box<dyn Iterator<Item = (Txid, Arc<Transaction>, &'g BTreeSet<A>)> + 'g>,
-    unprocessed_txs_with_last_seens: Box<dyn Iterator<Item = (Txid, Arc<Transaction>, u64)> + 'g>,
-    unprocessed_txs_left_over: VecDeque<(Txid, Arc<Transaction>, u32)>,
+    unprocessed_seen_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>, u64)> + 'g>,
+    unprocessed_leftover_txs: VecDeque<(Txid, Arc<Transaction>, u32)>,
 
     canonical: CanonicalMap<A>,
     not_canonical: NotCanonicalSet,
@@ -32,12 +32,12 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
     /// Constructs [`CanonicalIter`].
     pub fn new(tx_graph: &'g TxGraph<A>, chain: &'g C, chain_tip: BlockId) -> Self {
         let anchors = tx_graph.all_anchors();
-        let pending_anchored = Box::new(
+        let unprocessed_anchored_txs = Box::new(
             tx_graph
                 .txids_by_descending_anchor_height()
                 .filter_map(|(_, txid)| Some((txid, tx_graph.get_tx(txid)?, anchors.get(&txid)?))),
         );
-        let pending_last_seen = Box::new(
+        let unprocessed_seen_txs = Box::new(
             tx_graph
                 .txids_by_descending_last_seen()
                 .filter_map(|(last_seen, txid)| Some((txid, tx_graph.get_tx(txid)?, last_seen))),
@@ -46,9 +46,9 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
             tx_graph,
             chain,
             chain_tip,
-            unprocessed_txs_with_anchors: pending_anchored,
-            unprocessed_txs_with_last_seens: pending_last_seen,
-            unprocessed_txs_left_over: VecDeque::new(),
+            unprocessed_anchored_txs,
+            unprocessed_seen_txs,
+            unprocessed_leftover_txs: VecDeque::new(),
             canonical: HashMap::new(),
             not_canonical: HashSet::new(),
             queue: VecDeque::new(),
@@ -77,7 +77,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
             }
         }
         // cannot determine
-        self.unprocessed_txs_left_over.push_back((
+        self.unprocessed_leftover_txs.push_back((
             txid,
             tx,
             anchors
@@ -190,7 +190,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
                 return Some(Ok((txid, tx, reason)));
             }
 
-            if let Some((txid, tx, anchors)) = self.unprocessed_txs_with_anchors.next() {
+            if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
                 if !self.is_canonicalized(txid) {
                     if let Err(err) = self.scan_anchors(txid, tx, anchors) {
                         return Some(Err(err));
@@ -199,7 +199,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
                 continue;
             }
 
-            if let Some((txid, tx, last_seen)) = self.unprocessed_txs_with_last_seens.next() {
+            if let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
                 if !self.is_canonicalized(txid) {
                     let observed_in = ObservedIn::Mempool(last_seen);
                     self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
@@ -207,7 +207,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
                 continue;
             }
 
-            if let Some((txid, tx, height)) = self.unprocessed_txs_left_over.pop_front() {
+            if let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
                 if !self.is_canonicalized(txid) {
                     let observed_in = ObservedIn::Block(height);
                     self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
