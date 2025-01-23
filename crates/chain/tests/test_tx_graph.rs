@@ -10,6 +10,8 @@ use bdk_chain::{
     Anchor, ChainOracle, ChainPosition, Merge,
 };
 use bdk_testenv::{block_id, hash, utils::new_tx};
+use bitcoin::hex::FromHex;
+use bitcoin::Witness;
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,
     Transaction, TxIn, TxOut, Txid,
@@ -282,6 +284,74 @@ fn insert_tx_displaces_txouts() {
     assert!(changeset.txouts.is_empty());
     assert!(tx_graph.get_tx(txid).is_some());
     assert_eq!(tx_graph.get_txout(outpoint), Some(txout));
+}
+
+#[test]
+fn insert_signed_tx_displaces_unsigned() {
+    let previous_output = OutPoint::new(hash!("prev"), 2);
+    let unsigned_tx = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output,
+            script_sig: ScriptBuf::default(),
+            sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+            witness: Witness::default(),
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(24_000),
+            script_pubkey: ScriptBuf::default(),
+        }],
+    };
+    let signed_tx = Transaction {
+        input: vec![TxIn {
+            previous_output,
+            script_sig: ScriptBuf::default(),
+            sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+            witness: Witness::from_slice(&[
+                // Random witness from mempool.space
+                Vec::from_hex("d59118058bf9e8604cec5c0b4a13430b07286482784da313594e932faad074dc4bd27db7cbfff9ad32450db097342d0148ec21c3033b0c27888fd2fd0de2e9b5")
+                    .unwrap(),
+            ]),
+        }],
+        ..unsigned_tx.clone()
+    };
+
+    // Signed tx must displace unsigned.
+    {
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let changeset_insert_unsigned = tx_graph.insert_tx(unsigned_tx.clone());
+        let changeset_insert_signed = tx_graph.insert_tx(signed_tx.clone());
+        assert_eq!(
+            changeset_insert_unsigned,
+            ChangeSet {
+                txs: [Arc::new(unsigned_tx.clone())].into(),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            changeset_insert_signed,
+            ChangeSet {
+                txs: [Arc::new(signed_tx.clone())].into(),
+                ..Default::default()
+            }
+        );
+    }
+
+    // Unsigned tx must not displace signed.
+    {
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let changeset_insert_signed = tx_graph.insert_tx(signed_tx.clone());
+        let changeset_insert_unsigned = tx_graph.insert_tx(unsigned_tx.clone());
+        assert_eq!(
+            changeset_insert_signed,
+            ChangeSet {
+                txs: [Arc::new(signed_tx)].into(),
+                ..Default::default()
+            }
+        );
+        assert!(changeset_insert_unsigned.is_empty());
+    }
 }
 
 #[test]
