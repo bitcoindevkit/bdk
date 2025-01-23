@@ -1211,6 +1211,7 @@ fn call_map_anchors_with_non_deterministic_anchor() {
             outputs: &[TxOutTemplate::new(10000, Some(1))],
             anchors: &[block_id!(1, "A")],
             last_seen: None,
+            ..Default::default()
         },
         TxTemplate {
             tx_name: "tx2",
@@ -1227,7 +1228,7 @@ fn call_map_anchors_with_non_deterministic_anchor() {
             ..Default::default()
         },
     ];
-    let (graph, _, _) = init_graph(&template);
+    let graph = init_graph(&template).tx_graph;
     let new_graph = graph.clone().map_anchors(|a| NonDeterministicAnchor {
         anchor_block: a,
         // A non-deterministic value

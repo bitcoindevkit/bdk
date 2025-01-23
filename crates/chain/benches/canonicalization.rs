@@ -91,9 +91,11 @@ fn setup<F: Fn(&mut KeychainTxGraph, &LocalChain)>(f: F) -> (KeychainTxGraph, Lo
 }
 
 fn run_list_canonical_txs(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txs: usize) {
-    let txs = tx_graph
-        .graph()
-        .list_canonical_txs(chain, chain.tip().block_id(), CanonicalizationMods::NONE);
+    let txs = tx_graph.graph().list_canonical_txs(
+        chain,
+        chain.tip().block_id(),
+        CanonicalizationMods::NONE,
+    );
     assert_eq!(txs.count(), exp_txs);
 }
 

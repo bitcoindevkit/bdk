@@ -4264,7 +4264,11 @@ fn test_wallet_transactions_relevant() {
     let chain_tip = test_wallet.local_chain().tip().block_id();
     let canonical_tx_count_before = test_wallet
         .tx_graph()
-        .list_canonical_txs(test_wallet.local_chain(), chain_tip, CanonicalizationMods::NONE)
+        .list_canonical_txs(
+            test_wallet.local_chain(),
+            chain_tip,
+            CanonicalizationMods::NONE,
+        )
         .count();
 
     // add not relevant transaction to test wallet
@@ -4281,7 +4285,11 @@ fn test_wallet_transactions_relevant() {
     let full_tx_count_after = test_wallet.tx_graph().full_txs().count();
     let canonical_tx_count_after = test_wallet
         .tx_graph()
-        .list_canonical_txs(test_wallet.local_chain(), chain_tip, CanonicalizationMods::NONE)
+        .list_canonical_txs(
+            test_wallet.local_chain(),
+            chain_tip,
+            CanonicalizationMods::NONE,
+        )
         .count();
 
     assert_eq!(relevant_tx_count_before, relevant_tx_count_after);
@@ -4290,7 +4298,11 @@ fn test_wallet_transactions_relevant() {
         .any(|wallet_tx| wallet_tx.tx_node.txid == other_txid));
     assert!(test_wallet
         .tx_graph()
-        .list_canonical_txs(test_wallet.local_chain(), chain_tip, CanonicalizationMods::NONE)
+        .list_canonical_txs(
+            test_wallet.local_chain(),
+            chain_tip,
+            CanonicalizationMods::NONE
+        )
         .any(|wallet_tx| wallet_tx.tx_node.txid == other_txid));
     assert!(full_tx_count_before < full_tx_count_after);
     assert!(canonical_tx_count_before < canonical_tx_count_after);
