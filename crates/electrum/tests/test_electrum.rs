@@ -3,7 +3,8 @@ use bdk_chain::{
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest, SyncResponse},
     spk_txout::SpkTxOutIndex,
-    Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
+    Balance, CanonicalizationParams, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge,
+    TxGraph,
 };
 use bdk_core::bitcoin::{
     key::{Secp256k1, UntweakedPublicKey},
@@ -39,9 +40,13 @@ fn get_balance(
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
-    let balance = recv_graph
-        .graph()
-        .balance(recv_chain, chain_tip, outpoints, |_, _| true);
+    let balance = recv_graph.graph().balance(
+        recv_chain,
+        chain_tip,
+        CanonicalizationParams::default(),
+        outpoints,
+        |_, _| true,
+    );
     Ok(balance)
 }
 
