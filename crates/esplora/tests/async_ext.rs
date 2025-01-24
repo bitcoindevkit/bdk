@@ -1,14 +1,144 @@
-use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
-use bdk_chain::{ConfirmationBlockTime, TxGraph};
+use bdk_chain::{
+    bitcoin::{secp256k1::Secp256k1, Address, Amount},
+    indexer::keychain_txout::KeychainTxOutIndex,
+    local_chain::LocalChain,
+    miniscript::Descriptor,
+    spk_client::{FullScanRequest, SyncRequest},
+    ConfirmationBlockTime, IndexedTxGraph, TxGraph,
+};
 use bdk_esplora::EsploraAsyncExt;
 use esplora_client::{self, Builder};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
 
-use bdk_chain::bitcoin::{Address, Amount};
-use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
+use bdk_testenv::{
+    anyhow,
+    bitcoincore_rpc::{json::CreateRawTransactionInput, RawTx, RpcApi},
+    TestEnv,
+};
+
+// Ensure that a wallet can detect a malicious replacement of an incoming transaction.
+//
+// This checks that both the Electrum chain source and the receiving structures properly track the
+// replaced transaction as missing.
+#[tokio::test]
+pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
+    const SEND_TX_FEE: Amount = Amount::from_sat(1000);
+    const UNDO_SEND_TX_FEE: Amount = Amount::from_sat(2000);
+
+    use bdk_chain::keychain_txout::SyncRequestBuilderExt;
+    let env = TestEnv::new()?;
+    let rpc_client = env.rpc_client();
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_async()?;
+
+    let (receiver_desc, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)")
+        .expect("must be valid");
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new(KeychainTxOutIndex::new(0));
+    let _ = graph.index.insert_descriptor((), receiver_desc.clone())?;
+    let (chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+
+    // Derive the receiving address from the descriptor.
+    let ((_, receiver_spk), _) = graph.index.reveal_next_spk(()).unwrap();
+    let receiver_addr = Address::from_script(&receiver_spk, bdk_chain::bitcoin::Network::Regtest)?;
+
+    env.mine_blocks(101, None)?;
+
+    // Select a UTXO to use as an input for constructing our test transactions.
+    let selected_utxo = rpc_client
+        .list_unspent(None, None, None, Some(false), None)?
+        .into_iter()
+        // Find a block reward tx.
+        .find(|utxo| utxo.amount == Amount::from_int_btc(50))
+        .expect("Must find a block reward UTXO");
+
+    // Derive the sender's address from the selected UTXO.
+    let sender_spk = selected_utxo.script_pub_key.clone();
+    let sender_addr = Address::from_script(&sender_spk, bdk_chain::bitcoin::Network::Regtest)
+        .expect("Failed to derive address from UTXO");
+
+    // Setup the common inputs used by both `send_tx` and `undo_send_tx`.
+    let inputs = [CreateRawTransactionInput {
+        txid: selected_utxo.txid,
+        vout: selected_utxo.vout,
+        sequence: None,
+    }];
+
+    // Create and sign the `send_tx` that sends funds to the receiver address.
+    let send_tx_outputs = HashMap::from([(
+        receiver_addr.to_string(),
+        selected_utxo.amount - SEND_TX_FEE,
+    )]);
+    let send_tx = rpc_client.create_raw_transaction(&inputs, &send_tx_outputs, None, Some(true))?;
+    let send_tx = rpc_client
+        .sign_raw_transaction_with_wallet(send_tx.raw_hex(), None, None)?
+        .transaction()?;
+
+    // Create and sign the `undo_send_tx` transaction. This redirects funds back to the sender
+    // address.
+    let undo_send_outputs = HashMap::from([(
+        sender_addr.to_string(),
+        selected_utxo.amount - UNDO_SEND_TX_FEE,
+    )]);
+    let undo_send_tx =
+        rpc_client.create_raw_transaction(&inputs, &undo_send_outputs, None, Some(true))?;
+    let undo_send_tx = rpc_client
+        .sign_raw_transaction_with_wallet(undo_send_tx.raw_hex(), None, None)?
+        .transaction()?;
+
+    // Sync after broadcasting the `send_tx`. Ensure that we detect and receive the `send_tx`.
+    let send_txid = env.rpc_client().send_raw_transaction(send_tx.raw_hex())?;
+    env.wait_until_electrum_sees_txid(send_txid, Duration::from_secs(6))?;
+    let sync_request = SyncRequest::builder()
+        .chain_tip(chain.tip())
+        .revealed_spks_from_indexer(&graph.index, ..)
+        .check_unconfirmed_statuses(
+            &graph.index,
+            graph.graph().canonical_iter(&chain, chain.tip().block_id()),
+        );
+    let sync_response = client.sync(sync_request, 1).await?;
+    assert!(
+        sync_response
+            .tx_update
+            .txs
+            .iter()
+            .any(|tx| tx.compute_txid() == send_txid),
+        "sync response must include the send_tx"
+    );
+    let changeset = graph.apply_update(sync_response.tx_update.clone());
+    assert!(
+        changeset.tx_graph.txs.contains(&send_tx),
+        "tx graph must deem send_tx relevant and include it"
+    );
+
+    // Sync after broadcasting the `undo_send_tx`. Verify that `send_tx` is now missing from the
+    // mempool.
+    let undo_send_txid = env
+        .rpc_client()
+        .send_raw_transaction(undo_send_tx.raw_hex())?;
+    env.wait_until_electrum_sees_txid(undo_send_txid, Duration::from_secs(6))?;
+    let sync_request = SyncRequest::builder()
+        .chain_tip(chain.tip())
+        .revealed_spks_from_indexer(&graph.index, ..)
+        .check_unconfirmed_statuses(
+            &graph.index,
+            graph.graph().canonical_iter(&chain, chain.tip().block_id()),
+        );
+    let sync_response = client.sync(sync_request, 1).await?;
+    assert!(
+        sync_response.tx_update.evicted.contains(&send_txid),
+        "sync response must track send_tx as missing from mempool"
+    );
+    let changeset = graph.apply_update(sync_response.tx_update.clone());
+    assert!(
+        changeset.tx_graph.last_evicted.contains_key(&send_txid),
+        "tx graph must track send_tx as missing"
+    );
+
+    Ok(())
+}
 
 #[tokio::test]
 pub async fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
