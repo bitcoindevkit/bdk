@@ -1,14 +1,13 @@
 use bdk_core::{
-    bitcoin::{block::Header, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
-    collections::{BTreeMap, HashMap},
-    spk_client::{FullScanRequest, FullScanResponse, SyncRequest, SyncResponse},
+    bitcoin::{block::Header, BlockHash, OutPoint, Transaction, Txid},
+    collections::{BTreeMap, HashMap, HashSet},
+    spk_client::{
+        FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
+    },
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
@@ -138,8 +137,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut last_active_indices = BTreeMap::<K, u32>::default();
         for keychain in request.keychains() {
             let spks = request.iter_spks(keychain.clone());
+            let spks_with_history = spks.into_iter().map(|(i, spk)| {
+                (
+                    i,
+                    SpkWithExpectedTxids {
+                        spk,
+                        txids: HashSet::<Txid>::new(),
+                    },
+                )
+            });
             if let Some(last_active_index) =
-                self.populate_with_spks(&mut tx_update, spks, stop_gap, batch_size)?
+                self.populate_with_spks(&mut tx_update, spks_with_history, stop_gap, batch_size)?
             {
                 last_active_indices.insert(keychain, last_active_index);
             }
@@ -206,7 +214,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         self.populate_with_spks(
             &mut tx_update,
             request
-                .iter_spks()
+                .iter_spks_with_expected_txids()
                 .enumerate()
                 .map(|(i, spk)| (i as u32, spk)),
             usize::MAX,
@@ -243,7 +251,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     fn populate_with_spks(
         &self,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
-        mut spks: impl Iterator<Item = (u32, ScriptBuf)>,
+        mut spks_with_history: impl Iterator<Item = (u32, SpkWithExpectedTxids)>,
         stop_gap: usize,
         batch_size: usize,
     ) -> Result<Option<u32>, Error> {
@@ -251,35 +259,48 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut last_active_index = Option::<u32>::None;
 
         loop {
-            let spks = (0..batch_size)
-                .map_while(|_| spks.next())
+            let spks_with_history = (0..batch_size)
+                .map_while(|_| spks_with_history.next())
                 .collect::<Vec<_>>();
-            if spks.is_empty() {
+            if spks_with_history.is_empty() {
                 return Ok(last_active_index);
             }
 
-            let spk_histories = self
-                .inner
-                .batch_script_get_history(spks.iter().map(|(_, s)| s.as_script()))?;
+            let spk_histories = self.inner.batch_script_get_history(
+                spks_with_history.iter().map(|(_, s)| s.spk.as_script()),
+            )?;
 
-            for ((spk_index, _spk), spk_history) in spks.into_iter().zip(spk_histories) {
-                if spk_history.is_empty() {
+            for ((spk_index, spk_with_history), history_res) in
+                spks_with_history.into_iter().zip(spk_histories)
+            {
+                if history_res.is_empty() {
                     unused_spk_count = unused_spk_count.saturating_add(1);
                     if unused_spk_count >= stop_gap {
                         return Ok(last_active_index);
                     }
+                    tx_update.evicted.extend(spk_with_history.txids);
                     continue;
                 } else {
                     last_active_index = Some(spk_index);
                     unused_spk_count = 0;
                 }
 
-                for tx_res in spk_history {
+                for tx_res in history_res {
                     tx_update.txs.push(self.fetch_tx(tx_res.tx_hash)?);
                     if let Ok(height) = tx_res.height.try_into() {
                         self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, height)?;
                     }
                 }
+
+                let fetched_txids = tx_update
+                    .txs
+                    .iter()
+                    .map(|tx| tx.compute_txid())
+                    .collect::<HashSet<_>>();
+
+                tx_update
+                    .evicted
+                    .extend(spk_with_history.txids.difference(&fetched_txids).cloned());
             }
         }
     }
