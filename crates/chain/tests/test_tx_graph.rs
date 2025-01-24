@@ -1231,69 +1231,60 @@ fn tx_graph_update_conversion() {
 
     let test_cases: &[TestCase] = &[
         ("empty_update", TxUpdate::default()),
-        (
-            "single_tx",
-            TxUpdate {
-                txs: vec![make_tx(0).into()],
-                ..Default::default()
-            },
-        ),
-        (
-            "two_txs",
-            TxUpdate {
-                txs: vec![make_tx(0).into(), make_tx(1).into()],
-                ..Default::default()
-            },
-        ),
-        (
-            "with_floating_txouts",
-            TxUpdate {
-                txs: vec![make_tx(0).into(), make_tx(1).into()],
-                txouts: [
-                    (OutPoint::new(hash!("a"), 0), make_txout(0)),
-                    (OutPoint::new(hash!("a"), 1), make_txout(1)),
-                    (OutPoint::new(hash!("b"), 0), make_txout(2)),
-                ]
-                .into(),
-                ..Default::default()
-            },
-        ),
-        (
-            "with_anchors",
-            TxUpdate {
-                txs: vec![make_tx(0).into(), make_tx(1).into()],
-                txouts: [
-                    (OutPoint::new(hash!("a"), 0), make_txout(0)),
-                    (OutPoint::new(hash!("a"), 1), make_txout(1)),
-                    (OutPoint::new(hash!("b"), 0), make_txout(2)),
-                ]
-                .into(),
-                anchors: [
-                    (ConfirmationBlockTime::default(), hash!("a")),
-                    (ConfirmationBlockTime::default(), hash!("b")),
-                ]
-                .into(),
-                ..Default::default()
-            },
-        ),
-        (
-            "with_seen_ats",
-            TxUpdate {
-                txs: vec![make_tx(0).into(), make_tx(1).into()],
-                txouts: [
-                    (OutPoint::new(hash!("a"), 0), make_txout(0)),
-                    (OutPoint::new(hash!("a"), 1), make_txout(1)),
-                    (OutPoint::new(hash!("d"), 0), make_txout(2)),
-                ]
-                .into(),
-                anchors: [
-                    (ConfirmationBlockTime::default(), hash!("a")),
-                    (ConfirmationBlockTime::default(), hash!("b")),
-                ]
-                .into(),
-                seen_ats: [(hash!("c"), 12346)].into_iter().collect(),
-            },
-        ),
+        ("single_tx", {
+            let mut tx_update = TxUpdate::default();
+            tx_update.txs = vec![make_tx(0).into()];
+            tx_update
+        }),
+        ("two_txs", {
+            let mut tx_update = TxUpdate::default();
+            tx_update.txs = vec![make_tx(0).into(), make_tx(1).into()];
+            tx_update
+        }),
+        ("with_floating_txouts", {
+            let mut tx_update = TxUpdate::default();
+            tx_update.txs = vec![make_tx(0).into(), make_tx(1).into()];
+            tx_update.txouts = [
+                (OutPoint::new(hash!("a"), 0), make_txout(0)),
+                (OutPoint::new(hash!("a"), 1), make_txout(1)),
+                (OutPoint::new(hash!("b"), 0), make_txout(2)),
+            ]
+            .into();
+            tx_update
+        }),
+        ("with_anchors", {
+            let mut tx_update = TxUpdate::default();
+            tx_update.txs = vec![make_tx(0).into(), make_tx(1).into()];
+            tx_update.txouts = [
+                (OutPoint::new(hash!("a"), 0), make_txout(0)),
+                (OutPoint::new(hash!("a"), 1), make_txout(1)),
+                (OutPoint::new(hash!("b"), 0), make_txout(2)),
+            ]
+            .into();
+            tx_update.anchors = [
+                (ConfirmationBlockTime::default(), hash!("a")),
+                (ConfirmationBlockTime::default(), hash!("b")),
+            ]
+            .into();
+            tx_update
+        }),
+        ("with_seen_ats", {
+            let mut tx_update = TxUpdate::default();
+            tx_update.txs = vec![make_tx(0).into(), make_tx(1).into()];
+            tx_update.txouts = [
+                (OutPoint::new(hash!("a"), 0), make_txout(0)),
+                (OutPoint::new(hash!("a"), 1), make_txout(1)),
+                (OutPoint::new(hash!("d"), 0), make_txout(2)),
+            ]
+            .into();
+            tx_update.anchors = [
+                (ConfirmationBlockTime::default(), hash!("a")),
+                (ConfirmationBlockTime::default(), hash!("b")),
+            ]
+            .into();
+            tx_update.seen_ats = [(hash!("c"), 12346)].into_iter().collect();
+            tx_update
+        }),
     ];
 
     for (test_name, update) in test_cases {

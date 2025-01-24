@@ -132,10 +132,8 @@ pub fn many_conflicting_unconfirmed(c: &mut Criterion) {
                 }],
                 ..new_tx(i)
             };
-            let update = TxUpdate {
-                txs: vec![Arc::new(tx)],
-                ..Default::default()
-            };
+            let mut update = TxUpdate::default();
+            update.txs = vec![Arc::new(tx)];
             let _ = tx_graph.apply_update_at(update, Some(i as u64));
         }
     }));
@@ -169,10 +167,8 @@ pub fn many_chained_unconfirmed(c: &mut Criterion) {
                 ..new_tx(i)
             };
             let txid = tx.compute_txid();
-            let update = TxUpdate {
-                txs: vec![Arc::new(tx)],
-                ..Default::default()
-            };
+            let mut update = TxUpdate::default();
+            update.txs = vec![Arc::new(tx)];
             let _ = tx_graph.apply_update_at(update, Some(i as u64));
             // Store the next prevout.
             previous_output = OutPoint::new(txid, 0);
