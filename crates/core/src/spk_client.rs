@@ -167,6 +167,23 @@ impl<I> SyncRequestBuilder<I> {
         self
     }
 
+    /// Add transactions that are expected to exist under a given spk.
+    ///
+    /// This is useful for detecting a malicious replacement of an incoming transaction.
+    pub fn expected_txids_of_spk(
+        mut self,
+        txs: impl IntoIterator<Item = (Txid, ScriptBuf)>,
+    ) -> Self {
+        for (txid, spk) in txs {
+            self.inner
+                .spk_histories
+                .entry(spk)
+                .or_default()
+                .insert(txid);
+        }
+        self
+    }
+
     /// Add [`Txid`]s that will be synced against.
     pub fn txids(mut self, txids: impl IntoIterator<Item = Txid>) -> Self {
         self.inner.txids.extend(txids);
