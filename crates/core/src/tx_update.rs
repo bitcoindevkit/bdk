@@ -44,6 +44,12 @@ pub struct TxUpdate<A = ()> {
     /// [`SyncRequest::start_time`](crate::spk_client::SyncRequest::start_time) can be used to
     /// provide the `seen_at` value.
     pub seen_ats: HashSet<(Txid, u64)>,
+
+    /// When transactions were discovered to be missing (evicted) from the mempool.
+    ///
+    /// [`SyncRequest::start_time`](crate::spk_client::SyncRequest::start_time) can be used to
+    /// provide the `seen_at` value.
+    pub evicted_ats: HashSet<(Txid, u64)>,
 }
 
 impl<A> Default for TxUpdate<A> {
@@ -53,6 +59,7 @@ impl<A> Default for TxUpdate<A> {
             txouts: Default::default(),
             anchors: Default::default(),
             seen_ats: Default::default(),
+            evicted_ats: Default::default(),
         }
     }
 }
@@ -72,6 +79,7 @@ impl<A: Ord> TxUpdate<A> {
                 .map(|(a, txid)| (map(a), txid))
                 .collect(),
             seen_ats: self.seen_ats,
+            evicted_ats: self.evicted_ats,
         }
     }
 
@@ -81,5 +89,6 @@ impl<A: Ord> TxUpdate<A> {
         self.txouts.extend(other.txouts);
         self.anchors.extend(other.anchors);
         self.seen_ats.extend(other.seen_ats);
+        self.evicted_ats.extend(other.evicted_ats);
     }
 }
