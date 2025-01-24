@@ -45,11 +45,12 @@ pub mod bip39;
 /// Set of valid networks for a key
 pub type ValidNetworks = HashSet<Network>;
 
-/// Create a set containing mainnet, testnet, signet, and regtest
+/// Create a set containing mainnet, testnet, testnet4, signet, and regtest
 pub fn any_network() -> ValidNetworks {
     vec![
         Network::Bitcoin,
         Network::Testnet,
+        Network::Testnet4,
         Network::Regtest,
         Network::Signet,
     ]
@@ -60,11 +61,16 @@ pub fn any_network() -> ValidNetworks {
 pub fn mainnet_network() -> ValidNetworks {
     vec![Network::Bitcoin].into_iter().collect()
 }
-/// Create a set containing testnet and regtest
+/// Create a set containing test networks
 pub fn test_networks() -> ValidNetworks {
-    vec![Network::Testnet, Network::Regtest, Network::Signet]
-        .into_iter()
-        .collect()
+    vec![
+        Network::Testnet,
+        Network::Testnet4,
+        Network::Regtest,
+        Network::Signet,
+    ]
+    .into_iter()
+    .collect()
 }
 /// Compute the intersection of two sets
 pub fn merge_networks(a: &ValidNetworks, b: &ValidNetworks) -> ValidNetworks {
