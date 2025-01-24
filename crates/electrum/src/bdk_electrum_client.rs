@@ -571,10 +571,8 @@ mod test {
         // `fetch_prev_txout` on a coinbase transaction will trigger a `fetch_tx` on a transaction
         // with a txid of all zeros. If `fetch_prev_txout` attempts to fetch this transaction, this
         // assertion will fail.
-        let mut tx_update = TxUpdate {
-            txs: vec![Arc::new(coinbase_tx)],
-            ..Default::default()
-        };
+        let mut tx_update = TxUpdate::default();
+        tx_update.txs = vec![Arc::new(coinbase_tx)];
         assert!(client.fetch_prev_txout(&mut tx_update).is_ok());
 
         // Ensure that the txouts are empty.
