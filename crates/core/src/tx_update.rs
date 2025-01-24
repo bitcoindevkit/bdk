@@ -1,4 +1,4 @@
-use crate::collections::{BTreeMap, BTreeSet, HashMap};
+use crate::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use alloc::{sync::Arc, vec::Vec};
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 
@@ -34,6 +34,8 @@ pub struct TxUpdate<A = ()> {
     /// Seen at times for transactions. This records when a transaction was most recently seen in
     /// the user's mempool for the sake of tie-breaking other conflicting transactions.
     pub seen_ats: HashMap<Txid, u64>,
+    /// A set of txids missing from the mempool.
+    pub evicted: HashSet<Txid>,
 }
 
 impl<A> Default for TxUpdate<A> {
@@ -43,6 +45,7 @@ impl<A> Default for TxUpdate<A> {
             txouts: Default::default(),
             anchors: Default::default(),
             seen_ats: Default::default(),
+            evicted: Default::default(),
         }
     }
 }
@@ -62,6 +65,7 @@ impl<A: Ord> TxUpdate<A> {
                 .map(|(a, txid)| (map(a), txid))
                 .collect(),
             seen_ats: self.seen_ats,
+            evicted: self.evicted,
         }
     }
 
@@ -71,5 +75,6 @@ impl<A: Ord> TxUpdate<A> {
         self.txouts.extend(other.txouts);
         self.anchors.extend(other.anchors);
         self.seen_ats.extend(other.seen_ats);
+        self.evicted.extend(other.evicted);
     }
 }
