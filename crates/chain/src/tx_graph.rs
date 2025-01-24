@@ -110,19 +110,19 @@ use core::{
 
 impl<A: Ord> From<TxGraph<A>> for TxUpdate<A> {
     fn from(graph: TxGraph<A>) -> Self {
-        Self {
-            txs: graph.full_txs().map(|tx_node| tx_node.tx).collect(),
-            txouts: graph
-                .floating_txouts()
-                .map(|(op, txo)| (op, txo.clone()))
-                .collect(),
-            anchors: graph
-                .anchors
-                .into_iter()
-                .flat_map(|(txid, anchors)| anchors.into_iter().map(move |a| (a, txid)))
-                .collect(),
-            seen_ats: graph.last_seen.into_iter().collect(),
-        }
+        let mut tx_update = TxUpdate::default();
+        tx_update.txs = graph.full_txs().map(|tx_node| tx_node.tx).collect();
+        tx_update.txouts = graph
+            .floating_txouts()
+            .map(|(op, txo)| (op, txo.clone()))
+            .collect();
+        tx_update.anchors = graph
+            .anchors
+            .into_iter()
+            .flat_map(|(txid, anchors)| anchors.into_iter().map(move |a| (a, txid)))
+            .collect();
+        tx_update.seen_ats = graph.last_seen.into_iter().collect();
+        tx_update
     }
 }
 
