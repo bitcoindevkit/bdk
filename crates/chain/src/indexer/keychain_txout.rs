@@ -7,11 +7,13 @@ use crate::{
     spk_client::{FullScanRequestBuilder, SyncRequestBuilder},
     spk_iter::BIP32_MAX_INDEX,
     spk_txout::SpkTxOutIndex,
-    DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
+    Anchor, CanonicalIter, CanonicalReason, ChainOracle, DescriptorExt, DescriptorId, Indexed,
+    Indexer, KeychainIndexed, SpkIterator,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::{
+    convert::Infallible,
     fmt::Debug,
     ops::{Bound, RangeBounds},
 };
@@ -879,6 +881,20 @@ pub trait SyncRequestBuilderExt<K> {
 
     /// Add [`Script`](bitcoin::Script)s that are revealed by the `indexer` but currently unused.
     fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self;
+
+    /// Add unconfirmed txids and their associated spks.
+    ///
+    /// We expect that the chain source should include these txids in their spk histories. If not,
+    /// the transaction has been evicted for some reason and we will inform the receiving
+    /// structures in the response.
+    fn check_unconfirmed_statuses<A, C>(
+        self,
+        indexer: &KeychainTxOutIndex<K>,
+        canonical_iter: CanonicalIter<A, C>,
+    ) -> Self
+    where
+        A: Anchor,
+        C: ChainOracle<Error = Infallible>;
 }
 
 impl<K: Clone + Ord + core::fmt::Debug> SyncRequestBuilderExt<K> for SyncRequestBuilder<(K, u32)> {
@@ -891,6 +907,29 @@ impl<K: Clone + Ord + core::fmt::Debug> SyncRequestBuilderExt<K> for SyncRequest
 
     fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self {
         self.spks_with_indexes(indexer.unused_spks())
+    }
+
+    fn check_unconfirmed_statuses<A, C>(
+        self,
+        indexer: &KeychainTxOutIndex<K>,
+        canonical_iter: CanonicalIter<A, C>,
+    ) -> Self
+    where
+        A: Anchor,
+        C: ChainOracle<Error = Infallible>,
+    {
+        self.expected_txids_of_spk(
+            canonical_iter
+                .map(|res| res.expect("infallible"))
+                .filter(|(_, _, reason)| matches!(reason, CanonicalReason::ObservedIn { .. }))
+                .flat_map(|(txid, tx, _)| {
+                    indexer
+                        .inner
+                        .relevant_spks_of_tx(tx.as_ref())
+                        .into_iter()
+                        .map(move |spk| (txid, spk))
+                }),
+        )
     }
 }
 
