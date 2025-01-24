@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use bdk_core::collections::{BTreeMap, BTreeSet, HashSet};
-use bdk_core::spk_client::{FullScanRequest, FullScanResponse, SyncRequest, SyncResponse};
+use bdk_core::spk_client::{
+    FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
+};
 use bdk_core::{
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{BlockHash, OutPoint, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
 };
 use esplora_client::Sleeper;
@@ -77,10 +79,19 @@ where
         let mut last_active_indices = BTreeMap::<K, u32>::new();
         for keychain in keychains {
             let keychain_spks = request.iter_spks(keychain.clone());
+            let spks_with_history = keychain_spks.into_iter().map(|(i, spk)| {
+                (
+                    i,
+                    SpkWithExpectedTxids {
+                        spk,
+                        txids: HashSet::<Txid>::new(),
+                    },
+                )
+            });
             let (update, last_active_index) = fetch_txs_with_keychain_spks(
                 self,
                 &mut inserted_txs,
-                keychain_spks,
+                spks_with_history,
                 stop_gap,
                 parallel_requests,
             )
@@ -125,7 +136,7 @@ where
             fetch_txs_with_spks(
                 self,
                 &mut inserted_txs,
-                request.iter_spks(),
+                request.iter_spks_with_expected_txids(),
                 parallel_requests,
             )
             .await?,
@@ -279,12 +290,12 @@ async fn chain_update<S: Sleeper>(
 async fn fetch_txs_with_keychain_spks<I, S>(
     client: &esplora_client::AsyncClient<S>,
     inserted_txs: &mut HashSet<Txid>,
-    mut keychain_spks: I,
+    mut spks_with_history: I,
     stop_gap: usize,
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error>
 where
-    I: Iterator<Item = Indexed<ScriptBuf>> + Send,
+    I: Iterator<Item = Indexed<SpkWithExpectedTxids>> + Send,
     S: Sleeper + Clone + Send + Sync,
 {
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
@@ -292,18 +303,22 @@ where
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     let mut last_index = Option::<u32>::None;
     let mut last_active_index = Option::<u32>::None;
+    let mut spk_txids = HashSet::new();
 
     loop {
-        let handles = keychain_spks
+        let handles = spks_with_history
             .by_ref()
             .take(parallel_requests)
-            .map(|(spk_index, spk)| {
+            .map(|(spk_index, spk_with_history)| {
+                spk_txids.extend(&spk_with_history.txids);
                 let client = client.clone();
                 async move {
                     let mut last_seen = None;
                     let mut spk_txs = Vec::new();
                     loop {
-                        let txs = client.scripthash_txs(&spk, last_seen).await?;
+                        let txs = client
+                            .scripthash_txs(&spk_with_history.spk, last_seen)
+                            .await?;
                         let tx_count = txs.len();
                         last_seen = txs.last().map(|tx| tx.txid);
                         spk_txs.extend(txs);
@@ -344,6 +359,10 @@ where
         }
     }
 
+    update
+        .evicted
+        .extend(spk_txids.difference(inserted_txs).cloned());
+
     Ok((update, last_active_index))
 }
 
@@ -358,18 +377,21 @@ where
 async fn fetch_txs_with_spks<I, S>(
     client: &esplora_client::AsyncClient<S>,
     inserted_txs: &mut HashSet<Txid>,
-    spks: I,
+    spks_with_history: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error>
 where
-    I: IntoIterator<Item = ScriptBuf> + Send,
+    I: IntoIterator<Item = SpkWithExpectedTxids> + Send,
     I::IntoIter: Send,
     S: Sleeper + Clone + Send + Sync,
 {
     fetch_txs_with_keychain_spks(
         client,
         inserted_txs,
-        spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
+        spks_with_history
+            .into_iter()
+            .enumerate()
+            .map(|(i, spk)| (i as u32, spk)),
         usize::MAX,
         parallel_requests,
     )
