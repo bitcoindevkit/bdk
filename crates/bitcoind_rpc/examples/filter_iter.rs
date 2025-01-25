@@ -9,6 +9,7 @@ use bdk_chain::local_chain::LocalChain;
 use bdk_chain::miniscript::Descriptor;
 use bdk_chain::{BlockId, ConfirmationBlockTime, IndexedTxGraph, SpkIterator};
 use bdk_testenv::anyhow;
+use bitcoin::Address;
 
 // This example shows how BDK chain and tx-graph structures are updated using compact
 // filters syncing. Assumes a connection can be made to a bitcoin node via environment
@@ -101,6 +102,10 @@ fn main() -> anyhow::Result<()> {
             println!("{:?} | {} | {}", index, utxo.txout.value, utxo.outpoint);
         }
     }
+
+    let unused_spk = graph.index.reveal_next_spk("external").unwrap().0 .1;
+    let unused_address = Address::from_script(&unused_spk, NETWORK)?;
+    println!("Next external address: {}", unused_address);
 
     Ok(())
 }
