@@ -1676,7 +1676,7 @@ impl Wallet {
         if tx.output.len() > 1 {
             let mut change_index = None;
             for (index, txout) in tx.output.iter().enumerate() {
-                let change_keychain = KeychainKind::Internal;
+                let change_keychain = self.map_keychain(KeychainKind::Internal);
                 match txout_index.index_of_spk(txout.script_pubkey.clone()) {
                     Some((keychain, _)) if *keychain == change_keychain => {
                         change_index = Some(index)

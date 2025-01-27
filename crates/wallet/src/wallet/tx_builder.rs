@@ -1052,4 +1052,50 @@ mod test {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].keychain, KeychainKind::Internal);
     }
+
+    #[test]
+    fn test_build_fee_bump_remove_change_output_single_desc() {
+        use crate::test_utils::*;
+        use bdk_chain::BlockId;
+        use bitcoin::{hashes::Hash, BlockHash, Network};
+
+        let mut wallet = Wallet::create_single(get_test_tr_single_sig())
+            .network(Network::Regtest)
+            .create_wallet_no_persist()
+            .unwrap();
+
+        insert_checkpoint(
+            &mut wallet,
+            BlockId {
+                height: 1,
+                hash: BlockHash::all_zeros(),
+            },
+        );
+
+        receive_output_in_latest_block(&mut wallet, Amount::ONE_BTC.to_sat());
+
+        // tx1 sending 15k sat to a recipient
+        let recip = ScriptBuf::from_hex(
+            "5120e8f5c4dc2f5d6a7595e7b108cb063da9c7550312da1e22875d78b9db62b59cd5",
+        )
+        .unwrap();
+        let mut builder = wallet.build_tx();
+        builder.add_recipient(recip.clone(), Amount::from_sat(15_000));
+        builder.fee_absolute(Amount::from_sat(1_000));
+        let psbt = builder.finish().unwrap();
+
+        let tx = psbt.extract_tx().unwrap();
+        let txid = tx.compute_txid();
+        let feerate = wallet.calculate_fee_rate(&tx).unwrap().to_sat_per_kwu();
+        insert_tx(&mut wallet, tx);
+
+        // build fee bump
+        let mut builder = wallet.build_fee_bump(txid).unwrap();
+        assert_eq!(
+            builder.params.recipients,
+            vec![(recip, Amount::from_sat(15_000))]
+        );
+        builder.fee_rate(FeeRate::from_sat_per_kwu(feerate + 250));
+        let _ = builder.finish().unwrap();
+    }
 }
