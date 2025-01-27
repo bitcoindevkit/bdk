@@ -11,8 +11,11 @@
 
 use bdk_core::{BlockId, CheckPoint};
 use bitcoin::{block::Header, Block, BlockHash, Transaction};
-pub use bitcoincore_rpc;
 use bitcoincore_rpc::bitcoincore_rpc_json;
+
+pub mod bip158;
+
+pub use bitcoincore_rpc;
 
 /// The [`Emitter`] is used to emit data sourced from [`bitcoincore_rpc::Client`].
 ///
