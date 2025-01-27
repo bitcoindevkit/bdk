@@ -793,7 +793,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn apply_changeset(&mut self, changeset: ChangeSet) {
         for (&desc_id, &index) in &changeset.last_revealed {
             let v = self.last_revealed.entry(desc_id).or_default();
-            *v = index.max(*v);
+            let sanitized_index = if index > BIP32_MAX_INDEX {
+                BIP32_MAX_INDEX
+            } else {
+                index
+            };
+            *v = sanitized_index.max(*v);
             self.replenish_inner_index_did(desc_id, self.lookahead);
         }
     }
