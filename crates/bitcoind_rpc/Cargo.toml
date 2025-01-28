@@ -16,9 +16,9 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
+bdk_core = { version = "0.4.1", default-features = false }
 bitcoin = { version = "0.32.0", default-features = false }
 bitcoincore-rpc = { version = "0.19.0" }
-bdk_core = { path = "../core", version = "0.4.1", default-features = false }
 
 [dev-dependencies]
 bdk_bitcoind_rpc = { path = "." }

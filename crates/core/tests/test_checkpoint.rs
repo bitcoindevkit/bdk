@@ -1,4 +1,4 @@
-use bdk_core::{BlockId, CheckPoint};
+use bdk_chain::{BlockId, CheckPoint};
 use bdk_testenv::{block_id, hash};
 
 /// Inserting a block that already exists in the checkpoint chain must always succeed.
