@@ -52,8 +52,10 @@ jobs:
         if: matrix.rust.version == '1.63.0'
         run: ./ci/pin-msrv.sh
       - name: Build + Test
+        env:
+          MATRIX_RUST_VERSION: ${{ matrix.rust.version }}
         run: |
-          if [ "${{matrix.rust.version}}" = '1.63.0' ]; then
+          if [ $MATRIX_RUST_VERSION = '1.63.0' ]; then
             cargo build --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
             cargo test --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
           else
