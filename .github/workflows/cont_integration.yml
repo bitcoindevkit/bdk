@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: "Checkout repo"
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: "Read rust version"
         id: read_toolchain
         run: echo "rust_version=$(cat rust-version)" >> $GITHUB_OUTPUT
@@ -32,6 +34,8 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -48,8 +52,10 @@ jobs:
         if: matrix.rust.version == '1.63.0'
         run: ./ci/pin-msrv.sh
       - name: Build + Test
+        env:
+          MATRIX_RUST_VERSION: ${{ matrix.rust.version }}
         run: |
-          if [ "${{matrix.rust.version}}" = '1.63.0' ]; then
+          if [ $MATRIX_RUST_VERSION = '1.63.0' ]; then
             cargo build --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
             cargo test --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
           else
@@ -64,6 +70,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -96,6 +104,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
         # Install a recent version of clang that supports wasm32
       - run: wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - || exit 1
       - run: sudo apt-get update || exit 1
@@ -123,6 +133,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -141,6 +153,8 @@ jobs:
       checks: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions-rs/toolchain@v1
         with:
             toolchain: ${{ needs.prepare.outputs.rust_version }}
@@ -172,6 +186,8 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:

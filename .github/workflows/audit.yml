@@ -24,5 +24,7 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions-rust-lang/audit@v1
         name: Audit Rust Dependencies
