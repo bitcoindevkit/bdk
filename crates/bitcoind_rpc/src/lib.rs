@@ -43,6 +43,10 @@ pub struct Emitter<'c, C> {
     /// The last emitted block during our last mempool emission. This is used to determine whether
     /// there has been a reorg since our last mempool emission.
     last_mempool_tip: Option<u32>,
+
+    /// Unconfirmed txids that are expected to appear in mempool. This is used to determine if any
+    /// known txids have been evicted.
+    expected_mempool_txids: HashSet<Txid>,
 }
 
 impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
@@ -53,7 +57,15 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     ///
     /// `start_height` starts emission from a given height (if there are no conflicts with the
     /// original chain).
-    pub fn new(client: &'c C, last_cp: CheckPoint, start_height: u32) -> Self {
+    ///
+    /// `expected_mempool_txids` is the initial set of unconfirmed txids. Once at tip, any that are
+    /// no longer in mempool are marked evicted.
+    pub fn new(
+        client: &'c C,
+        last_cp: CheckPoint,
+        start_height: u32,
+        expected_mempool_txids: HashSet<Txid>,
+    ) -> Self {
         Self {
             client,
             start_height,
@@ -64,7 +76,14 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
         }
     }
 
-    /// Emit mempool transactions, alongside their first-seen unix timestamps.
+    /// Emit mempool transactions and any evicted [`Txid`]s. Returns a `latest_update_time` which is
+    /// used for setting the timestamp for evicted transactions.
+    ///
+    /// This method returns a [`MempoolEvent`] containing the full transactions (with their
+    /// first-seen unix timestamps) that were emitted, and [`MempoolEvent::evicted_txids`] which are
+    /// any [`Txid`]s which were previously expected and are now missing from the mempool. Note that
+    /// [`Txid`]s are only evicted if the emitter is at the chain tip with the same height and hash
+    /// as the best block from the RPC.
     ///
     /// This method emits each transaction only once, unless we cannot guarantee the transaction's
     /// ancestors are already emitted.
@@ -83,6 +102,32 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
             // We use `start_height - 1` as we cannot guarantee that the block at
             // `start_height` has been emitted.
             .unwrap_or(self.start_height.saturating_sub(1));
+
+        // Get the raw mempool result from the RPC client which will be used to determine if any
+        // transactions have been evicted.
+        let raw_mempool = client.get_raw_mempool_verbose()?;
+        let raw_mempool_txids: HashSet<Txid> = raw_mempool.keys().copied().collect();
+
+        // Determine if height and hash matches the best block from the RPC. Evictions are deferred
+        // if we are not at the best block.
+        let height = client.get_block_count()?;
+        let at_tip = if height != self.last_cp.height() as u64 {
+            false
+        } else {
+            // Verify if block hash matches in case of re-org.
+            client.get_block_hash(height)? == self.last_cp.hash()
+        };
+
+        // If at tip, any expected txid missing from raw mempool is considered evicted;
+        // if not at tip, we don't evict anything.
+        let mut evicted_txids: HashSet<Txid> = if at_tip {
+            self.expected_mempool_txids
+                .difference(&raw_mempool_txids)
+                .copied()
+                .collect()
+        } else {
+            HashSet::new()
+        };
 
         // Mempool txs come with a timestamp of when the tx is introduced to the mempool. We keep
         // track of the latest mempool tx's timestamp to determine whether we have seen a tx
@@ -128,7 +173,20 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
         self.last_mempool_time = latest_time;
         self.last_mempool_tip = Some(self.last_cp.height());
 
-        Ok(txs_to_emit)
+        // If at tip, we replace `expected_mempool_txids` with just the new txids. Otherwise, we’re
+        // still catching up to the tip and keep accumulating.
+        if at_tip {
+            self.expected_mempool_txids = new_txs.iter().map(|(tx, _)| tx.compute_txid()).collect();
+        } else {
+            self.expected_mempool_txids
+                .extend(new_txs.iter().map(|(tx, _)| tx.compute_txid()));
+        }
+
+        Ok(MempoolEvent {
+            new_txs,
+            evicted_txids,
+            latest_update_time: latest_time as u64,
+        })
     }
 
     /// Emit the next block height and header (if any).
@@ -139,9 +197,36 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
 
     /// Emit the next block height and block (if any).
     pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
-        Ok(poll(self, |hash| self.client.get_block(hash))?
-            .map(|(checkpoint, block)| BlockEvent { block, checkpoint }))
+        if let Some((checkpoint, block)) = poll(self, |hash| self.client.get_block(hash))? {
+            // Stop tracking unconfirmed transactions that have been confirmed in this block.
+            for tx in &block.txdata {
+                self.expected_mempool_txids.remove(&tx.compute_txid());
+            }
+            return Ok(Some(BlockEvent { block, checkpoint }));
+        }
+        Ok(None)
     }
+}
+
+/// A new emission from mempool.
+#[derive(Debug)]
+pub struct MempoolEvent {
+    /// Unemitted transactions or transactions with ancestors that are unseen by the receiver.
+    ///
+    /// To understand the second condition, consider a receiver which filters transactions based on
+    /// whether it alters the UTXO set of tracked script pubkeys. If an emitted mempool transaction
+    /// spends a tracked UTXO which is confirmed at height `h`, but the receiver has only seen up to
+    /// block of height `h-1`, we want to re-emit this transaction until the receiver has seen the
+    /// block at height `h`.
+    pub new_txs: Vec<(Transaction, u64)>,
+
+    /// [`Txid`]s of all transactions that have been evicted from mempool.
+    pub evicted_txids: HashSet<Txid>,
+
+    /// The latest timestamp of when a transaction entered the mempool.
+    ///
+    /// This is useful for setting the timestamp for evicted transactions.
+    pub latest_update_time: u64,
 }
 
 /// A newly emitted block from [`Emitter`].
