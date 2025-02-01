@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -11,10 +12,7 @@ use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
-use bdk_chain::{
-    bitcoin::{Block, Transaction},
-    local_chain, CanonicalizationParams, Merge,
-};
+use bdk_chain::{bitcoin::Block, local_chain, CanonicalizationParams, Merge};
 use example_cli::{
     anyhow,
     clap::{self, Args, Subcommand},
@@ -36,7 +34,7 @@ const DB_COMMIT_DELAY: Duration = Duration::from_secs(60);
 #[derive(Debug)]
 enum Emission {
     Block(bdk_bitcoind_rpc::BlockEvent<Block>),
-    Mempool(Vec<(Transaction, u64)>),
+    Mempool(bdk_bitcoind_rpc::MempoolEvent),
     Tip(u32),
 }
 
@@ -141,7 +139,7 @@ fn main() -> anyhow::Result<()> {
 
             let chain_tip = chain.lock().unwrap().tip();
             let rpc_client = rpc_args.new_client()?;
-            let mut emitter = Emitter::new(&rpc_client, chain_tip, fallback_height);
+            let mut emitter = Emitter::new(&rpc_client, chain_tip, fallback_height, HashSet::new());
             let mut db_stage = ChangeSet::default();
 
             let mut last_db_commit = Instant::now();
@@ -205,7 +203,7 @@ fn main() -> anyhow::Result<()> {
             let graph_changeset = graph
                 .lock()
                 .unwrap()
-                .batch_insert_relevant_unconfirmed(mempool_txs);
+                .batch_insert_relevant_unconfirmed(mempool_txs.new_txs);
             {
                 let db = &mut *db.lock().unwrap();
                 db_stage.merge(ChangeSet {
@@ -233,7 +231,8 @@ fn main() -> anyhow::Result<()> {
             let (tx, rx) = std::sync::mpsc::sync_channel::<Emission>(CHANNEL_BOUND);
             let emission_jh = std::thread::spawn(move || -> anyhow::Result<()> {
                 let rpc_client = rpc_args.new_client()?;
-                let mut emitter = Emitter::new(&rpc_client, last_cp, fallback_height);
+                let mut emitter =
+                    Emitter::new(&rpc_client, last_cp, fallback_height, HashSet::new());
 
                 let mut block_count = rpc_client.get_block_count()? as u32;
                 tx.send(Emission::Tip(block_count))?;
@@ -288,7 +287,13 @@ fn main() -> anyhow::Result<()> {
                         (chain_changeset, graph_changeset)
                     }
                     Emission::Mempool(mempool_txs) => {
-                        let graph_changeset = graph.batch_insert_relevant_unconfirmed(mempool_txs);
+                        let mut graph_changeset =
+                            graph.batch_insert_relevant_unconfirmed(mempool_txs.new_txs.clone());
+                        for txid in mempool_txs.evicted_txids {
+                            graph_changeset.merge(
+                                graph.insert_evicted_at(txid, mempool_txs.latest_update_time),
+                            );
+                        }
                         (local_chain::ChangeSet::default(), graph_changeset)
                     }
                     Emission::Tip(h) => {
