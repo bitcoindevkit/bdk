@@ -1,13 +1,16 @@
 //! Contains the [`IndexedTxGraph`] and associated types. Refer to the
 //! [`IndexedTxGraph`] documentation for more.
-use core::fmt::Debug;
+
+use core::fmt;
+use core::ops::RangeBounds;
 
 use alloc::{sync::Arc, vec::Vec};
-use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
+use bitcoin::{Block, OutPoint, ScriptBuf, Transaction, TxOut, Txid};
 
 use crate::{
+    spk_txout::SpkTxOutIndex,
     tx_graph::{self, TxGraph},
-    Anchor, BlockId, Indexer, Merge, TxPosInBlock,
+    Anchor, BlockId, ChainOracle, Indexer, Merge, TxPosInBlock,
 };
 
 /// The [`IndexedTxGraph`] combines a [`TxGraph`] and an [`Indexer`] implementation.
@@ -323,6 +326,43 @@ where
             tx_graph: graph,
             indexer,
         }
+    }
+
+    /// Inserts the given `evicted_at` for `txid`.
+    ///
+    /// The `evicted_at` timestamp represents the last known time when the transaction was observed
+    /// to be missing from the mempool. If `txid` was previously recorded with an earlier
+    /// `evicted_at` value, it is updated only if the new value is greater.
+    pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A, I::ChangeSet> {
+        let tx_graph = self.graph.insert_evicted_at(txid, evicted_at);
+        ChangeSet {
+            tx_graph,
+            ..Default::default()
+        }
+    }
+}
+
+impl<A, I> IndexedTxGraph<A, SpkTxOutIndex<I>>
+where
+    A: Anchor,
+    I: fmt::Debug + Clone + Ord,
+{
+    /// Returns an iterator over unconfirmed transactions and their associated script pubkeys,
+    /// filtered within the specified `range`.
+    ///
+    /// This function delegates the transaction filtering to [`TxGraph::iter_spks_with_expected_txids`],
+    /// using the [`SpkTxOutIndex`] stored in [`IndexedTxGraph`]. The [`TxGraph`] internally scans
+    /// for unconfirmed transactions relevant to the indexed outputs.
+    pub fn iter_spks_with_expected_txids<'a, O>(
+        &'a self,
+        chain: &'a O,
+        range: impl RangeBounds<I> + 'a,
+    ) -> impl Iterator<Item = (Txid, ScriptBuf)> + 'a
+    where
+        O: ChainOracle<Error = core::convert::Infallible>,
+    {
+        self.graph
+            .iter_spks_with_expected_txids(chain, &self.index, range)
     }
 }
 

@@ -91,9 +91,11 @@
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::collections::*;
+use crate::spk_txout::SpkTxOutIndex;
 use crate::BlockId;
 use crate::CanonicalIter;
 use crate::CanonicalReason;
+use crate::Indexer;
 use crate::ObservedIn;
 use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
 use alloc::collections::vec_deque::VecDeque;
@@ -105,7 +107,7 @@ use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txi
 use core::fmt::{self, Formatter};
 use core::{
     convert::Infallible,
-    ops::{Deref, RangeInclusive},
+    ops::{Deref, RangeBounds, RangeInclusive},
 };
 
 impl<A: Ord> From<TxGraph<A>> for TxUpdate<A> {
@@ -1160,6 +1162,50 @@ impl<A: Anchor> TxGraph<A> {
     ) -> Balance {
         self.try_balance(chain, chain_tip, outpoints, trust_predicate)
             .expect("oracle is infallible")
+    }
+
+    /// Returns an iterator over unconfirmed transactions and their associated script pubkeys,
+    /// filtered within the specified `range`.
+    ///
+    /// This function scans the transaction graph for unconfirmed transactions relevant to the
+    /// provided [`SpkTxOutIndex`], determining which transactions should be considered based on
+    /// indexed outputs.
+    pub fn iter_spks_with_expected_txids<'a, C, I>(
+        &'a self,
+        chain: &'a C,
+        indexer: &'a SpkTxOutIndex<I>,
+        range: impl RangeBounds<I> + 'a,
+    ) -> impl Iterator<Item = (Txid, ScriptBuf)> + 'a
+    where
+        C: ChainOracle<Error = core::convert::Infallible>,
+        I: fmt::Debug + Clone + Ord,
+    {
+        let chain_tip = chain.get_chain_tip().unwrap();
+
+        self.list_canonical_txs(chain, chain_tip)
+            .filter(|c| !c.chain_position.is_confirmed() && indexer.is_tx_relevant(&c.tx_node))
+            .flat_map(move |c| {
+                let txid = c.tx_node.txid;
+                let spks = c
+                    .tx_node
+                    .input
+                    .iter()
+                    .map(|txin| txin.previous_output)
+                    .chain(
+                        c.tx_node
+                            .output
+                            .iter()
+                            .enumerate()
+                            .map(move |(vout, _)| OutPoint::new(txid, vout as u32)),
+                    )
+                    .flat_map(|op| match indexer.txout(op) {
+                        Some((i, txo)) if range.contains(i) => Some(txo.script_pubkey.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+
+                core::iter::repeat(txid).zip(spks)
+            })
     }
 }
 
