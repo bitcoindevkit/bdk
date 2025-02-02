@@ -5,7 +5,7 @@ use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     local_chain::{CheckPoint, LocalChain},
     spk_txout::SpkTxOutIndex,
-    Balance, BlockId, IndexedTxGraph, Merge,
+    Balance, BlockId, Merge, TxGraph,
 };
 use bdk_testenv::{anyhow, TestEnv};
 use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};
@@ -148,7 +148,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     env.mine_blocks(101, None)?;
 
     let (mut chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
-    let mut indexed_tx_graph = IndexedTxGraph::<BlockId, _>::new({
+    let mut tx_graph = TxGraph::<BlockId, _>::new({
         let mut index = SpkTxOutIndex::<usize>::default();
         index.insert_spk(0, addr_0.script_pubkey());
         index.insert_spk(1, addr_1.script_pubkey());
@@ -161,8 +161,8 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
         let _ = chain.apply_update(emission.checkpoint)?;
-        let indexed_additions = indexed_tx_graph.apply_block_relevant(&emission.block, height);
-        assert!(indexed_additions.is_empty());
+        let tx_graph_changeset = tx_graph.apply_block_relevant(&emission.block, height);
+        assert!(tx_graph_changeset.is_empty());
     }
 
     // send 3 txs to a tracked address, these txs will be in the mempool
@@ -189,10 +189,9 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         assert!(emitter.next_block()?.is_none());
 
         let mempool_txs = emitter.mempool()?;
-        let indexed_additions = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs);
+        let tx_graph_changeset = tx_graph.batch_insert_unconfirmed(mempool_txs);
         assert_eq!(
-            indexed_additions
-                .tx_graph
+            tx_graph_changeset
                 .txs
                 .iter()
                 .map(|tx| tx.compute_txid())
@@ -200,7 +199,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
             exp_txids,
             "changeset should have the 3 mempool transactions",
         );
-        assert!(indexed_additions.tx_graph.anchors.is_empty());
+        assert!(tx_graph_changeset.anchors.is_empty());
     }
 
     // mine a block that confirms the 3 txs
@@ -222,10 +221,10 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         let emission = emitter.next_block()?.expect("must get mined block");
         let height = emission.block_height();
         let _ = chain.apply_update(emission.checkpoint)?;
-        let indexed_additions = indexed_tx_graph.apply_block_relevant(&emission.block, height);
-        assert!(indexed_additions.tx_graph.txs.is_empty());
-        assert!(indexed_additions.tx_graph.txouts.is_empty());
-        assert_eq!(indexed_additions.tx_graph.anchors, exp_anchors);
+        let tx_graph_changeset = tx_graph.apply_block_relevant(&emission.block, height);
+        assert!(tx_graph_changeset.txs.is_empty());
+        assert!(tx_graph_changeset.txouts.is_empty());
+        assert_eq!(tx_graph_changeset.anchors, exp_anchors);
     }
 
     Ok(())
@@ -276,7 +275,7 @@ fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
 
 fn process_block(
     recv_chain: &mut LocalChain,
-    recv_graph: &mut IndexedTxGraph<BlockId, SpkTxOutIndex<()>>,
+    recv_graph: &mut TxGraph<BlockId, SpkTxOutIndex<()>>,
     block: Block,
     block_height: u32,
 ) -> anyhow::Result<()> {
@@ -287,7 +286,7 @@ fn process_block(
 
 fn sync_from_emitter<C>(
     recv_chain: &mut LocalChain,
-    recv_graph: &mut IndexedTxGraph<BlockId, SpkTxOutIndex<()>>,
+    recv_graph: &mut TxGraph<BlockId, SpkTxOutIndex<()>>,
     emitter: &mut Emitter<C>,
 ) -> anyhow::Result<()>
 where
@@ -302,13 +301,11 @@ where
 
 fn get_balance(
     recv_chain: &LocalChain,
-    recv_graph: &IndexedTxGraph<BlockId, SpkTxOutIndex<()>>,
+    recv_graph: &TxGraph<BlockId, SpkTxOutIndex<()>>,
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
-    let balance = recv_graph
-        .graph()
-        .balance(recv_chain, chain_tip, outpoints, |_, _| true);
+    let balance = recv_graph.balance(recv_chain, chain_tip, outpoints, |_, _| true);
     Ok(balance)
 }
 
@@ -340,7 +337,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     // setup receiver
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<BlockId, _>::new({
+    let mut recv_graph = TxGraph::<BlockId, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index

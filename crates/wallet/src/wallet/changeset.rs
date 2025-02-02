@@ -1,10 +1,5 @@
-use bdk_chain::{
-    indexed_tx_graph, keychain_txout, local_chain, tx_graph, ConfirmationBlockTime, Merge,
-};
+use bdk_chain::{keychain_txout, local_chain, tx_graph, ConfirmationBlockTime, Merge};
 use miniscript::{Descriptor, DescriptorPublicKey};
-
-type IndexedTxGraphChangeSet =
-    indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>;
 
 /// A changeset for [`Wallet`](crate::Wallet).
 #[derive(Default, Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -18,6 +13,9 @@ pub struct ChangeSet {
     /// Changes to the [`LocalChain`](local_chain::LocalChain).
     pub local_chain: local_chain::ChangeSet,
     /// Changes to [`TxGraph`](tx_graph::TxGraph).
+    ///
+    /// The `indexer` field of this changeset can be ignored, as it is always the unit
+    /// type. The actual [`Self::indexer`] changeset is managed separately.
     pub tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime>,
     /// Changes to [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex).
     pub indexer: keychain_txout::ChangeSet,
@@ -191,11 +189,19 @@ impl From<local_chain::ChangeSet> for ChangeSet {
     }
 }
 
-impl From<IndexedTxGraphChangeSet> for ChangeSet {
-    fn from(indexed_tx_graph: IndexedTxGraphChangeSet) -> Self {
+impl From<tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>> for ChangeSet {
+    fn from(
+        tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
+    ) -> Self {
         Self {
-            tx_graph: indexed_tx_graph.tx_graph,
-            indexer: indexed_tx_graph.indexer,
+            tx_graph: tx_graph::ChangeSet {
+                txs: tx_graph.txs,
+                txouts: tx_graph.txouts,
+                anchors: tx_graph.anchors,
+                last_seen: tx_graph.last_seen,
+                ..Default::default()
+            },
+            indexer: tx_graph.indexer,
             ..Default::default()
         }
     }

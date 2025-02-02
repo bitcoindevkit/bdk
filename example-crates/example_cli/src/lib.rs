@@ -21,10 +21,9 @@ use bdk_chain::miniscript::{
 };
 use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
-    indexed_tx_graph,
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
-    tx_graph, ChainOracle, DescriptorExt, FullTxOut, IndexedTxGraph, Merge,
+    tx_graph, ChainOracle, DescriptorExt, FullTxOut, Merge, TxGraph,
 };
 use bdk_coin_select::{
     metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
@@ -37,8 +36,8 @@ use rand::prelude::*;
 pub use anyhow;
 pub use clap;
 
-/// Alias for a `IndexedTxGraph` with specific `Anchor` and `Indexer`.
-pub type KeychainTxGraph = IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<Keychain>>;
+/// Alias for a `TxGraph` with specific `Anchor` and `Indexer`.
+pub type KeychainTxGraph = TxGraph<ConfirmationBlockTime, KeychainTxOutIndex<Keychain>>;
 
 /// ChangeSet
 #[derive(Default, Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -51,10 +50,8 @@ pub struct ChangeSet {
     pub network: Option<Network>,
     /// Changes to the [`LocalChain`].
     pub local_chain: local_chain::ChangeSet,
-    /// Changes to [`TxGraph`](tx_graph::TxGraph).
-    pub tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime>,
-    /// Changes to [`KeychainTxOutIndex`].
-    pub indexer: keychain_txout::ChangeSet,
+    /// Changes to [`TxGraph`].
+    pub tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
 }
 
 #[derive(Parser)]
@@ -420,7 +417,6 @@ pub fn planned_utxos<O: ChainOracle>(
     let chain_tip = chain.get_chain_tip()?;
     let outpoints = graph.index.outpoints();
     graph
-        .graph()
         .try_filter_chain_unspents(chain, chain_tip, outpoints.iter().cloned())?
         .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
             let desc = graph
@@ -467,7 +463,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                         spk_chooser(index, Keychain::External).expect("Must exist");
                     let db = &mut *db.lock().unwrap();
                     db.append_changeset(&ChangeSet {
-                        indexer: index_changeset,
+                        tx_graph: index_changeset.into(),
                         ..Default::default()
                     })?;
                     let addr = Address::from_script(spk.as_script(), network)?;
@@ -512,7 +508,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 }
             }
 
-            let balance = graph.graph().try_balance(
+            let balance = graph.try_balance(
                 chain,
                 chain.get_chain_tip()?,
                 graph.index.outpoints().iter().cloned(),
@@ -555,7 +551,6 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     unconfirmed,
                 } => {
                     let txouts = graph
-                        .graph()
                         .try_filter_chain_txouts(chain, chain_tip, outpoints.iter().cloned())?
                         .filter(|(_, full_txo)| match (spent, unspent) {
                             (true, false) => full_txo.spent_by.is_some(),
@@ -630,7 +625,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     {
                         let db = &mut *db.lock().unwrap();
                         db.append_changeset(&ChangeSet {
-                            indexer,
+                            tx_graph: indexer.into(),
                             ..Default::default()
                         })?;
                     }
@@ -720,8 +715,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                             // it's not a big deal since we can always find it again from the
                             // blockchain.
                             db.lock().unwrap().append_changeset(&ChangeSet {
-                                tx_graph: changeset.tx_graph,
-                                indexer: changeset.indexer,
+                                tx_graph: changeset,
                                 ..Default::default()
                             })?;
                         }
@@ -812,10 +806,7 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
                     index.insert_descriptor(Keychain::Internal, change_desc)?;
                 }
                 let mut graph = KeychainTxGraph::new(index);
-                graph.apply_changeset(indexed_tx_graph::ChangeSet {
-                    tx_graph: changeset.tx_graph,
-                    indexer: changeset.indexer,
-                });
+                graph.apply_changeset(changeset.tx_graph);
                 graph
             });
 
@@ -924,7 +915,6 @@ impl Merge for ChangeSet {
         }
         Merge::merge(&mut self.local_chain, other.local_chain);
         Merge::merge(&mut self.tx_graph, other.tx_graph);
-        Merge::merge(&mut self.indexer, other.indexer);
     }
 
     fn is_empty(&self) -> bool {
@@ -933,6 +923,5 @@ impl Merge for ChangeSet {
             && self.network.is_none()
             && self.local_chain.is_empty()
             && self.tx_graph.is_empty()
-            && self.indexer.is_empty()
     }
 }

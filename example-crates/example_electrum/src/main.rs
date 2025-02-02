@@ -3,9 +3,8 @@ use std::io::{self, Write};
 use bdk_chain::{
     bitcoin::Network,
     collections::BTreeSet,
-    indexed_tx_graph,
     spk_client::{FullScanRequest, SyncRequest},
-    ConfirmationBlockTime, Merge,
+    tx_graph, Merge,
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
@@ -127,14 +126,7 @@ fn main() -> anyhow::Result<()> {
     let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(network)?);
 
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download them
-    client.populate_tx_cache(
-        graph
-            .lock()
-            .unwrap()
-            .graph()
-            .full_txs()
-            .map(|tx_node| tx_node.tx),
-    );
+    client.populate_tx_cache(graph.lock().unwrap().full_txs().map(|tx_node| tx_node.tx));
 
     let (chain_update, tx_update, keychain_update) = match electrum_cmd.clone() {
         ElectrumCommands::Scan {
@@ -177,13 +169,13 @@ fn main() -> anyhow::Result<()> {
                     })
             };
 
-            let res = client
+            let resp = client
                 .full_scan::<_>(request, stop_gap, scan_options.batch_size, false)
                 .context("scanning the blockchain")?;
             (
-                res.chain_update,
-                res.tx_update,
-                Some(res.last_active_indices),
+                resp.chain_update,
+                resp.tx_update,
+                Some(resp.last_active_indices),
             )
         }
         ElectrumCommands::Sync {
@@ -225,7 +217,6 @@ fn main() -> anyhow::Result<()> {
                 let init_outpoints = graph.index.outpoints();
                 request = request.outpoints(
                     graph
-                        .graph()
                         .filter_chain_unspents(
                             &*chain,
                             chain_tip.block_id(),
@@ -237,21 +228,20 @@ fn main() -> anyhow::Result<()> {
             if unconfirmed {
                 request = request.txids(
                     graph
-                        .graph()
                         .list_canonical_txs(&*chain, chain_tip.block_id())
                         .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                         .map(|canonical_tx| canonical_tx.tx_node.txid),
                 );
             }
 
-            let res = client
+            let resp = client
                 .sync(request, scan_options.batch_size, false)
                 .context("scanning the blockchain")?;
 
             // drop lock on graph and chain
             drop((graph, chain));
 
-            (res.chain_update, res.tx_update, None)
+            (resp.chain_update, resp.tx_update, None)
         }
     };
 
@@ -261,18 +251,15 @@ fn main() -> anyhow::Result<()> {
 
         let chain_changeset = chain.apply_update(chain_update.expect("request has chain tip"))?;
 
-        let mut indexed_tx_graph_changeset =
-            indexed_tx_graph::ChangeSet::<ConfirmationBlockTime, _>::default();
+        let mut tx_graph_changeset = tx_graph::ChangeSet::default();
         if let Some(keychain_update) = keychain_update {
-            let keychain_changeset = graph.index.reveal_to_target_multi(&keychain_update);
-            indexed_tx_graph_changeset.merge(keychain_changeset.into());
+            tx_graph_changeset.merge(graph.index.reveal_to_target_multi(&keychain_update).into());
         }
-        indexed_tx_graph_changeset.merge(graph.apply_update(tx_update));
+        tx_graph_changeset.merge(graph.apply_update(tx_update));
 
         ChangeSet {
             local_chain: chain_changeset,
-            tx_graph: indexed_tx_graph_changeset.tx_graph,
-            indexer: indexed_tx_graph_changeset.indexer,
+            tx_graph: tx_graph_changeset,
             ..Default::default()
         }
     };
