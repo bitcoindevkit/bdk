@@ -126,7 +126,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let client = esplora_cmd.esplora_args().client(network)?;
-    // Prepare the `IndexedTxGraph` and `LocalChain` updates based on whether we are scanning or
+    // Prepare the `TxGraph` and `LocalChain` updates based on whether we are scanning or
     // syncing.
     //
     // Scanning: We are iterating through spks of all keychains and scanning for transactions for
@@ -137,7 +137,7 @@ fn main() -> anyhow::Result<()> {
     //
     // Syncing: We only check for specified spks, utxos and txids to update their confirmation
     //   status or fetch missing transactions.
-    let (local_chain_changeset, indexed_tx_graph_changeset) = match &esplora_cmd {
+    let (local_chain_changeset, tx_graph_changeset) = match &esplora_cmd {
         EsploraCommands::Scan {
             stop_gap,
             scan_options,
@@ -239,7 +239,6 @@ fn main() -> anyhow::Result<()> {
                     let init_outpoints = graph.index.outpoints();
                     request = request.outpoints(
                         graph
-                            .graph()
                             .filter_chain_unspents(
                                 &*chain,
                                 local_tip.block_id(),
@@ -254,7 +253,6 @@ fn main() -> anyhow::Result<()> {
                     // `EsploraExt::update_tx_graph_without_keychain`.
                     request = request.txids(
                         graph
-                            .graph()
                             .list_canonical_txs(&*chain, local_tip.block_id())
                             .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                             .map(|canonical_tx| canonical_tx.tx_node.txid),
@@ -280,8 +278,7 @@ fn main() -> anyhow::Result<()> {
     let mut db = db.lock().unwrap();
     db.append(&ChangeSet {
         local_chain: local_chain_changeset,
-        tx_graph: indexed_tx_graph_changeset.tx_graph,
-        indexer: indexed_tx_graph_changeset.indexer,
+        tx_graph: tx_graph_changeset,
         ..Default::default()
     })?;
     Ok(())

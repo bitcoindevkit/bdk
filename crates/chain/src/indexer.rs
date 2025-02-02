@@ -8,13 +8,14 @@ pub mod spk_txout;
 
 /// Utilities for indexing transaction data.
 ///
-/// Types which implement this trait can be used to construct an [`IndexedTxGraph`].
-/// This trait's methods should rarely be called directly.
+/// An `Indexer` is the second type parameter of a [`TxGraph<A, X>`]. The `TxGraph` calls the
+/// indexer whenever new transaction data is inserted into it, allowing the indexer to look at the
+/// new data and mutate its state.
 ///
-/// [`IndexedTxGraph`]: crate::IndexedTxGraph
+/// [`TxGraph<A, X>`]: crate::TxGraph
 pub trait Indexer {
     /// The resultant "changeset" when new transaction data is indexed.
-    type ChangeSet;
+    type ChangeSet: Default + crate::Merge;
 
     /// Scan and index the given `outpoint` and `txout`.
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet;
@@ -30,4 +31,20 @@ pub trait Indexer {
 
     /// Determines whether the transaction should be included in the index.
     fn is_tx_relevant(&self, tx: &Transaction) -> bool;
+}
+
+impl Indexer for () {
+    type ChangeSet = ();
+
+    fn index_txout(&mut self, _outpoint: OutPoint, _txout: &TxOut) -> Self::ChangeSet {}
+
+    fn index_tx(&mut self, _tx: &Transaction) -> Self::ChangeSet {}
+
+    fn apply_changeset(&mut self, _changeset: Self::ChangeSet) {}
+
+    fn initial_changeset(&self) -> Self::ChangeSet {}
+
+    fn is_tx_relevant(&self, _tx: &Transaction) -> bool {
+        false
+    }
 }

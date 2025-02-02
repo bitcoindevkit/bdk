@@ -115,7 +115,8 @@ fn insert_txouts() {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.clone().into(),
             anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
-            last_seen: [(hash!("tx2"), 1000000)].into()
+            last_seen: [(hash!("tx2"), 1000000)].into(),
+            ..Default::default()
         }
     );
 
@@ -168,7 +169,8 @@ fn insert_txouts() {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
             anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
-            last_seen: [(hash!("tx2"), 1000000)].into()
+            last_seen: [(hash!("tx2"), 1000000)].into(),
+            ..Default::default()
         }
     );
 }
@@ -588,7 +590,8 @@ fn test_walk_ancestors() {
         ..new_tx(0)
     };
 
-    let mut graph = TxGraph::<BlockId>::new([
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.batch_insert_tx([
         tx_a0.clone(),
         tx_b0.clone(),
         tx_b1.clone(),
@@ -1049,7 +1052,8 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     let txids: Vec<Txid> = txs.iter().map(Transaction::compute_txid).collect();
 
     // graph
-    let mut graph = TxGraph::<BlockId>::new(txs);
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.batch_insert_tx(txs);
     let full_txs: Vec<_> = graph.full_txs().collect();
     assert_eq!(full_txs.len(), 2);
     let unseen_txs: Vec<_> = graph.txs_with_no_anchor_or_last_seen().collect();

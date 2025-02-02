@@ -1,4 +1,4 @@
-use bdk_chain::{keychain_txout::KeychainTxOutIndex, local_chain::LocalChain, IndexedTxGraph};
+use bdk_chain::{keychain_txout::KeychainTxOutIndex, local_chain::LocalChain, TxGraph};
 use bdk_core::{BlockId, CheckPoint};
 use bdk_core::{ConfirmationBlockTime, TxUpdate};
 use bdk_testenv::hash;
@@ -11,7 +11,7 @@ use miniscript::{Descriptor, DescriptorPublicKey};
 use std::sync::Arc;
 
 type Keychain = ();
-type KeychainTxGraph = IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<Keychain>>;
+type KeychainTxGraph = TxGraph<ConfirmationBlockTime, KeychainTxOutIndex<Keychain>>;
 
 /// New tx guaranteed to have at least one output
 fn new_tx(lt: u32) -> Transaction {
@@ -90,14 +90,12 @@ fn setup<F: Fn(&mut KeychainTxGraph, &LocalChain)>(f: F) -> (KeychainTxGraph, Lo
 }
 
 fn run_list_canonical_txs(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txs: usize) {
-    let txs = tx_graph
-        .graph()
-        .list_canonical_txs(chain, chain.tip().block_id());
+    let txs = tx_graph.list_canonical_txs(chain, chain.tip().block_id());
     assert_eq!(txs.count(), exp_txs);
 }
 
 fn run_filter_chain_txouts(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txos: usize) {
-    let utxos = tx_graph.graph().filter_chain_txouts(
+    let utxos = tx_graph.filter_chain_txouts(
         chain,
         chain.tip().block_id(),
         tx_graph.index.outpoints().clone(),
@@ -106,7 +104,7 @@ fn run_filter_chain_txouts(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_t
 }
 
 fn run_filter_chain_unspents(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_utxos: usize) {
-    let utxos = tx_graph.graph().filter_chain_unspents(
+    let utxos = tx_graph.filter_chain_unspents(
         chain,
         chain.tip().block_id(),
         tx_graph.index.outpoints().clone(),
