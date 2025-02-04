@@ -7,6 +7,7 @@ use bdk_core::{
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::{
     collections::HashSet,
+    ops::Deref,
     sync::{Arc, Mutex},
 };
 
@@ -16,7 +17,10 @@ const CHAIN_SUFFIX_LENGTH: u32 = 8;
 /// Wrapper around an [`electrum_client::ElectrumApi`] which includes an internal in-memory
 /// transaction cache to avoid re-fetching already downloaded transactions.
 #[derive(Debug)]
-pub struct BdkElectrumClient<E> {
+pub struct BdkElectrumClient<E: Deref>
+where
+    E::Target: ElectrumApi,
+{
     /// The internal [`electrum_client::ElectrumApi`]
     pub inner: E,
     /// The transaction cache
@@ -25,7 +29,10 @@ pub struct BdkElectrumClient<E> {
     block_header_cache: Mutex<HashMap<u32, Header>>,
 }
 
-impl<E: ElectrumApi> BdkElectrumClient<E> {
+impl<E: Deref> BdkElectrumClient<E>
+where
+    E::Target: ElectrumApi,
+{
     /// Creates a new bdk client from a [`electrum_client::ElectrumApi`]
     pub fn new(client: E) -> Self {
         Self {
@@ -130,7 +137,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut request: FullScanRequest<K> = request.into();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(self.fetch_tip_and_latest_blocks(chain_tip)?),
             None => None,
         };
 
@@ -198,7 +205,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut request: SyncRequest<I> = request.into();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(self.fetch_tip_and_latest_blocks(chain_tip)?),
             None => None,
         };
 
@@ -434,79 +441,80 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
         Ok(())
     }
-}
 
-/// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`. The latest blocks are
-/// fetched to construct checkpoint updates with the proper [`BlockHash`] in case of re-org.
-fn fetch_tip_and_latest_blocks(
-    client: &impl ElectrumApi,
-    prev_tip: CheckPoint,
-) -> Result<(CheckPoint, BTreeMap<u32, BlockHash>), Error> {
-    let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
-    let new_tip_height = height as u32;
+    /// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`. The latest blocks are
+    /// fetched to construct checkpoint updates with the proper [`BlockHash`] in case of re-org.
+    fn fetch_tip_and_latest_blocks(
+        &self,
+        prev_tip: CheckPoint,
+    ) -> Result<(CheckPoint, BTreeMap<u32, BlockHash>), Error> {
+        let client = &self.inner;
+        let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
+        let new_tip_height = height as u32;
 
-    // If electrum returns a tip height that is lower than our previous tip, then checkpoints do
-    // not need updating. We just return the previous tip and use that as the point of agreement.
-    if new_tip_height < prev_tip.height() {
-        return Ok((prev_tip, BTreeMap::new()));
-    }
-
-    // Atomically fetch the latest `CHAIN_SUFFIX_LENGTH` count of blocks from Electrum. We use this
-    // to construct our checkpoint update.
-    let mut new_blocks = {
-        let start_height = new_tip_height.saturating_sub(CHAIN_SUFFIX_LENGTH - 1);
-        let hashes = client
-            .block_headers(start_height as _, CHAIN_SUFFIX_LENGTH as _)?
-            .headers
-            .into_iter()
-            .map(|h| h.block_hash());
-        (start_height..).zip(hashes).collect::<BTreeMap<u32, _>>()
-    };
-
-    // Find the "point of agreement" (if any).
-    let agreement_cp = {
-        let mut agreement_cp = Option::<CheckPoint>::None;
-        for cp in prev_tip.iter() {
-            let cp_block = cp.block_id();
-            let hash = match new_blocks.get(&cp_block.height) {
-                Some(&hash) => hash,
-                None => {
-                    assert!(
-                        new_tip_height >= cp_block.height,
-                        "already checked that electrum's tip cannot be smaller"
-                    );
-                    let hash = client.block_header(cp_block.height as _)?.block_hash();
-                    new_blocks.insert(cp_block.height, hash);
-                    hash
-                }
-            };
-            if hash == cp_block.hash {
-                agreement_cp = Some(cp);
-                break;
-            }
+        // If electrum returns a tip height that is lower than our previous tip, then checkpoints do
+        // not need updating. We just return the previous tip and use that as the point of agreement.
+        if new_tip_height < prev_tip.height() {
+            return Ok((prev_tip, BTreeMap::new()));
         }
-        agreement_cp
-    };
 
-    let agreement_height = agreement_cp.as_ref().map(CheckPoint::height);
+        // Atomically fetch the latest `CHAIN_SUFFIX_LENGTH` count of blocks from Electrum. We use this
+        // to construct our checkpoint update.
+        let mut new_blocks = {
+            let start_height = new_tip_height.saturating_sub(CHAIN_SUFFIX_LENGTH - 1);
+            let hashes = client
+                .block_headers(start_height as _, CHAIN_SUFFIX_LENGTH as _)?
+                .headers
+                .into_iter()
+                .map(|h| h.block_hash());
+            (start_height..).zip(hashes).collect::<BTreeMap<u32, _>>()
+        };
 
-    let new_tip = new_blocks
-        .iter()
-        // Prune `new_blocks` to only include blocks that are actually new.
-        .filter(|(height, _)| Some(*<&u32>::clone(height)) > agreement_height)
-        .map(|(height, hash)| BlockId {
-            height: *height,
-            hash: *hash,
-        })
-        .fold(agreement_cp, |prev_cp, block| {
-            Some(match prev_cp {
-                Some(cp) => cp.push(block).expect("must extend checkpoint"),
-                None => CheckPoint::new(block),
+        // Find the "point of agreement" (if any).
+        let agreement_cp = {
+            let mut agreement_cp = Option::<CheckPoint>::None;
+            for cp in prev_tip.iter() {
+                let cp_block = cp.block_id();
+                let hash = match new_blocks.get(&cp_block.height) {
+                    Some(&hash) => hash,
+                    None => {
+                        assert!(
+                            new_tip_height >= cp_block.height,
+                            "already checked that electrum's tip cannot be smaller"
+                        );
+                        let hash = client.block_header(cp_block.height as _)?.block_hash();
+                        new_blocks.insert(cp_block.height, hash);
+                        hash
+                    }
+                };
+                if hash == cp_block.hash {
+                    agreement_cp = Some(cp);
+                    break;
+                }
+            }
+            agreement_cp
+        };
+
+        let agreement_height = agreement_cp.as_ref().map(CheckPoint::height);
+
+        let new_tip = new_blocks
+            .iter()
+            // Prune `new_blocks` to only include blocks that are actually new.
+            .filter(|(height, _)| Some(*<&u32>::clone(height)) > agreement_height)
+            .map(|(height, hash)| BlockId {
+                height: *height,
+                hash: *hash,
             })
-        })
-        .expect("must have at least one checkpoint");
+            .fold(agreement_cp, |prev_cp, block| {
+                Some(match prev_cp {
+                    Some(cp) => cp.push(block).expect("must extend checkpoint"),
+                    None => CheckPoint::new(block),
+                })
+            })
+            .expect("must have at least one checkpoint");
 
-    Ok((new_tip, new_blocks))
+        Ok((new_tip, new_blocks))
+    }
 }
 
 // Add a corresponding checkpoint per anchor height if it does not yet exist. Checkpoints should not

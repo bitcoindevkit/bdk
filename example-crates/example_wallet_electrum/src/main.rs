@@ -45,7 +45,8 @@ fn main() -> Result<(), anyhow::Error> {
     println!("Wallet balance before syncing: {}", balance.total());
 
     print!("Syncing...");
-    let client = BdkElectrumClient::new(electrum_client::Client::new(ELECTRUM_URL)?);
+    let electrum_client = electrum_client::Client::new(ELECTRUM_URL)?;
+    let client = BdkElectrumClient::new(&electrum_client);
 
     // Populate the electrum client's transaction cache so it doesn't redownload transaction we
     // already have.

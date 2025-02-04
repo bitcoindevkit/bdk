@@ -124,7 +124,8 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(network)?);
+    let electrum_client = electrum_cmd.electrum_args().client(network)?;
+    let client = BdkElectrumClient::new(&electrum_client);
 
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download them
     client.populate_tx_cache(

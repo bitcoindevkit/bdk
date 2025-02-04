@@ -27,7 +27,7 @@ fn get_balance(
 }
 
 fn sync_with_electrum<I, Spks>(
-    client: &BdkElectrumClient<electrum_client::Client>,
+    client: &BdkElectrumClient<&electrum_client::Client>,
     spks: Spks,
     chain: &mut LocalChain,
     graph: &mut IndexedTxGraph<ConfirmationBlockTime, I>,
@@ -58,7 +58,7 @@ where
 pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
-    let client = BdkElectrumClient::new(electrum_client);
+    let client = BdkElectrumClient::new(&electrum_client);
 
     let receive_address0 =
         Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")?.assume_checked();
@@ -166,7 +166,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
 pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
-    let client = BdkElectrumClient::new(electrum_client);
+    let client = BdkElectrumClient::new(&electrum_client);
     let _block_hashes = env.mine_blocks(101, None)?;
 
     // Now let's test the gap limit. First of all get a chain of 10 addresses.
@@ -295,7 +295,7 @@ fn test_sync() -> anyhow::Result<()> {
 
     let env = TestEnv::new()?;
     let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
-    let client = BdkElectrumClient::new(electrum_client);
+    let client = BdkElectrumClient::new(&electrum_client);
 
     // Setup addresses.
     let addr_to_mine = env
@@ -438,7 +438,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     let env = TestEnv::new()?;
     let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
-    let client = BdkElectrumClient::new(electrum_client);
+    let client = BdkElectrumClient::new(&electrum_client);
 
     // Setup addresses.
     let addr_to_mine = env
