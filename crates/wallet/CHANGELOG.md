@@ -7,6 +7,23 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [wallet-1.1.0]
+
+### Added
+
+- `Wallet` can now be constructed using `Network::Testnet4` #1805
+- test: create tx locktime cltv for a specific time #1682
+- docs: add architectural decision records (ADR) #1592
+
+### Changed
+
+- Changed the default transaction version number to version 2 for TxBuilder. #1789
+
+### Fixed
+
+- Improve safety on finalize psbt #1790
+- Fixed an issue preventing `build_fee_bump` from re-targeting the drain value for some wallets #1812
+
 ## [wallet-1.0.0]
 
 ### Summary
@@ -1237,3 +1254,4 @@ final transaction is created by calling `finish` on the builder.
 [v1.0.0-beta.5]: https://github.com/bitcoindevkit/bdk/releases/tag/v1.0.0-beta.5
 [v1.0.0-beta.6]: https://github.com/bitcoindevkit/bdk/releases/tag/v1.0.0-beta.6
 [wallet-1.0.0]: https://github.com/bitcoindevkit/bdk/releases/tag/wallet-1.0.0
+[wallet-1.1.0]: https://github.com/bitcoindevkit/bdk/releases/tag/wallet-1.1.0
