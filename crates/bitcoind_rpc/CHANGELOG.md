@@ -7,6 +7,12 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [bitcoind_rpc-0.18.0]
+
+### Added
+
+- Added `bip158` module as a means of updating `bdk_chain` structures #1614
+
 ## [bitcoind_rpc-0.17.1]
 
 ### Changed
@@ -14,3 +20,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minor updates to fix new rustc 1.83.0 clippy warnings #1776
 
 [bitcoind_rpc-0.17.1]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.17.1
+[bitcoind_rpc-0.18.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.18.0

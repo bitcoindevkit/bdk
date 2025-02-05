@@ -1,6 +1,6 @@
 [package]
 name = "bdk_electrum"
-version = "0.20.1"
+version = "0.21.0"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.4.1" }
-electrum-client = { version = "0.22", features = [ "proxy" ], default-features = false }
+electrum-client = { version = "0.23", features = [ "proxy" ], default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv" }
