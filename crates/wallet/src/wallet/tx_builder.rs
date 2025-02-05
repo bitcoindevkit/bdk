@@ -342,8 +342,9 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     ///
     /// This method returns errors in the following circumstances:
     ///
-    /// 1. The `psbt_input` does not contain a `witness_utxo` or `non_witness_utxo`.
-    /// 2. The data in `non_witness_utxo` does not match what is in `outpoint`.
+    /// 1. The provided outpoint is associated to a [`LocalOutput`].
+    /// 2. The `psbt_input` does not contain a `witness_utxo` or `non_witness_utxo`.
+    /// 3. The data in `non_witness_utxo` does not match what is in `outpoint`.
     ///
     /// Note unless you set [`only_witness_utxo`] any non-taproot `psbt_input` you pass to this
     /// method must have `non_witness_utxo` set otherwise you will get an error when [`finish`]
@@ -374,6 +375,10 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         satisfaction_weight: Weight,
         sequence: Sequence,
     ) -> Result<&mut Self, AddForeignUtxoError> {
+        // Avoid the inclusion of local utxos as foreign utxos
+        if self.wallet.tx_graph().get_txout(outpoint).is_some() {
+            return Err(AddForeignUtxoError::NotForeignUtxo);
+        };
         if psbt_input.witness_utxo.is_none() {
             match psbt_input.non_witness_utxo.as_ref() {
                 Some(tx) => {
@@ -711,6 +716,8 @@ pub enum AddForeignUtxoError {
     InvalidOutpoint(OutPoint),
     /// Foreign utxo missing witness_utxo or non_witness_utxo
     MissingUtxo,
+    /// UTxO is owned by wallet
+    NotForeignUtxo,
 }
 
 impl fmt::Display for AddForeignUtxoError {
@@ -730,6 +737,7 @@ impl fmt::Display for AddForeignUtxoError {
                 outpoint.txid, outpoint.vout,
             ),
             Self::MissingUtxo => write!(f, "Foreign utxo missing witness_utxo or non_witness_utxo"),
+            Self::NotForeignUtxo => write!(f, "UTxO is owned by wallet"),
         }
     }
 }
