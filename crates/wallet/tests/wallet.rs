@@ -1644,18 +1644,121 @@ fn test_calculate_fee_with_missing_foreign_utxo() {
 }
 
 #[test]
-fn test_add_foreign_utxo_invalid_psbt_input() {
+fn test_add_foreign_utxo_fails_without_psbt_input_prev_tx_data() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
-    let outpoint = wallet.list_unspent().next().expect("must exist").outpoint;
+    let address = Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
+        .expect("address")
+        .require_network(Network::Regtest)
+        .unwrap();
+    let tx0 = Transaction {
+        output: vec![TxOut {
+            value: Amount::from_sat(76_000),
+            script_pubkey: address.script_pubkey(),
+        }],
+        ..new_tx(0)
+    };
+    let external_outpoint = OutPoint {
+        txid: tx0.compute_txid(),
+        vout: 0,
+    };
     let foreign_utxo_satisfaction = wallet
         .public_descriptor(KeychainKind::External)
         .max_weight_to_satisfy()
         .unwrap();
 
     let mut builder = wallet.build_tx();
-    let result =
-        builder.add_foreign_utxo(outpoint, psbt::Input::default(), foreign_utxo_satisfaction);
-    assert!(matches!(result, Err(AddForeignUtxoError::MissingUtxo)));
+    let result = builder.add_foreign_utxo(
+        external_outpoint,
+        psbt::Input::default(),
+        foreign_utxo_satisfaction,
+    );
+    assert!(
+        matches!(result, Err(AddForeignUtxoError::MissingUtxo)),
+        "should fail when there is no data about the transaction creating the input"
+    );
+}
+
+#[test]
+fn test_add_foreign_utxo_fails_when_utxo_is_owned_by_wallet_with_prev_txout() {
+    let (mut wallet1, _) =
+        get_funded_wallet_single("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+
+    let utxo = wallet1.list_unspent().next().expect("must take!");
+    let foreign_utxo_satisfaction = wallet1
+        .public_descriptor(KeychainKind::External)
+        .max_weight_to_satisfy()
+        .unwrap();
+
+    let psbt_input = psbt::Input {
+        // Add txout
+        witness_utxo: Some(utxo.txout.clone()),
+        ..Default::default()
+    };
+
+    let mut builder = wallet1.build_tx();
+    let result = builder.add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction);
+    assert!(
+        matches!(result, Err(AddForeignUtxoError::NotForeignUtxo)),
+        "should fail when the outpoint provided is not foreign to the wallet"
+    );
+}
+
+#[test]
+fn test_add_foreign_utxo_fails_when_utxo_is_owned_by_wallet_with_full_prev_tx() {
+    let (mut wallet1, txid1) =
+        get_funded_wallet_single("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+
+    let utxo = wallet1.list_unspent().next().expect("must take!");
+    let full_tx = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
+    let foreign_utxo_satisfaction = wallet1
+        .public_descriptor(KeychainKind::External)
+        .max_weight_to_satisfy()
+        .unwrap();
+
+    let psbt_input = psbt::Input {
+        // Add full transaction
+        non_witness_utxo: Some(full_tx.as_ref().clone()),
+        ..Default::default()
+    };
+
+    let mut builder = wallet1.build_tx();
+    let result = builder.add_foreign_utxo(utxo.outpoint, psbt_input, foreign_utxo_satisfaction);
+    assert!(
+        matches!(result, Err(AddForeignUtxoError::NotForeignUtxo)),
+        "should fail when the outpoint provided is not foreign to the wallet"
+    );
+}
+
+#[test]
+fn test_add_foreign_utxo_fails_with_invalid_outpoint_vout() {
+    let (mut wallet1, txid1) =
+        get_funded_wallet_single("wpkh(cVbZ8ovhye9AoAHFsqobCf7LxbXDAECy9Kb8TZdfsDYMZGBUyCnm)");
+
+    let utxo = wallet1.list_unspent().next().expect("must take!");
+    let full_tx = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
+    let foreign_utxo_satisfaction = wallet1
+        .public_descriptor(KeychainKind::External)
+        .max_weight_to_satisfy()
+        .unwrap();
+
+    let psbt_input = psbt::Input {
+        non_witness_utxo: Some(full_tx.as_ref().clone()),
+        ..Default::default()
+    };
+
+    let mut builder = wallet1.build_tx();
+    let result = builder.add_foreign_utxo(
+        OutPoint {
+            vout: full_tx.output.len() as u32 + 1,
+            txid: utxo.outpoint.txid,
+        },
+        psbt_input,
+        foreign_utxo_satisfaction,
+    );
+    assert!(
+        matches!(result, Err(AddForeignUtxoError::InvalidOutpoint { .. })),
+        "should fail when the outpoint provided index is not one of the possible transaction vouts"
+    );
 }
 
 #[test]
@@ -1674,19 +1777,23 @@ fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
         .unwrap();
 
     let mut builder = wallet1.build_tx();
+
+    // Check we are activating the code path that should rise the error
     assert!(
-        builder
-            .add_foreign_utxo(
+        matches!(
+            builder.add_foreign_utxo(
                 utxo2.outpoint,
                 psbt::Input {
                     non_witness_utxo: Some(tx1.as_ref().clone()),
                     ..Default::default()
                 },
                 satisfaction_weight
-            )
-            .is_err(),
-        "should fail when outpoint doesn't match psbt_input"
+            ),
+            Err(AddForeignUtxoError::InvalidTxid { .. })
+        ),
+        "should fail when outpoint txid doesn't match psbt_input txout txid"
     );
+
     assert!(
         builder
             .add_foreign_utxo(
