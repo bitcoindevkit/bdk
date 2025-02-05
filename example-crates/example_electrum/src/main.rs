@@ -253,7 +253,10 @@ fn main() -> anyhow::Result<()> {
 
         let mut tx_graph_changeset = tx_graph::ChangeSet::default();
         if let Some(keychain_update) = keychain_update {
-            tx_graph_changeset.merge(graph.index.reveal_to_target_multi(&keychain_update).into());
+            tx_graph_changeset.merge(tx_graph::ChangeSet {
+                indexer: graph.index.reveal_to_target_multi(&keychain_update),
+                ..Default::default()
+            });
         }
         tx_graph_changeset.merge(graph.apply_update(tx_update));
 

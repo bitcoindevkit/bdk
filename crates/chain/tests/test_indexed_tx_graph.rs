@@ -6,8 +6,10 @@ mod common;
 use std::{collections::BTreeSet, sync::Arc};
 
 use bdk_chain::{
-    indexer::keychain_txout::KeychainTxOutIndex, local_chain::LocalChain, tx_graph, Balance,
-    ChainPosition, ConfirmationBlockTime, DescriptorExt, TxGraph,
+    indexer::keychain_txout::KeychainTxOutIndex,
+    local_chain::LocalChain,
+    tx_graph::{self, TxChangeSet},
+    Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt, TxGraph,
 };
 use bdk_testenv::{
     block_id, hash,
@@ -71,11 +73,13 @@ fn insert_relevant_txs() {
     let txs = [tx_c, tx_b, tx_a];
 
     let changeset = tx_graph::ChangeSet {
-        txs: txs.iter().cloned().map(Arc::new).collect(),
+        tx_data: TxChangeSet {
+            txs: txs.iter().cloned().map(Arc::new).collect(),
+            ..Default::default()
+        },
         indexer: keychain_txout::ChangeSet {
             last_revealed: [(descriptor.descriptor_id(), 9_u32)].into(),
         },
-        ..Default::default()
     };
 
     assert_eq!(
@@ -85,11 +89,10 @@ fn insert_relevant_txs() {
 
     // The initial changeset will also contain info about the keychain we added
     let initial_changeset = tx_graph::ChangeSet {
-        txs: changeset.txs,
+        tx_data: changeset.tx_data,
         indexer: keychain_txout::ChangeSet {
             last_revealed: changeset.indexer.last_revealed,
         },
-        ..Default::default()
     };
 
     assert_eq!(graph.initial_changeset(), initial_changeset);

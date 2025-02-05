@@ -8,7 +8,7 @@ use bdk_chain::{
     bitcoin::Network,
     keychain_txout::FullScanRequestBuilderExt,
     spk_client::{FullScanRequest, SyncRequest},
-    Merge,
+    tx_graph, Merge,
 };
 use bdk_esplora::{esplora_client, EsploraExt};
 use example_cli::{
@@ -183,9 +183,12 @@ fn main() -> anyhow::Result<()> {
                     let index_changeset = graph
                         .index
                         .reveal_to_target_multi(&update.last_active_indices);
-                    let mut indexed_tx_graph_changeset = graph.apply_update(update.tx_update);
-                    indexed_tx_graph_changeset.merge(index_changeset.into());
-                    indexed_tx_graph_changeset
+                    let mut tx_graph_changeset = graph.apply_update(update.tx_update);
+                    tx_graph_changeset.merge(tx_graph::ChangeSet {
+                        indexer: index_changeset,
+                        ..Default::default()
+                    });
+                    tx_graph_changeset
                 },
             )
         }

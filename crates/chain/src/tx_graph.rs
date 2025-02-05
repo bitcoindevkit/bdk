@@ -631,7 +631,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                         );
                     }
                     None => {
-                        changeset.txouts.insert(outpoint, txout);
+                        changeset.tx_data.txouts.insert(outpoint, txout);
                     }
                 }
             }
@@ -669,7 +669,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                         .insert(txid);
                 }
                 *partial_tx = TxNodeInternal::Whole(tx.clone());
-                changeset.txs.insert(tx);
+                changeset.tx_data.txs.insert(tx);
             }
         }
 
@@ -734,7 +734,10 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
         let mut changeset = ChangeSet::default();
 
         for (tx, _) in &txs {
-            changeset.merge(self.index.index_tx(tx).into());
+            changeset.merge(ChangeSet {
+                indexer: self.index.index_tx(tx),
+                ..Default::default()
+            });
         }
 
         for (tx, anchors) in txs {
@@ -830,7 +833,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                 }
                 self.txs_by_highest_conf_heights.insert((new_top_h, txid));
             }
-            changeset.anchors.insert((anchor, txid));
+            changeset.tx_data.anchors.insert((anchor, txid));
         }
         changeset
     }
@@ -862,7 +865,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                 self.txs_by_last_seen.remove(&(old_last_seen, txid));
             }
             self.txs_by_last_seen.insert((seen_at, txid));
-            changeset.last_seen.insert(txid, seen_at);
+            changeset.tx_data.last_seen.insert(txid, seen_at);
         }
         changeset
     }
@@ -919,12 +922,16 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
         let mut changeset = ChangeSet::<A, X::ChangeSet>::default();
         for (&txid, node) in &self.txs {
             match node {
-                TxNodeInternal::Whole(tx) => {
-                    changeset.merge(self.index.index_tx(tx.as_ref()).into())
-                }
+                TxNodeInternal::Whole(tx) => changeset.merge(ChangeSet {
+                    indexer: self.index.index_tx(tx.as_ref()),
+                    ..Default::default()
+                }),
                 TxNodeInternal::Partial(txouts) => {
                     for (op, txout) in TxNodeInternal::iter_txouts(txid, txouts) {
-                        changeset.merge(self.index.index_txout(op, txout).into());
+                        changeset.merge(ChangeSet {
+                            indexer: self.index.index_txout(op, txout),
+                            ..Default::default()
+                        });
                     }
                 }
             };
@@ -934,7 +941,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
 
     /// Determines the [`ChangeSet`] between `self` and an empty [`TxGraph`].
     pub fn initial_changeset(&self) -> ChangeSet<A, X::ChangeSet> {
-        ChangeSet {
+        let tx_data = TxChangeSet {
             txs: self.full_txs().map(|tx_node| tx_node.tx).collect(),
             txouts: self
                 .floating_txouts()
@@ -942,6 +949,9 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                 .collect(),
             anchors: self.rev_anchors(),
             last_seen: self.last_seen.clone().into_iter().collect(),
+        };
+        ChangeSet {
+            tx_data,
             indexer: self.index.initial_changeset(),
         }
     }
@@ -949,10 +959,10 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
     /// Indexes the txs and txouts of `changeset` and merges the resulting changes.
     fn index_changeset(&mut self, changeset: &mut ChangeSet<A, X::ChangeSet>) {
         let indexer = &mut changeset.indexer;
-        for tx in &changeset.txs {
+        for tx in &changeset.tx_data.txs {
             indexer.merge(self.index.index_tx(tx));
         }
-        for (&outpoint, txout) in &changeset.txouts {
+        for (&outpoint, txout) in &changeset.tx_data.txouts {
             indexer.merge(self.index.index_txout(outpoint, txout));
         }
     }
@@ -963,23 +973,17 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
         // transactions so we do that first.
         self.index.apply_changeset(changeset.indexer);
 
-        for tx in &changeset.txs {
-            self.index.index_tx(tx);
-        }
-        for (&outpoint, txout) in &changeset.txouts {
-            self.index.index_txout(outpoint, txout);
-        }
-
-        for tx in changeset.txs {
+        let tx_changeset = changeset.tx_data;
+        for tx in tx_changeset.txs {
             let _ = self.insert_tx(tx);
         }
-        for (outpoint, txout) in changeset.txouts {
+        for (outpoint, txout) in tx_changeset.txouts {
             let _ = self.insert_txout(outpoint, txout);
         }
-        for (anchor, txid) in changeset.anchors {
+        for (anchor, txid) in tx_changeset.anchors {
             let _ = self.insert_anchor(txid, anchor);
         }
-        for (txid, seen_at) in changeset.last_seen {
+        for (txid, seen_at) in tx_changeset.last_seen {
             let _ = self.insert_seen_at(txid, seen_at);
         }
     }
@@ -1320,7 +1324,10 @@ where
         };
         let mut changeset = ChangeSet::default();
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
-            changeset.merge(self.index.index_tx(tx).into());
+            changeset.merge(ChangeSet {
+                indexer: self.index.index_tx(tx),
+                ..Default::default()
+            });
             if self.index.is_tx_relevant(tx) {
                 let anchor = TxPosInBlock {
                     block,
@@ -1348,7 +1355,10 @@ where
         };
         let mut changeset = ChangeSet::default();
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
-            changeset.merge(self.index.index_tx(tx).into());
+            changeset.merge(ChangeSet {
+                indexer: self.index.index_tx(tx),
+                ..Default::default()
+            });
             let anchor = TxPosInBlock {
                 block: &block,
                 block_id,
@@ -1361,23 +1371,36 @@ where
     }
 }
 
-/// The [`ChangeSet`] represents changes to a [`TxGraph`].
+impl<A, X> AsRef<TxGraph<A, X>> for TxGraph<A, X> {
+    fn as_ref(&self) -> &TxGraph<A, X> {
+        self
+    }
+}
+
+/// The [`TxChangeSet`] represents changes to transaction data in [`TxGraph`].
 ///
-/// Since [`TxGraph`] is monotone, the "changeset" can only contain transactions to be added and
+/// Transaction data includes full transactions, floating txouts (for fee/feerate calculations),
+/// [`Anchor`]s, and timestamps of when the transaction was seen in the mempool (currently only
+/// `last-seen`).
+///
+/// Transaction data is monotone. The `TxChangeSet` can only contain transactions to be added and
 /// not removed.
 ///
-/// Refer to [module-level documentation](self) for more.
+/// Refer to [`ChangeSet`] which also includes changes to the internal [`Indexer`] of [`TxGraph`].
+/// Refer to the [module-level documentation](crate::tx_graph) for more.
+///
+/// [`TxGraph`]: crate::TxGraph
+/// [`Indexer`]: crate::Indexer
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
     serde(bound(
-        deserialize = "A: Ord + serde::Deserialize<'de>, X: serde::Deserialize<'de>",
-        serialize = "A: Ord + serde::Serialize, X: serde::Serialize",
+        deserialize = "A: Ord + serde::Deserialize<'de>",
+        serialize = "A: Ord + serde::Serialize",
     ))
 )]
-#[must_use]
-pub struct ChangeSet<A = (), X = ()> {
+pub struct TxChangeSet<A = ()> {
     /// Added transactions.
     pub txs: BTreeSet<Arc<Transaction>>,
     /// Added txouts.
@@ -1386,35 +1409,20 @@ pub struct ChangeSet<A = (), X = ()> {
     pub anchors: BTreeSet<(A, Txid)>,
     /// Added last-seen unix timestamps of transactions.
     pub last_seen: BTreeMap<Txid, u64>,
-    /// [`Indexer`] changes
-    pub indexer: X,
 }
 
-impl<A, X: Default> Default for ChangeSet<A, X> {
+impl<A> Default for TxChangeSet<A> {
     fn default() -> Self {
         Self {
             txs: Default::default(),
             txouts: Default::default(),
             anchors: Default::default(),
             last_seen: Default::default(),
-            indexer: Default::default(),
         }
     }
 }
 
-impl<A, X> From<X> for ChangeSet<A, X> {
-    fn from(indexer: X) -> Self {
-        Self {
-            indexer,
-            txs: Default::default(),
-            txouts: Default::default(),
-            anchors: Default::default(),
-            last_seen: Default::default(),
-        }
-    }
-}
-
-impl<A, X> ChangeSet<A, X> {
+impl<A> TxChangeSet<A> {
     /// Iterates over all outpoints contained within [`ChangeSet`].
     pub fn txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
         self.txs
@@ -1448,7 +1456,27 @@ impl<A, X> ChangeSet<A, X> {
     }
 }
 
-impl<A: Ord, X: Merge> Merge for ChangeSet<A, X> {
+impl<A: Ord> TxChangeSet<A> {
+    /// Transform the [`TxChangeSet`] to have [`Anchor`]s of another type.
+    ///
+    /// This takes in a closure of signature `FnMut(A) -> A2` which is called for each [`Anchor`] to
+    /// transform it.
+    pub fn map_anchors<A2: Ord, F>(self, mut f: F) -> TxChangeSet<A2>
+    where
+        F: FnMut(A) -> A2,
+    {
+        TxChangeSet {
+            txs: self.txs,
+            txouts: self.txouts,
+            anchors: BTreeSet::<(A2, Txid)>::from_iter(
+                self.anchors.into_iter().map(|(a, txid)| (f(a), txid)),
+            ),
+            last_seen: self.last_seen,
+        }
+    }
+}
+
+impl<A: Ord> Merge for TxChangeSet<A> {
     fn merge(&mut self, other: Self) {
         // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
         // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
@@ -1464,7 +1492,6 @@ impl<A: Ord, X: Merge> Merge for ChangeSet<A, X> {
                 .filter(|(txid, update_ls)| self.last_seen.get(txid) < Some(update_ls))
                 .collect::<Vec<_>>(),
         );
-        self.indexer.merge(other.indexer);
     }
 
     fn is_empty(&self) -> bool {
@@ -1472,37 +1499,77 @@ impl<A: Ord, X: Merge> Merge for ChangeSet<A, X> {
             && self.txouts.is_empty()
             && self.anchors.is_empty()
             && self.last_seen.is_empty()
-            && self.indexer.is_empty()
     }
 }
 
-impl<A: Ord, X> ChangeSet<A, X> {
+/// The [`ChangeSet`] represents changes to a [`TxGraph`] and it's internal [`Indexer`].
+///
+/// Refer to the [module-level documentation](crate::tx_graph) for more.
+///
+/// [`TxGraph`]: crate::TxGraph
+/// [`Indexer`]: crate::Indexer
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Deserialize, serde::Serialize),
+    serde(bound(
+        deserialize = "A: Ord + serde::Deserialize<'de>, XC: serde::Deserialize<'de>",
+        serialize = "A: Ord + serde::Serialize, XC: serde::Serialize",
+    ))
+)]
+#[must_use]
+pub struct ChangeSet<A = (), XC = ()> {
+    /// Changes to transaction data.
+    #[cfg_attr(feature = "serde", serde(alias = "tx_graph"))]
+    pub tx_data: TxChangeSet<A>,
+    /// Changes to the indexer.
+    pub indexer: XC,
+}
+
+impl<A, XC: Default> Default for ChangeSet<A, XC> {
+    fn default() -> Self {
+        Self {
+            tx_data: Default::default(),
+            indexer: Default::default(),
+        }
+    }
+}
+
+impl<A, XC: Default> From<TxChangeSet<A>> for ChangeSet<A, XC> {
+    fn from(tx_graph: TxChangeSet<A>) -> Self {
+        Self {
+            tx_data: tx_graph,
+            ..Default::default()
+        }
+    }
+}
+
+impl<A: Ord, XC> ChangeSet<A, XC> {
     /// Transform the [`ChangeSet`] to have [`Anchor`]s of another type.
     ///
     /// This takes in a closure of signature `FnMut(A) -> A2` which is called for each [`Anchor`] to
     /// transform it.
-    pub fn map_anchors<A2: Ord, F>(self, mut f: F) -> ChangeSet<A2, X>
+    pub fn map_anchors<A2: Ord, F>(self, f: F) -> ChangeSet<A2, XC>
     where
         F: FnMut(A) -> A2,
     {
         ChangeSet {
-            txs: self.txs,
-            txouts: self.txouts,
-            anchors: BTreeSet::<(A2, Txid)>::from_iter(
-                self.anchors.into_iter().map(|(a, txid)| (f(a), txid)),
-            ),
-            last_seen: self.last_seen,
+            tx_data: self.tx_data.map_anchors(f),
             indexer: self.indexer,
         }
     }
 }
 
-impl<A, X> AsRef<TxGraph<A, X>> for TxGraph<A, X> {
-    fn as_ref(&self) -> &TxGraph<A, X> {
-        self
+impl<A: Ord, I: Merge> Merge for ChangeSet<A, I> {
+    fn merge(&mut self, other: Self) {
+        self.tx_data.merge(other.tx_data);
+        self.indexer.merge(other.indexer);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.tx_data.is_empty() && self.indexer.is_empty()
     }
 }
-
 /// An iterator that traverses ancestors of a given root transaction.
 ///
 /// The iterator excludes partial transactions.

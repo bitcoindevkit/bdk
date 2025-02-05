@@ -1,3 +1,4 @@
+use bdk_chain::tx_graph;
 use serde_json::json;
 use std::cmp;
 use std::collections::HashMap;
@@ -23,7 +24,7 @@ use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
-    tx_graph, ChainOracle, DescriptorExt, FullTxOut, Merge, TxGraph,
+    ChainOracle, DescriptorExt, FullTxOut, Merge, TxGraph,
 };
 use bdk_coin_select::{
     metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
@@ -463,7 +464,10 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                         spk_chooser(index, Keychain::External).expect("Must exist");
                     let db = &mut *db.lock().unwrap();
                     db.append(&ChangeSet {
-                        tx_graph: index_changeset.into(),
+                        tx_graph: tx_graph::ChangeSet {
+                            indexer: index_changeset,
+                            ..Default::default()
+                        },
                         ..Default::default()
                     })?;
                     let addr = Address::from_script(spk.as_script(), network)?;
@@ -625,7 +629,10 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     {
                         let db = &mut *db.lock().unwrap();
                         db.append(&ChangeSet {
-                            tx_graph: indexer.into(),
+                            tx_graph: tx_graph::ChangeSet {
+                                indexer,
+                                ..Default::default()
+                            },
                             ..Default::default()
                         })?;
                     }

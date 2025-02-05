@@ -189,7 +189,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         assert!(emitter.next_block()?.is_none());
 
         let mempool_txs = emitter.mempool()?;
-        let tx_graph_changeset = tx_graph.batch_insert_unconfirmed(mempool_txs);
+        let tx_graph_changeset = tx_graph.batch_insert_unconfirmed(mempool_txs).tx_data;
         assert_eq!(
             tx_graph_changeset
                 .txs
@@ -221,7 +221,9 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         let emission = emitter.next_block()?.expect("must get mined block");
         let height = emission.block_height();
         let _ = chain.apply_update(emission.checkpoint)?;
-        let tx_graph_changeset = tx_graph.apply_block_relevant(&emission.block, height);
+        let tx_graph_changeset = tx_graph
+            .apply_block_relevant(&emission.block, height)
+            .tx_data;
         assert!(tx_graph_changeset.txs.is_empty());
         assert!(tx_graph_changeset.txouts.is_empty());
         assert_eq!(tx_graph_changeset.anchors, exp_anchors);
