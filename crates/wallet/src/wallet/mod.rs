@@ -28,7 +28,7 @@ use bdk_chain::{
         FullScanRequest, FullScanRequestBuilder, FullScanResponse, SyncRequest, SyncRequestBuilder,
         SyncResponse,
     },
-    tx_graph::{self, CalculateFeeError, CanonicalTx, TxGraph, TxUpdate},
+    tx_graph::{CalculateFeeError, CanonicalTx, TxGraph, TxUpdate},
     BlockId, ChainPosition, ConfirmationBlockTime, DescriptorExt, FullTxOut, Indexed, Indexer,
     Merge,
 };
@@ -600,7 +600,7 @@ impl Wallet {
         index.apply_changeset(changeset.indexer);
 
         let mut graph = TxGraph::new(());
-        graph.apply_changeset(changeset.tx_graph);
+        graph.apply_changeset(changeset.tx_graph.into());
         let mut indexed_graph = graph.swap_indexer(index).0;
         let _ = indexed_graph.reindex();
 
@@ -2457,10 +2457,8 @@ impl Wallet {
     }
 }
 
-impl AsRef<tx_graph::TxGraph<ConfirmationBlockTime, KeychainTxOutIndex<KeychainKind>>> for Wallet {
-    fn as_ref(
-        &self,
-    ) -> &tx_graph::TxGraph<ConfirmationBlockTime, KeychainTxOutIndex<KeychainKind>> {
+impl AsRef<TxGraph<ConfirmationBlockTime, KeychainTxOutIndex<KeychainKind>>> for Wallet {
+    fn as_ref(&self) -> &TxGraph<ConfirmationBlockTime, KeychainTxOutIndex<KeychainKind>> {
         &self.tx_graph
     }
 }

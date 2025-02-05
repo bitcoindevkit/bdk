@@ -1,4 +1,8 @@
-use bdk_chain::{keychain_txout, local_chain, tx_graph, ConfirmationBlockTime, Merge};
+use bdk_chain::{
+    keychain_txout, local_chain,
+    tx_graph::{changeset as tx, changeset::indexed},
+    ConfirmationBlockTime, Merge,
+};
 use miniscript::{Descriptor, DescriptorPublicKey};
 
 /// A changeset for [`Wallet`](crate::Wallet).
@@ -12,11 +16,8 @@ pub struct ChangeSet {
     pub network: Option<bitcoin::Network>,
     /// Changes to the [`LocalChain`](local_chain::LocalChain).
     pub local_chain: local_chain::ChangeSet,
-    /// Changes to [`TxGraph`](tx_graph::TxGraph).
-    ///
-    /// The `indexer` field of this changeset can be ignored, as it is always the unit
-    /// type. The actual [`Self::indexer`] changeset is managed separately.
-    pub tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime>,
+    /// Changes to [`TxGraph`](bdk_chain::TxGraph).
+    pub tx_graph: tx::ChangeSet<ConfirmationBlockTime>,
     /// Changes to [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex).
     pub indexer: keychain_txout::ChangeSet,
 }
@@ -90,9 +91,9 @@ impl ChangeSet {
             &[&Self::schema_v0()],
         )?;
 
-        bdk_chain::local_chain::ChangeSet::init_sqlite_tables(db_tx)?;
-        bdk_chain::tx_graph::ChangeSet::<ConfirmationBlockTime>::init_sqlite_tables(db_tx)?;
-        bdk_chain::keychain_txout::ChangeSet::init_sqlite_tables(db_tx)?;
+        local_chain::ChangeSet::init_sqlite_tables(db_tx)?;
+        tx::ChangeSet::<ConfirmationBlockTime>::init_sqlite_tables(db_tx)?;
+        keychain_txout::ChangeSet::init_sqlite_tables(db_tx)?;
 
         Ok(())
     }
@@ -126,7 +127,7 @@ impl ChangeSet {
         }
 
         changeset.local_chain = local_chain::ChangeSet::from_sqlite(db_tx)?;
-        changeset.tx_graph = tx_graph::ChangeSet::<_>::from_sqlite(db_tx)?;
+        changeset.tx_graph = tx::ChangeSet::<_>::from_sqlite(db_tx)?;
         changeset.indexer = keychain_txout::ChangeSet::from_sqlite(db_tx)?;
 
         Ok(changeset)
@@ -189,26 +190,18 @@ impl From<local_chain::ChangeSet> for ChangeSet {
     }
 }
 
-impl From<tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>> for ChangeSet {
-    fn from(
-        tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
-    ) -> Self {
+impl From<indexed::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>> for ChangeSet {
+    fn from(value: indexed::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>) -> Self {
         Self {
-            tx_graph: tx_graph::ChangeSet {
-                txs: tx_graph.txs,
-                txouts: tx_graph.txouts,
-                anchors: tx_graph.anchors,
-                last_seen: tx_graph.last_seen,
-                ..Default::default()
-            },
-            indexer: tx_graph.indexer,
+            tx_graph: value.tx_graph,
+            indexer: value.indexer,
             ..Default::default()
         }
     }
 }
 
-impl From<tx_graph::ChangeSet<ConfirmationBlockTime>> for ChangeSet {
-    fn from(tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime>) -> Self {
+impl From<tx::ChangeSet<ConfirmationBlockTime>> for ChangeSet {
+    fn from(tx_graph: tx::ChangeSet<ConfirmationBlockTime>) -> Self {
         Self {
             tx_graph,
             ..Default::default()

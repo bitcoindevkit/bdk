@@ -4,7 +4,8 @@ use bdk_chain::{
     bitcoin::Network,
     collections::BTreeSet,
     spk_client::{FullScanRequest, SyncRequest},
-    tx_graph, Merge,
+    tx_graph::changeset::indexed,
+    Merge,
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
@@ -251,7 +252,7 @@ fn main() -> anyhow::Result<()> {
 
         let chain_changeset = chain.apply_update(chain_update.expect("request has chain tip"))?;
 
-        let mut tx_graph_changeset = tx_graph::ChangeSet::default();
+        let mut tx_graph_changeset = indexed::ChangeSet::default();
         if let Some(keychain_update) = keychain_update {
             tx_graph_changeset.merge(graph.index.reveal_to_target_multi(&keychain_update).into());
         }

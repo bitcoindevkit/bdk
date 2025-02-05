@@ -113,11 +113,14 @@ use alloc::vec::Vec;
 use bdk_core::ConfirmationBlockTime;
 pub use bdk_core::TxUpdate;
 use bitcoin::{Amount, Block, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
+use changeset::{self as tx, indexed::ChangeSet};
 use core::fmt::{self, Formatter};
 use core::{
     convert::Infallible,
     ops::{Deref, RangeInclusive},
 };
+
+pub mod changeset;
 
 impl<A: Ord, X> From<TxGraph<A, X>> for TxUpdate<A> {
     fn from(graph: TxGraph<A, X>) -> Self {
@@ -631,7 +634,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                         );
                     }
                     None => {
-                        changeset.txouts.insert(outpoint, txout);
+                        changeset.tx_graph.txouts.insert(outpoint, txout);
                     }
                 }
             }
@@ -669,7 +672,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                         .insert(txid);
                 }
                 *partial_tx = TxNodeInternal::Whole(tx.clone());
-                changeset.txs.insert(tx);
+                changeset.tx_graph.txs.insert(tx);
             }
         }
 
@@ -830,7 +833,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                 }
                 self.txs_by_highest_conf_heights.insert((new_top_h, txid));
             }
-            changeset.anchors.insert((anchor, txid));
+            changeset.tx_graph.anchors.insert((anchor, txid));
         }
         changeset
     }
@@ -862,7 +865,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                 self.txs_by_last_seen.remove(&(old_last_seen, txid));
             }
             self.txs_by_last_seen.insert((seen_at, txid));
-            changeset.last_seen.insert(txid, seen_at);
+            changeset.tx_graph.last_seen.insert(txid, seen_at);
         }
         changeset
     }
@@ -970,7 +973,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
 
     /// Determines the [`ChangeSet`] between `self` and an empty [`TxGraph`].
     pub fn initial_changeset(&self) -> ChangeSet<A, X::ChangeSet> {
-        ChangeSet {
+        let tx_graph = tx::ChangeSet {
             txs: self.full_txs().map(|tx_node| tx_node.tx).collect(),
             txouts: self
                 .floating_txouts()
@@ -978,6 +981,9 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
                 .collect(),
             anchors: self.rev_anchors(),
             last_seen: self.last_seen.clone().into_iter().collect(),
+        };
+        ChangeSet {
+            tx_graph,
             indexer: self.index.initial_changeset(),
         }
     }
@@ -985,10 +991,10 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
     /// Indexes the txs and txouts of `changeset` and merges the resulting changes.
     fn index_changeset(&mut self, changeset: &mut ChangeSet<A, X::ChangeSet>) {
         let indexer = &mut changeset.indexer;
-        for tx in &changeset.txs {
+        for tx in &changeset.tx_graph.txs {
             indexer.merge(self.index.index_tx(tx));
         }
-        for (&outpoint, txout) in &changeset.txouts {
+        for (&outpoint, txout) in &changeset.tx_graph.txouts {
             indexer.merge(self.index.index_txout(outpoint, txout));
         }
     }
@@ -999,6 +1005,7 @@ impl<A: Anchor, X: Indexer> TxGraph<A, X> {
         // transactions so we do that first.
         self.index.apply_changeset(changeset.indexer);
 
+        let changeset = changeset.tx_graph;
         for tx in &changeset.txs {
             self.index.index_tx(tx);
         }
@@ -1394,142 +1401,6 @@ where
             changeset.merge(self.insert_anchor(tx.compute_txid(), anchor.into()));
         }
         changeset
-    }
-}
-
-/// The [`ChangeSet`] represents changes to a [`TxGraph`].
-///
-/// Since [`TxGraph`] is monotone, the "changeset" can only contain transactions to be added and
-/// not removed.
-///
-/// Refer to [module-level documentation](self) for more.
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(bound(
-        deserialize = "A: Ord + serde::Deserialize<'de>, X: serde::Deserialize<'de>",
-        serialize = "A: Ord + serde::Serialize, X: serde::Serialize",
-    ))
-)]
-#[must_use]
-pub struct ChangeSet<A = (), X = ()> {
-    /// Added transactions.
-    pub txs: BTreeSet<Arc<Transaction>>,
-    /// Added txouts.
-    pub txouts: BTreeMap<OutPoint, TxOut>,
-    /// Added anchors.
-    pub anchors: BTreeSet<(A, Txid)>,
-    /// Added last-seen unix timestamps of transactions.
-    pub last_seen: BTreeMap<Txid, u64>,
-    /// [`Indexer`] changes
-    pub indexer: X,
-}
-
-impl<A, X: Default> Default for ChangeSet<A, X> {
-    fn default() -> Self {
-        Self {
-            txs: Default::default(),
-            txouts: Default::default(),
-            anchors: Default::default(),
-            last_seen: Default::default(),
-            indexer: Default::default(),
-        }
-    }
-}
-
-impl<A, X> From<X> for ChangeSet<A, X> {
-    fn from(indexer: X) -> Self {
-        Self {
-            indexer,
-            txs: Default::default(),
-            txouts: Default::default(),
-            anchors: Default::default(),
-            last_seen: Default::default(),
-        }
-    }
-}
-
-impl<A, X> ChangeSet<A, X> {
-    /// Iterates over all outpoints contained within [`ChangeSet`].
-    pub fn txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
-        self.txs
-            .iter()
-            .flat_map(|tx| {
-                tx.output
-                    .iter()
-                    .enumerate()
-                    .map(move |(vout, txout)| (OutPoint::new(tx.compute_txid(), vout as _), txout))
-            })
-            .chain(self.txouts.iter().map(|(op, txout)| (*op, txout)))
-    }
-
-    /// Iterates over the heights of that the new transaction anchors in this changeset.
-    ///
-    /// This is useful if you want to find which heights you need to fetch data about in order to
-    /// confirm or exclude these anchors.
-    pub fn anchor_heights(&self) -> impl Iterator<Item = u32> + '_
-    where
-        A: Anchor,
-    {
-        let mut dedup = None;
-        self.anchors
-            .iter()
-            .map(|(a, _)| a.anchor_block().height)
-            .filter(move |height| {
-                let duplicate = dedup == Some(*height);
-                dedup = Some(*height);
-                !duplicate
-            })
-    }
-}
-
-impl<A: Ord, X: Merge> Merge for ChangeSet<A, X> {
-    fn merge(&mut self, other: Self) {
-        // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
-        // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
-        self.txs.extend(other.txs);
-        self.txouts.extend(other.txouts);
-        self.anchors.extend(other.anchors);
-
-        // last_seen timestamps should only increase
-        self.last_seen.extend(
-            other
-                .last_seen
-                .into_iter()
-                .filter(|(txid, update_ls)| self.last_seen.get(txid) < Some(update_ls))
-                .collect::<Vec<_>>(),
-        );
-        self.indexer.merge(other.indexer);
-    }
-
-    fn is_empty(&self) -> bool {
-        self.txs.is_empty()
-            && self.txouts.is_empty()
-            && self.anchors.is_empty()
-            && self.last_seen.is_empty()
-            && self.indexer.is_empty()
-    }
-}
-
-impl<A: Ord, X> ChangeSet<A, X> {
-    /// Transform the [`ChangeSet`] to have [`Anchor`]s of another type.
-    ///
-    /// This takes in a closure of signature `FnMut(A) -> A2` which is called for each [`Anchor`] to
-    /// transform it.
-    pub fn map_anchors<A2: Ord, F>(self, mut f: F) -> ChangeSet<A2, X>
-    where
-        F: FnMut(A) -> A2,
-    {
-        ChangeSet {
-            txs: self.txs,
-            txouts: self.txouts,
-            anchors: BTreeSet::<(A2, Txid)>::from_iter(
-                self.anchors.into_iter().map(|(a, txid)| (f(a), txid)),
-            ),
-            last_seen: self.last_seen,
-            indexer: self.indexer,
-        }
     }
 }
 

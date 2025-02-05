@@ -23,7 +23,8 @@ use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
-    tx_graph, ChainOracle, DescriptorExt, FullTxOut, Merge, TxGraph,
+    tx_graph::changeset::indexed,
+    ChainOracle, DescriptorExt, FullTxOut, Merge, TxGraph,
 };
 use bdk_coin_select::{
     metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
@@ -51,7 +52,7 @@ pub struct ChangeSet {
     /// Changes to the [`LocalChain`].
     pub local_chain: local_chain::ChangeSet,
     /// Changes to [`TxGraph`].
-    pub tx_graph: tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
+    pub tx_graph: indexed::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>,
 }
 
 #[derive(Parser)]
