@@ -8,8 +8,11 @@ use bdk_chain::{
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
 use core::time::Duration;
-use std::collections::{BTreeSet, HashSet};
 use std::str::FromStr;
+use std::{
+    collections::{BTreeSet, HashSet},
+    sync::Arc,
+};
 
 // Batch size for `sync_with_electrum`.
 const BATCH_SIZE: usize = 5;
@@ -674,5 +677,44 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
         // Check that the calculated fee matches the fee from the transaction data.
         assert_eq!(fee, Amount::from_sat(tx_fee)); // 1650sat
     }
+    Ok(())
+}
+
+#[test]
+fn borrowed() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let _client = BdkElectrumClient::new(electrum_client);
+    drop(_client);
+
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let _client = BdkElectrumClient::new(&electrum_client);
+    drop(_client);
+
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let _client = BdkElectrumClient::new(Arc::new(electrum_client));
+    drop(_client);
+
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let _client = BdkElectrumClient::new(Box::new(electrum_client));
+    drop(_client);
+
+    let electrum_client =
+        electrum_client::raw_client::RawClient::new(&env.electrsd.electrum_url, None)?;
+    let _client =
+        BdkElectrumClient::<_, electrum_client::raw_client::RawClient<_>>::with_custom_client(
+            electrum_client,
+        );
+    drop(_client);
+
+    let electrum_client =
+        electrum_client::raw_client::RawClient::new(&env.electrsd.electrum_url, None)?;
+    let _client =
+        BdkElectrumClient::<_, electrum_client::raw_client::RawClient<_>>::with_custom_client(
+            Box::new(electrum_client),
+        );
+    drop(_client);
+
     Ok(())
 }

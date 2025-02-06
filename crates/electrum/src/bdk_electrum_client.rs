@@ -6,7 +6,9 @@ use bdk_core::{
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::{
+    borrow::Borrow,
     collections::HashSet,
+    marker::PhantomData,
     sync::{Arc, Mutex},
 };
 
@@ -16,22 +18,36 @@ const CHAIN_SUFFIX_LENGTH: u32 = 8;
 /// Wrapper around an [`electrum_client::ElectrumApi`] which includes an internal in-memory
 /// transaction cache to avoid re-fetching already downloaded transactions.
 #[derive(Debug)]
-pub struct BdkElectrumClient<E> {
+pub struct BdkElectrumClient<E, C = electrum_client::Client> {
     /// The internal [`electrum_client::ElectrumApi`]
     pub inner: E,
     /// The transaction cache
     tx_cache: Mutex<HashMap<Txid, Arc<Transaction>>>,
     /// The header cache
     block_header_cache: Mutex<HashMap<u32, Header>>,
+    _marker: PhantomData<C>,
 }
 
-impl<E: ElectrumApi> BdkElectrumClient<E> {
-    /// Creates a new bdk client from a [`electrum_client::ElectrumApi`]
+impl<E: Borrow<electrum_client::Client>> BdkElectrumClient<E, electrum_client::Client> {
+    /// Creates a new bdk client from any type that can be borrowed as [`electrum_client::Client`].
     pub fn new(client: E) -> Self {
         Self {
             inner: client,
             tx_cache: Default::default(),
             block_header_cache: Default::default(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<E: Borrow<C>, C: ElectrumApi> BdkElectrumClient<E, C> {
+    /// Creates a new bdk client from any type that implements [`electrum_client::ElectrumApi`].
+    pub fn with_custom_client(client: E) -> Self {
+        Self {
+            inner: client,
+            tx_cache: Default::default(),
+            block_header_cache: Default::default(),
+            _marker: PhantomData,
         }
     }
 
@@ -58,7 +74,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         drop(tx_cache);
 
-        let tx = Arc::new(self.inner.transaction_get(&txid)?);
+        let tx = Arc::new(self.inner.borrow().transaction_get(&txid)?);
 
         self.tx_cache.lock().unwrap().insert(txid, Arc::clone(&tx));
 
@@ -82,7 +98,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
     /// Update a block header at given `height`. Returns the updated header.
     fn update_header(&self, height: u32) -> Result<Header, Error> {
-        let header = self.inner.block_header(height as usize)?;
+        let header = self.inner.borrow().block_header(height as usize)?;
 
         self.block_header_cache
             .lock()
@@ -96,7 +112,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ///
     /// This is a re-export of [`ElectrumApi::transaction_broadcast`].
     pub fn transaction_broadcast(&self, tx: &Transaction) -> Result<Txid, Error> {
-        self.inner.transaction_broadcast(tx)
+        self.inner.borrow().transaction_broadcast(tx)
     }
 
     /// Full scan the keychain scripts specified with the blockchain (via an Electrum client) and
@@ -130,7 +146,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut request: FullScanRequest<K> = request.into();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(self.inner.borrow(), chain_tip)?),
             None => None,
         };
 
@@ -198,7 +214,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut request: SyncRequest<I> = request.into();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(self.inner.borrow(), chain_tip)?),
             None => None,
         };
 
@@ -260,6 +276,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
             let spk_histories = self
                 .inner
+                .borrow()
                 .batch_script_get_history(spks.iter().map(|(_, s)| s.as_script()))?;
 
             for ((spk_index, _spk), spk_history) in spks.into_iter().zip(spk_histories) {
@@ -304,7 +321,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             // add to our sparsechain `update`:
             let mut has_residing = false; // tx in which the outpoint resides
             let mut has_spending = false; // tx that spends the outpoint
-            for res in self.inner.script_get_history(&op_txout.script_pubkey)? {
+            for res in self
+                .inner
+                .borrow()
+                .script_get_history(&op_txout.script_pubkey)?
+            {
                 if has_residing && has_spending {
                     break;
                 }
@@ -356,6 +377,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             // call to get confirmation status of our transaction
             if let Some(r) = self
                 .inner
+                .borrow()
                 .script_get_history(spk)?
                 .into_iter()
                 .find(|r| r.tx_hash == txid)
@@ -378,6 +400,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ) -> Result<(), Error> {
         if let Ok(merkle_res) = self
             .inner
+            .borrow()
             .transaction_get_merkle(&txid, confirmation_height as usize)
         {
             let mut header = self.fetch_header(merkle_res.block_height as u32)?;
