@@ -17,7 +17,7 @@ use bdk_chain::miniscript::{
     descriptor::{DescriptorSecretKey, SinglePubKey},
     plan::{Assets, Plan},
     psbt::PsbtExt,
-    Descriptor, DescriptorPublicKey,
+    Descriptor, DescriptorPublicKey, ForEachKey,
 };
 use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
@@ -596,23 +596,19 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     let chain = chain.lock().unwrap();
 
                     // collect assets we can sign for
-                    let mut assets = Assets::new();
+                    let mut pks = vec![];
+                    for (_, desc) in graph.index.keychains() {
+                        desc.for_each_key(|k| {
+                            pks.push(k.clone());
+                            true
+                        });
+                    }
+                    let mut assets = Assets::new().add(pks);
                     if let Some(n) = after {
                         assets = assets.after(absolute::LockTime::from_consensus(n));
                     }
                     if let Some(n) = older {
                         assets = assets.older(relative::LockTime::from_consensus(n)?);
-                    }
-                    for (_, desc) in graph.index.keychains() {
-                        match desc {
-                            Descriptor::Wpkh(wpkh) => {
-                                assets = assets.add(wpkh.clone().into_inner());
-                            }
-                            Descriptor::Tr(tr) => {
-                                assets = assets.add(tr.internal_key().clone());
-                            }
-                            _ => bail!("unsupported descriptor type"),
-                        }
                     }
 
                     create_tx(&mut graph, &*chain, &assets, coin_select, address, value)?
