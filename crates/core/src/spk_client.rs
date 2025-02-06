@@ -170,7 +170,7 @@ impl<I> SyncRequestBuilder<I> {
     /// Add transactions that are expected to exist under a given spk.
     ///
     /// This is useful for detecting a malicious replacement of an incoming transaction.
-    pub fn expected_txids_of_spk(
+    pub fn expected_unconfirmed_spk_txids(
         mut self,
         txs: impl IntoIterator<Item = (Txid, ScriptBuf)>,
     ) -> Self {

@@ -1,7 +1,6 @@
 //! Contains the [`IndexedTxGraph`] and associated types. Refer to the
 //! [`IndexedTxGraph`] documentation for more.
 
-use core::fmt;
 use core::ops::RangeBounds;
 
 use alloc::{sync::Arc, vec::Vec};
@@ -345,24 +344,50 @@ where
 impl<A, I> IndexedTxGraph<A, SpkTxOutIndex<I>>
 where
     A: Anchor,
-    I: fmt::Debug + Clone + Ord,
+    I: core::fmt::Debug + Clone + Ord,
 {
-    /// Returns an iterator over unconfirmed transactions and their associated script pubkeys,
-    /// filtered within the specified `range`.
+    /// Iterate over unconfirmed txids that we expect to exist in a chain source's spk history
+    /// response.
     ///
-    /// This function delegates the transaction filtering to [`TxGraph::iter_spks_with_expected_txids`],
-    /// using the [`SpkTxOutIndex`] stored in [`IndexedTxGraph`]. The [`TxGraph`] internally scans
-    /// for unconfirmed transactions relevant to the indexed outputs.
-    pub fn iter_spks_with_expected_txids<'a, O>(
+    /// This is used to fill [`SyncRequestBuilder::expected_unconfirmed_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_unconfirmed_spk_txids).
+    ///
+    /// The spk range can be contrained with `range`.
+    pub fn expected_unconfirmed_spk_txids<'a, O>(
         &'a self,
         chain: &'a O,
+        chain_tip: BlockId,
         range: impl RangeBounds<I> + 'a,
-    ) -> impl Iterator<Item = (Txid, ScriptBuf)> + 'a
+    ) -> Result<Vec<(Txid, ScriptBuf)>, O::Error>
     where
-        O: ChainOracle<Error = core::convert::Infallible>,
+        O: ChainOracle,
     {
         self.graph
-            .iter_spks_with_expected_txids(chain, &self.index, range)
+            .expected_unconfirmed_spk_txids(chain, chain_tip, &self.index, range)
+    }
+}
+
+impl<A, K> IndexedTxGraph<A, crate::keychain_txout::KeychainTxOutIndex<K>>
+where
+    A: Anchor,
+    K: core::fmt::Debug + Clone + Ord,
+{
+    /// Iterate over unconfirmed txids that we expect to exist in a chain source's spk history
+    /// response.
+    ///
+    /// This is used to fill [`SyncRequestBuilder::expected_unconfirmed_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_unconfirmed_spk_txids).
+    ///
+    /// The spk range can be contrained with `range`.
+    pub fn expected_unconfirmed_spk_txids<'a, O>(
+        &'a self,
+        chain: &'a O,
+        chain_tip: BlockId,
+        range: impl RangeBounds<(K, u32)> + 'a,
+    ) -> Result<Vec<(Txid, ScriptBuf)>, O::Error>
+    where
+        O: ChainOracle,
+    {
+        self.graph
+            .expected_unconfirmed_spk_txids(chain, chain_tip, &self.index, range)
     }
 }
 

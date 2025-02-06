@@ -42,6 +42,12 @@ pub struct SpkTxOutIndex<I> {
     spk_txouts: BTreeSet<(I, OutPoint)>,
 }
 
+impl<I> AsRef<SpkTxOutIndex<I>> for SpkTxOutIndex<I> {
+    fn as_ref(&self) -> &SpkTxOutIndex<I> {
+        self
+    }
+}
+
 impl<I> Default for SpkTxOutIndex<I> {
     fn default() -> Self {
         Self {

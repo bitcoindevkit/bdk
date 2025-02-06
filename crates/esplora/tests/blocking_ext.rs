@@ -94,10 +94,11 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     let sync_request = SyncRequest::builder()
         .chain_tip(chain.tip())
         .revealed_spks_from_indexer(&graph.index, ..)
-        .check_unconfirmed_statuses(
-            &graph.index,
-            graph.graph().canonical_iter(&chain, chain.tip().block_id()),
-        );
+        .expected_unconfirmed_spk_txids(graph.expected_unconfirmed_spk_txids(
+            &chain,
+            chain.tip().block_id(),
+            ..,
+        )?);
     let sync_response = client.sync(sync_request, 1)?;
     assert!(
         sync_response
@@ -122,10 +123,11 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     let sync_request = SyncRequest::builder()
         .chain_tip(chain.tip())
         .revealed_spks_from_indexer(&graph.index, ..)
-        .check_unconfirmed_statuses(
-            &graph.index,
-            graph.graph().canonical_iter(&chain, chain.tip().block_id()),
-        );
+        .expected_unconfirmed_spk_txids(graph.expected_unconfirmed_spk_txids(
+            &chain,
+            chain.tip().block_id(),
+            ..,
+        )?);
     let sync_response = client.sync(sync_request, 1)?;
     assert!(
         sync_response.tx_update.evicted.contains(&send_txid),

@@ -806,15 +806,14 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     // Send the tx.
     let txid_2 = core.send_raw_transaction(&tx1b)?;
 
-    // Retrieve the expected unconfirmed txids and spks from the graph.
-    let exp_spk_txids = graph.expected_unconfirmed_spk_txids(&chain, chain_tip, ..)?;
-    assert_eq!(exp_spk_txids, vec![(txid_1, spk)]);
-
-    // Check that mempool emission contains evicted txid.
-    let mempool_event = emitter.mempool()?;
-    let unseen_txids: Vec<Txid> = mempool_event
-        .emitted_txs
-        .iter()
+    // We evict the expected txs that are missing from mempool.
+    let exp_txids = graph
+        .expected_unconfirmed_spk_txids(&chain, chain_tip, ..)?
+        .collect::<Vec<_>>();
+    assert_eq!(exp_txids, vec![(txid_1, spk)]);
+    let mempool = emitter
+        .mempool()?
+        .into_iter()
         .map(|(tx, _)| tx.compute_txid())
         .collect();
     assert!(unseen_txids.contains(&txid_2));
