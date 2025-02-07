@@ -16,23 +16,52 @@
 //! documentation for more details), and the timestamp of the last time we saw the transaction as
 //! unconfirmed.
 //!
-//! Conflicting transactions are allowed to coexist within a [`TxGraph`]. This is useful for
-//! identifying and traversing conflicts and descendants of a given transaction. Some [`TxGraph`]
-//! methods only consider transactions that are "canonical" (i.e., in the best chain or in mempool).
-//! We decide which transactions are canonical based on the transaction's anchors and the
-//! `last_seen` (as unconfirmed) timestamp.
+//! # Canonicalization
+//!
+//! Conflicting transactions are allowed to coexist within a [`TxGraph`]. A process called
+//! canonicalization is required to get a conflict-free history of transactions.
+//!
+//! * [`list_canonical_txs`](TxGraph::list_canonical_txs) lists canonical transactions.
+//! * [`filter_chain_txouts`](TxGraph::filter_chain_txouts) filters out canonical outputs from a
+//!     list of outpoints.
+//! * [`filter_chain_unspents`](TxGraph::filter_chain_unspents) filters out canonical unspent
+//!     outputs from a list of outpoints.
+//! * [`balance`](TxGraph::balance) gets the total sum of unspent outputs filtered from a list of
+//!     outpoints.
+//! * [`canonical_iter`](TxGraph::canonical_iter) returns the [`CanonicalIter`] which contains all
+//!     of the canonicalization logic.
+//!
+//! All these methods require a `chain` and `chain_tip` argument. The `chain` must be a
+//! [`ChainOracle`] implementation (such as [`LocalChain`](crate::local_chain::LocalChain)) which
+//! identifies which blocks exist under a given `chain_tip`.
+//!
+//! The canonicalization algorithm uses the following associated data to determine which
+//! transactions have precedence over others:
+//!
+//! * [`Anchor`] - This bit of data represents that a transaction is anchored in a given block. If
+//!     the transaction is anchored in chain of `chain_tip`, or is an ancestor of a transaction
+//!     anchored in chain of `chain_tip`, then the transaction must be canonical.
+//! * `last_seen` - This is the timestamp of when a transaction is last-seen in the mempool. This
+//!     value is updated by [`insert_seen_at`](TxGraph::insert_seen_at) and
+//!     [`apply_update`](TxGraph::apply_update). Transactions that are seen later have higher
+//!     priority than those that are seen earlier. `last_seen` values are transitive. Meaning that
+//!     the actual `last_seen` value of a transaction is the max of all the `last_seen` values of
+//!     it's descendants.
+//! * `last_evicted` - This is the timestamp of when a transaction is last-seen as evicted in the
+//!     mempool. If this value is equal to or higher than the transaction's `last_seen` value, then
+//!     it will not be considered canonical.
+//!
+//! # Graph traversal
+//!
+//! You can use [`TxAncestors`]/[`TxDescendants`] to traverse ancestors and descendants of a given
+//! transaction, respectively.
+//!
+//! # Applying changes
 //!
 //! The [`ChangeSet`] reports changes made to a [`TxGraph`]; it can be used to either save to
 //! persistent storage, or to be applied to another [`TxGraph`].
 //!
-//! Lastly, you can use [`TxAncestors`]/[`TxDescendants`] to traverse ancestors and descendants of
-//! a given transaction, respectively.
-//!
-//! # Applying changes
-//!
 //! Methods that change the state of [`TxGraph`] will return [`ChangeSet`]s.
-//! [`ChangeSet`]s can be applied back to a [`TxGraph`] or be used to inform persistent storage
-//! of the changes to [`TxGraph`].
 //!
 //! # Generics
 //!
