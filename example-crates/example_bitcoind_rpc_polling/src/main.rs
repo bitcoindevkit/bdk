@@ -186,7 +186,7 @@ fn main() -> anyhow::Result<()> {
                         graph.graph().balance(
                             &*chain,
                             synced_to.block_id(),
-                            CanonicalizationParams::NONE,
+                            CanonicalizationParams::default(),
                             graph.index.outpoints().iter().cloned(),
                             |(k, _), _| k == &Keychain::Internal,
                         )
@@ -324,7 +324,7 @@ fn main() -> anyhow::Result<()> {
                         graph.graph().balance(
                             &*chain,
                             synced_to.block_id(),
-                            CanonicalizationParams::NONE,
+                            CanonicalizationParams::default(),
                             graph.index.outpoints().iter().cloned(),
                             |(k, _), _| k == &Keychain::Internal,
                         )

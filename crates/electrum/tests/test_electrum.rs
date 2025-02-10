@@ -3,7 +3,8 @@ use bdk_chain::{
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest, SyncResponse},
     spk_txout::SpkTxOutIndex,
-    Balance, CanonicalizationParams, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
+    Balance, CanonicalizationParams, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge,
+    TxGraph,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
@@ -23,7 +24,7 @@ fn get_balance(
     let balance = recv_graph.graph().balance(
         recv_chain,
         chain_tip,
-        CanonicalizationParams::NONE,
+        CanonicalizationParams::default(),
         outpoints,
         |_, _| true,
     );

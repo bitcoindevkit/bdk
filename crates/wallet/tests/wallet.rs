@@ -4267,7 +4267,7 @@ fn test_wallet_transactions_relevant() {
         .list_canonical_txs(
             test_wallet.local_chain(),
             chain_tip,
-            CanonicalizationParams::NONE,
+            CanonicalizationParams::default(),
         )
         .count();
 
@@ -4288,7 +4288,7 @@ fn test_wallet_transactions_relevant() {
         .list_canonical_txs(
             test_wallet.local_chain(),
             chain_tip,
-            CanonicalizationParams::NONE,
+            CanonicalizationParams::default(),
         )
         .count();
 
@@ -4301,7 +4301,7 @@ fn test_wallet_transactions_relevant() {
         .list_canonical_txs(
             test_wallet.local_chain(),
             chain_tip,
-            CanonicalizationParams::NONE
+            CanonicalizationParams::default()
         )
         .any(|wallet_tx| wallet_tx.tx_node.txid == other_txid));
     assert!(full_tx_count_before < full_tx_count_after);

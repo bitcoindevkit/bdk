@@ -271,7 +271,7 @@ fn test_list_owned_txouts() {
                 .filter_chain_txouts(
                     &local_chain,
                     chain_tip,
-                    CanonicalizationParams::NONE,
+                    CanonicalizationParams::default(),
                     graph.index.outpoints().iter().cloned(),
                 )
                 .collect::<Vec<_>>();
@@ -281,7 +281,7 @@ fn test_list_owned_txouts() {
                 .filter_chain_unspents(
                     &local_chain,
                     chain_tip,
-                    CanonicalizationParams::NONE,
+                    CanonicalizationParams::default(),
                     graph.index.outpoints().iter().cloned(),
                 )
                 .collect::<Vec<_>>();
@@ -289,7 +289,7 @@ fn test_list_owned_txouts() {
             let balance = graph.graph().balance(
                 &local_chain,
                 chain_tip,
-                CanonicalizationParams::NONE,
+                CanonicalizationParams::default(),
                 graph.index.outpoints().iter().cloned(),
                 |_, spk: ScriptBuf| trusted_spks.contains(&spk),
             );
@@ -592,7 +592,11 @@ fn test_get_chain_position() {
         // check chain position
         let chain_pos = graph
             .graph()
-            .list_canonical_txs(chain, chain.tip().block_id(), CanonicalizationParams::NONE)
+            .list_canonical_txs(
+                chain,
+                chain.tip().block_id(),
+                CanonicalizationParams::default(),
+            )
             .find_map(|canon_tx| {
                 if canon_tx.tx_node.txid == txid {
                     Some(canon_tx.chain_position)
