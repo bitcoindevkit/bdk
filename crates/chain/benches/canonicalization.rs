@@ -94,7 +94,7 @@ fn run_list_canonical_txs(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_tx
     let txs = tx_graph.graph().list_canonical_txs(
         chain,
         chain.tip().block_id(),
-        CanonicalizationParams::NONE,
+        CanonicalizationParams::default(),
     );
     assert_eq!(txs.count(), exp_txs);
 }
@@ -103,7 +103,7 @@ fn run_filter_chain_txouts(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_t
     let utxos = tx_graph.graph().filter_chain_txouts(
         chain,
         chain.tip().block_id(),
-        CanonicalizationParams::NONE,
+        CanonicalizationParams::default(),
         tx_graph.index.outpoints().clone(),
     );
     assert_eq!(utxos.count(), exp_txos);
@@ -113,7 +113,7 @@ fn run_filter_chain_unspents(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp
     let utxos = tx_graph.graph().filter_chain_unspents(
         chain,
         chain.tip().block_id(),
-        CanonicalizationParams::NONE,
+        CanonicalizationParams::default(),
         tx_graph.index.outpoints().clone(),
     );
     assert_eq!(utxos.count(), exp_utxos);

@@ -18,13 +18,6 @@ pub struct CanonicalizationParams {
     pub assume_canonical: Vec<Txid>,
 }
 
-impl CanonicalizationParams {
-    /// No mods.
-    pub const NONE: Self = Self {
-        assume_canonical: Vec::new(),
-    };
-}
-
 /// Iterates over canonical txs.
 pub struct CanonicalIter<'g, A, C> {
     tx_graph: &'g TxGraph<A>,

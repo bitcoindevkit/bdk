@@ -309,7 +309,7 @@ fn get_balance(
     let balance = recv_graph.graph().balance(
         recv_chain,
         chain_tip,
-        CanonicalizationParams::NONE,
+        CanonicalizationParams::default(),
         outpoints,
         |_, _| true,
     );

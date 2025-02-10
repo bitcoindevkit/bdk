@@ -229,7 +229,7 @@ fn main() -> anyhow::Result<()> {
                         .filter_chain_unspents(
                             &*chain,
                             chain_tip.block_id(),
-                            CanonicalizationParams::NONE,
+                            CanonicalizationParams::default(),
                             init_outpoints.iter().cloned(),
                         )
                         .map(|(_, utxo)| utxo.outpoint),
@@ -242,7 +242,7 @@ fn main() -> anyhow::Result<()> {
                         .list_canonical_txs(
                             &*chain,
                             chain_tip.block_id(),
-                            CanonicalizationParams::NONE,
+                            CanonicalizationParams::default(),
                         )
                         .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                         .map(|canonical_tx| canonical_tx.tx_node.txid),
