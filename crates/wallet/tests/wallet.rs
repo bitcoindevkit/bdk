@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use assert_matches::assert_matches;
-use bdk_chain::{BlockId, CanonicalizationMods, ChainPosition, ConfirmationBlockTime};
+use bdk_chain::{BlockId, CanonicalizationParams, ChainPosition, ConfirmationBlockTime};
 use bdk_wallet::coin_selection::{self, LargestFirstCoinSelection};
 use bdk_wallet::descriptor::{calc_checksum, DescriptorError, IntoWalletDescriptor};
 use bdk_wallet::error::CreateTxError;
@@ -4267,7 +4267,7 @@ fn test_wallet_transactions_relevant() {
         .list_canonical_txs(
             test_wallet.local_chain(),
             chain_tip,
-            CanonicalizationMods::NONE,
+            CanonicalizationParams::NONE,
         )
         .count();
 
@@ -4288,7 +4288,7 @@ fn test_wallet_transactions_relevant() {
         .list_canonical_txs(
             test_wallet.local_chain(),
             chain_tip,
-            CanonicalizationMods::NONE,
+            CanonicalizationParams::NONE,
         )
         .count();
 
@@ -4301,7 +4301,7 @@ fn test_wallet_transactions_relevant() {
         .list_canonical_txs(
             test_wallet.local_chain(),
             chain_tip,
-            CanonicalizationMods::NONE
+            CanonicalizationParams::NONE
         )
         .any(|wallet_tx| wallet_tx.tx_node.txid == other_txid));
     assert!(full_tx_count_before < full_tx_count_after);

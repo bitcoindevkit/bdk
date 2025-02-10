@@ -94,7 +94,7 @@ use crate::collections::*;
 use crate::BlockId;
 use crate::CanonicalIter;
 use crate::CanonicalReason;
-use crate::CanonicalizationMods;
+use crate::CanonicalizationParams;
 use crate::ObservedIn;
 use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
 use alloc::collections::vec_deque::VecDeque;
@@ -830,7 +830,7 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
     ) -> impl Iterator<Item = Result<CanonicalTx<'a, Arc<Transaction>, A>, C::Error>> {
         fn find_direct_anchor<A: Anchor, C: ChainOracle>(
             tx_node: &TxNode<'_, Arc<Transaction>, A>,
@@ -908,7 +908,7 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
     ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
         self.try_list_canonical_txs(chain, chain_tip, mods)
             .map(|res| res.expect("infallible"))
@@ -937,7 +937,7 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> Result<impl Iterator<Item = (OI, FullTxOut<A>)> + 'a, C::Error> {
         let mut canon_txs = HashMap::<Txid, CanonicalTx<Arc<Transaction>, A>>::new();
@@ -1011,7 +1011,7 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
     ) -> CanonicalIter<'a, A, C> {
         CanonicalIter::new(self, chain, chain_tip, mods)
     }
@@ -1026,7 +1026,7 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_chain_txouts(chain, chain_tip, mods, outpoints)
@@ -1055,7 +1055,7 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> Result<impl Iterator<Item = (OI, FullTxOut<A>)> + 'a, C::Error> {
         Ok(self
@@ -1073,7 +1073,7 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
         txouts: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
         self.try_filter_chain_unspents(chain, chain_tip, mods, txouts)
@@ -1096,7 +1096,7 @@ impl<A: Anchor> TxGraph<A> {
         &self,
         chain: &C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
         mut trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
     ) -> Result<Balance, C::Error> {
@@ -1141,7 +1141,7 @@ impl<A: Anchor> TxGraph<A> {
         &self,
         chain: &C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
         trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
     ) -> Balance {

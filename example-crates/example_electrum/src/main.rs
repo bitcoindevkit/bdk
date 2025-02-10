@@ -5,7 +5,7 @@ use bdk_chain::{
     collections::BTreeSet,
     indexed_tx_graph,
     spk_client::{FullScanRequest, SyncRequest},
-    CanonicalizationMods, ConfirmationBlockTime, Merge,
+    CanonicalizationParams, ConfirmationBlockTime, Merge,
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
@@ -229,7 +229,7 @@ fn main() -> anyhow::Result<()> {
                         .filter_chain_unspents(
                             &*chain,
                             chain_tip.block_id(),
-                            CanonicalizationMods::NONE,
+                            CanonicalizationParams::NONE,
                             init_outpoints.iter().cloned(),
                         )
                         .map(|(_, utxo)| utxo.outpoint),
@@ -242,7 +242,7 @@ fn main() -> anyhow::Result<()> {
                         .list_canonical_txs(
                             &*chain,
                             chain_tip.block_id(),
-                            CanonicalizationMods::NONE,
+                            CanonicalizationParams::NONE,
                         )
                         .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
                         .map(|canonical_tx| canonical_tx.tx_node.txid),

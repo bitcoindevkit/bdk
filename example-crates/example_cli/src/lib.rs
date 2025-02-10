@@ -19,7 +19,7 @@ use bdk_chain::miniscript::{
     psbt::PsbtExt,
     Descriptor, DescriptorPublicKey,
 };
-use bdk_chain::CanonicalizationMods;
+use bdk_chain::CanonicalizationParams;
 use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
     indexed_tx_graph,
@@ -425,7 +425,7 @@ pub fn planned_utxos<O: ChainOracle>(
         .try_filter_chain_unspents(
             chain,
             chain_tip,
-            CanonicalizationMods::NONE,
+            CanonicalizationParams::NONE,
             outpoints.iter().cloned(),
         )?
         .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
@@ -521,7 +521,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
             let balance = graph.graph().try_balance(
                 chain,
                 chain.get_chain_tip()?,
-                CanonicalizationMods::NONE,
+                CanonicalizationParams::NONE,
                 graph.index.outpoints().iter().cloned(),
                 |(k, _), _| k == &Keychain::Internal,
             )?;
@@ -566,7 +566,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                         .try_filter_chain_txouts(
                             chain,
                             chain_tip,
-                            CanonicalizationMods::NONE,
+                            CanonicalizationParams::NONE,
                             outpoints.iter().cloned(),
                         )?
                         .filter(|(_, full_txo)| match (spent, unspent) {

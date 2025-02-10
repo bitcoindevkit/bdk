@@ -13,7 +13,7 @@ use bdk_bitcoind_rpc::{
 };
 use bdk_chain::{
     bitcoin::{Block, Transaction},
-    local_chain, CanonicalizationMods, Merge,
+    local_chain, CanonicalizationParams, Merge,
 };
 use example_cli::{
     anyhow,
@@ -186,7 +186,7 @@ fn main() -> anyhow::Result<()> {
                         graph.graph().balance(
                             &*chain,
                             synced_to.block_id(),
-                            CanonicalizationMods::NONE,
+                            CanonicalizationParams::NONE,
                             graph.index.outpoints().iter().cloned(),
                             |(k, _), _| k == &Keychain::Internal,
                         )
@@ -324,7 +324,7 @@ fn main() -> anyhow::Result<()> {
                         graph.graph().balance(
                             &*chain,
                             synced_to.block_id(),
-                            CanonicalizationMods::NONE,
+                            CanonicalizationParams::NONE,
                             graph.index.outpoints().iter().cloned(),
                             |(k, _), _| k == &Keychain::Internal,
                         )

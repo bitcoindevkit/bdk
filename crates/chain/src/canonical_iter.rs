@@ -10,7 +10,7 @@ use bitcoin::{Transaction, Txid};
 
 /// Modifies the canonicalization algorithm.
 #[derive(Debug, Default, Clone)]
-pub struct CanonicalizationMods {
+pub struct CanonicalizationParams {
     /// Transactions that will supercede all other transactions.
     ///
     /// In case of conflicting transactions within `assume_canonical`, transactions that appear
@@ -18,7 +18,7 @@ pub struct CanonicalizationMods {
     pub assume_canonical: Vec<Txid>,
 }
 
-impl CanonicalizationMods {
+impl CanonicalizationParams {
     /// No mods.
     pub const NONE: Self = Self {
         assume_canonical: Vec::new(),
@@ -49,7 +49,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
         tx_graph: &'g TxGraph<A>,
         chain: &'g C,
         chain_tip: BlockId,
-        mods: CanonicalizationMods,
+        mods: CanonicalizationParams,
     ) -> Self {
         let anchors = tx_graph.all_anchors();
         let unprocessed_assumed_txs = Box::new(
