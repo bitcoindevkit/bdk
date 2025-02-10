@@ -1432,7 +1432,7 @@ impl Wallet {
                     utxo: Utxo::Local(utxo),
                 })
                 // include foreign UTxOs as required
-                .chain(params.foreign_utxos.clone())
+                .chain(params.foreign_utxos.clone().into_values())
                 .collect();
             let optional = self.filter_utxos(&params, current_height.to_consensus_u32());
 
@@ -1640,9 +1640,12 @@ impl Wallet {
             .map_err(|_| BuildFeeBumpError::FeeRateUnavailable)?;
 
         // remove the inputs from the tx and process them
-        let (local, foreign): (HashSet<LocalOutput>, Vec<WeightedUtxo>) =
+        let (local, foreign): (HashSet<LocalOutput>, HashMap<OutPoint, WeightedUtxo>) =
             tx.input.drain(..).try_fold(
-                (HashSet::<LocalOutput>::new(), Vec::<WeightedUtxo>::new()),
+                (
+                    HashSet::<LocalOutput>::new(),
+                    HashMap::<OutPoint, WeightedUtxo>::new(),
+                ),
                 |(mut local, mut foreign), txin| -> Result<_, BuildFeeBumpError> {
                     let prev_tx = graph
                         .get_tx(txin.previous_output.txid)
@@ -1683,14 +1686,17 @@ impl Wallet {
                                     ..Default::default()
                                 })
                             };
-                            foreign.push(WeightedUtxo {
-                                utxo: Utxo::Foreign {
-                                    outpoint: txin.previous_output,
-                                    sequence: txin.sequence,
-                                    psbt_input: psbt_input_data,
+                            foreign.insert(
+                                txin.previous_output,
+                                WeightedUtxo {
+                                    utxo: Utxo::Foreign {
+                                        outpoint: txin.previous_output,
+                                        sequence: txin.sequence,
+                                        psbt_input: psbt_input_data,
+                                    },
+                                    satisfaction_weight,
                                 },
-                                satisfaction_weight,
-                            });
+                            );
                             true
                         }
                     };
