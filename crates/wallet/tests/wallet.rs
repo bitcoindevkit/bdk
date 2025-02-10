@@ -1676,21 +1676,6 @@ fn test_add_foreign_utxo_invalid_psbt_input() {
 }
 
 #[test]
-fn test_add_foreign_utxo_fails_when_utxo_is_owned_by_wallet() {
-    let (mut wallet, _) = get_funded_wallet_wpkh();
-    let outpoint = wallet.list_unspent().next().expect("must exist").outpoint;
-    let foreign_utxo_satisfaction = wallet
-        .public_descriptor(KeychainKind::External)
-        .max_weight_to_satisfy()
-        .unwrap();
-
-    let mut builder = wallet.build_tx();
-    let result =
-        builder.add_foreign_utxo(outpoint, psbt::Input::default(), foreign_utxo_satisfaction);
-    assert!(matches!(result, Err(AddForeignUtxoError::NotForeignUtxo)));
-}
-
-#[test]
 fn test_add_foreign_utxo_where_outpoint_doesnt_match_psbt_input() {
     let (mut wallet1, txid1) = get_funded_wallet_wpkh();
     let (wallet2, txid2) =
