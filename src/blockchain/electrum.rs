@@ -346,10 +346,9 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
 #[cfg(feature = "test-electrum")]
 mod test {
     use super::*;
-    use crate::database::{MemoryDatabase, SqliteDatabase};
+    use crate::database::MemoryDatabase;
     use crate::testutils::blockchain_tests::TestClient;
     use crate::testutils::configurable_blockchain_tests::ConfigurableBlockchainTester;
-    use crate::wallet::coin_selection::OldestFirstCoinSelection;
     use crate::wallet::{AddressIndex, Wallet};
 
     crate::bdk_blockchain_tests! {
@@ -438,6 +437,13 @@ mod test {
     #[test]
     #[ignore] // takes ~1 hr to complete, here as reference for future testing
     fn test_electrum_large_num_utxos() {
+        use crate::database::SqliteDatabase;
+        use crate::wallet::coin_selection::OldestFirstCoinSelection;
+        use crate::SignOptions;
+        use bitcoin::Amount;
+        use bitcoincore_rpc::RpcApi;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
         const NUM_TX: u32 = 50;
         const NUM_UTXO: u32 = 700;
 

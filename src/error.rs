@@ -149,6 +149,9 @@ pub enum Error {
     #[cfg(feature = "sqlite")]
     /// Rusqlite client error
     Rusqlite(rusqlite::Error),
+    #[cfg(feature = "sqlite")]
+    /// r2d2 connection pool error
+    R2d2(r2d2::Error),
 }
 
 /// Errors returned by miniscript when updating inconsistent PSBTs
@@ -270,6 +273,8 @@ impl fmt::Display for Error {
             Self::Rpc(err) => write!(f, "RPC client error: {}", err),
             #[cfg(feature = "sqlite")]
             Self::Rusqlite(err) => write!(f, "SQLite error: {}", err),
+            #[cfg(feature = "sqlite")]
+            Self::R2d2(err) => write!(f, "R2d2 error: {}", err),
         }
     }
 }
@@ -322,6 +327,8 @@ impl_error!(sled::Error, Sled);
 impl_error!(bitcoincore_rpc::Error, Rpc);
 #[cfg(feature = "sqlite")]
 impl_error!(rusqlite::Error, Rusqlite);
+#[cfg(feature = "sqlite")]
+impl_error!(r2d2::Error, R2d2);
 
 #[cfg(feature = "compact_filters")]
 impl From<crate::blockchain::compact_filters::CompactFiltersError> for Error {
