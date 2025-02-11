@@ -131,8 +131,8 @@ impl WalletSync for ElectrumBlockchain {
         let chunk_size = self.stop_gap + 1;
 
         // The electrum server has been inconsistent somehow in its responses during sync. For
-        // example, we do a batch request of transactions and the response contains less
-        // tranascations than in the request. This should never happen but we don't want to panic.
+        // example, we do a batch request of transactions and the response contains fewer
+        // transactions than in the request. This should never happen, but we don't want to panic.
         let electrum_goof = || Error::Generic("electrum server misbehaving".to_string());
 
         let batch_update = loop {
@@ -345,12 +345,11 @@ impl ConfigurableBlockchain for ElectrumBlockchain {
 #[cfg(test)]
 #[cfg(feature = "test-electrum")]
 mod test {
-    use std::sync::Arc;
-
     use super::*;
-    use crate::database::MemoryDatabase;
+    use crate::database::{MemoryDatabase, SqliteDatabase};
     use crate::testutils::blockchain_tests::TestClient;
     use crate::testutils::configurable_blockchain_tests::ConfigurableBlockchainTester;
+    use crate::wallet::coin_selection::OldestFirstCoinSelection;
     use crate::wallet::{AddressIndex, Wallet};
 
     crate::bdk_blockchain_tests! {
@@ -433,5 +432,173 @@ mod test {
         }
 
         ElectrumTester.run();
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    #[ignore] // takes ~1 hr to complete, here as reference for future testing
+    fn test_electrum_large_num_utxos() {
+        const NUM_TX: u32 = 50;
+        const NUM_UTXO: u32 = 700;
+
+        env_logger::init();
+        let mut test_client = TestClient::default();
+        let electrum_blockchain =
+            ElectrumBlockchain::from(Client::new(&test_client.electrsd.electrum_url).unwrap());
+
+        // fund bdk wallet 1 with regtest node coinbase txs
+        let mem_db = MemoryDatabase::new();
+        let wallet1_descriptor = "wpkh(tprv8i8F4EhYDMquzqiecEX8SKYMXqfmmb1Sm7deoA1Hokxzn281XgTkwsd6gL8aJevLE4aJugfVf9MKMvrcRvPawGMenqMBA3bRRfp4s1V7Eg3/0/*)";
+        let wallet1 =
+            Wallet::new(wallet1_descriptor, None, bitcoin::Network::Regtest, mem_db).unwrap();
+        let wallet1_address = wallet1.get_address(AddressIndex::New).unwrap().address;
+        test_client
+            .send_to_address(
+                &wallet1_address,
+                Amount::from_btc(5.0).unwrap(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        test_client.generate(1, None);
+        wallet1
+            .sync(&electrum_blockchain, Default::default())
+            .unwrap();
+        assert_eq!(wallet1.get_balance().unwrap().confirmed, 5_0000_0000);
+        // bdk wallet 1 creates NUM_TX tx * NUM_UTXO utxos and sends them back to itself
+        for _ in 0..NUM_TX {
+            let amount = 2715;
+            let address_amounts = (0..NUM_UTXO)
+                .map(|_| {
+                    (
+                        wallet1
+                            .get_address(AddressIndex::New)
+                            .unwrap()
+                            .address
+                            .script_pubkey(),
+                        amount,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let mut tx_builder = wallet1.build_tx().coin_selection(OldestFirstCoinSelection);
+            // only allow spending utxos greater than 2715 sats
+            let unspendable = wallet1
+                .list_unspent()
+                .unwrap()
+                .iter()
+                .filter(|utxo| utxo.txout.value <= amount)
+                .map(|utxo| utxo.outpoint)
+                .collect::<Vec<_>>();
+            tx_builder
+                .set_recipients(address_amounts)
+                .unspendable(unspendable);
+            let (mut psbt, _details) = tx_builder.finish().unwrap();
+            assert!(wallet1.sign(&mut psbt, SignOptions::default()).unwrap());
+            let tx = psbt.extract_tx();
+            electrum_blockchain.broadcast(&tx).unwrap();
+            // include test txs in a block
+            test_client.generate(1, None);
+            wallet1
+                .sync(&electrum_blockchain, Default::default())
+                .unwrap()
+        }
+        assert_eq!(
+            (NUM_TX * NUM_UTXO) as usize,
+            wallet1
+                .list_unspent()
+                .unwrap()
+                .iter()
+                .filter(|utxo| utxo.txout.value == 2715)
+                .count()
+        );
+
+        // bdk wallet 2 to receives NUM_TX tx with NUM_UTXO utxos from wallet 1
+        let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("bdk_{}", time.as_nanos()));
+        let sqlite_db = SqliteDatabase::new(String::from(dir.to_str().unwrap()));
+        let wallet2_descriptor = "wpkh(tprv8i8F4EhYDMquzqiecEX8SKYMXqfmmb1Sm7deoA1Hokxzn281XgTkwsd6gL8aJevLE4aJugfVf9MKMvrcRvPawGMenqMBA3bRRfp4s1V7Eg3/1/*)";
+        let wallet2 = Wallet::new(
+            wallet2_descriptor,
+            None,
+            bitcoin::Network::Regtest,
+            sqlite_db,
+        )
+        .unwrap();
+        wallet2
+            .sync(&electrum_blockchain, Default::default())
+            .unwrap();
+        assert_eq!(0, wallet2.get_balance().unwrap().confirmed);
+
+        // send NUM_TX tx with NUM_UTXO utxos each from wallet1 to wallet2
+        for _ in 0..NUM_TX {
+            let amount = 2715;
+            let address_amounts = (0..NUM_UTXO)
+                .map(|_| {
+                    (
+                        wallet2
+                            .get_address(AddressIndex::New)
+                            .unwrap()
+                            .address
+                            .script_pubkey(),
+                        amount,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let fee_utxo = wallet1
+                .list_unspent()
+                .unwrap()
+                .iter()
+                .filter(|utxo| utxo.txout.value > amount)
+                .map(|utxo| utxo.outpoint)
+                .last()
+                .unwrap()
+                .clone();
+            let spend_utxos = wallet1
+                .list_unspent()
+                .unwrap()
+                .iter()
+                .filter(|utxo| utxo.txout.value == amount)
+                .map(|utxo| utxo.outpoint)
+                .take(NUM_UTXO as usize)
+                .collect::<Vec<_>>();
+            let mut tx_builder = wallet1.build_tx().coin_selection(OldestFirstCoinSelection);
+            tx_builder
+                .manually_selected_only()
+                .set_recipients(address_amounts)
+                .add_utxos(&spend_utxos)
+                .unwrap()
+                .add_utxo(fee_utxo)
+                .unwrap();
+            let (mut psbt, _details) = tx_builder.finish().unwrap();
+            assert!(wallet1.sign(&mut psbt, SignOptions::default()).unwrap());
+            let tx = psbt.extract_tx();
+            electrum_blockchain.broadcast(&tx).unwrap();
+            // include test txs in a block
+            test_client.generate(1, None);
+            wallet1
+                .sync(&electrum_blockchain, Default::default())
+                .unwrap()
+        }
+        wallet2
+            .sync(&electrum_blockchain, Default::default())
+            .unwrap();
+        assert_eq!(
+            (NUM_TX * NUM_UTXO) as usize,
+            wallet2
+                .list_unspent()
+                .unwrap()
+                .iter()
+                .filter(|utxo| utxo.txout.value == 2715)
+                .count()
+        );
+        assert_eq!(
+            wallet2.get_balance().unwrap().confirmed,
+            (2715 * NUM_UTXO * NUM_TX) as u64
+        );
     }
 }
