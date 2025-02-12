@@ -6,7 +6,48 @@ use miniscript::{Descriptor, DescriptorPublicKey};
 type IndexedTxGraphChangeSet =
     indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>;
 
-/// A changeset for [`Wallet`](crate::Wallet).
+/// A changeset for [`Wallet`].
+///
+/// The changeset is used to persist and recover changes and additions made during the
+/// life of the wallet. The kinds of changes that frequently make up this set are new
+/// transactions, blocks in the local chain, and derivation indexes. The changeset is
+/// also responsible for transmitting persistent metadata such as the public descriptor(s)
+/// and configured network. All of these are necessary for the correct functioning of a
+/// wallet.
+///
+/// For greater efficiency the wallet is able to stage changes before committing them.
+/// Many operations result in staged changes which require persistence on the part of the
+/// user. These include address revelation, applying an [`Update`], and introducing
+/// transactions and related data to the wallet. To get the staged changes see
+/// [`Wallet::staged`] and similar methods. Once the changes are committed to the persistence
+/// layer the contents of the stage should be discarded.
+///
+/// You should persist early and often generally speaking, however in principle there is
+/// no limitation on the number or type of changes that can be staged prior to persistence
+/// or the order in which they're staged. This is because changesets are designed to be
+/// [merged]. The change that is eventually persisted will include the combined effect of
+/// each change individually.
+///
+/// The [`ChangeSet`] is backwards compatible in the sense that it is intended to interoperate
+/// with earlier versions of the library. Specifically this means that the orginal fields will
+/// remain unchanged and that the addition of new fields corresponds to new feature upgrades.
+///
+/// The API of [`Wallet`] is designed to give the user control of what data to persist, when
+/// to persist it, and to determine when committed changes can be safely discarded. You should
+/// consider how your database handles partial or repeat writes, whether the persistence
+/// operation proceeds atomically, and whether the order of writes matters among the fields
+/// of the [`ChangeSet`]. BDK has no strict requirements regarding these details but
+/// provides a straightforward solution in the case of [SQLite]. If implementing your own
+/// persistence layer, please see the docs for [`PersistedWallet`] and [`WalletPersister`]
+/// as a reference.
+///
+/// [merged]: bdk_chain::Merge
+/// [`PersistedWallet`]: crate::PersistedWallet
+/// [SQLite]: bdk_chain::rusqlite_impl
+/// [`Update`]: crate::Update
+/// [`WalletPersister`]: crate::WalletPersister
+/// [`Wallet::staged`]: crate::Wallet::staged
+/// [`Wallet`]: crate::Wallet
 #[derive(Default, Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ChangeSet {
     /// Descriptor for recipient addresses.
