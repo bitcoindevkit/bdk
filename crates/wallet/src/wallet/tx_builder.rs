@@ -556,9 +556,9 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// 1. Set the nLockTime for preventing fee sniping.
     ///    **Note**: This will be ignored if you manually specify a nlocktime using [`TxBuilder::nlocktime`].
     /// 2. Decide whether coinbase outputs are mature or not. If the coinbase outputs are not
-    ///    mature at `current_height`, we ignore them in the coin selection.
-    ///    If you want to create a transaction that spends immature coinbase inputs, manually
-    ///    add them using [`TxBuilder::add_utxos`].
+    ///    mature at spending height, which is `current_height` + 1, we ignore them in the coin
+    ///    selection. If you want to create a transaction that spends immature coinbase inputs,
+    ///    manually add them using [`TxBuilder::add_utxos`].
     ///
     /// In both cases, if you don't provide a current height, we use the last sync height.
     pub fn current_height(&mut self, height: u32) -> &mut Self {
