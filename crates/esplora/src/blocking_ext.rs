@@ -7,7 +7,7 @@ use bdk_core::{
 use esplora_client::{OutputStatus, Tx};
 use std::thread::JoinHandle;
 
-use crate::{insert_anchor_from_status, insert_prevouts};
+use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
 
 /// [`esplora_client::Error`]
 pub type Error = Box<esplora_client::Error>;
@@ -54,6 +54,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         parallel_requests: usize,
     ) -> Result<FullScanResponse<K>, Error> {
         let mut request = request.into();
+        let start_time = request.start_time();
 
         let chain_tip = request.chain_tip();
         let latest_blocks = if chain_tip.is_some() {
@@ -69,6 +70,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             let keychain_spks = request.iter_spks(keychain.clone());
             let (update, last_active_index) = fetch_txs_with_keychain_spks(
                 self,
+                start_time,
                 &mut inserted_txs,
                 keychain_spks,
                 stop_gap,
@@ -103,6 +105,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         parallel_requests: usize,
     ) -> Result<SyncResponse, Error> {
         let mut request: SyncRequest<I> = request.into();
+        let start_time = request.start_time();
 
         let chain_tip = request.chain_tip();
         let latest_blocks = if chain_tip.is_some() {
@@ -115,18 +118,21 @@ impl EsploraExt for esplora_client::BlockingClient {
         let mut inserted_txs = HashSet::<Txid>::new();
         tx_update.extend(fetch_txs_with_spks(
             self,
+            start_time,
             &mut inserted_txs,
             request.iter_spks(),
             parallel_requests,
         )?);
         tx_update.extend(fetch_txs_with_txids(
             self,
+            start_time,
             &mut inserted_txs,
             request.iter_txids(),
             parallel_requests,
         )?);
         tx_update.extend(fetch_txs_with_outpoints(
             self,
+            start_time,
             &mut inserted_txs,
             request.iter_outpoints(),
             parallel_requests,
@@ -250,6 +256,7 @@ fn chain_update(
 
 fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
     client: &esplora_client::BlockingClient,
+    start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     mut keychain_spks: I,
     stop_gap: usize,
@@ -299,7 +306,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
                 if inserted_txs.insert(tx.txid) {
                     update.txs.push(tx.to_tx().into());
                 }
-                insert_anchor_from_status(&mut update, tx.txid, tx.status);
+                insert_anchor_or_seen_at_from_status(&mut update, start_time, tx.txid, tx.status);
                 insert_prevouts(&mut update, tx.vin);
             }
         }
@@ -328,12 +335,14 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
 /// Refer to [crate-level docs](crate) for more.
 fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf>>(
     client: &esplora_client::BlockingClient,
+    start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     spks: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
     fetch_txs_with_keychain_spks(
         client,
+        start_time,
         inserted_txs,
         spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
         usize::MAX,
@@ -350,6 +359,7 @@ fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf>>(
 /// Refer to [crate-level docs](crate) for more.
 fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
     client: &esplora_client::BlockingClient,
+    start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     txids: I,
     parallel_requests: usize,
@@ -386,7 +396,7 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
                 if inserted_txs.insert(txid) {
                     update.txs.push(tx_info.to_tx().into());
                 }
-                insert_anchor_from_status(&mut update, txid, tx_info.status);
+                insert_anchor_or_seen_at_from_status(&mut update, start_time, txid, tx_info.status);
                 insert_prevouts(&mut update, tx_info.vin);
             }
         }
@@ -402,6 +412,7 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
 /// Refer to [crate-level docs](crate) for more.
 fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     client: &esplora_client::BlockingClient,
+    start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     outpoints: I,
     parallel_requests: usize,
@@ -413,6 +424,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     // TODO: We should maintain a tx cache (like we do with Electrum).
     update.extend(fetch_txs_with_txids(
         client,
+        start_time,
         inserted_txs,
         outpoints.iter().map(|op| op.txid),
         parallel_requests,
@@ -449,7 +461,12 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
                     missing_txs.push(spend_txid);
                 }
                 if let Some(spend_status) = op_status.status {
-                    insert_anchor_from_status(&mut update, spend_txid, spend_status);
+                    insert_anchor_or_seen_at_from_status(
+                        &mut update,
+                        start_time,
+                        spend_txid,
+                        spend_status,
+                    );
                 }
             }
         }
@@ -457,6 +474,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
 
     update.extend(fetch_txs_with_txids(
         client,
+        start_time,
         inserted_txs,
         missing_txs,
         parallel_requests,

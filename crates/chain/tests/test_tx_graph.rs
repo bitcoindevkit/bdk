@@ -94,7 +94,7 @@ fn insert_txouts() {
             // Insert partials transactions.
             update.txouts.insert(*outpoint, txout.clone());
             // Mark them unconfirmed.
-            update.seen_ats.insert(outpoint.txid, unconf_seen_at);
+            update.seen_ats.insert((outpoint.txid, unconf_seen_at));
         }
 
         // Insert the full transaction.
@@ -1289,7 +1289,7 @@ fn tx_graph_update_conversion() {
 
     for (test_name, update) in test_cases {
         let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
-        let _ = tx_graph.apply_update_at(update.clone(), None);
+        let _ = tx_graph.apply_update(update.clone());
         let update_from_tx_graph: TxUpdate<ConfirmationBlockTime> = tx_graph.into();
 
         assert_eq!(
