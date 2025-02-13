@@ -478,7 +478,7 @@ impl Wallet {
 
     /// Load [`Wallet`] from the given previously persisted [`ChangeSet`] and `params`.
     ///
-    /// Refer to [`Wallet::load`] for more.
+    /// Returns `Ok(None)` if the changeset is empty. Refer to [`Wallet::load`] for more.
     pub fn load_with_params(
         changeset: ChangeSet,
         params: LoadParams,
