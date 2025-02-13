@@ -36,8 +36,9 @@ mod async_ext;
 #[cfg(feature = "async")]
 pub use async_ext::*;
 
-fn insert_anchor_from_status(
+fn insert_anchor_or_seen_at_from_status(
     update: &mut TxUpdate<ConfirmationBlockTime>,
+    start_time: u64,
     txid: Txid,
     status: TxStatus,
 ) {
@@ -53,6 +54,8 @@ fn insert_anchor_from_status(
             confirmation_time: time,
         };
         update.anchors.insert((anchor, txid));
+    } else {
+        update.seen_ats.insert((txid, start_time));
     }
 }
 

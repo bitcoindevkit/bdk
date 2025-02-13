@@ -146,7 +146,7 @@ fn main() -> anyhow::Result<()> {
                 let graph = &*graph.lock().unwrap();
                 let chain = &*chain.lock().unwrap();
 
-                FullScanRequest::builder()
+                FullScanRequest::builder_now()
                     .chain_tip(chain.tip())
                     .spks_for_keychain(
                         Keychain::External,
@@ -207,13 +207,12 @@ fn main() -> anyhow::Result<()> {
             }
 
             let chain_tip = chain.tip();
-            let mut request =
-                SyncRequest::builder()
-                    .chain_tip(chain_tip.clone())
-                    .inspect(|item, progress| {
-                        let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
-                        eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
-                    });
+            let mut request = SyncRequest::builder_now()
+                .chain_tip(chain_tip.clone())
+                .inspect(|item, progress| {
+                    let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
+                    eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
+                });
 
             if all_spks {
                 request = request.spks_with_indexes(graph.index.revealed_spks(..));
