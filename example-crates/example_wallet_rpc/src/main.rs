@@ -3,7 +3,7 @@ use bdk_bitcoind_rpc::{
     Emitter,
 };
 use bdk_wallet::{
-    bitcoin::{Block, Network, Transaction},
+    bitcoin::{Block, Network},
     file_store::Store,
     KeychainKind, Wallet,
 };
@@ -73,7 +73,7 @@ impl Args {
 enum Emission {
     SigTerm,
     Block(bdk_bitcoind_rpc::BlockEvent<Block>),
-    Mempool(Vec<(Transaction, u64)>),
+    Mempool(bdk_bitcoind_rpc::MempoolEvent),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -157,7 +157,7 @@ fn main() -> anyhow::Result<()> {
             }
             Emission::Mempool(mempool_emission) => {
                 let start_apply_mempool = Instant::now();
-                wallet.apply_unconfirmed_txs(mempool_emission);
+                wallet.apply_unconfirmed_txs(mempool_emission.emitted_txs);
                 wallet.persist(&mut db)?;
                 println!(
                     "Applied unconfirmed transactions in {}s",

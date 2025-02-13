@@ -10,8 +10,9 @@
 #![warn(missing_docs)]
 
 use bdk_core::{BlockId, CheckPoint};
-use bitcoin::{block::Header, Block, BlockHash, Transaction};
+use bitcoin::{block::Header, Block, BlockHash, Transaction, Txid};
 use bitcoincore_rpc::bitcoincore_rpc_json;
+use std::collections::HashSet;
 
 pub mod bip158;
 
@@ -64,17 +65,19 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
         }
     }
 
-    /// Emit mempool transactions, alongside their first-seen unix timestamps.
+    /// Emit mempool transactions and capture the initial snapshot of all mempool [`Txid`]s.
     ///
-    /// This method emits each transaction only once, unless we cannot guarantee the transaction's
-    /// ancestors are already emitted.
+    /// This method returns a [`MempoolEvent`] containing the full transactions (with their
+    /// first-seen unix timestamps) that were emitted, and the set of all [`Txid`]s present from the
+    /// initial mempool query. Each transaction is emitted only once, unless we cannot guarantee the
+    /// transaction's ancestors are already emitted.
     ///
     /// To understand why, consider a receiver which filters transactions based on whether it
     /// alters the UTXO set of tracked script pubkeys. If an emitted mempool transaction spends a
     /// tracked UTXO which is confirmed at height `h`, but the receiver has only seen up to block
     /// of height `h-1`, we want to re-emit this transaction until the receiver has seen the block
     /// at height `h`.
-    pub fn mempool(&mut self) -> Result<Vec<(Transaction, u64)>, bitcoincore_rpc::Error> {
+    pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let client = self.client;
 
         // This is the emitted tip height during the last mempool emission.
@@ -91,8 +94,11 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
         let prev_mempool_time = self.last_mempool_time;
         let mut latest_time = prev_mempool_time;
 
-        let txs_to_emit = client
-            .get_raw_mempool_verbose()?
+        // Get the raw mempool result from the RPC client.
+        let raw_mempool = client.get_raw_mempool_verbose()?;
+        let raw_mempool_txids = raw_mempool.keys().copied().collect::<HashSet<_>>();
+
+        let emitted_txs = raw_mempool
             .into_iter()
             .filter_map({
                 let latest_time = &mut latest_time;
@@ -128,7 +134,11 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
         self.last_mempool_time = latest_time;
         self.last_mempool_tip = Some(self.last_cp.height());
 
-        Ok(txs_to_emit)
+        Ok(MempoolEvent {
+            emitted_txs,
+            raw_mempool_txids,
+            last_seen: latest_time as u64,
+        })
     }
 
     /// Emit the next block height and header (if any).
@@ -141,6 +151,37 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
         Ok(poll(self, |hash| self.client.get_block(hash))?
             .map(|(checkpoint, block)| BlockEvent { block, checkpoint }))
+    }
+}
+
+/// A new emission from mempool.
+#[derive(Debug)]
+pub struct MempoolEvent {
+    /// Emitted mempool transactions with their first‐seen unix timestamps.
+    pub emitted_txs: Vec<(Transaction, u64)>,
+
+    /// Set of all [`Txid`]s from the raw mempool result, including transactions that may have been
+    /// confirmed or evicted during processing. This is used to determine which expected
+    /// transactions are missing.
+    pub raw_mempool_txids: HashSet<Txid>,
+
+    /// The latest first-seen epoch of emitted mempool transactions.
+    pub last_seen: u64,
+}
+
+impl MempoolEvent {
+    /// Given an iterator of expected [`Txid`]s, return those that are missing from the mempool.
+    pub fn evicted_txids(
+        &self,
+        expected_unconfirmed_txids: impl IntoIterator<Item = Txid>,
+    ) -> HashSet<Txid> {
+        let expected_set = expected_unconfirmed_txids
+            .into_iter()
+            .collect::<HashSet<_>>();
+        expected_set
+            .difference(&self.raw_mempool_txids)
+            .copied()
+            .collect()
     }
 }
 
