@@ -189,7 +189,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         assert!(emitter.next_block()?.is_none());
 
         let mempool_txs = emitter.mempool()?;
-        let indexed_additions = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs);
+        let indexed_additions = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs.new_txs);
         assert_eq!(
             indexed_additions
                 .tx_graph
@@ -437,6 +437,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     // the first emission should include all transactions
     let emitted_txids = emitter
         .mempool()?
+        .new_txs
         .into_iter()
         .map(|(tx, _)| tx.compute_txid())
         .collect::<BTreeSet<Txid>>();
@@ -447,7 +448,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
 
     // second emission should be empty
     assert!(
-        emitter.mempool()?.is_empty(),
+        emitter.mempool()?.new_txs.is_empty(),
         "second emission should be empty"
     );
 
@@ -457,7 +458,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     }
     while emitter.next_header()?.is_some() {}
     assert!(
-        emitter.mempool()?.is_empty(),
+        emitter.mempool()?.new_txs.is_empty(),
         "third emission, after chain tip is extended, should also be empty"
     );
 
@@ -506,6 +507,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
     assert_eq!(
         emitter
             .mempool()?
+            .new_txs
             .into_iter()
             .map(|(tx, _)| tx.compute_txid())
             .collect::<BTreeSet<_>>(),
@@ -515,6 +517,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
     assert_eq!(
         emitter
             .mempool()?
+            .new_txs
             .into_iter()
             .map(|(tx, _)| tx.compute_txid())
             .collect::<BTreeSet<_>>(),
@@ -535,6 +538,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
                 .collect::<BTreeSet<_>>();
             let emitted_txids = emitter
                 .mempool()?
+                .new_txs
                 .into_iter()
                 .map(|(tx, _)| tx.compute_txid())
                 .collect::<BTreeSet<_>>();
@@ -593,6 +597,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
     assert_eq!(
         emitter
             .mempool()?
+            .new_txs
             .into_iter()
             .map(|(tx, _)| tx.compute_txid())
             .collect::<BTreeSet<_>>(),
@@ -628,6 +633,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
             // include mempool txs introduced at reorg height or greater
             let mempool = emitter
                 .mempool()?
+                .new_txs
                 .into_iter()
                 .map(|(tx, _)| tx.compute_txid())
                 .collect::<BTreeSet<_>>();
@@ -643,6 +649,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
 
             let mempool = emitter
                 .mempool()?
+                .new_txs
                 .into_iter()
                 .map(|(tx, _)| tx.compute_txid())
                 .collect::<BTreeSet<_>>();
@@ -766,7 +773,7 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     )?;
 
     let mut emitter = Emitter::new(env.rpc_client(), chain.tip(), 1);
-    let changeset = graph.batch_insert_unconfirmed(emitter.mempool()?);
+    let changeset = graph.batch_insert_unconfirmed(emitter.mempool()?.new_txs);
     assert!(changeset
         .tx_graph
         .txs
@@ -828,6 +835,7 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
         let _ = graph.insert_evicted_at(txid, seen_at);
     }
 
+    // tx1 should no longer be canonical.
     assert!(graph
         .graph()
         .list_canonical_txs(&chain, chain_tip)
