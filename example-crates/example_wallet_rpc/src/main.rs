@@ -3,7 +3,7 @@ use bdk_bitcoind_rpc::{
     Emitter,
 };
 use bdk_wallet::{
-    bitcoin::{Block, Network, Transaction},
+    bitcoin::{Block, Network},
     file_store::Store,
     KeychainKind, Wallet,
 };
@@ -73,7 +73,7 @@ impl Args {
 enum Emission {
     SigTerm,
     Block(bdk_bitcoind_rpc::BlockEvent<Block>),
-    Mempool(Vec<(Transaction, u64)>),
+    Mempool(bdk_bitcoind_rpc::MempoolEvent),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -125,8 +125,23 @@ fn main() -> anyhow::Result<()> {
     });
 
     let emitter_tip = wallet_tip.clone();
+    let unconfirmed_txids = wallet
+        .tx_graph()
+        .list_expected_spk_txids(
+            wallet.local_chain(),
+            emitter_tip.block_id(),
+            wallet.spk_index(),
+            ..,
+        )
+        .map(|(_, txid)| txid)
+        .collect();
     spawn(move || -> Result<(), anyhow::Error> {
-        let mut emitter = Emitter::new(&rpc_client, emitter_tip, args.start_height);
+        let mut emitter = Emitter::new(
+            &rpc_client,
+            emitter_tip,
+            args.start_height,
+            unconfirmed_txids,
+        );
         while let Some(emission) = emitter.next_block()? {
             sender.send(Emission::Block(emission))?;
         }
@@ -157,7 +172,7 @@ fn main() -> anyhow::Result<()> {
             }
             Emission::Mempool(mempool_emission) => {
                 let start_apply_mempool = Instant::now();
-                wallet.apply_unconfirmed_txs(mempool_emission);
+                wallet.apply_unconfirmed_txs(mempool_emission.new_txs);
                 wallet.persist(&mut db)?;
                 println!(
                     "Applied unconfirmed transactions in {}s",
