@@ -8,7 +8,7 @@ use bdk_core::{
 use esplora_client::Sleeper;
 use futures::{stream::FuturesOrdered, TryStreamExt};
 
-use crate::{insert_anchor_from_status, insert_prevouts};
+use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
 
 /// [`esplora_client::Error`]
 type Error = Box<esplora_client::Error>;
@@ -63,6 +63,7 @@ where
         parallel_requests: usize,
     ) -> Result<FullScanResponse<K>, Error> {
         let mut request = request.into();
+        let start_time = request.start_time();
         let keychains = request.keychains();
 
         let chain_tip = request.chain_tip();
@@ -79,6 +80,7 @@ where
             let keychain_spks = request.iter_spks(keychain.clone());
             let (update, last_active_index) = fetch_txs_with_keychain_spks(
                 self,
+                start_time,
                 &mut inserted_txs,
                 keychain_spks,
                 stop_gap,
@@ -111,6 +113,7 @@ where
         parallel_requests: usize,
     ) -> Result<SyncResponse, Error> {
         let mut request = request.into();
+        let start_time = request.start_time();
 
         let chain_tip = request.chain_tip();
         let latest_blocks = if chain_tip.is_some() {
@@ -124,6 +127,7 @@ where
         tx_update.extend(
             fetch_txs_with_spks(
                 self,
+                start_time,
                 &mut inserted_txs,
                 request.iter_spks(),
                 parallel_requests,
@@ -133,6 +137,7 @@ where
         tx_update.extend(
             fetch_txs_with_txids(
                 self,
+                start_time,
                 &mut inserted_txs,
                 request.iter_txids(),
                 parallel_requests,
@@ -142,6 +147,7 @@ where
         tx_update.extend(
             fetch_txs_with_outpoints(
                 self,
+                start_time,
                 &mut inserted_txs,
                 request.iter_outpoints(),
                 parallel_requests,
@@ -278,6 +284,7 @@ async fn chain_update<S: Sleeper>(
 /// Refer to [crate-level docs](crate) for more.
 async fn fetch_txs_with_keychain_spks<I, S>(
     client: &esplora_client::AsyncClient<S>,
+    start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     mut keychain_spks: I,
     stop_gap: usize,
@@ -328,7 +335,7 @@ where
                 if inserted_txs.insert(tx.txid) {
                     update.txs.push(tx.to_tx().into());
                 }
-                insert_anchor_from_status(&mut update, tx.txid, tx.status);
+                insert_anchor_or_seen_at_from_status(&mut update, start_time, tx.txid, tx.status);
                 insert_prevouts(&mut update, tx.vin);
             }
         }
@@ -357,6 +364,7 @@ where
 /// Refer to [crate-level docs](crate) for more.
 async fn fetch_txs_with_spks<I, S>(
     client: &esplora_client::AsyncClient<S>,
+    start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     spks: I,
     parallel_requests: usize,
@@ -368,6 +376,7 @@ where
 {
     fetch_txs_with_keychain_spks(
         client,
+        start_time,
         inserted_txs,
         spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
         usize::MAX,
@@ -385,6 +394,7 @@ where
 /// Refer to [crate-level docs](crate) for more.
 async fn fetch_txs_with_txids<I, S>(
     client: &esplora_client::AsyncClient<S>,
+    start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     txids: I,
     parallel_requests: usize,
@@ -420,7 +430,7 @@ where
                 if inserted_txs.insert(txid) {
                     update.txs.push(tx_info.to_tx().into());
                 }
-                insert_anchor_from_status(&mut update, txid, tx_info.status);
+                insert_anchor_or_seen_at_from_status(&mut update, start_time, txid, tx_info.status);
                 insert_prevouts(&mut update, tx_info.vin);
             }
         }
@@ -436,6 +446,7 @@ where
 /// Refer to [crate-level docs](crate) for more.
 async fn fetch_txs_with_outpoints<I, S>(
     client: &esplora_client::AsyncClient<S>,
+    start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     outpoints: I,
     parallel_requests: usize,
@@ -453,6 +464,7 @@ where
     update.extend(
         fetch_txs_with_txids(
             client,
+            start_time,
             inserted_txs,
             outpoints.iter().copied().map(|op| op.txid),
             parallel_requests,
@@ -486,13 +498,26 @@ where
                 missing_txs.push(spend_txid);
             }
             if let Some(spend_status) = op_status.status {
-                insert_anchor_from_status(&mut update, spend_txid, spend_status);
+                insert_anchor_or_seen_at_from_status(
+                    &mut update,
+                    start_time,
+                    spend_txid,
+                    spend_status,
+                );
             }
         }
     }
 
-    update
-        .extend(fetch_txs_with_txids(client, inserted_txs, missing_txs, parallel_requests).await?);
+    update.extend(
+        fetch_txs_with_txids(
+            client,
+            start_time,
+            inserted_txs,
+            missing_txs,
+            parallel_requests,
+        )
+        .await?,
+    );
     Ok(update)
 }
 

@@ -128,6 +128,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         fetch_prev_txouts: bool,
     ) -> Result<FullScanResponse<K>, Error> {
         let mut request: FullScanRequest<K> = request.into();
+        let start_time = request.start_time();
 
         let tip_and_latest_blocks = match request.chain_tip() {
             Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
@@ -139,7 +140,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         for keychain in request.keychains() {
             let spks = request.iter_spks(keychain.clone());
             if let Some(last_active_index) =
-                self.populate_with_spks(&mut tx_update, spks, stop_gap, batch_size)?
+                self.populate_with_spks(start_time, &mut tx_update, spks, stop_gap, batch_size)?
             {
                 last_active_indices.insert(keychain, last_active_index);
             }
@@ -196,6 +197,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         fetch_prev_txouts: bool,
     ) -> Result<SyncResponse, Error> {
         let mut request: SyncRequest<I> = request.into();
+        let start_time = request.start_time();
 
         let tip_and_latest_blocks = match request.chain_tip() {
             Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
@@ -204,6 +206,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         self.populate_with_spks(
+            start_time,
             &mut tx_update,
             request
                 .iter_spks()
@@ -212,8 +215,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             usize::MAX,
             batch_size,
         )?;
-        self.populate_with_txids(&mut tx_update, request.iter_txids())?;
-        self.populate_with_outpoints(&mut tx_update, request.iter_outpoints())?;
+        self.populate_with_txids(start_time, &mut tx_update, request.iter_txids())?;
+        self.populate_with_outpoints(start_time, &mut tx_update, request.iter_outpoints())?;
 
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
@@ -242,6 +245,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// also included.
     fn populate_with_spks(
         &self,
+        start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         mut spks: impl Iterator<Item = (u32, ScriptBuf)>,
         stop_gap: usize,
@@ -268,7 +272,6 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     if unused_spk_count >= stop_gap {
                         return Ok(last_active_index);
                     }
-                    continue;
                 } else {
                     last_active_index = Some(spk_index);
                     unused_spk_count = 0;
@@ -276,8 +279,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
                 for tx_res in spk_history {
                     tx_update.txs.push(self.fetch_tx(tx_res.tx_hash)?);
-                    if let Ok(height) = tx_res.height.try_into() {
-                        self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, height)?;
+                    match tx_res.height.try_into() {
+                        // Returned heights 0 & -1 are reserved for unconfirmed txs.
+                        Ok(height) if height > 0 => {
+                            self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, height)?;
+                        }
+                        _ => {
+                            tx_update.seen_ats.insert((tx_res.tx_hash, start_time));
+                        }
                     }
                 }
             }
@@ -290,6 +299,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// included. Anchors of the aforementioned transactions are included.
     fn populate_with_outpoints(
         &self,
+        start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
     ) -> Result<(), Error> {
@@ -314,8 +324,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 if !has_residing && res.tx_hash == op_txid {
                     has_residing = true;
                     tx_update.txs.push(Arc::clone(&op_tx));
-                    if let Ok(height) = res.height.try_into() {
-                        self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                    match res.height.try_into() {
+                        // Returned heights 0 & -1 are reserved for unconfirmed txs.
+                        Ok(height) if height > 0 => {
+                            self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                        }
+                        _ => {
+                            tx_update.seen_ats.insert((res.tx_hash, start_time));
+                        }
                     }
                 }
 
@@ -330,8 +346,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         continue;
                     }
                     tx_update.txs.push(Arc::clone(&res_tx));
-                    if let Ok(height) = res.height.try_into() {
-                        self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                    match res.height.try_into() {
+                        // Returned heights 0 & -1 are reserved for unconfirmed txs.
+                        Ok(height) if height > 0 => {
+                            self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                        }
+                        _ => {
+                            tx_update.seen_ats.insert((res.tx_hash, start_time));
+                        }
                     }
                 }
             }
@@ -342,6 +364,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Populate the `tx_update` with transactions/anchors of the provided `txids`.
     fn populate_with_txids(
         &self,
+        start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
     ) -> Result<(), Error> {
@@ -366,8 +389,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .into_iter()
                 .find(|r| r.tx_hash == txid)
             {
-                if let Ok(height) = r.height.try_into() {
-                    self.validate_merkle_for_anchor(tx_update, txid, height)?;
+                match r.height.try_into() {
+                    // Returned heights 0 & -1 are reserved for unconfirmed txs.
+                    Ok(height) if height > 0 => {
+                        self.validate_merkle_for_anchor(tx_update, txid, height)?;
+                    }
+                    _ => {
+                        tx_update.seen_ats.insert((r.tx_hash, start_time));
+                    }
                 }
             }
 
