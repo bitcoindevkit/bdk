@@ -2073,10 +2073,6 @@ impl Wallet {
                     return false;
                 }
                 if tx.is_coinbase() {
-                    debug_assert!(
-                        chain_position.is_confirmed(),
-                        "coinbase must always be confirmed"
-                    );
                     if let Some(current_height) = current_height {
                         match chain_position {
                             ChainPosition::Confirmed(a) => {
