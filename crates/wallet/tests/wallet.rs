@@ -3875,8 +3875,16 @@ fn test_spend_coinbase() {
     };
     insert_anchor(&mut wallet, txid, anchor);
 
-    let not_yet_mature_time = confirmation_height + COINBASE_MATURITY - 1;
-    let maturity_time = confirmation_height + COINBASE_MATURITY;
+    // NOTE: A transaction spending an output coming from the coinbase tx at height h, is eligible
+    // to be included in block h + [100 = COINBASE_MATURITY] or higher.
+    // Tx elibible to be included in the next block will be accepted in the mempool, used in block
+    // templates and relayed on the network.
+    // Miners may include such tx in a block when their chaintip is at h + [99 = COINBASE_MATURITY - 1].
+    // This means these coins are available for selection at height h + 99.
+    //
+    // By https://bitcoin.stackexchange.com/a/119017
+    let not_yet_mature_time = confirmation_height + COINBASE_MATURITY - 2;
+    let maturity_time = confirmation_height + COINBASE_MATURITY - 1;
 
     let balance = wallet.balance();
     assert_eq!(

@@ -2052,9 +2052,10 @@ impl Wallet {
                         match chain_position {
                             ChainPosition::Confirmed { anchor, .. } => {
                                 // https://github.com/bitcoin/bitcoin/blob/c5e67be03bb06a5d7885c55db1f016fbf2333fe3/src/validation.cpp#L373-L375
-                                spendable &= (current_height
-                                    .saturating_sub(anchor.block_id.height))
-                                    >= COINBASE_MATURITY;
+                                let spend_height = current_height + 1;
+                                let coin_age_at_spend_height =
+                                    spend_height.saturating_sub(anchor.block_id.height);
+                                spendable &= coin_age_at_spend_height >= COINBASE_MATURITY;
                             }
                             ChainPosition::Unconfirmed { .. } => spendable = false,
                         }
