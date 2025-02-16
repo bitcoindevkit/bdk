@@ -120,6 +120,7 @@
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::collections::*;
+use crate::spk_txout::SpkTxOutIndex;
 use crate::BlockId;
 use crate::CanonicalIter;
 use crate::CanonicalReason;
@@ -132,6 +133,7 @@ use bdk_core::ConfirmationBlockTime;
 pub use bdk_core::TxUpdate;
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
+use core::ops::RangeBounds;
 use core::{
     convert::Infallible,
     ops::{Deref, RangeInclusive},
@@ -1149,6 +1151,67 @@ impl<A: Anchor> TxGraph<A> {
     ) -> Balance {
         self.try_balance(chain, chain_tip, outpoints, trust_predicate)
             .expect("oracle is infallible")
+    }
+
+    /// List txids that are expected to exist under the given spks.
+    ///
+    /// This is used to fill [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
+    ///
+    /// The spk index range can be contrained with `range`.
+    ///
+    /// # Error
+    ///
+    /// If the [`ChainOracle`] implementation (`chain`) fails, an error will be returned with the
+    /// returned item.
+    ///
+    /// If the [`ChainOracle`] is infallible,
+    /// [`list_expected_spk_txids`](Self::list_expected_spk_txids) can be used instead.
+    pub fn try_list_expected_spk_txids<'a, C, I>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        indexer: &'a impl AsRef<SpkTxOutIndex<I>>,
+        spk_index_range: impl RangeBounds<I> + 'a,
+    ) -> impl Iterator<Item = Result<(ScriptBuf, Txid), C::Error>> + 'a
+    where
+        C: ChainOracle,
+        I: fmt::Debug + Clone + Ord + 'a,
+    {
+        let indexer = indexer.as_ref();
+        self.try_list_canonical_txs(chain, chain_tip).flat_map(
+            move |res| -> Vec<Result<(ScriptBuf, Txid), C::Error>> {
+                let range = &spk_index_range;
+                let c_tx = match res {
+                    Ok(c_tx) => c_tx,
+                    Err(err) => return vec![Err(err)],
+                };
+                let relevant_spks = indexer.relevant_spks_of_tx(&c_tx.tx_node);
+                relevant_spks
+                    .into_iter()
+                    .filter(|(i, _)| range.contains(i))
+                    .map(|(_, spk)| Ok((spk, c_tx.tx_node.txid)))
+                    .collect()
+            },
+        )
+    }
+
+    /// List txids that are expected to exist under the given spks.
+    ///
+    /// This is the infallible version of
+    /// [`try_list_expected_spk_txids`](Self::try_list_expected_spk_txids).
+    pub fn list_expected_spk_txids<'a, C, I>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        indexer: &'a impl AsRef<SpkTxOutIndex<I>>,
+        spk_index_range: impl RangeBounds<I> + 'a,
+    ) -> impl Iterator<Item = (ScriptBuf, Txid)> + 'a
+    where
+        C: ChainOracle<Error = Infallible>,
+        I: fmt::Debug + Clone + Ord + 'a,
+    {
+        self.try_list_expected_spk_txids(chain, chain_tip, indexer, spk_index_range)
+            .map(|r| r.expect("infallible"))
     }
 }
 
