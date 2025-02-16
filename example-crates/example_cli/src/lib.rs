@@ -150,6 +150,9 @@ pub enum PsbtCmd<S: clap::Args> {
         value: u64,
         /// Recipient address
         address: Address<NetworkUnchecked>,
+        /// Set the feerate of the tx (sat/vbyte)
+        #[clap(long, short, default_value = "1.0")]
+        feerate: Option<f32>,
         /// Set max absolute timelock (from consensus value)
         #[clap(long, short)]
         after: Option<u32>,
@@ -260,6 +263,7 @@ pub fn create_tx<O: ChainOracle>(
     cs_algorithm: CoinSelectionAlgo,
     address: Address,
     value: u64,
+    feerate: f32,
 ) -> anyhow::Result<(Psbt, Option<ChangeInfo>)>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
@@ -332,7 +336,10 @@ where
                 .iter()
                 .map(|output| (output.weight().to_wu() as u32, output.value.to_sat())),
         ),
-        fee: TargetFee::default(),
+        fee: TargetFee {
+            rate: FeeRate::from_sat_per_vb(feerate),
+            ..Default::default()
+        },
     };
 
     let change_policy = ChangePolicy {
@@ -584,6 +591,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
             PsbtCmd::New {
                 value,
                 address,
+                feerate,
                 after,
                 older,
                 coin_select,
@@ -611,7 +619,15 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                         assets = assets.older(relative::LockTime::from_consensus(n)?);
                     }
 
-                    create_tx(&mut graph, &*chain, &assets, coin_select, address, value)?
+                    create_tx(
+                        &mut graph,
+                        &*chain,
+                        &assets,
+                        coin_select,
+                        address,
+                        value,
+                        feerate.expect("must have feerate"),
+                    )?
                 };
 
                 if let Some(ChangeInfo {
