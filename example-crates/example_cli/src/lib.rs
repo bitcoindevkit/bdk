@@ -147,8 +147,10 @@ pub enum PsbtCmd<S: clap::Args> {
     /// Create a new PSBT.
     New {
         /// Amount to send in satoshis
+        #[clap(required = true)]
         value: u64,
         /// Recipient address
+        #[clap(required = true)]
         address: Address<NetworkUnchecked>,
         /// Set the feerate of the tx (sat/vbyte)
         #[clap(long, short, default_value = "1.0")]
@@ -168,20 +170,21 @@ pub enum PsbtCmd<S: clap::Args> {
     },
     /// Sign with a hot signer
     Sign {
-        /// PSBT
-        #[clap(long)]
-        psbt: Option<String>,
-        /// Private descriptor
-        #[clap(long, short = 'd')]
+        /// Private descriptor [env: DESCRIPTOR=]
+        #[clap(long, short)]
         descriptor: Option<String>,
+        /// PSBT
+        #[clap(long, short, required = true)]
+        psbt: String,
     },
     /// Extract transaction
     Extract {
         /// PSBT
+        #[clap(long, short, required = true)]
         psbt: String,
         /// Whether to try broadcasting the tx
-        #[clap(long, short = 'b')]
-        try_broadcast: bool,
+        #[clap(long, short)]
+        broadcast: bool,
         #[clap(flatten)]
         chain_specific: S,
     },
@@ -451,7 +454,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
     chain: &Mutex<LocalChain>,
     db: &Mutex<Store<ChangeSet>>,
     network: Network,
-    broadcast: impl FnOnce(S, &Transaction) -> anyhow::Result<()>,
+    broadcast_fn: impl FnOnce(S, &Transaction) -> anyhow::Result<()>,
     cmd: Commands<CS, S>,
 ) -> anyhow::Result<()> {
     match cmd {
@@ -671,7 +674,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 Ok(())
             }
             PsbtCmd::Sign { psbt, descriptor } => {
-                let mut psbt = Psbt::from_str(psbt.unwrap_or_default().as_str())?;
+                let mut psbt = Psbt::from_str(&psbt)?;
 
                 let desc_str = match descriptor {
                     Some(s) => s,
@@ -709,20 +712,20 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 Ok(())
             }
             PsbtCmd::Extract {
-                try_broadcast,
+                broadcast,
                 chain_specific,
                 psbt,
             } => {
-                let mut psbt = Psbt::from_str(psbt.as_str())?;
+                let mut psbt = Psbt::from_str(&psbt)?;
                 psbt.finalize_mut(&Secp256k1::new())
                     .map_err(|errors| anyhow::anyhow!("failed to finalize PSBT {errors:?}"))?;
 
                 let tx = psbt.extract_tx()?;
 
-                if try_broadcast {
+                if broadcast {
                     let mut graph = graph.lock().unwrap();
 
-                    match broadcast(chain_specific, &tx) {
+                    match broadcast_fn(chain_specific, &tx) {
                         Ok(_) => {
                             println!("Broadcasted Tx: {}", tx.compute_txid());
 
