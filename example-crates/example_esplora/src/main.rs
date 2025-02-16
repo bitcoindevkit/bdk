@@ -87,7 +87,7 @@ impl EsploraArgs {
 #[derive(Parser, Debug, Clone, PartialEq)]
 pub struct ScanOptions {
     /// Max number of concurrent esplora server requests.
-    #[clap(long, default_value = "5")]
+    #[clap(long, default_value = "2")]
     pub parallel_requests: usize,
 }
 
