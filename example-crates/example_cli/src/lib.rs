@@ -292,7 +292,7 @@ where
         .map(|(plan, utxo)| {
             Candidate::new(
                 utxo.txout.value.to_sat(),
-                plan.satisfaction_weight() as u32,
+                plan.satisfaction_weight() as u64,
                 plan.witness_version().is_some(),
             )
         })
@@ -334,7 +334,7 @@ where
         outputs: TargetOutputs::fund_outputs(
             outputs
                 .iter()
-                .map(|output| (output.weight().to_wu() as u32, output.value.to_sat())),
+                .map(|output| (output.weight().to_wu(), output.value.to_sat())),
         ),
         fee: TargetFee {
             rate: FeeRate::from_sat_per_vb(feerate),
