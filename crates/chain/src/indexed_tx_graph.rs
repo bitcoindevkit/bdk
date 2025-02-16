@@ -1,13 +1,18 @@
 //! Contains the [`IndexedTxGraph`] and associated types. Refer to the
 //! [`IndexedTxGraph`] documentation for more.
-use core::fmt::Debug;
+use core::{
+    convert::Infallible,
+    fmt::{self, Debug},
+    ops::RangeBounds,
+};
 
 use alloc::{sync::Arc, vec::Vec};
-use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
+use bitcoin::{Block, OutPoint, ScriptBuf, Transaction, TxOut, Txid};
 
 use crate::{
+    spk_txout::SpkTxOutIndex,
     tx_graph::{self, TxGraph},
-    Anchor, BlockId, Indexer, Merge, TxPosInBlock,
+    Anchor, BlockId, ChainOracle, Indexer, Merge, TxPosInBlock,
 };
 
 /// The [`IndexedTxGraph`] combines a [`TxGraph`] and an [`Indexer`] implementation.
@@ -125,6 +130,19 @@ where
     /// the later last-seen is prioritized.
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A, I::ChangeSet> {
         self.graph.insert_seen_at(txid, seen_at).into()
+    }
+
+    /// Inserts the given `evicted_at` for `txid`.
+    ///
+    /// The `evicted_at` timestamp represents the last known time when the transaction was observed
+    /// to be missing from the mempool. If `txid` was previously recorded with an earlier
+    /// `evicted_at` value, it is updated only if the new value is greater.
+    pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A, I::ChangeSet> {
+        let tx_graph = self.graph.insert_evicted_at(txid, evicted_at);
+        ChangeSet {
+            tx_graph,
+            ..Default::default()
+        }
     }
 
     /// Batch insert transactions, filtering out those that are irrelevant.
@@ -298,6 +316,58 @@ where
             tx_graph: graph,
             indexer,
         }
+    }
+}
+
+impl<A, X> IndexedTxGraph<A, X>
+where
+    A: Anchor,
+{
+    /// List txids that are expected to exist under the given spks.
+    ///
+    /// This is used to fill [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
+    ///
+    /// The spk index range can be contrained with `range`.
+    ///
+    /// # Error
+    ///
+    /// If the [`ChainOracle`] implementation (`chain`) fails, an error will be returned with the
+    /// returned item.
+    ///
+    /// If the [`ChainOracle`] is infallible,
+    /// [`list_expected_spk_txids`](Self::list_expected_spk_txids) can be used instead.
+    pub fn try_list_expected_spk_txids<'a, C, I>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        spk_index_range: impl RangeBounds<I> + 'a,
+    ) -> impl Iterator<Item = Result<(ScriptBuf, Txid), C::Error>> + 'a
+    where
+        C: ChainOracle,
+        X: AsRef<SpkTxOutIndex<I>> + 'a,
+        I: fmt::Debug + Clone + Ord + 'a,
+    {
+        self.graph
+            .try_list_expected_spk_txids(chain, chain_tip, &self.index, spk_index_range)
+    }
+
+    /// List txids that are expected to exist under the given spks.
+    ///
+    /// This is the infallible version of
+    /// [`try_list_expected_spk_txids`](Self::try_list_expected_spk_txids).
+    pub fn list_expected_spk_txids<'a, C, I>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        spk_index_range: impl RangeBounds<I> + 'a,
+    ) -> impl Iterator<Item = (ScriptBuf, Txid)> + 'a
+    where
+        C: ChainOracle<Error = Infallible>,
+        X: AsRef<SpkTxOutIndex<I>> + 'a,
+        I: fmt::Debug + Clone + Ord + 'a,
+    {
+        self.try_list_expected_spk_txids(chain, chain_tip, spk_index_range)
+            .map(|r| r.expect("infallible"))
     }
 }
 

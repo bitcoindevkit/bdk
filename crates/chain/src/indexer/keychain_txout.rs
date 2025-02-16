@@ -136,6 +136,12 @@ impl<K> Default for KeychainTxOutIndex<K> {
     }
 }
 
+impl<K> AsRef<SpkTxOutIndex<(K, u32)>> for KeychainTxOutIndex<K> {
+    fn as_ref(&self) -> &SpkTxOutIndex<(K, u32)> {
+        &self.inner
+    }
+}
+
 impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     type ChangeSet = ChangeSet;
 
@@ -199,6 +205,11 @@ impl<K> KeychainTxOutIndex<K> {
             last_revealed: Default::default(),
             lookahead,
         }
+    }
+
+    /// Get a reference to the internal [`SpkTxOutIndex`].
+    pub fn inner(&self) -> &SpkTxOutIndex<(K, u32)> {
+        &self.inner
     }
 }
 
