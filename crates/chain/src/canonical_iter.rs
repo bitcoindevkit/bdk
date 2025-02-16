@@ -8,8 +8,8 @@ use bdk_core::BlockId;
 use bitcoin::{Transaction, Txid};
 
 /// Iterates over canonical txs.
-pub struct CanonicalIter<'g, A, C> {
-    tx_graph: &'g TxGraph<A>,
+pub struct CanonicalIter<'g, A, X, C> {
+    tx_graph: &'g TxGraph<A, X>,
     chain: &'g C,
     chain_tip: BlockId,
 
@@ -24,9 +24,9 @@ pub struct CanonicalIter<'g, A, C> {
     queue: VecDeque<Txid>,
 }
 
-impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
+impl<'g, A: Anchor, X, C: ChainOracle> CanonicalIter<'g, A, X, C> {
     /// Constructs [`CanonicalIter`].
-    pub fn new(tx_graph: &'g TxGraph<A>, chain: &'g C, chain_tip: BlockId) -> Self {
+    pub fn new(tx_graph: &'g TxGraph<A, X>, chain: &'g C, chain_tip: BlockId) -> Self {
         let anchors = tx_graph.all_anchors();
         let pending_anchored = Box::new(
             tx_graph
@@ -133,7 +133,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
     }
 }
 
-impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
+impl<A: Anchor, X, C: ChainOracle> Iterator for CanonicalIter<'_, A, X, C> {
     type Item = Result<(Txid, Arc<Transaction>, CanonicalReason<A>), C::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {

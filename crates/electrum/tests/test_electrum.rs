@@ -3,7 +3,7 @@ use bdk_chain::{
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest, SyncResponse},
     spk_txout::SpkTxOutIndex,
-    Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
+    Balance, ConfirmationBlockTime, Indexer, Merge, TxGraph,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
@@ -16,13 +16,11 @@ const BATCH_SIZE: usize = 5;
 
 fn get_balance(
     recv_chain: &LocalChain,
-    recv_graph: &IndexedTxGraph<ConfirmationBlockTime, SpkTxOutIndex<()>>,
+    recv_graph: &TxGraph<ConfirmationBlockTime, SpkTxOutIndex<()>>,
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
-    let balance = recv_graph
-        .graph()
-        .balance(recv_chain, chain_tip, outpoints, |_, _| true);
+    let balance = recv_graph.balance(recv_chain, chain_tip, outpoints, |_, _| true);
     Ok(balance)
 }
 
@@ -30,7 +28,7 @@ fn sync_with_electrum<I, Spks>(
     client: &BdkElectrumClient<electrum_client::Client>,
     spks: Spks,
     chain: &mut LocalChain,
-    graph: &mut IndexedTxGraph<ConfirmationBlockTime, I>,
+    graph: &mut TxGraph<ConfirmationBlockTime, I>,
 ) -> anyhow::Result<SyncResponse>
 where
     I: Indexer,
@@ -308,7 +306,7 @@ fn test_sync() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+    let mut recv_graph = TxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index
@@ -398,13 +396,10 @@ fn test_sync() -> anyhow::Result<()> {
 
     // Check to see if we have the floating txouts available from our transactions' previous outputs
     // in order to calculate transaction fees.
-    for tx in recv_graph.graph().full_txs() {
+    for tx in recv_graph.full_txs() {
         // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
         // floating txouts available from the transaction's previous outputs.
-        let fee = recv_graph
-            .graph()
-            .calculate_fee(&tx.tx)
-            .expect("fee must exist");
+        let fee = recv_graph.calculate_fee(&tx.tx).expect("fee must exist");
 
         // Retrieve the fee in the transaction data from `bitcoind`.
         let tx_fee = env
@@ -451,7 +446,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+    let mut recv_graph = TxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index
@@ -538,7 +533,7 @@ fn test_sync_with_coinbase() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+    let mut recv_graph = TxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index
@@ -573,7 +568,7 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
 
     // Setup receiver.
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
-    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+    let mut recv_graph = TxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
         recv_index
@@ -634,7 +629,6 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
 
     // Check the graph update contains the right floating txout
     let graph_txout = recv_graph
-        .graph()
         .all_txouts()
         .find(|(_op, txout)| txout.value == prev_amt)
         .unwrap();
@@ -649,13 +643,10 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
         },
     );
 
-    for tx in recv_graph.graph().full_txs() {
+    for tx in recv_graph.full_txs() {
         // Retrieve the calculated fee from `TxGraph`, which will panic if we do not have the
         // floating txouts available from the transaction's previous outputs.
-        let fee = recv_graph
-            .graph()
-            .calculate_fee(&tx.tx)
-            .expect("fee must exist");
+        let fee = recv_graph.calculate_fee(&tx.tx).expect("fee must exist");
 
         // Check the fee calculated fee matches the initial fee amount
         assert_eq!(fee, FEE_AMOUNT);
