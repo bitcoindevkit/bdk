@@ -80,7 +80,7 @@ pub use bdk_chain::Balance;
 pub use changeset::ChangeSet;
 pub use params::*;
 pub use persisted::*;
-pub use utils::IsDust;
+pub use utils::{IsDust, TxAmountSpend};
 
 /// A Bitcoin wallet
 ///

@@ -117,6 +117,19 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Older {
         }
     }
 }
+/// Trait to perform the calculation of the transaction amount spent.
+/// Use the spend() method pass the three tuples of`Amount` values to perform the calc of total.
+pub trait TxAmountSpend {
+    /// Perfome the calc to get total of the transaction
+    fn spend(&self) -> Amount;
+}
+impl TxAmountSpend for (Amount, Amount, Amount) {
+    fn spend(&self) -> Amount {
+        // Pass the tree tuples of `Amount` to performe calculate
+        let (sent, received, fee) = *self;
+        sent - received + fee
+    }
+}
 
 // The Knuth shuffling algorithm based on the original [Fisher-Yates method](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle)
 pub(crate) fn shuffle_slice<T>(list: &mut [T], rng: &mut impl RngCore) {
