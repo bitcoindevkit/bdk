@@ -278,15 +278,20 @@ impl<'a, 'b, D: Database> TxCache<'a, 'b, D> {
             }
         }
 
-        if !need_fetch.is_empty() {
+        // For some wallets there exists a pathological case where we may try to fetch many thousands
+        // of transactions at once, which creates enormous memory pressure. By chunking the batch
+        // into more reasonably sized sub-queries, we allow time for memory to be freed.
+        for chunk in need_fetch.chunks(1000) {
             let txs = self
                 .client
-                .batch_transaction_get(need_fetch.clone())
+                .batch_transaction_get(chunk)
                 .map_err(Error::Electrum)?;
+
             let mut txs: HashMap<_, _> = txs.into_iter().map(|tx| (tx.txid(), tx)).collect();
-            for txid in need_fetch {
-                if let Some(tx) = txs.remove(txid) {
-                    self.cache.insert(*txid, tx);
+
+            for txid in chunk {
+                if let Some(tx) = txs.remove(*txid) {
+                    self.cache.insert(**txid, tx);
                 }
             }
         }
