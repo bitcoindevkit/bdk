@@ -4,7 +4,7 @@ use bdk_testenv::utils::DESCRIPTORS;
 use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 
-use bdk_chain::{spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor};
+use bdk_chain::{spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor, CanonicalizationMods};
 use bitcoin::{
     locktime::absolute::LockTime, secp256k1::Secp256k1, transaction, Amount, OutPoint, ScriptBuf,
     Sequence, Transaction, TxIn, TxOut, Txid, Witness,
@@ -24,6 +24,7 @@ pub struct TxTemplate<'a, A> {
     pub outputs: &'a [TxOutTemplate],
     pub anchors: &'a [A],
     pub last_seen: Option<u64>,
+    pub assume_canonical: bool,
 }
 
 #[allow(dead_code)]
@@ -52,15 +53,23 @@ impl TxOutTemplate {
 }
 
 #[allow(dead_code)]
+pub struct TxTemplateEnv<'a, A> {
+    pub tx_graph: TxGraph<A>,
+    pub indexer: SpkTxOutIndex<u32>,
+    pub txid_to_name: HashMap<&'a str, Txid>,
+    pub canonicalization_mods: CanonicalizationMods,
+}
+
+#[allow(dead_code)]
 pub fn init_graph<'a, A: Anchor + Clone + 'a>(
     tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
-) -> (TxGraph<A>, SpkTxOutIndex<u32>, HashMap<&'a str, Txid>) {
+) -> TxTemplateEnv<'a, A> {
     let (descriptor, _) =
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[2]).unwrap();
-    let mut graph = TxGraph::<A>::default();
-    let mut spk_index = SpkTxOutIndex::default();
+    let mut tx_graph = TxGraph::<A>::default();
+    let mut indexer = SpkTxOutIndex::default();
     (0..10).for_each(|index| {
-        spk_index.insert_spk(
+        indexer.insert_spk(
             index,
             descriptor
                 .at_derivation_index(index)
@@ -68,8 +77,9 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
                 .script_pubkey(),
         );
     });
-    let mut tx_ids = HashMap::<&'a str, Txid>::new();
+    let mut txid_to_name = HashMap::<&'a str, Txid>::new();
 
+    let mut canonicalization_mods = CanonicalizationMods::default();
     for (bogus_txin_vout, tx_tmp) in tx_templates.into_iter().enumerate() {
         let tx = Transaction {
             version: transaction::Version::non_standard(0),
@@ -98,7 +108,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
                         witness: Witness::new(),
                     },
                     TxInTemplate::PrevTx(prev_name, prev_vout) => {
-                        let prev_txid = tx_ids.get(prev_name).expect(
+                        let prev_txid = txid_to_name.get(prev_name).expect(
                             "txin template must spend from tx of template that comes before",
                         );
                         TxIn {
@@ -120,21 +130,30 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
                     },
                     Some(index) => TxOut {
                         value: Amount::from_sat(output.value),
-                        script_pubkey: spk_index.spk_at_index(index).unwrap(),
+                        script_pubkey: indexer.spk_at_index(index).unwrap(),
                     },
                 })
                 .collect(),
         };
 
-        tx_ids.insert(tx_tmp.tx_name, tx.compute_txid());
-        spk_index.scan(&tx);
-        let _ = graph.insert_tx(tx.clone());
+        let txid = tx.compute_txid();
+        if tx_tmp.assume_canonical {
+            canonicalization_mods.assume_canonical.push(txid);
+        }
+        txid_to_name.insert(tx_tmp.tx_name, txid);
+        indexer.scan(&tx);
+        let _ = tx_graph.insert_tx(tx.clone());
         for anchor in tx_tmp.anchors.iter() {
-            let _ = graph.insert_anchor(tx.compute_txid(), anchor.clone());
+            let _ = tx_graph.insert_anchor(txid, anchor.clone());
         }
         if let Some(last_seen) = tx_tmp.last_seen {
-            let _ = graph.insert_seen_at(tx.compute_txid(), last_seen);
+            let _ = tx_graph.insert_seen_at(txid, last_seen);
         }
     }
-    (graph, spk_index, tx_ids)
+    TxTemplateEnv {
+        tx_graph,
+        indexer,
+        txid_to_name,
+        canonicalization_mods,
+    }
 }

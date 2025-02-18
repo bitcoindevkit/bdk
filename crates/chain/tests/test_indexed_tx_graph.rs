@@ -9,7 +9,7 @@ use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
-    tx_graph, Balance, ChainPosition, ConfirmationBlockTime, DescriptorExt,
+    tx_graph, Balance, CanonicalizationMods, ChainPosition, ConfirmationBlockTime, DescriptorExt,
 };
 use bdk_testenv::{
     block_id, hash,
@@ -271,6 +271,7 @@ fn test_list_owned_txouts() {
                 .filter_chain_txouts(
                     &local_chain,
                     chain_tip,
+                    CanonicalizationMods::NONE,
                     graph.index.outpoints().iter().cloned(),
                 )
                 .collect::<Vec<_>>();
@@ -280,6 +281,7 @@ fn test_list_owned_txouts() {
                 .filter_chain_unspents(
                     &local_chain,
                     chain_tip,
+                    CanonicalizationMods::NONE,
                     graph.index.outpoints().iter().cloned(),
                 )
                 .collect::<Vec<_>>();
@@ -287,6 +289,7 @@ fn test_list_owned_txouts() {
             let balance = graph.graph().balance(
                 &local_chain,
                 chain_tip,
+                CanonicalizationMods::NONE,
                 graph.index.outpoints().iter().cloned(),
                 |_, spk: ScriptBuf| trusted_spks.contains(&spk),
             );
@@ -589,7 +592,7 @@ fn test_get_chain_position() {
         // check chain position
         let chain_pos = graph
             .graph()
-            .list_canonical_txs(chain, chain.tip().block_id())
+            .list_canonical_txs(chain, chain.tip().block_id(), CanonicalizationMods::NONE)
             .find_map(|canon_tx| {
                 if canon_tx.tx_node.txid == txid {
                     Some(canon_tx.chain_position)
