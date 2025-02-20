@@ -52,7 +52,7 @@ use rand_core::RngCore;
 use super::coin_selection::CoinSelectionAlgorithm;
 use super::utils::shuffle_slice;
 use super::{CreateTxError, Wallet};
-use crate::collections::{BTreeMap, HashSet};
+use crate::collections::{BTreeMap, HashMap, HashSet};
 use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 
 /// A transaction builder
@@ -125,7 +125,8 @@ pub(crate) struct TxParams {
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) utxos: Vec<WeightedUtxo>,
+    pub(crate) utxos: HashSet<LocalOutput>,
+    pub(crate) foreign_utxos: HashMap<OutPoint, WeightedUtxo>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<psbt::PsbtSighashType>,
@@ -274,26 +275,14 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, AddUtxoError> {
-        {
-            let wallet = &mut self.wallet;
-            let utxos = outpoints
-                .iter()
+        let _ = outpoints.iter().try_for_each(|outpoint| {
+            self.wallet
+                .get_utxo(*outpoint)
                 .map(|outpoint| {
-                    wallet
-                        .get_utxo(*outpoint)
-                        .ok_or(AddUtxoError::UnknownUtxo(*outpoint))
+                    self.params.utxos.insert(outpoint);
                 })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            for utxo in utxos {
-                let descriptor = wallet.public_descriptor(utxo.keychain);
-                let satisfaction_weight = descriptor.max_weight_to_satisfy().unwrap();
-                self.params.utxos.push(WeightedUtxo {
-                    satisfaction_weight,
-                    utxo: Utxo::Local(utxo),
-                });
-            }
-        }
+                .ok_or(AddUtxoError::UnknownUtxo(*outpoint))
+        });
 
         Ok(self)
     }
@@ -393,14 +382,17 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
             }
         }
 
-        self.params.utxos.push(WeightedUtxo {
-            satisfaction_weight,
-            utxo: Utxo::Foreign {
-                outpoint,
-                sequence,
-                psbt_input: Box::new(psbt_input),
+        self.params.foreign_utxos.insert(
+            outpoint,
+            WeightedUtxo {
+                satisfaction_weight,
+                utxo: Utxo::Foreign {
+                    outpoint,
+                    sequence,
+                    psbt_input: Box::new(psbt_input),
+                },
             },
-        });
+        );
 
         Ok(self)
     }
@@ -1097,5 +1089,62 @@ mod test {
         );
         builder.fee_rate(FeeRate::from_sat_per_kwu(feerate + 250));
         let _ = builder.finish().unwrap();
+    }
+
+    #[test]
+    fn not_duplicated_utxos_in_required_list() {
+        let mut params = TxParams::default();
+        let test_utxos = get_test_utxos();
+        for _ in 0..3 {
+            params.utxos.insert(test_utxos[0].clone());
+        }
+        assert_eq!(
+            vec![test_utxos[0].clone()],
+            params.utxos.into_iter().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn not_duplicated_foreign_utxos_with_same_outpoint_but_different_weight() {
+        use crate::test_utils::get_funded_wallet_wpkh;
+        // Use two different wallets to avoid adding local utxos
+        let (wallet1, txid1) = get_funded_wallet_wpkh();
+        let (mut wallet2, _) = get_funded_wallet_wpkh();
+
+        let utxo1 = wallet1.list_unspent().next().unwrap();
+        let tx1 = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
+
+        let satisfaction_weight = wallet1
+            .public_descriptor(KeychainKind::External)
+            .max_weight_to_satisfy()
+            .unwrap();
+
+        let mut builder = wallet2.build_tx();
+
+        // add foreign utxo with satsifaction weight x
+        let _ = builder.add_foreign_utxo(
+            utxo1.outpoint,
+            psbt::Input {
+                non_witness_utxo: Some(tx1.as_ref().clone()),
+                ..Default::default()
+            },
+            satisfaction_weight,
+        );
+
+        let modified_satisfaction_weight = satisfaction_weight - Weight::from_wu(6);
+
+        assert_ne!(satisfaction_weight, modified_satisfaction_weight);
+
+        // add foreign utxo with same outpoint but satisfaction weight x - 6wu
+        let _ = builder.add_foreign_utxo(
+            utxo1.outpoint,
+            psbt::Input {
+                non_witness_utxo: Some(tx1.as_ref().clone()),
+                ..Default::default()
+            },
+            modified_satisfaction_weight,
+        );
+
+        assert_eq!(builder.params.foreign_utxos.len(), 1);
     }
 }
