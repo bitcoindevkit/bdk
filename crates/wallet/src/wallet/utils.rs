@@ -117,6 +117,19 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for Older {
         }
     }
 }
+/// Trait to perform the calculation of the transaction amount spent.
+/// Use the spend() method pass the three tuples of`Amount` values to perform the calc of total.
+pub trait TxAmountSpend {
+    /// Perfome the calc to get total of the transaction
+    fn spend(&self) -> Amount;
+}
+impl TxAmountSpend for (Amount, Amount, Amount) {
+    fn spend(&self) -> Amount {
+        // Pass the tree tuples of `Amount` to performe calculate
+        let (sent, received, fee) = *self;
+        sent - received + fee
+    }
+}
 
 // The Knuth shuffling algorithm based on the original [Fisher-Yates method](https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle)
 pub(crate) fn shuffle_slice<T>(list: &mut [T], rng: &mut impl RngCore) {
@@ -139,8 +152,8 @@ mod test {
     // otherwise it's time-based
     pub(crate) const SEQUENCE_LOCKTIME_TYPE_FLAG: u32 = 1 << 22;
 
-    use super::{check_nsequence_rbf, shuffle_slice, IsDust};
-    use crate::bitcoin::{Address, Network, Sequence};
+    use super::{check_nsequence_rbf, shuffle_slice, IsDust, TxAmountSpend};
+    use crate::bitcoin::{Address, Amount, Network, Sequence};
     use alloc::vec::Vec;
     use core::str::FromStr;
     use rand::{rngs::StdRng, thread_rng, SeedableRng};
@@ -246,5 +259,13 @@ mod test {
         let mut test: Vec<u8> = vec![0, 1, 2, 4, 5];
         shuffle_slice(&mut test, &mut rng);
         assert_eq!(test, &[0, 4, 1, 2, 5]);
+    }
+    #[test]
+    fn test_txamountspend() {
+        let sent: Amount = Amount::from_sat(30);
+        let received: Amount = Amount::from_sat(30);
+        let fee: Amount = Amount::from_sat(30);
+        let result = (sent, received, fee).spend();
+        assert_eq!(result, Amount::from_sat(30));
     }
 }
