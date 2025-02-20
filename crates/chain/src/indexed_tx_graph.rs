@@ -1,13 +1,15 @@
 //! Contains the [`IndexedTxGraph`] and associated types. Refer to the
 //! [`IndexedTxGraph`] documentation for more.
-use core::fmt::Debug;
+
+use core::ops::RangeBounds;
 
 use alloc::{sync::Arc, vec::Vec};
-use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
+use bitcoin::{Block, OutPoint, ScriptBuf, Transaction, TxOut, Txid};
 
 use crate::{
+    spk_txout::SpkTxOutIndex,
     tx_graph::{self, TxGraph},
-    Anchor, BlockId, Indexer, Merge, TxPosInBlock,
+    Anchor, BlockId, ChainOracle, Indexer, Merge, TxPosInBlock,
 };
 
 /// The [`IndexedTxGraph`] combines a [`TxGraph`] and an [`Indexer`] implementation.
@@ -323,6 +325,69 @@ where
             tx_graph: graph,
             indexer,
         }
+    }
+
+    /// Inserts the given `evicted_at` for `txid`.
+    ///
+    /// The `evicted_at` timestamp represents the last known time when the transaction was observed
+    /// to be missing from the mempool. If `txid` was previously recorded with an earlier
+    /// `evicted_at` value, it is updated only if the new value is greater.
+    pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A, I::ChangeSet> {
+        let tx_graph = self.graph.insert_evicted_at(txid, evicted_at);
+        ChangeSet {
+            tx_graph,
+            ..Default::default()
+        }
+    }
+}
+
+impl<A, I> IndexedTxGraph<A, SpkTxOutIndex<I>>
+where
+    A: Anchor,
+    I: core::fmt::Debug + Clone + Ord,
+{
+    /// Iterate over unconfirmed txids that we expect to exist in a chain source's spk history
+    /// response.
+    ///
+    /// This is used to fill [`SyncRequestBuilder::expected_unconfirmed_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_unconfirmed_spk_txids).
+    ///
+    /// The spk range can be contrained with `range`.
+    pub fn expected_unconfirmed_spk_txids<'a, O>(
+        &'a self,
+        chain: &'a O,
+        chain_tip: BlockId,
+        range: impl RangeBounds<I> + 'a,
+    ) -> Result<Vec<(Txid, ScriptBuf)>, O::Error>
+    where
+        O: ChainOracle,
+    {
+        self.graph
+            .expected_unconfirmed_spk_txids(chain, chain_tip, &self.index, range)
+    }
+}
+
+impl<A, K> IndexedTxGraph<A, crate::keychain_txout::KeychainTxOutIndex<K>>
+where
+    A: Anchor,
+    K: core::fmt::Debug + Clone + Ord,
+{
+    /// Iterate over unconfirmed txids that we expect to exist in a chain source's spk history
+    /// response.
+    ///
+    /// This is used to fill [`SyncRequestBuilder::expected_unconfirmed_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_unconfirmed_spk_txids).
+    ///
+    /// The spk range can be contrained with `range`.
+    pub fn expected_unconfirmed_spk_txids<'a, O>(
+        &'a self,
+        chain: &'a O,
+        chain_tip: BlockId,
+        range: impl RangeBounds<(K, u32)> + 'a,
+    ) -> Result<Vec<(Txid, ScriptBuf)>, O::Error>
+    where
+        O: ChainOracle,
+    {
+        self.graph
+            .expected_unconfirmed_spk_txids(chain, chain_tip, &self.index, range)
     }
 }
 

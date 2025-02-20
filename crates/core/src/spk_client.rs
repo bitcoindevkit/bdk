@@ -1,7 +1,7 @@
 //! Helper types for spk-based blockchain clients.
 use crate::{
     alloc::{boxed::Box, collections::VecDeque, vec::Vec},
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap, HashSet},
     CheckPoint, ConfirmationBlockTime, Indexed,
 };
 use bitcoin::{OutPoint, Script, ScriptBuf, Txid};
@@ -86,6 +86,14 @@ impl SyncProgress {
     }
 }
 
+/// [`Script`] with corresponding [`Txid`] histories.
+pub struct SpkWithExpectedTxids {
+    /// Script pubkey.
+    pub spk: ScriptBuf,
+    /// Txid history.
+    pub txids: HashSet<Txid>,
+}
+
 /// Builds a [`SyncRequest`].
 #[must_use]
 pub struct SyncRequestBuilder<I = ()> {
@@ -159,6 +167,23 @@ impl<I> SyncRequestBuilder<I> {
         self
     }
 
+    /// Add transactions that are expected to exist under a given spk.
+    ///
+    /// This is useful for detecting a malicious replacement of an incoming transaction.
+    pub fn expected_unconfirmed_spk_txids(
+        mut self,
+        txs: impl IntoIterator<Item = (Txid, ScriptBuf)>,
+    ) -> Self {
+        for (txid, spk) in txs {
+            self.inner
+                .spk_histories
+                .entry(spk)
+                .or_default()
+                .insert(txid);
+        }
+        self
+    }
+
     /// Add [`Txid`]s that will be synced against.
     pub fn txids(mut self, txids: impl IntoIterator<Item = Txid>) -> Self {
         self.inner.txids.extend(txids);
@@ -213,6 +238,7 @@ pub struct SyncRequest<I = ()> {
     chain_tip: Option<CheckPoint>,
     spks: VecDeque<(I, ScriptBuf)>,
     spks_consumed: usize,
+    spk_histories: HashMap<ScriptBuf, HashSet<Txid>>,
     txids: VecDeque<Txid>,
     txids_consumed: usize,
     outpoints: VecDeque<OutPoint>,
@@ -226,6 +252,7 @@ impl<I> Default for SyncRequest<I> {
             chain_tip: None,
             spks: VecDeque::new(),
             spks_consumed: 0,
+            spk_histories: HashMap::new(),
             txids: VecDeque::new(),
             txids_consumed: 0,
             outpoints: VecDeque::new(),
@@ -276,6 +303,23 @@ impl<I> SyncRequest<I> {
         Some(spk)
     }
 
+    /// Advances the sync request and returns the next [`ScriptBuf`] with corresponding [`Txid`]
+    /// history.
+    ///
+    /// Returns [`None`] when there are no more scripts remaining in the request.
+    pub fn next_spk_with_history(&mut self) -> Option<SpkWithExpectedTxids> {
+        let next_spk = self.next_spk()?;
+        let spk_history = self
+            .spk_histories
+            .get(&next_spk)
+            .cloned()
+            .unwrap_or_default();
+        Some(SpkWithExpectedTxids {
+            spk: next_spk,
+            txids: spk_history,
+        })
+    }
+
     /// Advances the sync request and returns the next [`Txid`].
     ///
     /// Returns [`None`] when there are no more txids remaining in the request.
@@ -299,6 +343,13 @@ impl<I> SyncRequest<I> {
     /// Iterate over [`ScriptBuf`]s contained in this request.
     pub fn iter_spks(&mut self) -> impl ExactSizeIterator<Item = ScriptBuf> + '_ {
         SyncIter::<I, ScriptBuf>::new(self)
+    }
+
+    /// Iterate over [`ScriptBuf`]s with corresponding [`Txid`] histories contained in this request.
+    pub fn iter_spks_with_expected_txids(
+        &mut self,
+    ) -> impl ExactSizeIterator<Item = SpkWithExpectedTxids> + '_ {
+        SyncIter::<I, SpkWithExpectedTxids>::new(self)
     }
 
     /// Iterate over [`Txid`]s contained in this request.
@@ -516,6 +567,19 @@ impl<I> Iterator for SyncIter<'_, I, ScriptBuf> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.request.next_spk()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.request.spks.len();
+        (remaining, Some(remaining))
+    }
+}
+
+impl<I> Iterator for SyncIter<'_, I, SpkWithExpectedTxids> {
+    type Item = SpkWithExpectedTxids;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.request.next_spk_with_history()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

@@ -1,10 +1,25 @@
-use crate::collections::{BTreeMap, BTreeSet, HashMap};
+use crate::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use alloc::{sync::Arc, vec::Vec};
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 
 /// Data object used to communicate updates about relevant transactions from some chain data source
 /// to the core model (usually a `bdk_chain::TxGraph`).
+///
+/// ```rust
+/// use bdk_core::TxUpdate;
+/// # use std::sync::Arc;
+/// # use bitcoin::{Transaction, transaction::Version, absolute::LockTime};
+/// # let version = Version::ONE;
+/// # let lock_time = LockTime::ZERO;
+/// # let tx = Arc::new(Transaction { input: vec![], output: vec![], version, lock_time });
+/// # let txid = tx.compute_txid();
+/// # let anchor = ();
+/// let mut tx_update = TxUpdate::default();
+/// tx_update.txs.push(tx);
+/// tx_update.anchors.insert((anchor, txid));
+/// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct TxUpdate<A = ()> {
     /// Full transactions. These are transactions that were determined to be relevant to the wallet
     /// given the request.
@@ -19,6 +34,8 @@ pub struct TxUpdate<A = ()> {
     /// Seen at times for transactions. This records when a transaction was most recently seen in
     /// the user's mempool for the sake of tie-breaking other conflicting transactions.
     pub seen_ats: HashMap<Txid, u64>,
+    /// A set of txids missing from the mempool.
+    pub evicted: HashSet<Txid>,
 }
 
 impl<A> Default for TxUpdate<A> {
@@ -28,6 +45,7 @@ impl<A> Default for TxUpdate<A> {
             txouts: Default::default(),
             anchors: Default::default(),
             seen_ats: Default::default(),
+            evicted: Default::default(),
         }
     }
 }
@@ -47,6 +65,7 @@ impl<A: Ord> TxUpdate<A> {
                 .map(|(a, txid)| (map(a), txid))
                 .collect(),
             seen_ats: self.seen_ats,
+            evicted: self.evicted,
         }
     }
 
@@ -56,5 +75,6 @@ impl<A: Ord> TxUpdate<A> {
         self.txouts.extend(other.txouts);
         self.anchors.extend(other.anchors);
         self.seen_ats.extend(other.seen_ats);
+        self.evicted.extend(other.evicted);
     }
 }

@@ -3,7 +3,7 @@
 use core::ops::RangeBounds;
 
 use crate::{
-    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
+    collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap, HashSet},
     Indexer,
 };
 use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
@@ -40,6 +40,12 @@ pub struct SpkTxOutIndex<I> {
     txouts: BTreeMap<OutPoint, (I, TxOut)>,
     /// Lookup from spk index to outpoints that had that spk
     spk_txouts: BTreeSet<(I, OutPoint)>,
+}
+
+impl<I> AsRef<SpkTxOutIndex<I>> for SpkTxOutIndex<I> {
+    fn as_ref(&self) -> &SpkTxOutIndex<I> {
+        self
+    }
 }
 
 impl<I> Default for SpkTxOutIndex<I> {
@@ -333,5 +339,24 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
             .iter()
             .any(|output| self.spk_indices.contains_key(&output.script_pubkey));
         input_matches || output_matches
+    }
+
+    /// Find relevant script pubkeys associated with a transaction for tracking and validation.
+    ///
+    /// Returns a set of script pubkeys from [`SpkTxOutIndex`] that are relevant to the outputs and
+    /// previous outputs of a given transaction. Inputs are only considered relevant if the parent
+    /// transactions have been scanned.
+    pub fn relevant_spks_of_tx(&self, tx: &Transaction) -> HashSet<ScriptBuf> {
+        let spks_from_inputs = tx.input.iter().filter_map(|txin| {
+            self.txouts
+                .get(&txin.previous_output)
+                .map(|(_, prev_txo)| prev_txo.script_pubkey.clone())
+        });
+        let spks_from_outputs = tx
+            .output
+            .iter()
+            .filter(|txout| self.spk_indices.contains_key(&txout.script_pubkey))
+            .map(|txo| txo.script_pubkey.clone());
+        spks_from_inputs.chain(spks_from_outputs).collect()
     }
 }

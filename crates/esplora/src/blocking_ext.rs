@@ -1,7 +1,9 @@
 use bdk_core::collections::{BTreeMap, BTreeSet, HashSet};
-use bdk_core::spk_client::{FullScanRequest, FullScanResponse, SyncRequest, SyncResponse};
+use bdk_core::spk_client::{
+    FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
+};
 use bdk_core::{
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{BlockHash, OutPoint, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
 };
 use esplora_client::{OutputStatus, Tx};
@@ -67,10 +69,19 @@ impl EsploraExt for esplora_client::BlockingClient {
         let mut last_active_indices = BTreeMap::<K, u32>::new();
         for keychain in request.keychains() {
             let keychain_spks = request.iter_spks(keychain.clone());
+            let spks_with_history = keychain_spks.into_iter().map(|(i, spk)| {
+                (
+                    i,
+                    SpkWithExpectedTxids {
+                        spk,
+                        txids: HashSet::<Txid>::new(),
+                    },
+                )
+            });
             let (update, last_active_index) = fetch_txs_with_keychain_spks(
                 self,
                 &mut inserted_txs,
-                keychain_spks,
+                spks_with_history,
                 stop_gap,
                 parallel_requests,
             )?;
@@ -116,7 +127,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         tx_update.extend(fetch_txs_with_spks(
             self,
             &mut inserted_txs,
-            request.iter_spks(),
+            request.iter_spks_with_expected_txids(),
             parallel_requests,
         )?);
         tx_update.extend(fetch_txs_with_txids(
@@ -248,10 +259,10 @@ fn chain_update(
     Ok(tip)
 }
 
-fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
+fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>>>(
     client: &esplora_client::BlockingClient,
     inserted_txs: &mut HashSet<Txid>,
-    mut keychain_spks: I,
+    mut spks_with_history: I,
     stop_gap: usize,
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error> {
@@ -260,19 +271,21 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     let mut last_index = Option::<u32>::None;
     let mut last_active_index = Option::<u32>::None;
+    let mut spk_txids = HashSet::new();
 
     loop {
-        let handles = keychain_spks
+        let handles = spks_with_history
             .by_ref()
             .take(parallel_requests)
-            .map(|(spk_index, spk)| {
+            .map(|(spk_index, spk_with_history)| {
+                spk_txids.extend(&spk_with_history.txids);
                 std::thread::spawn({
                     let client = client.clone();
                     move || -> Result<TxsOfSpkIndex, Error> {
                         let mut last_seen = None;
                         let mut spk_txs = Vec::new();
                         loop {
-                            let txs = client.scripthash_txs(&spk, last_seen)?;
+                            let txs = client.scripthash_txs(&spk_with_history.spk, last_seen)?;
                             let tx_count = txs.len();
                             last_seen = txs.last().map(|tx| tx.txid);
                             spk_txs.extend(txs);
@@ -315,6 +328,10 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
         }
     }
 
+    update
+        .evicted
+        .extend(spk_txids.difference(inserted_txs).cloned());
+
     Ok((update, last_active_index))
 }
 
@@ -326,16 +343,19 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
 /// requests to make in parallel.
 ///
 /// Refer to [crate-level docs](crate) for more.
-fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf>>(
+fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
     client: &esplora_client::BlockingClient,
     inserted_txs: &mut HashSet<Txid>,
-    spks: I,
+    spks_with_history: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
     fetch_txs_with_keychain_spks(
         client,
         inserted_txs,
-        spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
+        spks_with_history
+            .into_iter()
+            .enumerate()
+            .map(|(i, spk_with_history)| (i as u32, spk_with_history)),
         usize::MAX,
         parallel_requests,
     )
