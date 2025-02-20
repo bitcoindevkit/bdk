@@ -146,7 +146,7 @@ fn main() -> anyhow::Result<()> {
             let request = {
                 let chain_tip = chain.lock().expect("mutex must not be poisoned").tip();
                 let indexed_graph = &*graph.lock().expect("mutex must not be poisoned");
-                FullScanRequest::builder()
+                FullScanRequest::builder_now()
                     .chain_tip(chain_tip)
                     .spks_from_indexer(&indexed_graph.index)
                     .inspect({
@@ -210,15 +210,14 @@ fn main() -> anyhow::Result<()> {
 
             let local_tip = chain.lock().expect("mutex must not be poisoned").tip();
             // Spks, outpoints and txids we want updates on will be accumulated here.
-            let mut request =
-                SyncRequest::builder()
-                    .chain_tip(local_tip.clone())
-                    .inspect(|item, progress| {
-                        let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
-                        eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
-                        // Flush early to ensure we print at every iteration.
-                        let _ = io::stderr().flush();
-                    });
+            let mut request = SyncRequest::builder_now()
+                .chain_tip(local_tip.clone())
+                .inspect(|item, progress| {
+                    let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
+                    eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
+                    // Flush early to ensure we print at every iteration.
+                    let _ = io::stderr().flush();
+                });
 
             // Get a short lock on the structures to get spks, utxos, and txs that we are interested
             // in.
