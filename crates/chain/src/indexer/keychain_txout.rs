@@ -105,7 +105,7 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 /// ```
 ///
 /// [`Ord`]: core::cmp::Ord
-/// [`SpkTxOutIndex`]: crate::spk_txout_index::SpkTxOutIndex
+/// [`SpkTxOutIndex`]: crate::spk_txout::SpkTxOutIndex
 /// [`Descriptor`]: crate::miniscript::Descriptor
 /// [`reveal_to_target`]: Self::reveal_to_target
 /// [`reveal_next_spk`]: Self::reveal_next_spk

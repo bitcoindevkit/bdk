@@ -48,6 +48,7 @@ jobs:
         if: matrix.rust.version == '1.75.0'
         run: |
           cargo update -p home --precise "0.5.9"
+          cargo update -p native-tls --precise "0.2.13"
       - name: Pin dependencies for MSRV
         if: matrix.rust.version == '1.63.0'
         run: ./ci/pin-msrv.sh
