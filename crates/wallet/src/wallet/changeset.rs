@@ -2,45 +2,89 @@ use bdk_chain::{
     indexed_tx_graph, keychain_txout, local_chain, tx_graph, ConfirmationBlockTime, Merge,
 };
 use miniscript::{Descriptor, DescriptorPublicKey};
+use serde::{Deserialize, Serialize};
 
 type IndexedTxGraphChangeSet =
     indexed_tx_graph::ChangeSet<ConfirmationBlockTime, keychain_txout::ChangeSet>;
 
-/// A changeset for [`Wallet`].
+/// A change set for [`Wallet`]
 ///
-/// The changeset is used to persist and recover changes and additions made during the
-/// life of the wallet. The kinds of changes that frequently make up this set are new
-/// transactions, blocks in the local chain, and derivation indexes. The changeset is
-/// also responsible for transmitting persistent metadata such as the public descriptor(s)
-/// and configured network. All of these are necessary for the correct functioning of a
-/// wallet.
+/// ## Definition
 ///
-/// For greater efficiency the wallet is able to stage changes before committing them.
-/// Many operations result in staged changes which require persistence on the part of the
-/// user. These include address revelation, applying an [`Update`], and introducing
-/// transactions and related data to the wallet. To get the staged changes see
-/// [`Wallet::staged`] and similar methods. Once the changes are committed to the persistence
-/// layer the contents of the stage should be discarded.
+/// The change set is responsible for transmiting data between the persistent storage layer and the
+/// core components of the library. Specifically, it serves two primary functions:
 ///
-/// You should persist early and often generally speaking, however in principle there is
-/// no limitation on the number or type of changes that can be staged prior to persistence
-/// or the order in which they're staged. This is because changesets are designed to be
-/// [merged]. The change that is eventually persisted will include the combined effect of
-/// each change individually.
+/// 1) Recording incremental changes to the in-memory representation that need to be persisted
+///     to disk
+/// 2) Applying aggregate changes from the persistence layer to the in-memory representation at
+///     startup
 ///
-/// The [`ChangeSet`] is backwards compatible in the sense that it is intended to interoperate
-/// with earlier versions of the library. Specifically this means that the orginal fields will
-/// remain unchanged and that the addition of new fields corresponds to new feature upgrades.
+/// ## Contract
 ///
-/// The API of [`Wallet`] is designed to give the user control of what data to persist, when
-/// to persist it, and to determine when committed changes can be safely discarded. You should
-/// consider how your database handles partial or repeat writes, whether the persistence
-/// operation proceeds atomically, and whether the order of writes matters among the fields
-/// of the [`ChangeSet`]. BDK has no strict requirements regarding these details but
-/// provides a straightforward solution in the case of [SQLite]. If implementing your own
-/// persistence layer, please see the docs for [`PersistedWallet`] and [`WalletPersister`]
-/// as a reference.
+/// The change set maintains and enforces the following properties:
 ///
+/// * Change sets must implement [`Serialize`] and [`Deserialize`] to meet the definition from
+///     above.
+/// * Change sets must implement [`Default`] as a way of instantiating new empty objects.
+/// * Change sets must implement [`Merge`] so that many instances can be aggregated into a single
+///     one.
+/// * A change set is composed of a number of individual "sub-change sets" that adhere to the same
+///     rules as above. This is for increased modularity and portability. For example the core
+///     modules each have their own change set (`tx_graph`, `local_chain`, etc).
+///
+/// ## Note
+///
+/// The change set has certain required fields without which a `Wallet` cannot function.
+/// These include the [`descriptor`] and the [`network`] in use. These are required to be non-empty
+/// _in the aggregate_, meaning the field must be present and non-null in the union of all
+/// persisted changes, but may be empty in any one change set (where "empty" can describe an empty
+/// container or the `Option::None` variant). For example, the descriptor and network are
+/// present in the first change set after wallet creation, but are usually omitted from subsequent
+/// updates, as they are not permitted to change during the course of wallet operation.
+///
+/// Other fields of the change set are not required to be non-empty, that is they may be empty even
+/// in the aggregate. However in practice certain fields should always contain the data needed to
+/// recover a wallet state between sessions. These include:
+/// * [`change_descriptor`](Self::change_descriptor)
+/// * [`local_chain`](Self::local_chain)
+/// * [`tx_graph`](Self::tx_graph)
+/// * [`indexer`](Self::indexer)
+///
+/// ## Staging
+///
+/// For greater efficiency the [`Wallet`] is able to _stage_ the to-be-persisted changes. Many
+/// operations result in staged changes which require persistence on the part of the user. These
+/// include address revelation, applying an [`Update`], and introducing transactions and chain
+/// data to the wallet. To get the staged changes see [`Wallet::staged`] and similar methods. Once
+/// the changes are committed to the persistence layer the contents of the stage should be
+/// discarded.
+///
+/// Users should persist early and often generally speaking, however in principle there is no
+/// limit to the number or type of changes that can be staged prior to persistence or the order in
+/// in which they're staged. This is because changesets are designed to be [merged]. The change
+/// that is ultimately persisted will encompass the combined effect of each change individually.
+///
+/// ## Extensibility
+///
+/// Existing fields may continue to exist in future versions and may be extended with additional
+/// sub-fields. New top-level fields may be added in the future to accommodate new features and
+/// data types.
+///
+/// BDK reserves the right to introduce breaking changes to the [`ChangeSet`] structure in a major
+/// version release. API changes that affect the kinds of data persisted will be displayed
+/// prominently in the release notes of newer versions. Users are advised to look for any such
+/// changes and update their application accordingly.
+///
+/// The resulting interface is designed to give the user greater control of what to persist and
+/// when to persist it. Custom implementations should consider and account for the possibility of
+/// partial or repeat writes, the atomicity of persistence operations, and the order of reads and
+/// writes among the fields of the change set. BDK imposes no strict requirements regarding these
+/// aspects but provides a straightforward solution in the case of [SQLite]. If implementing your
+/// own persistence, please refer to the documentation for [`WalletPersister`] and
+/// [`PersistedWallet`] for more information.
+///
+/// [`descriptor`]: Self::descriptor
+/// [`network`]: Self::network
 /// [merged]: bdk_chain::Merge
 /// [`PersistedWallet`]: crate::PersistedWallet
 /// [SQLite]: bdk_chain::rusqlite_impl
@@ -48,7 +92,7 @@ type IndexedTxGraphChangeSet =
 /// [`WalletPersister`]: crate::WalletPersister
 /// [`Wallet::staged`]: crate::Wallet::staged
 /// [`Wallet`]: crate::Wallet
-#[derive(Default, Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Default, Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct ChangeSet {
     /// Descriptor for recipient addresses.
     pub descriptor: Option<Descriptor<DescriptorPublicKey>>,
