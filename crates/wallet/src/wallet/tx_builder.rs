@@ -342,8 +342,9 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     ///
     /// This method returns errors in the following circumstances:
     ///
-    /// 1. The `psbt_input` does not contain a `witness_utxo` or `non_witness_utxo`.
-    /// 2. The data in `non_witness_utxo` does not match what is in `outpoint`.
+    /// 1. The provided outpoint is associated to a [`LocalOutput`].
+    /// 2. The `psbt_input` does not contain a `witness_utxo` or `non_witness_utxo`.
+    /// 3. The data in `non_witness_utxo` does not match what is in `outpoint`.
     ///
     /// Note unless you set [`only_witness_utxo`] any non-taproot `psbt_input` you pass to this
     /// method must have `non_witness_utxo` set otherwise you will get an error when [`finish`]
@@ -374,24 +375,31 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         satisfaction_weight: Weight,
         sequence: Sequence,
     ) -> Result<&mut Self, AddForeignUtxoError> {
-        if psbt_input.witness_utxo.is_none() {
-            match psbt_input.non_witness_utxo.as_ref() {
-                Some(tx) => {
-                    if tx.compute_txid() != outpoint.txid {
-                        return Err(AddForeignUtxoError::InvalidTxid {
-                            input_txid: tx.compute_txid(),
-                            foreign_utxo: outpoint,
-                        });
-                    }
-                    if tx.output.len() <= outpoint.vout as usize {
-                        return Err(AddForeignUtxoError::InvalidOutpoint(outpoint));
-                    }
-                }
-                None => {
-                    return Err(AddForeignUtxoError::MissingUtxo);
-                }
+        let script_pubkey = if let Some(ref txout) = psbt_input.witness_utxo {
+            txout.script_pubkey.clone()
+        } else if let Some(tx) = psbt_input.non_witness_utxo.as_ref() {
+            if tx.compute_txid() != outpoint.txid {
+                return Err(AddForeignUtxoError::InvalidTxid {
+                    input_txid: tx.compute_txid(),
+                    foreign_utxo: outpoint,
+                });
             }
-        }
+
+            if let Ok(txout) = tx.tx_out(outpoint.vout as usize) {
+                txout.script_pubkey.clone()
+            } else {
+                return Err(AddForeignUtxoError::InvalidOutpoint(outpoint));
+            }
+        } else {
+            return Err(AddForeignUtxoError::MissingUtxo);
+        };
+
+        // Avoid the inclusion of local utxos as foreign utxos
+        if self.wallet.is_mine(script_pubkey) {
+            // TODO(2.0.0): return Err(AddForeignUtxoError::NotForeignUtxo);
+            // No-op to avoid breaking changes until next major release
+            return Ok(self);
+        };
 
         self.params.utxos.push(WeightedUtxo {
             satisfaction_weight,
@@ -711,6 +719,8 @@ pub enum AddForeignUtxoError {
     InvalidOutpoint(OutPoint),
     /// Foreign utxo missing witness_utxo or non_witness_utxo
     MissingUtxo,
+    // Avoid breaking changes until next major release
+    // TODO(2.0.0): NotForeignUtxo,
 }
 
 impl fmt::Display for AddForeignUtxoError {
@@ -730,6 +740,8 @@ impl fmt::Display for AddForeignUtxoError {
                 outpoint.txid, outpoint.vout,
             ),
             Self::MissingUtxo => write!(f, "Foreign utxo missing witness_utxo or non_witness_utxo"),
+            // Avoid breaking changes until next major release
+            // TODO(2.0.0): Self::NotForeignUtxo => write!(f, "UTxO is owned by wallet"),
         }
     }
 }
@@ -1097,5 +1109,22 @@ mod test {
         );
         builder.fee_rate(FeeRate::from_sat_per_kwu(feerate + 250));
         let _ = builder.finish().unwrap();
+    }
+
+    #[test]
+    fn test_add_foreign_utxo_fails_when_utxo_is_owned_by_wallet() {
+        use crate::test_utils::get_funded_wallet_wpkh;
+        let (mut wallet, _) = get_funded_wallet_wpkh();
+        let outpoint = wallet.list_unspent().next().expect("must exist").outpoint;
+        let foreign_utxo_satisfaction = wallet
+            .public_descriptor(KeychainKind::External)
+            .max_weight_to_satisfy()
+            .unwrap();
+
+        let mut builder = wallet.build_tx();
+        let _ =
+            builder.add_foreign_utxo(outpoint, psbt::Input::default(), foreign_utxo_satisfaction);
+        // TODO(2.0.0): assert!(matches!(result, Err(AddForeignUtxoError::NotForeignUtxo)));
+        assert!(builder.params.utxos.is_empty());
     }
 }
