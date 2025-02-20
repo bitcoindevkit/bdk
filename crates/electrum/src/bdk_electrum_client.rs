@@ -276,7 +276,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
                 for tx_res in spk_history {
                     tx_update.txs.push(self.fetch_tx(tx_res.tx_hash)?);
-                    self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, tx_res.height)?;
+                    if let Ok(height) = tx_res.height.try_into() {
+                        self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, height)?;
+                    }
                 }
             }
         }
@@ -312,7 +314,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 if !has_residing && res.tx_hash == op_txid {
                     has_residing = true;
                     tx_update.txs.push(Arc::clone(&op_tx));
-                    self.validate_merkle_for_anchor(tx_update, res.tx_hash, res.height)?;
+                    if let Ok(height) = res.height.try_into() {
+                        self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                    }
                 }
 
                 if !has_spending && res.tx_hash != op_txid {
@@ -326,7 +330,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         continue;
                     }
                     tx_update.txs.push(Arc::clone(&res_tx));
-                    self.validate_merkle_for_anchor(tx_update, res.tx_hash, res.height)?;
+                    if let Ok(height) = res.height.try_into() {
+                        self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                    }
                 }
             }
         }
@@ -360,7 +366,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .into_iter()
                 .find(|r| r.tx_hash == txid)
             {
-                self.validate_merkle_for_anchor(tx_update, txid, r.height)?;
+                if let Ok(height) = r.height.try_into() {
+                    self.validate_merkle_for_anchor(tx_update, txid, height)?;
+                }
             }
 
             tx_update.txs.push(tx);
@@ -374,11 +382,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         &self,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txid: Txid,
-        confirmation_height: i32,
+        confirmation_height: usize,
     ) -> Result<(), Error> {
         if let Ok(merkle_res) = self
             .inner
-            .transaction_get_merkle(&txid, confirmation_height as usize)
+            .transaction_get_merkle(&txid, confirmation_height)
         {
             let mut header = self.fetch_header(merkle_res.block_height as u32)?;
             let mut is_confirmed_tx = electrum_client::utils::validate_merkle_proof(

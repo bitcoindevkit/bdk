@@ -5,9 +5,15 @@ use bdk_chain::{
     spk_txout::SpkTxOutIndex,
     Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
 };
+use bdk_core::bitcoin::Network;
 use bdk_electrum::BdkElectrumClient;
-use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
+use bdk_testenv::{
+    anyhow,
+    bitcoincore_rpc::{json::CreateRawTransactionInput, RawTx, RpcApi},
+    TestEnv,
+};
 use core::time::Duration;
+use electrum_client::ElectrumApi;
 use std::collections::{BTreeSet, HashSet};
 use std::str::FromStr;
 
@@ -52,6 +58,63 @@ where
     let _ = graph.apply_update(update.tx_update.clone());
 
     Ok(update)
+}
+
+/// If an spk history contains a tx that spends another unconfirmed tx (chained mempool history),
+/// the Electrum API will return the tx with a negative height. This should succeed and not panic.
+#[test]
+pub fn chained_mempool_tx_sync() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let rpc_client = env.rpc_client();
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+
+    let tracked_addr = rpc_client
+        .get_new_address(None, None)?
+        .require_network(Network::Regtest)?;
+
+    env.mine_blocks(100, None)?;
+
+    // First unconfirmed tx.
+    env.send(&tracked_addr, Amount::from_btc(1.0)?)?;
+
+    // Create second unconfirmed tx that spends the first.
+    let utxo = rpc_client
+        .list_unspent(None, Some(0), None, Some(true), None)?
+        .into_iter()
+        .find(|utxo| utxo.script_pub_key == tracked_addr.script_pubkey())
+        .expect("must find the newly created utxo");
+    let tx_that_spends_unconfirmed = rpc_client.create_raw_transaction(
+        &[CreateRawTransactionInput {
+            txid: utxo.txid,
+            vout: utxo.vout,
+            sequence: None,
+        }],
+        &[(
+            tracked_addr.to_string(),
+            utxo.amount - Amount::from_sat(1000),
+        )]
+        .into(),
+        None,
+        None,
+    )?;
+    let signed_tx = rpc_client
+        .sign_raw_transaction_with_wallet(tx_that_spends_unconfirmed.raw_hex(), None, None)?
+        .transaction()?;
+    rpc_client.send_raw_transaction(signed_tx.raw_hex())?;
+
+    env.wait_until_electrum_sees_txid(signed_tx.compute_txid(), Duration::from_secs(5))?;
+
+    let spk_history = electrum_client.script_get_history(&tracked_addr.script_pubkey())?;
+    assert!(
+        spk_history.into_iter().any(|tx_res| tx_res.height < 0),
+        "must find tx with negative height"
+    );
+
+    let client = BdkElectrumClient::new(electrum_client);
+    let request = SyncRequest::builder().spks(core::iter::once(tracked_addr.script_pubkey()));
+    let _response = client.sync(request, 1, false)?;
+
+    Ok(())
 }
 
 #[test]
