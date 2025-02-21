@@ -1,11 +1,13 @@
 use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
+    keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
+    miniscript::Descriptor,
     spk_client::{FullScanRequest, SyncRequest, SyncResponse},
     spk_txout::SpkTxOutIndex,
     Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
 };
-use bdk_core::bitcoin::Network;
+use bdk_core::bitcoin::{key::Secp256k1, Network};
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{
     anyhow,
@@ -14,7 +16,7 @@ use bdk_testenv::{
 };
 use core::time::Duration;
 use electrum_client::ElectrumApi;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
 
 // Batch size for `sync_with_electrum`.
@@ -45,7 +47,7 @@ where
     Spks::IntoIter: ExactSizeIterator + Send + 'static,
 {
     let update = client.sync(
-        SyncRequest::builder().chain_tip(chain.tip()).spks(spks),
+        SyncRequest::builder_now().chain_tip(chain.tip()).spks(spks),
         BATCH_SIZE,
         true,
     )?;
@@ -58,6 +60,125 @@ where
     let _ = graph.apply_update(update.tx_update.clone());
 
     Ok(update)
+}
+
+// Ensure that a wallet can detect a malicious replacement of an incoming transaction.
+//
+// This checks that both the Electrum chain source and the receiving structures properly track the
+// replaced transaction as missing.
+#[test]
+pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
+    const SEND_TX_FEE: Amount = Amount::from_sat(1000);
+    const UNDO_SEND_TX_FEE: Amount = Amount::from_sat(2000);
+
+    use bdk_chain::keychain_txout::SyncRequestBuilderExt;
+    let env = TestEnv::new()?;
+    let rpc_client = env.rpc_client();
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    let (receiver_desc, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)")
+        .expect("must be valid");
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new(KeychainTxOutIndex::new(0));
+    let _ = graph.index.insert_descriptor((), receiver_desc.clone())?;
+    let (chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+
+    // Derive the receiving address from the descriptor.
+    let ((_, receiver_spk), _) = graph.index.reveal_next_spk(()).unwrap();
+    let receiver_addr = Address::from_script(&receiver_spk, bdk_chain::bitcoin::Network::Regtest)?;
+
+    env.mine_blocks(101, None)?;
+
+    // Select a UTXO to use as an input for constructing our test transactions.
+    let selected_utxo = rpc_client
+        .list_unspent(None, None, None, Some(false), None)?
+        .into_iter()
+        // Find a block reward tx.
+        .find(|utxo| utxo.amount == Amount::from_int_btc(50))
+        .expect("Must find a block reward UTXO");
+
+    // Derive the sender's address from the selected UTXO.
+    let sender_spk = selected_utxo.script_pub_key.clone();
+    let sender_addr = Address::from_script(&sender_spk, bdk_chain::bitcoin::Network::Regtest)
+        .expect("Failed to derive address from UTXO");
+
+    // Setup the common inputs used by both `send_tx` and `undo_send_tx`.
+    let inputs = [CreateRawTransactionInput {
+        txid: selected_utxo.txid,
+        vout: selected_utxo.vout,
+        sequence: None,
+    }];
+
+    // Create and sign the `send_tx` that sends funds to the receiver address.
+    let send_tx_outputs = HashMap::from([(
+        receiver_addr.to_string(),
+        selected_utxo.amount - SEND_TX_FEE,
+    )]);
+    let send_tx = rpc_client.create_raw_transaction(&inputs, &send_tx_outputs, None, Some(true))?;
+    let send_tx = rpc_client
+        .sign_raw_transaction_with_wallet(send_tx.raw_hex(), None, None)?
+        .transaction()?;
+
+    // Create and sign the `undo_send_tx` transaction. This redirects funds back to the sender
+    // address.
+    let undo_send_outputs = HashMap::from([(
+        sender_addr.to_string(),
+        selected_utxo.amount - UNDO_SEND_TX_FEE,
+    )]);
+    let undo_send_tx =
+        rpc_client.create_raw_transaction(&inputs, &undo_send_outputs, None, Some(true))?;
+    let undo_send_tx = rpc_client
+        .sign_raw_transaction_with_wallet(undo_send_tx.raw_hex(), None, None)?
+        .transaction()?;
+
+    // Sync after broadcasting the `send_tx`. Ensure that we detect and receive the `send_tx`.
+    let send_txid = env.rpc_client().send_raw_transaction(send_tx.raw_hex())?;
+    env.wait_until_electrum_sees_txid(send_txid, Duration::from_secs(6))?;
+    let sync_request = SyncRequest::builder_now()
+        .chain_tip(chain.tip())
+        .revealed_spks_from_indexer(&graph.index, ..)
+        .expected_spk_txids(graph.list_expected_spk_txids(&chain, chain.tip().block_id(), ..));
+    let sync_response = client.sync(sync_request, BATCH_SIZE, true)?;
+    assert!(
+        sync_response
+            .tx_update
+            .txs
+            .iter()
+            .any(|tx| tx.compute_txid() == send_txid),
+        "sync response must include the send_tx"
+    );
+    let changeset = graph.apply_update(sync_response.tx_update.clone());
+    assert!(
+        changeset.tx_graph.txs.contains(&send_tx),
+        "tx graph must deem send_tx relevant and include it"
+    );
+
+    // Sync after broadcasting the `undo_send_tx`. Verify that `send_tx` is now missing from the
+    // mempool.
+    let undo_send_txid = env
+        .rpc_client()
+        .send_raw_transaction(undo_send_tx.raw_hex())?;
+    env.wait_until_electrum_sees_txid(undo_send_txid, Duration::from_secs(6))?;
+    let sync_request = SyncRequest::builder_now()
+        .chain_tip(chain.tip())
+        .revealed_spks_from_indexer(&graph.index, ..)
+        .expected_spk_txids(graph.list_expected_spk_txids(&chain, chain.tip().block_id(), ..));
+    let sync_response = client.sync(sync_request, BATCH_SIZE, true)?;
+    assert!(
+        sync_response
+            .tx_update
+            .evicted_ats
+            .iter()
+            .any(|(txid, _)| *txid == send_txid),
+        "sync response must track send_tx as missing from mempool"
+    );
+    let changeset = graph.apply_update(sync_response.tx_update.clone());
+    assert!(
+        changeset.tx_graph.last_evicted.contains_key(&send_txid),
+        "tx graph must track send_tx as missing"
+    );
+
+    Ok(())
 }
 
 /// If an spk history contains a tx that spends another unconfirmed tx (chained mempool history),
@@ -111,7 +232,7 @@ pub fn chained_mempool_tx_sync() -> anyhow::Result<()> {
     );
 
     let client = BdkElectrumClient::new(electrum_client);
-    let request = SyncRequest::builder().spks(core::iter::once(tracked_addr.script_pubkey()));
+    let request = SyncRequest::builder_now().spks(core::iter::once(tracked_addr.script_pubkey()));
     let _response = client.sync(request, 1, false)?;
 
     Ok(())
@@ -161,7 +282,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let cp_tip = env.make_checkpoint_tip();
 
     let sync_update = {
-        let request = SyncRequest::builder()
+        let request = SyncRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks(misc_spks);
         client.sync(request, 1, true)?
@@ -275,7 +396,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     // A scan with a stop_gap of 3 won't find the transaction, but a scan with a gap limit of 4
     // will.
     let full_scan_update = {
-        let request = FullScanRequest::builder()
+        let request = FullScanRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 3, 1, false)?
@@ -283,7 +404,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     assert!(full_scan_update.tx_update.txs.is_empty());
     assert!(full_scan_update.last_active_indices.is_empty());
     let full_scan_update = {
-        let request = FullScanRequest::builder()
+        let request = FullScanRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 4, 1, false)?
@@ -316,7 +437,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     // A scan with gap limit 5 won't find the second transaction, but a scan with gap limit 6 will.
     // The last active indice won't be updated in the first case but will in the second one.
     let full_scan_update = {
-        let request = FullScanRequest::builder()
+        let request = FullScanRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 5, 1, false)?
@@ -331,7 +452,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     assert!(txs.contains(&txid_4th_addr));
     assert_eq!(full_scan_update.last_active_indices[&0], 3);
     let full_scan_update = {
-        let request = FullScanRequest::builder()
+        let request = FullScanRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 6, 1, false)?

@@ -2265,31 +2265,7 @@ impl Wallet {
     ///
     /// After applying updates you should persist the staged wallet changes. For an example of how
     /// to persist staged wallet changes see [`Wallet::reveal_next_address`].
-    #[cfg(feature = "std")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn apply_update(&mut self, update: impl Into<Update>) -> Result<(), CannotConnectError> {
-        use std::time::*;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time now must surpass epoch anchor");
-        self.apply_update_at(update, now.as_secs())
-    }
-
-    /// Applies an `update` alongside a `seen_at` timestamp and stages the changes.
-    ///
-    /// `seen_at` represents when the update is seen (in unix seconds). It is used to determine the
-    /// `last_seen`s for all transactions in the update which have no corresponding anchor(s). The
-    /// `last_seen` value is used internally to determine precedence of conflicting unconfirmed
-    /// transactions (where the transaction with the lower `last_seen` value is omitted from the
-    /// canonical history).
-    ///
-    /// Use [`apply_update`](Wallet::apply_update) to have the `seen_at` value automatically set to
-    /// the current time.
-    pub fn apply_update_at(
-        &mut self,
-        update: impl Into<Update>,
-        seen_at: u64,
-    ) -> Result<(), CannotConnectError> {
         let update = update.into();
         let mut changeset = match update.chain {
             Some(chain_update) => ChangeSet::from(self.chain.apply_update(chain_update)?),
@@ -2301,11 +2277,7 @@ impl Wallet {
             .index
             .reveal_to_target_multi(&update.last_active_indices);
         changeset.merge(index_changeset.into());
-        changeset.merge(
-            self.indexed_graph
-                .apply_update_at(update.tx_update, Some(seen_at))
-                .into(),
-        );
+        changeset.merge(self.indexed_graph.apply_update(update.tx_update).into());
         self.stage.merge(changeset);
         Ok(())
     }
@@ -2448,9 +2420,23 @@ impl Wallet {
     /// This is the first step when performing a spk-based wallet partial sync, the returned
     /// [`SyncRequest`] collects all revealed script pubkeys from the wallet keychain needed to
     /// start a blockchain sync with a spk based blockchain client.
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn start_sync_with_revealed_spks(&self) -> SyncRequestBuilder<(KeychainKind, u32)> {
+        let start_time = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("time must no go backwards")
+            .as_secs();
+        self.start_sync_with_revealed_spks_at(start_time)
+    }
+
+    /// Create a partial [`SyncRequest`] for this wallet for all revealed spks.
+    pub fn start_sync_with_revealed_spks_at(
+        &self,
+        start_time: u64,
+    ) -> SyncRequestBuilder<(KeychainKind, u32)> {
         use bdk_chain::keychain_txout::SyncRequestBuilderExt;
-        SyncRequest::builder()
+        SyncRequest::builder(start_time)
             .chain_tip(self.chain.tip())
             .revealed_spks_from_indexer(&self.indexed_graph.index, ..)
     }
@@ -2463,9 +2449,20 @@ impl Wallet {
     ///
     /// This operation is generally only used when importing or restoring a previously used wallet
     /// in which the list of used scripts is not known.
+    #[cfg(feature = "std")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     pub fn start_full_scan(&self) -> FullScanRequestBuilder<KeychainKind> {
+        let start_time = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("time must no go backwards")
+            .as_secs();
+        self.start_full_scan_at(start_time)
+    }
+
+    /// Create a [`FullScanRequest] for this wallet.
+    pub fn start_full_scan_at(&self, start_time: u64) -> FullScanRequestBuilder<KeychainKind> {
         use bdk_chain::keychain_txout::FullScanRequestBuilderExt;
-        FullScanRequest::builder()
+        FullScanRequest::builder(start_time)
             .chain_tip(self.chain.tip())
             .spks_from_indexer(&self.indexed_graph.index)
     }

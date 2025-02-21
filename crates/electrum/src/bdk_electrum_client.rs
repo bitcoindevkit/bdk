@@ -1,14 +1,13 @@
 use bdk_core::{
     bitcoin::{block::Header, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
-    collections::{BTreeMap, HashMap},
-    spk_client::{FullScanRequest, FullScanResponse, SyncRequest, SyncResponse},
+    collections::{BTreeMap, HashMap, HashSet},
+    spk_client::{
+        FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
+    },
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
@@ -128,6 +127,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         fetch_prev_txouts: bool,
     ) -> Result<FullScanResponse<K>, Error> {
         let mut request: FullScanRequest<K> = request.into();
+        let start_time = request.start_time();
 
         let tip_and_latest_blocks = match request.chain_tip() {
             Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
@@ -137,9 +137,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         let mut last_active_indices = BTreeMap::<K, u32>::default();
         for keychain in request.keychains() {
-            let spks = request.iter_spks(keychain.clone());
+            let spks = request
+                .iter_spks(keychain.clone())
+                .map(|(spk_i, spk)| (spk_i, SpkWithExpectedTxids::from(spk)));
             if let Some(last_active_index) =
-                self.populate_with_spks(&mut tx_update, spks, stop_gap, batch_size)?
+                self.populate_with_spks(start_time, &mut tx_update, spks, stop_gap, batch_size)?
             {
                 last_active_indices.insert(keychain, last_active_index);
             }
@@ -196,6 +198,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         fetch_prev_txouts: bool,
     ) -> Result<SyncResponse, Error> {
         let mut request: SyncRequest<I> = request.into();
+        let start_time = request.start_time();
 
         let tip_and_latest_blocks = match request.chain_tip() {
             Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
@@ -204,16 +207,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         self.populate_with_spks(
+            start_time,
             &mut tx_update,
             request
-                .iter_spks()
+                .iter_spks_with_expected_txids()
                 .enumerate()
                 .map(|(i, spk)| (i as u32, spk)),
             usize::MAX,
             batch_size,
         )?;
-        self.populate_with_txids(&mut tx_update, request.iter_txids())?;
-        self.populate_with_outpoints(&mut tx_update, request.iter_outpoints())?;
+        self.populate_with_txids(start_time, &mut tx_update, request.iter_txids())?;
+        self.populate_with_outpoints(start_time, &mut tx_update, request.iter_outpoints())?;
 
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
@@ -242,8 +246,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// also included.
     fn populate_with_spks(
         &self,
+        start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
-        mut spks: impl Iterator<Item = (u32, ScriptBuf)>,
+        mut spks_with_expected_txids: impl Iterator<Item = (u32, SpkWithExpectedTxids)>,
         stop_gap: usize,
         batch_size: usize,
     ) -> Result<Option<u32>, Error> {
@@ -252,32 +257,63 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         loop {
             let spks = (0..batch_size)
-                .map_while(|_| spks.next())
+                .map_while(|_| spks_with_expected_txids.next())
                 .collect::<Vec<_>>();
             if spks.is_empty() {
                 return Ok(last_active_index);
             }
 
+            let (spks, expected_spk_txids): (Vec<(u32, ScriptBuf)>, HashMap<ScriptBuf, _>) = spks
+                .iter()
+                .map(|(spk_i, spk_with_expected_txids)| {
+                    (
+                        (*spk_i, spk_with_expected_txids.spk.clone()),
+                        (
+                            spk_with_expected_txids.spk.clone(),
+                            spk_with_expected_txids.expected_txids.clone(),
+                        ),
+                    )
+                })
+                .unzip();
+
             let spk_histories = self
                 .inner
                 .batch_script_get_history(spks.iter().map(|(_, s)| s.as_script()))?;
 
-            for ((spk_index, _spk), spk_history) in spks.into_iter().zip(spk_histories) {
+            for ((spk_index, spk), spk_history) in spks.into_iter().zip(spk_histories) {
                 if spk_history.is_empty() {
                     unused_spk_count = unused_spk_count.saturating_add(1);
                     if unused_spk_count >= stop_gap {
                         return Ok(last_active_index);
                     }
-                    continue;
                 } else {
                     last_active_index = Some(spk_index);
                     unused_spk_count = 0;
                 }
 
+                let spk_history_set = spk_history
+                    .iter()
+                    .map(|res| res.tx_hash)
+                    .collect::<HashSet<_>>();
+
+                if let Some(expected_txids) = expected_spk_txids.get(&spk) {
+                    tx_update.evicted_ats.extend(
+                        expected_txids
+                            .difference(&spk_history_set)
+                            .map(|&txid| (txid, start_time)),
+                    );
+                }
+
                 for tx_res in spk_history {
                     tx_update.txs.push(self.fetch_tx(tx_res.tx_hash)?);
-                    if let Ok(height) = tx_res.height.try_into() {
-                        self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, height)?;
+                    match tx_res.height.try_into() {
+                        // Returned heights 0 & -1 are reserved for unconfirmed txs.
+                        Ok(height) if height > 0 => {
+                            self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, height)?;
+                        }
+                        _ => {
+                            tx_update.seen_ats.insert((tx_res.tx_hash, start_time));
+                        }
                     }
                 }
             }
@@ -290,6 +326,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// included. Anchors of the aforementioned transactions are included.
     fn populate_with_outpoints(
         &self,
+        start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
     ) -> Result<(), Error> {
@@ -314,8 +351,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 if !has_residing && res.tx_hash == op_txid {
                     has_residing = true;
                     tx_update.txs.push(Arc::clone(&op_tx));
-                    if let Ok(height) = res.height.try_into() {
-                        self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                    match res.height.try_into() {
+                        // Returned heights 0 & -1 are reserved for unconfirmed txs.
+                        Ok(height) if height > 0 => {
+                            self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                        }
+                        _ => {
+                            tx_update.seen_ats.insert((res.tx_hash, start_time));
+                        }
                     }
                 }
 
@@ -330,8 +373,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         continue;
                     }
                     tx_update.txs.push(Arc::clone(&res_tx));
-                    if let Ok(height) = res.height.try_into() {
-                        self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                    match res.height.try_into() {
+                        // Returned heights 0 & -1 are reserved for unconfirmed txs.
+                        Ok(height) if height > 0 => {
+                            self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                        }
+                        _ => {
+                            tx_update.seen_ats.insert((res.tx_hash, start_time));
+                        }
                     }
                 }
             }
@@ -342,6 +391,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Populate the `tx_update` with transactions/anchors of the provided `txids`.
     fn populate_with_txids(
         &self,
+        start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
     ) -> Result<(), Error> {
@@ -366,8 +416,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .into_iter()
                 .find(|r| r.tx_hash == txid)
             {
-                if let Ok(height) = r.height.try_into() {
-                    self.validate_merkle_for_anchor(tx_update, txid, height)?;
+                match r.height.try_into() {
+                    // Returned heights 0 & -1 are reserved for unconfirmed txs.
+                    Ok(height) if height > 0 => {
+                        self.validate_merkle_for_anchor(tx_update, txid, height)?;
+                    }
+                    _ => {
+                        tx_update.seen_ats.insert((r.tx_hash, start_time));
+                    }
                 }
             }
 
@@ -571,10 +627,8 @@ mod test {
         // `fetch_prev_txout` on a coinbase transaction will trigger a `fetch_tx` on a transaction
         // with a txid of all zeros. If `fetch_prev_txout` attempts to fetch this transaction, this
         // assertion will fail.
-        let mut tx_update = TxUpdate {
-            txs: vec![Arc::new(coinbase_tx)],
-            ..Default::default()
-        };
+        let mut tx_update = TxUpdate::default();
+        tx_update.txs = vec![Arc::new(coinbase_tx)];
         assert!(client.fetch_prev_txout(&mut tx_update).is_ok());
 
         // Ensure that the txouts are empty.
