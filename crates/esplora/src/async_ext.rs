@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use bdk_core::collections::{BTreeMap, BTreeSet, HashSet};
-use bdk_core::spk_client::{FullScanRequest, FullScanResponse, SyncRequest, SyncResponse};
+use bdk_core::spk_client::{
+    FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
+};
 use bdk_core::{
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{BlockHash, OutPoint, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
 };
 use esplora_client::Sleeper;
@@ -62,7 +64,7 @@ where
         stop_gap: usize,
         parallel_requests: usize,
     ) -> Result<FullScanResponse<K>, Error> {
-        let mut request = request.into();
+        let mut request: FullScanRequest<K> = request.into();
         let start_time = request.start_time();
         let keychains = request.keychains();
 
@@ -77,7 +79,9 @@ where
         let mut inserted_txs = HashSet::<Txid>::new();
         let mut last_active_indices = BTreeMap::<K, u32>::new();
         for keychain in keychains {
-            let keychain_spks = request.iter_spks(keychain.clone());
+            let keychain_spks = request
+                .iter_spks(keychain.clone())
+                .map(|(spk_i, spk)| (spk_i, spk.into()));
             let (update, last_active_index) = fetch_txs_with_keychain_spks(
                 self,
                 start_time,
@@ -112,7 +116,7 @@ where
         request: R,
         parallel_requests: usize,
     ) -> Result<SyncResponse, Error> {
-        let mut request = request.into();
+        let mut request: SyncRequest<I> = request.into();
         let start_time = request.start_time();
 
         let chain_tip = request.chain_tip();
@@ -129,7 +133,7 @@ where
                 self,
                 start_time,
                 &mut inserted_txs,
-                request.iter_spks(),
+                request.iter_spks_with_expected_txids(),
                 parallel_requests,
             )
             .await?,
@@ -291,10 +295,10 @@ async fn fetch_txs_with_keychain_spks<I, S>(
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error>
 where
-    I: Iterator<Item = Indexed<ScriptBuf>> + Send,
+    I: Iterator<Item = Indexed<SpkWithExpectedTxids>> + Send,
     S: Sleeper + Clone + Send + Sync,
 {
-    type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
+    type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     let mut last_index = Option::<u32>::None;
@@ -306,6 +310,8 @@ where
             .take(parallel_requests)
             .map(|(spk_index, spk)| {
                 let client = client.clone();
+                let expected_txids = spk.expected_txids;
+                let spk = spk.spk;
                 async move {
                     let mut last_seen = None;
                     let mut spk_txs = Vec::new();
@@ -315,9 +321,15 @@ where
                         last_seen = txs.last().map(|tx| tx.txid);
                         spk_txs.extend(txs);
                         if tx_count < 25 {
-                            break Result::<_, Error>::Ok((spk_index, spk_txs));
+                            break;
                         }
                     }
+                    let got_txids = spk_txs.iter().map(|tx| tx.txid).collect::<HashSet<_>>();
+                    let evicted_txids = expected_txids
+                        .difference(&got_txids)
+                        .copied()
+                        .collect::<HashSet<_>>();
+                    Result::<TxsOfSpkIndex, Error>::Ok((spk_index, spk_txs, evicted_txids))
                 }
             })
             .collect::<FuturesOrdered<_>>();
@@ -326,7 +338,7 @@ where
             break;
         }
 
-        for (index, txs) in handles.try_collect::<Vec<TxsOfSpkIndex>>().await? {
+        for (index, txs, evicted) in handles.try_collect::<Vec<TxsOfSpkIndex>>().await? {
             last_index = Some(index);
             if !txs.is_empty() {
                 last_active_index = Some(index);
@@ -338,6 +350,9 @@ where
                 insert_anchor_or_seen_at_from_status(&mut update, start_time, tx.txid, tx.status);
                 insert_prevouts(&mut update, tx.vin);
             }
+            update
+                .evicted_ats
+                .extend(evicted.into_iter().map(|txid| (txid, start_time)));
         }
 
         let last_index = last_index.expect("Must be set since handles wasn't empty.");
@@ -370,7 +385,7 @@ async fn fetch_txs_with_spks<I, S>(
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error>
 where
-    I: IntoIterator<Item = ScriptBuf> + Send,
+    I: IntoIterator<Item = SpkWithExpectedTxids> + Send,
     I::IntoIter: Send,
     S: Sleeper + Clone + Send + Sync,
 {

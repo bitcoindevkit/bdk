@@ -1,7 +1,9 @@
 use bdk_core::collections::{BTreeMap, BTreeSet, HashSet};
-use bdk_core::spk_client::{FullScanRequest, FullScanResponse, SyncRequest, SyncResponse};
+use bdk_core::spk_client::{
+    FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
+};
 use bdk_core::{
-    bitcoin::{BlockHash, OutPoint, ScriptBuf, Txid},
+    bitcoin::{BlockHash, OutPoint, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
 };
 use esplora_client::{OutputStatus, Tx};
@@ -53,7 +55,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         stop_gap: usize,
         parallel_requests: usize,
     ) -> Result<FullScanResponse<K>, Error> {
-        let mut request = request.into();
+        let mut request: FullScanRequest<K> = request.into();
         let start_time = request.start_time();
 
         let chain_tip = request.chain_tip();
@@ -67,7 +69,9 @@ impl EsploraExt for esplora_client::BlockingClient {
         let mut inserted_txs = HashSet::<Txid>::new();
         let mut last_active_indices = BTreeMap::<K, u32>::new();
         for keychain in request.keychains() {
-            let keychain_spks = request.iter_spks(keychain.clone());
+            let keychain_spks = request
+                .iter_spks(keychain.clone())
+                .map(|(spk_i, spk)| (spk_i, spk.into()));
             let (update, last_active_index) = fetch_txs_with_keychain_spks(
                 self,
                 start_time,
@@ -120,7 +124,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             self,
             start_time,
             &mut inserted_txs,
-            request.iter_spks(),
+            request.iter_spks_with_expected_txids(),
             parallel_requests,
         )?);
         tx_update.extend(fetch_txs_with_txids(
@@ -254,7 +258,7 @@ fn chain_update(
     Ok(tip)
 }
 
-fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
+fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>>>(
     client: &esplora_client::BlockingClient,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
@@ -262,7 +266,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
     stop_gap: usize,
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error> {
-    type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>);
+    type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     let mut last_index = Option::<u32>::None;
@@ -273,21 +277,27 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
             .by_ref()
             .take(parallel_requests)
             .map(|(spk_index, spk)| {
-                std::thread::spawn({
-                    let client = client.clone();
-                    move || -> Result<TxsOfSpkIndex, Error> {
-                        let mut last_seen = None;
-                        let mut spk_txs = Vec::new();
-                        loop {
-                            let txs = client.scripthash_txs(&spk, last_seen)?;
-                            let tx_count = txs.len();
-                            last_seen = txs.last().map(|tx| tx.txid);
-                            spk_txs.extend(txs);
-                            if tx_count < 25 {
-                                break Ok((spk_index, spk_txs));
-                            }
+                let client = client.clone();
+                let expected_txids = spk.expected_txids;
+                let spk = spk.spk;
+                std::thread::spawn(move || -> Result<TxsOfSpkIndex, Error> {
+                    let mut last_txid = None;
+                    let mut spk_txs = Vec::new();
+                    loop {
+                        let txs = client.scripthash_txs(&spk, last_txid)?;
+                        let tx_count = txs.len();
+                        last_txid = txs.last().map(|tx| tx.txid);
+                        spk_txs.extend(txs);
+                        if tx_count < 25 {
+                            break;
                         }
                     }
+                    let got_txids = spk_txs.iter().map(|tx| tx.txid).collect::<HashSet<_>>();
+                    let evicted_txids = expected_txids
+                        .difference(&got_txids)
+                        .copied()
+                        .collect::<HashSet<_>>();
+                    Ok((spk_index, spk_txs, evicted_txids))
                 })
             })
             .collect::<Vec<JoinHandle<Result<TxsOfSpkIndex, Error>>>>();
@@ -297,7 +307,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
         }
 
         for handle in handles {
-            let (index, txs) = handle.join().expect("thread must not panic")?;
+            let (index, txs, evicted) = handle.join().expect("thread must not panic")?;
             last_index = Some(index);
             if !txs.is_empty() {
                 last_active_index = Some(index);
@@ -309,6 +319,9 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
                 insert_anchor_or_seen_at_from_status(&mut update, start_time, tx.txid, tx.status);
                 insert_prevouts(&mut update, tx.vin);
             }
+            update
+                .evicted_ats
+                .extend(evicted.into_iter().map(|txid| (txid, start_time)));
         }
 
         let last_index = last_index.expect("Must be set since handles wasn't empty.");
@@ -333,7 +346,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<ScriptBuf>>>(
 /// requests to make in parallel.
 ///
 /// Refer to [crate-level docs](crate) for more.
-fn fetch_txs_with_spks<I: IntoIterator<Item = ScriptBuf>>(
+fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
     client: &esplora_client::BlockingClient,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
