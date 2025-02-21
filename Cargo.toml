@@ -1,6 +1,6 @@
 [package]
 name = "bdk"
-version = "0.30.1"
+version = "0.30.2"
 authors = ["Alekos Filini <alekos.filini@gmail.com>", "Riccardo Casatta <riccardo@casatta.it>"]
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
@@ -94,10 +94,10 @@ reqwest-default-tls = ["esplora-client/async-https"]
 
 # Debug/Test features
 test-blockchains = ["bitcoincore-rpc", "electrum-client"]
-test-electrum = ["electrum", "electrsd/electrs_0_8_10", "electrsd/bitcoind_23_1", "test-blockchains"]
-test-rpc = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_23_1", "test-blockchains"]
-test-rpc-legacy = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_23_1", "test-blockchains"]
-test-esplora = ["electrsd/legacy", "electrsd/esplora_a33e97e1", "electrsd/bitcoind_23_1", "test-blockchains"]
+test-electrum = ["electrum", "electrsd/electrs_0_8_10", "electrsd/bitcoind_23_0", "test-blockchains"]
+test-rpc = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_23_0", "test-blockchains"]
+test-rpc-legacy = ["rpc", "electrsd/electrs_0_8_10", "electrsd/bitcoind_23_0", "test-blockchains"]
+test-esplora = ["electrsd/legacy", "electrsd/esplora_a33e97e1", "electrsd/bitcoind_23_0", "test-blockchains"]
 test-md-docs = ["electrum"]
 test-hardware-signer = ["hardware-signer"]
 
@@ -111,7 +111,7 @@ miniscript = { version = "10.0", features = ["std"] }
 bitcoin = { version = "0.30", features = ["std"] }
 lazy_static = "1.4"
 env_logger = { version = "0.7", default-features = false }
-electrsd = "0.29.0"
+electrsd = "0.24.0"
 assert_matches = "1.5.0"
 
 [[example]]
@@ -130,7 +130,7 @@ path = "examples/policy.rs"
 [[example]]
 name = "rpcwallet"
 path = "examples/rpcwallet.rs"
-required-features = ["keys-bip39", "key-value-db", "rpc", "electrsd/bitcoind_22_1"]
+required-features = ["keys-bip39", "key-value-db", "rpc", "electrsd/bitcoind_22_0"]
 
 [[example]]
 name = "psbt_signer"

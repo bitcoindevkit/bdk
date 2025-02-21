@@ -86,7 +86,13 @@ impl SqliteDatabase {
     /// Instantiate a new SqliteDatabase instance by creating a connection
     /// to the database stored at path
     pub fn new<T: AsRef<Path>>(path: T) -> Self {
-        let connection = get_connection(&path).unwrap();
+        let connection = get_connection(&path).expect("Failed to open database");
+        connection
+            .execute_batch("PRAGMA journal_mode = WAL")
+            .expect("Failed to set WAL journal mode");
+        connection
+            .execute_batch("PRAGMA busy_timeout = 5000")
+            .expect("Failed to set busy_timeout");
         SqliteDatabase {
             path: PathBuf::from(path.as_ref()),
             connection,

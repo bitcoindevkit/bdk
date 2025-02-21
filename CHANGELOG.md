@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [v0.30.1]
+## [v0.30.2]
 
-### Fixed
+- Fix out of memory issue caused by batch fetching many large txs #1831
+- Fix SQLite panic when syncing many large txs #1836
+
+## [v0.30.1]
 
 - Fix electrum conftime_req filter for needs_block_height #1782
 
@@ -707,4 +710,5 @@ final transaction is created by calling `finish` on the builder.
 [v0.29.0]: https://github.com/bitcoindevkit/bdk/compare/v0.28.2...v0.29.0
 [v0.30.0]: https://github.com/bitcoindevkit/bdk/compare/v0.29.0...v0.30.0
 [v0.30.1]: https://github.com/bitcoindevkit/bdk/compare/v0.30.0...v0.30.1
-[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.30.1...release/0.29
+[v0.30.2]: https://github.com/bitcoindevkit/bdk/compare/v0.30.1...v0.30.2
+[Unreleased]: https://github.com/bitcoindevkit/bdk/compare/v0.30.2...release/0.30
