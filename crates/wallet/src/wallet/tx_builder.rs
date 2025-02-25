@@ -514,7 +514,10 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
 
     /// Set a specific [`ConfirmationSpendPolicy`]. See [`TxBuilder::only_spend_confirmed`] and
     /// [`TxBuilder::only_spend_unconfirmed`] for some shortcuts.
-    pub fn confirmation_policy(&mut self, confirmation_policy: ConfirmationSpendPolicy) -> &mut Self {
+    pub fn confirmation_policy(
+        &mut self,
+        confirmation_policy: ConfirmationSpendPolicy,
+    ) -> &mut Self {
         self.params.confirmation_policy = confirmation_policy;
         self
     }
