@@ -2026,6 +2026,8 @@ impl Wallet {
                     self.keychains().count() == 1
                         || params.change_policy.is_satisfied_by(local_output)
                 })
+                // only add utxos that match the confirmation policy
+                .filter(|local_output| params.confirmation_policy.is_satisfied_by(local_output))
                 // only add to optional UTxOs those marked as spendable
                 .filter(|local_output| !params.unspendable.contains(&local_output.outpoint))
                 // if bumping fees only add to optional UTxOs those confirmed

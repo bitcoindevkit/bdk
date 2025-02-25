@@ -767,6 +767,109 @@ fn test_create_tx_change_policy() {
 }
 
 #[test]
+fn test_create_tx_confirmation_policy() {
+    let (mut wallet, funding_txid) = get_funded_wallet_wpkh();
+    assert_eq!(wallet.balance().confirmed, Amount::from_sat(50_000));
+    insert_checkpoint(
+        &mut wallet,
+        BlockId {
+            height: 3_000,
+            hash: BlockHash::all_zeros(),
+        },
+    );
+
+    let confirmed_tx = Transaction {
+        input: vec![],
+        output: vec![TxOut {
+            script_pubkey: wallet
+                .next_unused_address(KeychainKind::External)
+                .script_pubkey(),
+            value: Amount::from_sat(25_000),
+        }],
+        version: transaction::Version::non_standard(0),
+        lock_time: absolute::LockTime::ZERO,
+    };
+    let confirmed_txid = confirmed_tx.compute_txid();
+    insert_tx(&mut wallet, confirmed_tx);
+    let anchor = ConfirmationBlockTime {
+        block_id: wallet.latest_checkpoint().get(3_000).unwrap().block_id(),
+        confirmation_time: 200,
+    };
+    insert_anchor(&mut wallet, confirmed_txid, anchor);
+    let unconfirmed_tx = Transaction {
+        input: vec![],
+        output: vec![TxOut {
+            script_pubkey: wallet
+                .next_unused_address(KeychainKind::External)
+                .script_pubkey(),
+            value: Amount::from_sat(25_000),
+        }],
+        version: transaction::Version::non_standard(0),
+        lock_time: absolute::LockTime::ZERO,
+    };
+    let unconfirmed_txid = unconfirmed_tx.compute_txid();
+    insert_tx(&mut wallet, unconfirmed_tx);
+
+    let addr = wallet.next_unused_address(KeychainKind::External);
+
+    let mut builder = wallet.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(51_000))
+        .only_spend_confirmed();
+    let ret = builder.finish().unwrap();
+    assert_eq!(ret.unsigned_tx.input.len(), 2);
+    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == funding_txid));
+    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == confirmed_txid));
+
+    let mut builder = wallet.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(51_000))
+        .only_spend_confirmed_since(3_000);
+    let ret = builder.finish().unwrap();
+    assert_eq!(ret.unsigned_tx.input.len(), 2);
+    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == funding_txid));
+    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == confirmed_txid));
+
+    let mut builder = wallet.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(25_000))
+        .only_spend_confirmed_since(2_500);
+    let ret = builder.finish().unwrap();
+    assert_eq!(ret.unsigned_tx.input.len(), 1);
+    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == funding_txid));
+
+    let mut builder = wallet.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(24_000))
+        .only_spend_unconfirmed();
+    let ret = builder.finish().unwrap();
+    assert_eq!(ret.unsigned_tx.input.len(), 1);
+    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == unconfirmed_txid));
+
+    let mut builder = wallet.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(76_000))
+        .only_spend_confirmed();
+    assert!(matches!(
+        builder.finish(),
+        Err(CreateTxError::CoinSelection(
+            coin_selection::InsufficientFunds { .. }
+        )),
+    ));
+
+    let mut builder = wallet.build_tx();
+    builder
+        .add_recipient(addr.script_pubkey(), Amount::from_sat(76_000))
+        .only_spend_unconfirmed();
+    assert!(matches!(
+        builder.finish(),
+        Err(CreateTxError::CoinSelection(
+            coin_selection::InsufficientFunds { .. }
+        )),
+    ));
+}
+
+#[test]
 fn test_create_tx_default_sequence() {
     let (mut wallet, _) = get_funded_wallet_wpkh();
     let addr = wallet.next_unused_address(KeychainKind::External);
