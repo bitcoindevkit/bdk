@@ -232,6 +232,10 @@ pub trait CoinSelectionAlgorithm: core::fmt::Debug {
         params: CoinSelectionParams<'_, R>,
     ) -> Result<CoinSelectionResult, InsufficientFunds>;
 }
+fn group_utxos_if_applies(utxos: Vec<WeightedUtxo>, _: bool) -> Vec<Vec<WeightedUtxo>> {
+    // No grouping: every UTXO is its own group.
+    return utxos.into_iter().map(|u| vec![u]).collect();
+}
 
 /// Simple and dumb coin selection
 ///
@@ -247,21 +251,31 @@ impl CoinSelectionAlgorithm for LargestFirstCoinSelection {
     ) -> Result<CoinSelectionResult, InsufficientFunds> {
         let CoinSelectionParams {
             required_utxos,
-            mut optional_utxos,
+            optional_utxos,
             fee_rate,
             target_amount,
             drain_script,
             rand: _,
-            avoid_partial_spends: _,
+            avoid_partial_spends,
         } = params;
+        let required_utxo_group =
+            group_utxos_if_applies(required_utxos.clone(), avoid_partial_spends);
+        let mut optional_utxos_group = group_utxos_if_applies(optional_utxos, avoid_partial_spends);
         // We put the "required UTXOs" first and make sure the optional UTXOs are sorted,
         // initially smallest to largest, before being reversed with `.rev()`.
         let utxos = {
-            optional_utxos.sort_unstable_by_key(|wu| wu.utxo.txout().value);
-            required_utxos
+            optional_utxos_group.sort_unstable_by_key(|group| {
+                group.iter().map(|wu| wu.utxo.txout().value).sum::<Amount>()
+            });
+            required_utxo_group
                 .into_iter()
                 .map(|utxo| (true, utxo))
-                .chain(optional_utxos.into_iter().rev().map(|utxo| (false, utxo)))
+                .chain(
+                    optional_utxos_group
+                        .into_iter()
+                        .rev()
+                        .map(|utxo| (false, utxo)),
+                )
         };
 
         select_sorted_utxos(utxos, fee_rate, target_amount, drain_script)
@@ -282,26 +296,30 @@ impl CoinSelectionAlgorithm for OldestFirstCoinSelection {
     ) -> Result<CoinSelectionResult, InsufficientFunds> {
         let CoinSelectionParams {
             required_utxos,
-            mut optional_utxos,
+            optional_utxos,
             fee_rate,
             target_amount,
             drain_script,
             rand: _,
-            avoid_partial_spends: _,
+            avoid_partial_spends,
         } = params;
+        let required_utxo_group =
+            group_utxos_if_applies(required_utxos.clone(), avoid_partial_spends);
+        let mut optional_utxos_group =
+            group_utxos_if_applies(optional_utxos.clone(), avoid_partial_spends);
         // We put the "required UTXOs" first and make sure the optional UTXOs are sorted from
         // oldest to newest according to blocktime
         // For utxo that doesn't exist in DB, they will have lowest priority to be selected
         let utxos = {
-            optional_utxos.sort_unstable_by_key(|wu| match &wu.utxo {
-                Utxo::Local(local) => Some(local.chain_position),
+            optional_utxos_group.sort_unstable_by_key(|group| match group[0].utxo {
+                Utxo::Local(ref local) => Some(local.chain_position),
                 Utxo::Foreign { .. } => None,
             });
 
-            required_utxos
+            required_utxo_group
                 .into_iter()
                 .map(|utxo| (true, utxo))
-                .chain(optional_utxos.into_iter().map(|utxo| (false, utxo)))
+                .chain(optional_utxos_group.into_iter().map(|utxo| (false, utxo)))
         };
 
         select_sorted_utxos(utxos, fee_rate, target_amount, drain_script)
@@ -336,7 +354,7 @@ pub fn decide_change(remaining_amount: Amount, fee_rate: FeeRate, drain_script: 
 }
 
 fn select_sorted_utxos(
-    utxos: impl Iterator<Item = (bool, WeightedUtxo)>,
+    utxos: impl Iterator<Item = (bool, Vec<WeightedUtxo>)>,
     fee_rate: FeeRate,
     target_amount: Amount,
     drain_script: &Script,
@@ -346,20 +364,23 @@ fn select_sorted_utxos(
     let selected = utxos
         .scan(
             (&mut selected_amount, &mut fee_amount),
-            |(selected_amount, fee_amount), (must_use, weighted_utxo)| {
+            |(selected_amount, fee_amount), (must_use, group)| {
                 if must_use || **selected_amount < target_amount + **fee_amount {
-                    **fee_amount += fee_rate
-                        * TxIn::default()
-                            .segwit_weight()
-                            .checked_add(weighted_utxo.satisfaction_weight)
-                            .expect("`Weight` addition should not cause an integer overflow");
-                    **selected_amount += weighted_utxo.utxo.txout().value;
-                    Some(weighted_utxo.utxo)
+                    for weighted_utxo in &group {
+                        **fee_amount += fee_rate
+                            * TxIn::default()
+                                .segwit_weight()
+                                .checked_add(weighted_utxo.satisfaction_weight)
+                                .expect("`Weight` addition should not cause an integer overflow");
+                        **selected_amount += weighted_utxo.utxo.txout().value;
+                    }
+                    Some(group.into_iter().map(|wu| wu.utxo).collect::<Vec<_>>())
                 } else {
                     None
                 }
             },
         )
+        .flatten()
         .collect::<Vec<_>>();
 
     let amount_needed_with_fees = target_amount + fee_amount;
@@ -469,26 +490,42 @@ impl<Cs: CoinSelectionAlgorithm> CoinSelectionAlgorithm for BranchAndBoundCoinSe
             rand: _,
             avoid_partial_spends,
         } = params;
+        let required_utxo_group =
+            group_utxos_if_applies(required_utxos.clone(), avoid_partial_spends);
+        let optional_utxos_group =
+            group_utxos_if_applies(optional_utxos.clone(), avoid_partial_spends);
         // Mapping every (UTXO, usize) to an output group
-        let required_ogs: Vec<OutputGroup> = required_utxos
-            .iter()
-            .map(|u| OutputGroup::new(u.clone(), fee_rate))
+        let required_ogs: Vec<Vec<OutputGroup>> = required_utxo_group
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .map(|weighted_utxo| OutputGroup::new(weighted_utxo, fee_rate))
+                    .collect()
+            })
             .collect();
 
         // Mapping every (UTXO, usize) to an output group, filtering UTXOs with a negative
         // effective value
-        let optional_ogs: Vec<OutputGroup> = optional_utxos
-            .iter()
-            .map(|u| OutputGroup::new(u.clone(), fee_rate))
-            .filter(|u| u.effective_value.is_positive())
+        let optional_ogs: Vec<Vec<OutputGroup>> = optional_utxos_group
+            .into_iter()
+            .map(|group| {
+                group
+                    .into_iter()
+                    .map(|weighted_utxo| OutputGroup::new(weighted_utxo, fee_rate))
+                    .filter(|og| og.effective_value.is_positive())
+                    .collect()
+            })
             .collect();
 
         let curr_value = required_ogs
             .iter()
+            .flat_map(|group| group.iter())
             .fold(SignedAmount::ZERO, |acc, x| acc + x.effective_value);
 
         let curr_available_value = optional_ogs
             .iter()
+            .flat_map(|group| group.iter())
             .fold(SignedAmount::ZERO, |acc, x| acc + x.effective_value);
 
         let cost_of_change = (Weight::from_vb(self.size_of_change).expect("overflow occurred")
@@ -515,9 +552,11 @@ impl<Cs: CoinSelectionAlgorithm> CoinSelectionAlgorithm for BranchAndBoundCoinSe
                 // positive effective value), sum their value and their fee cost.
                 let (utxo_fees, utxo_value) = required_ogs.iter().chain(optional_ogs.iter()).fold(
                     (Amount::ZERO, Amount::ZERO),
-                    |(mut fees, mut value), utxo| {
-                        fees += utxo.fee;
-                        value += utxo.weighted_utxo.utxo.txout().value;
+                    |(mut fees, mut value), group| {
+                        for utxo in group {
+                            fees += utxo.fee;
+                            value += utxo.weighted_utxo.utxo.txout().value;
+                        }
                         (fees, value)
                     },
                 );
@@ -580,8 +619,8 @@ impl<Cs> BranchAndBoundCoinSelection<Cs> {
     #[allow(clippy::too_many_arguments)]
     fn bnb(
         &self,
-        required_utxos: Vec<OutputGroup>,
-        mut optional_utxos: Vec<OutputGroup>,
+        required_utxos: Vec<Vec<OutputGroup>>,
+        mut optional_utxos: Vec<Vec<OutputGroup>>,
         mut curr_value: SignedAmount,
         mut curr_available_value: SignedAmount,
         target_amount: SignedAmount,
@@ -596,7 +635,12 @@ impl<Cs> BranchAndBoundCoinSelection<Cs> {
         let mut current_selection: Vec<bool> = Vec::with_capacity(optional_utxos.len());
 
         // Sort the utxo_pool
-        optional_utxos.sort_unstable_by_key(|a| a.effective_value);
+        optional_utxos.sort_unstable_by_key(|group| {
+            group
+                .iter()
+                .map(|og| og.effective_value)
+                .sum::<SignedAmount>()
+        });
         optional_utxos.reverse();
 
         // Contains the best selection we found
@@ -637,7 +681,10 @@ impl<Cs> BranchAndBoundCoinSelection<Cs> {
                 // Walk backwards to find the last included UTXO that still needs to have its omission branch traversed.
                 while let Some(false) = current_selection.last() {
                     current_selection.pop();
-                    curr_available_value += optional_utxos[current_selection.len()].effective_value;
+                    curr_available_value += optional_utxos[current_selection.len()]
+                        .iter()
+                        .map(|og| og.effective_value)
+                        .sum::<SignedAmount>();
                 }
 
                 if current_selection.last_mut().is_none() {
@@ -655,17 +702,26 @@ impl<Cs> BranchAndBoundCoinSelection<Cs> {
                 }
 
                 let utxo = &optional_utxos[current_selection.len() - 1];
-                curr_value -= utxo.effective_value;
+                curr_value -= utxo
+                    .iter()
+                    .map(|og| og.effective_value)
+                    .sum::<SignedAmount>();
             } else {
                 // Moving forwards, continuing down this branch
                 let utxo = &optional_utxos[current_selection.len()];
 
                 // Remove this utxo from the curr_available_value utxo amount
-                curr_available_value -= utxo.effective_value;
+                curr_available_value -= utxo
+                    .iter()
+                    .map(|og| og.effective_value)
+                    .sum::<SignedAmount>();
 
                 // Inclusion branch first (Largest First Exploration)
                 current_selection.push(true);
-                curr_value += utxo.effective_value;
+                curr_value += utxo
+                    .iter()
+                    .map(|og| og.effective_value)
+                    .sum::<SignedAmount>();
             }
         }
 
@@ -679,7 +735,7 @@ impl<Cs> BranchAndBoundCoinSelection<Cs> {
             .into_iter()
             .zip(best_selection)
             .filter_map(|(optional, is_in_best)| if is_in_best { Some(optional) } else { None })
-            .collect::<Vec<OutputGroup>>();
+            .collect::<Vec<Vec<OutputGroup>>>();
 
         let selected_amount = best_selection_value.unwrap();
 
@@ -707,21 +763,23 @@ impl CoinSelectionAlgorithm for SingleRandomDraw {
     ) -> Result<CoinSelectionResult, InsufficientFunds> {
         let CoinSelectionParams {
             required_utxos,
-            mut optional_utxos,
+            optional_utxos,
             fee_rate,
             target_amount,
             drain_script,
             rand,
-            avoid_partial_spends: _,
+            avoid_partial_spends,
         } = params;
+        let required_utxo_group = group_utxos_if_applies(required_utxos, avoid_partial_spends);
+        let mut optional_utxos_group = group_utxos_if_applies(optional_utxos, avoid_partial_spends);
         // We put the required UTXOs first and then the randomize optional UTXOs to take as needed
         let utxos = {
-            shuffle_slice(&mut optional_utxos, rand);
+            shuffle_slice(&mut optional_utxos_group, rand);
 
-            required_utxos
+            required_utxo_group
                 .into_iter()
                 .map(|utxo| (true, utxo))
-                .chain(optional_utxos.into_iter().map(|utxo| (false, utxo)))
+                .chain(optional_utxos_group.into_iter().map(|utxo| (false, utxo)))
         };
 
         // select required UTXOs and then random optional UTXOs.
@@ -730,15 +788,20 @@ impl CoinSelectionAlgorithm for SingleRandomDraw {
 }
 
 fn calculate_cs_result(
-    mut selected_utxos: Vec<OutputGroup>,
-    mut required_utxos: Vec<OutputGroup>,
+    mut selected_utxos: Vec<Vec<OutputGroup>>,
+    mut required_utxos: Vec<Vec<OutputGroup>>,
     excess: Excess,
 ) -> CoinSelectionResult {
     selected_utxos.append(&mut required_utxos);
-    let fee_amount = selected_utxos.iter().map(|u| u.fee).sum();
+    let fee_amount = selected_utxos
+        .iter()
+        .flat_map(|group| group.iter())
+        .map(|u| u.fee)
+        .sum();
     let selected = selected_utxos
         .into_iter()
-        .map(|u| u.weighted_utxo.utxo)
+        .flatten()
+        .map(|og| og.weighted_utxo.utxo)
         .collect::<Vec<_>>();
 
     CoinSelectionResult {
@@ -1444,7 +1507,7 @@ mod test {
         let target_amount = SignedAmount::from_sat(20_000) + FEE_AMOUNT.to_signed().unwrap();
         let result = BranchAndBoundCoinSelection::new(size_of_change, SingleRandomDraw).bnb(
             vec![],
-            utxos,
+            utxos.into_iter().map(|u| vec![u]).collect(),
             SignedAmount::ZERO,
             curr_available_value,
             target_amount,
@@ -1477,7 +1540,7 @@ mod test {
 
         let result = BranchAndBoundCoinSelection::new(size_of_change, SingleRandomDraw).bnb(
             vec![],
-            utxos,
+            utxos.into_iter().map(|u| vec![u]).collect(),
             SignedAmount::ZERO,
             curr_available_value,
             target_amount,
@@ -1518,7 +1581,7 @@ mod test {
         let result = BranchAndBoundCoinSelection::new(size_of_change, SingleRandomDraw)
             .bnb(
                 vec![],
-                utxos,
+                utxos.into_iter().map(|u| vec![u]).collect(),
                 curr_value,
                 curr_available_value,
                 target_amount,
@@ -1558,7 +1621,7 @@ mod test {
             let result = BranchAndBoundCoinSelection::<SingleRandomDraw>::default()
                 .bnb(
                     vec![],
-                    optional_utxos,
+                    optional_utxos.into_iter().map(|u| vec![u]).collect(),
                     curr_value,
                     curr_available_value,
                     target_amount,
