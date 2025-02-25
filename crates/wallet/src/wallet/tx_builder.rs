@@ -140,6 +140,7 @@ pub(crate) struct TxParams {
     pub(crate) bumping_fee: Option<PreviousFee>,
     pub(crate) current_height: Option<absolute::LockTime>,
     pub(crate) allow_dust: bool,
+    pub(crate) avoid_partial_spends: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -572,6 +573,19 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// **Note**: by avoiding a dust limit check you may end up with a transaction that is non-standard.
     pub fn allow_dust(&mut self, allow_dust: bool) -> &mut Self {
         self.params.allow_dust = allow_dust;
+        self
+    }
+
+    /// Avoid partial spends.
+    ///
+    /// Group outputs by address, selecting many (possibly all) or none,
+    /// instead of selecting on a per-output basis. Privacy is improved as
+    /// addresses are mostly swept with fewer transactions and outputs are
+    /// aggregated in clean change addresses. It may result in higher fees
+    /// due to less optimal coin selection caused by this added limitation
+    /// and possibly a larger-than-necessary number of inputs being used
+    pub fn avoid_partial_spends(&mut self) -> &mut Self {
+        self.params.avoid_partial_spends = true;
         self
     }
 
