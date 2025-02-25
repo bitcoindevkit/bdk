@@ -117,6 +117,7 @@ use bitcoin::OutPoint;
 use bitcoin::TxIn;
 use bitcoin::{Script, Weight};
 
+use chain::bdk_core::collections::HashMap;
 use core::convert::TryInto;
 use core::fmt::{self, Formatter};
 use rand_core::RngCore;
@@ -232,9 +233,43 @@ pub trait CoinSelectionAlgorithm: core::fmt::Debug {
         params: CoinSelectionParams<'_, R>,
     ) -> Result<CoinSelectionResult, InsufficientFunds>;
 }
-fn group_utxos_if_applies(utxos: Vec<WeightedUtxo>, _: bool) -> Vec<Vec<WeightedUtxo>> {
-    // No grouping: every UTXO is its own group.
-    return utxos.into_iter().map(|u| vec![u]).collect();
+
+// See https://github.com/bitcoin/bitcoin/pull/18418/files
+// https://bitcoincore.reviews/17824.html#l-339
+const OUTPUT_GROUP_MAX_ENTRIES: usize = 100;
+
+/// Group weighted UTXOs based on their script_pubkey if partial spends should be avoided.
+///
+/// If avoid_partial_spends is false each UTXO is kept in its own group.
+/// If true, UTXOs sharing the same script_pubkey are grouped together, and if a group
+/// would exceed OUTPUT_GROUP_MAX_ENTRIES the group is split into chunks.
+fn group_utxos_if_applies(
+    utxos: Vec<WeightedUtxo>,
+    avoid_partial_spends: bool,
+) -> Vec<Vec<WeightedUtxo>> {
+    if !avoid_partial_spends {
+        // No grouping: every UTXO is its own group.
+        return utxos.into_iter().map(|u| vec![u]).collect();
+    }
+
+    // Group UTXOs by their scriptPubKey bytes.
+    let mut groups_by_spk: HashMap<Vec<u8>, Vec<WeightedUtxo>> = HashMap::new();
+    for weighted_utxo in utxos {
+        let spk = weighted_utxo.utxo.txout().script_pubkey.as_bytes().to_vec();
+        groups_by_spk.entry(spk).or_default().push(weighted_utxo);
+    }
+    // For each group, split into multiple groups if needed.
+    let mut final_groups = Vec::new();
+    for (_spk, group) in groups_by_spk {
+        if group.len() > OUTPUT_GROUP_MAX_ENTRIES {
+            for chunk in group.chunks(OUTPUT_GROUP_MAX_ENTRIES) {
+                final_groups.push(chunk.to_vec());
+            }
+        } else {
+            final_groups.push(group);
+        }
+    }
+    final_groups
 }
 
 /// Simple and dumb coin selection
@@ -989,6 +1024,87 @@ mod test {
                 }),
             })
             .collect()
+    }
+
+    fn generate_utxos_with_same_address() -> Vec<WeightedUtxo> {
+        // Two distinct scripts to simulate two addresses: A and B.
+        let script_a = bitcoin::ScriptBuf::from(vec![b'A']);
+        let script_b = bitcoin::ScriptBuf::from(vec![b'B']);
+
+        vec![
+            // 1.0 btc to A
+            WeightedUtxo {
+                satisfaction_weight: Weight::from_wu_usize(P2WPKH_SATISFACTION_SIZE),
+                utxo: Utxo::Local(LocalOutput {
+                    outpoint: OutPoint::from_str(
+                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:0",
+                    )
+                    .unwrap(),
+                    txout: TxOut {
+                        value: Amount::from_sat(1_000_000_000),
+                        script_pubkey: script_a.clone(),
+                    },
+                    keychain: KeychainKind::External,
+                    is_spent: false,
+                    derivation_index: 42,
+                    chain_position: ChainPosition::Unconfirmed { last_seen: Some(0) },
+                }),
+            },
+            // 0.5 btc to A
+            WeightedUtxo {
+                satisfaction_weight: Weight::from_wu_usize(P2WPKH_SATISFACTION_SIZE),
+                utxo: Utxo::Local(LocalOutput {
+                    outpoint: OutPoint::from_str(
+                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:1",
+                    )
+                    .unwrap(),
+                    txout: TxOut {
+                        value: Amount::from_sat(500_000_000),
+                        script_pubkey: script_a,
+                    },
+                    keychain: KeychainKind::External,
+                    is_spent: false,
+                    derivation_index: 42,
+                    chain_position: ChainPosition::Unconfirmed { last_seen: Some(0) },
+                }),
+            },
+            // 1.0 btc to B
+            WeightedUtxo {
+                satisfaction_weight: Weight::from_wu_usize(P2WPKH_SATISFACTION_SIZE),
+                utxo: Utxo::Local(LocalOutput {
+                    outpoint: OutPoint::from_str(
+                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:2",
+                    )
+                    .unwrap(),
+                    txout: TxOut {
+                        value: Amount::from_sat(1_000_000_000),
+                        script_pubkey: script_b.clone(),
+                    },
+                    keychain: KeychainKind::External,
+                    is_spent: false,
+                    derivation_index: 42,
+                    chain_position: ChainPosition::Unconfirmed { last_seen: Some(0) },
+                }),
+            },
+            // 0.5 btc to B
+            WeightedUtxo {
+                satisfaction_weight: Weight::from_wu_usize(P2WPKH_SATISFACTION_SIZE),
+                utxo: Utxo::Local(LocalOutput {
+                    outpoint: OutPoint::from_str(
+                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:3",
+                    )
+                    .unwrap(),
+                    txout: TxOut {
+                        value: Amount::from_sat(500_000_000),
+                        script_pubkey: script_b,
+                    },
+                    keychain: KeychainKind::External,
+                    is_spent: false,
+                    derivation_index: 42,
+                    chain_position: ChainPosition::Unconfirmed { last_seen: Some(0) },
+                }),
+            },
+        ]
     }
 
     fn sum_random_utxos(mut rng: &mut StdRng, utxos: &mut [WeightedUtxo]) -> Amount {
@@ -1948,6 +2064,384 @@ mod test {
                 .map(|utxo| utxo.outpoint().vout)
                 .collect::<Vec<u32>>();
             assert_eq!(vouts, tc.exp_vouts, "wrong selected vouts for {}", tc.name);
+        }
+    }
+
+    #[test]
+    fn test_group_utxos_if_applies_grouping() {
+        // generate 4 utxos:
+        // - Two for script A
+        // - Two for script B
+        let utxos = generate_utxos_with_same_address();
+
+        // Grouping should combine utxos with the same script when avoiding partial spends.
+        let groups = group_utxos_if_applies(utxos, true);
+
+        // Since we have two distinct script_pubkeys we expect 2 groups.
+        assert_eq!(
+            groups.len(),
+            2,
+            "Expected 2 groups for 2 distinct addresses"
+        );
+
+        // Each group must have exactly two UTXOs.
+        for group in groups {
+            assert_eq!(group.len(), 2, "Each group should contain exactly 2 UTXOs");
+            // Check that all UTXOs in the group share the same script_pubkey.
+            let script = group[0].utxo.txout().script_pubkey.clone();
+            for utxo in group.iter() {
+                assert_eq!(utxo.utxo.txout().script_pubkey, script);
+            }
+        }
+    }
+
+    #[test]
+    fn test_group_utxos_if_applies_max_entries() {
+        // Create 101 UTXOs with the same script (address A)
+        let script_a = bitcoin::ScriptBuf::from(vec![b'A']);
+        let mut utxos = Vec::new();
+        for i in 0..101 {
+            utxos.push(WeightedUtxo {
+                satisfaction_weight: Weight::from_wu_usize(P2WPKH_SATISFACTION_SIZE),
+                utxo: Utxo::Local(LocalOutput {
+                    outpoint: OutPoint::from_str(&format!(
+                        "ebd9813ecebc57ff8f30797de7c205e3c7498ca950ea4341ee51a685ff2fa30a:{}",
+                        i
+                    ))
+                    .unwrap(),
+                    txout: TxOut {
+                        value: Amount::from_sat(1_000_000_000),
+                        script_pubkey: script_a.clone(),
+                    },
+                    keychain: KeychainKind::External,
+                    is_spent: false,
+                    derivation_index: 42,
+                    chain_position: ChainPosition::Unconfirmed { last_seen: Some(0) },
+                }),
+            });
+        }
+
+        // Group UTXOs with avoid_partial_spends enabled.
+        let groups = group_utxos_if_applies(utxos, true);
+
+        // Since all UTXOs share the same script_pubkey and OUTPUT_GROUP_MAX_ENTRIES is 100,
+        // they must be split into 2 groups: one with 100 utxos and one with 1.
+        assert_eq!(
+            groups.len(),
+            2,
+            "Expected 2 groups after splitting 101 UTXOs"
+        );
+        let sizes: Vec<usize> = groups.iter().map(|g| g.len()).collect();
+        assert!(
+            sizes.contains(&100),
+            "One group should contain exactly 100 UTXOs"
+        );
+        assert!(
+            sizes.contains(&1),
+            "One group should contain exactly 1 UTXO"
+        );
+    }
+
+    #[test]
+    fn test_coin_selection_grouping_address_behavior() {
+        // Scenario: our node has four outputs:
+        //    • 1.0 btc to A
+        //    • 0.5 btc to A
+        //    • 1.0 btc to B
+        //    • 0.5 btc to B
+        //
+        // The node sends 0.2 btc to C.
+        //
+        // Without avoid_partial_spends:
+        //   • The algorithm considers each UTXO separately.
+        //   • In our LargestFirstCoinSelection (which orders optional groups descending by total value)
+        //     the highest‐value individual coin is chosen.
+        //   • Here that is the 1.0 btc output.
+        //
+        // With avoid_partial_spends:
+        //   • UTXOs sharing the same address are grouped.
+        //   • One group (either all A’s or all B’s) is used, so both UTXOs from that address are selected.
+        //
+        // To eliminate fee effects we use a zero fee rate.
+        let fee_rate = FeeRate::ZERO;
+        // Set target low enough so that a single UTXO would suffice.
+        let target = Amount::from_sat(200_000_000);
+        // A dummy drain script (change output script)
+        let drain_script = ScriptBuf::new();
+
+        // Generate the four test UTXOs.
+        let utxos = generate_utxos_with_same_address();
+
+        // --- Case 1: Without avoid_partial_spends (grouping disabled)
+        let mut rng = thread_rng();
+        let res_no_group = LargestFirstCoinSelection
+            .coin_select(CoinSelectionParams {
+                required_utxos: vec![],        // no required UTXOs
+                optional_utxos: utxos.clone(), // all UTXOs as optional
+                fee_rate,
+                target_amount: target,
+                drain_script: &drain_script,
+                rand: &mut rng,
+                avoid_partial_spends: false, // grouping disabled
+            })
+            .expect("coin selection should succeed without grouping");
+        // Without grouping, the algorithm picks one UTXO—the one with the highest value.
+        // In our ordering, the 1.0 btc output is chosen.
+        assert_eq!(
+            res_no_group.selected.len(),
+            1,
+            "expected 1 UTXO selected when not grouping"
+        );
+        let selected_no_group = res_no_group.selected_amount();
+        // We expect the selected UTXO to have a value of 1.0 btc (1_000_000_000 sat).
+        assert_eq!(
+            selected_no_group,
+            Amount::from_sat(1_000_000_000),
+            "expected non-grouped selection to pick the 1.0 btc output"
+        );
+
+        // --- Case 2: With avoid_partial_spends enabled (grouping enabled)
+        let res_group = LargestFirstCoinSelection
+            .coin_select(CoinSelectionParams {
+                required_utxos: vec![], // no required UTXOs
+                optional_utxos: utxos,  // all UTXOs as optional
+                fee_rate,
+                target_amount: target,
+                drain_script: &drain_script,
+                rand: &mut rng,
+                avoid_partial_spends: true, // grouping enabled
+            })
+            .expect("coin selection should succeed with grouping");
+        // With grouping enabled, each address is treated as a group.
+        // For either address A or B, the group consists of both outputs:
+        //    1.0 btc + 0.5 btc = 1.5 btc in total.
+        // Thus we expect exactly 2 UTXOs to be selected.
+        assert_eq!(
+            res_group.selected.len(),
+            2,
+            "expected 2 UTXOs selected when grouping is enabled"
+        );
+        let selected_group = res_group.selected_amount();
+        // The grouped selection should have a higher total (1.5 btc) than the non-grouped one.
+        assert!(
+            selected_group > selected_no_group,
+            "expected grouped selection amount to be larger"
+        );
+        // Also check that both UTXOs in the grouped selection share the same script.
+        let common_script = res_group.selected[0].txout().script_pubkey.clone();
+        for utxo in res_group.selected.iter() {
+            assert_eq!(
+                utxo.txout().script_pubkey,
+                common_script,
+                "all UTXOs in a grouped selection must belong to the same address"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coin_selection_grouping_address_behavior_oldestfirst() {
+        // Using OldestFirstCoinSelection.
+        let fee_rate = FeeRate::ZERO;
+        let target = Amount::from_sat(200_000_000); // low target so a single coin would suffice
+        let drain_script = ScriptBuf::new();
+        let utxos = generate_utxos_with_same_address();
+
+        // Case 1: Grouping disabled.
+        let mut rng = thread_rng();
+        let res_no_group = OldestFirstCoinSelection
+            .coin_select(CoinSelectionParams {
+                required_utxos: vec![],        // no required UTXOs
+                optional_utxos: utxos.clone(), // all UTXOs as optional
+                fee_rate,
+                target_amount: target,
+                drain_script: &drain_script,
+                rand: &mut rng,
+                avoid_partial_spends: false, // grouping disabled
+            })
+            .expect("coin selection should succeed without grouping (OldestFirst)");
+        // Expect the highest-value individual coin is chosen (here 1.0 btc).
+        assert_eq!(
+            res_no_group.selected.len(),
+            1,
+            "expected 1 UTXO selected when not grouping (OldestFirst)"
+        );
+        assert_eq!(
+            res_no_group.selected_amount(),
+            Amount::from_sat(1_000_000_000),
+            "expected non-grouped selection to pick the 1.0 btc output (OldestFirst)"
+        );
+
+        // Case 2: Grouping enabled.
+        let res_group = OldestFirstCoinSelection
+            .coin_select(CoinSelectionParams {
+                required_utxos: vec![],
+                optional_utxos: utxos,
+                fee_rate,
+                target_amount: target,
+                drain_script: &drain_script,
+                rand: &mut rng,
+                avoid_partial_spends: true, // grouping enabled
+            })
+            .expect("coin selection should succeed with grouping (OldestFirst)");
+        // With grouping enabled, one group (either A’s or B’s) is used: both outputs (1.0+0.5).
+        assert_eq!(
+            res_group.selected.len(),
+            2,
+            "expected 2 UTXOs selected when grouping is enabled (OldestFirst)"
+        );
+        assert_eq!(
+            res_group.selected_amount(),
+            Amount::from_sat(1_500_000_000),
+            "expected grouped selection to pick outputs totaling 1.5 btc (OldestFirst)"
+        );
+        let common_script = res_group.selected[0].txout().script_pubkey.clone();
+        for utxo in res_group.selected.iter() {
+            assert_eq!(
+                utxo.txout().script_pubkey,
+                common_script,
+                "all UTXOs in grouped selection must belong to the same address (OldestFirst)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_coin_selection_grouping_address_behavior_branch_and_bound() {
+        // Using BranchAndBoundCoinSelection with SingleRandomDraw as fallback.
+        let fee_rate = FeeRate::ZERO;
+        let target = Amount::from_sat(200_000_000);
+        let drain_script = ScriptBuf::new();
+        let utxos = generate_utxos_with_same_address();
+
+        let mut rng = thread_rng();
+        let bnb_algo = BranchAndBoundCoinSelection::<SingleRandomDraw>::default();
+
+        // --- Case 1: Without avoid_partial_spends (grouping disabled)
+        let res_no_group = bnb_algo
+            .coin_select(CoinSelectionParams {
+                required_utxos: vec![],
+                optional_utxos: utxos.clone(),
+                fee_rate,
+                target_amount: target,
+                drain_script: &drain_script,
+                rand: &mut rng,
+                avoid_partial_spends: false, // grouping disabled
+            })
+            .expect("coin selection should succeed without grouping (BnB)");
+        // Expect exactly one UTXO selected. However, due to the fallback randomness
+        // the chosen coin's value could be either 1.0 btc or 0.5 btc.
+        assert_eq!(
+            res_no_group.selected.len(),
+            1,
+            "expected 1 UTXO selected when not grouping (BnB)"
+        );
+        let non_group_val = res_no_group.selected_amount();
+        assert!(
+            non_group_val == Amount::from_sat(1_000_000_000) || non_group_val == Amount::from_sat(500_000_000),
+            "expected non-grouped selection in BnB to be either 1.0 btc (1_000_000_000 sat) or 0.5 btc (500_000_000 sat), got {}",
+            non_group_val
+        );
+
+        // --- Case 2: With avoid_partial_spends enabled (grouping enabled)
+        let res_group = bnb_algo
+            .coin_select(CoinSelectionParams {
+                required_utxos: vec![],
+                optional_utxos: utxos,
+                fee_rate,
+                target_amount: target,
+                drain_script: &drain_script,
+                rand: &mut rng,
+                avoid_partial_spends: true, // grouping enabled
+            })
+            .expect("coin selection should succeed with grouping (BnB)");
+        // With grouping, each address is treated as a group.
+        // For either address A or B, the group consists of both outputs:
+        //    1.0 btc + 0.5 btc = 1.5 btc in total.
+        // Thus we expect exactly 2 UTXOs to be selected.
+        assert_eq!(
+            res_group.selected.len(),
+            2,
+            "expected 2 UTXOs selected when grouping is enabled (BnB)"
+        );
+        assert_eq!(
+            res_group.selected_amount(),
+            Amount::from_sat(1_500_000_000),
+            "expected grouped selection to pick outputs totaling 1.5 btc (BnB)"
+        );
+        let common_script = res_group.selected[0].txout().script_pubkey.clone();
+        for utxo in res_group.selected.iter() {
+            assert_eq!(
+                utxo.txout().script_pubkey,
+                common_script,
+                "all UTXOs in grouped selection must belong to the same address (BnB)"
+            );
+        }
+    }
+    #[test]
+    fn test_coin_selection_grouping_address_behavior_single_random_draw() {
+        // Using SingleRandomDraw algorithm.
+        let fee_rate = FeeRate::ZERO;
+        let target = Amount::from_sat(200_000_000);
+        let drain_script = ScriptBuf::new();
+        let utxos = generate_utxos_with_same_address();
+        let mut rng = thread_rng();
+
+        // --- Case 1: Without avoid_partial_spends (grouping disabled)
+        let res_no_group = SingleRandomDraw
+            .coin_select(CoinSelectionParams {
+                required_utxos: vec![],        // no required UTXOs
+                optional_utxos: utxos.clone(), // all UTXOs as optional
+                fee_rate,
+                target_amount: target,
+                drain_script: &drain_script,
+                rand: &mut rng,
+                avoid_partial_spends: false, // grouping disabled
+            })
+            .expect("coin selection should succeed without grouping (RandomDraw)");
+        // Expect that exactly one UTXO is picked.
+        assert_eq!(
+            res_no_group.selected.len(),
+            1,
+            "expected 1 UTXO selected when not grouping (RandomDraw)"
+        );
+        let sel_amt = res_no_group.selected_amount();
+        // Since SingleRandomDraw selects randomly, it may pick either the 1.0 btc or
+        // the 0.5 btc output. We allow both.
+        assert!(
+            sel_amt == Amount::from_sat(1_000_000_000) || sel_amt == Amount::from_sat(500_000_000),
+            "expected non-grouped selection to pick either the 1.0 btc or 0.5 btc output, got {}",
+            sel_amt
+        );
+
+        // --- Case 2: With avoid_partial_spends enabled (grouping enabled)
+        let res_group = SingleRandomDraw
+            .coin_select(CoinSelectionParams {
+                required_utxos: vec![], // no required UTXOs
+                optional_utxos: utxos,  // all UTXOs as optional
+                fee_rate,
+                target_amount: target,
+                drain_script: &drain_script,
+                rand: &mut rng,
+                avoid_partial_spends: true, // grouping enabled
+            })
+            .expect("coin selection should succeed with grouping (RandomDraw)");
+        // With grouping enabled, the algorithm should select both UTXOs from one address.
+        assert_eq!(
+            res_group.selected.len(),
+            2,
+            "expected 2 UTXOs selected when grouping is enabled (RandomDraw)"
+        );
+        assert_eq!(
+            res_group.selected_amount(),
+            Amount::from_sat(1_500_000_000),
+            "expected grouped selection to pick outputs totaling 1.5 btc (RandomDraw)"
+        );
+        let common_script = res_group.selected[0].txout().script_pubkey.clone();
+        for utxo in res_group.selected.iter() {
+            assert_eq!(
+                utxo.txout().script_pubkey,
+                common_script,
+                "all UTXOs in grouped selection must belong to the same address (RandomDraw)"
+            );
         }
     }
 }
