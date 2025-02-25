@@ -1998,6 +1998,7 @@ impl Wallet {
     ) -> (Vec<WeightedUtxo>, Vec<WeightedUtxo>) {
         let TxParams {
             change_policy,
+            confirmation_policy,
             unspendable,
             utxos,
             drain_wallet,
@@ -2068,6 +2069,7 @@ impl Wallet {
         let mut i = 0;
         may_spend.retain(|u| {
             let retain = (self.keychains().count() == 1 || change_policy.is_satisfied_by(&u.0))
+                && confirmation_policy.is_satisfied_by(&u.0)
                 && !unspendable.contains(&u.0.outpoint)
                 && satisfies_confirmed[i];
             i += 1;
