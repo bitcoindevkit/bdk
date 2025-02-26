@@ -31,8 +31,6 @@ mod balance;
 pub use balance::*;
 mod chain_data;
 pub use chain_data::*;
-pub mod indexed_tx_graph;
-pub use indexed_tx_graph::IndexedTxGraph;
 pub mod indexer;
 pub use indexer::spk_txout;
 pub use indexer::Indexer;

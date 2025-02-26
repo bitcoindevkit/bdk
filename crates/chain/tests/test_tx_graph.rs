@@ -5,8 +5,7 @@ mod common;
 use bdk_chain::{collections::*, BlockId, ConfirmationBlockTime};
 use bdk_chain::{
     local_chain::LocalChain,
-    tx_graph::{self, CalculateFeeError},
-    tx_graph::{ChangeSet, TxGraph},
+    tx_graph::{self, changeset::ChangeSet, CalculateFeeError, TxGraph},
     Anchor, ChainOracle, ChainPosition, Merge,
 };
 use bdk_testenv::{block_id, hash, utils::new_tx};
@@ -77,7 +76,7 @@ fn insert_txouts() {
         let mut graph = TxGraph::<BlockId>::default();
         for (outpoint, txout) in &original_ops {
             assert_eq!(
-                graph.insert_txout(*outpoint, txout.clone()),
+                graph.insert_txout(*outpoint, txout.clone()).tx_graph,
                 ChangeSet {
                     txouts: [(*outpoint, txout.clone())].into(),
                     ..Default::default()
@@ -110,7 +109,7 @@ fn insert_txouts() {
     let changeset = graph.apply_update(update);
 
     assert_eq!(
-        changeset,
+        changeset.tx_graph,
         ChangeSet {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.clone().into(),
@@ -163,7 +162,7 @@ fn insert_txouts() {
 
     // Check that the initial_changeset is correct
     assert_eq!(
-        graph.initial_changeset(),
+        graph.initial_changeset().tx_graph,
         ChangeSet {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
@@ -275,7 +274,7 @@ fn insert_tx_displaces_txouts() {
     let changeset = tx_graph.insert_txout(outpoint, txout.clone());
     assert!(!changeset.is_empty());
 
-    let changeset = tx_graph.insert_tx(tx.clone());
+    let changeset = tx_graph.insert_tx(tx.clone()).tx_graph;
     assert_eq!(changeset.txs.len(), 1);
     assert!(changeset.txouts.is_empty());
     assert!(tx_graph.get_tx(txid).is_some());
@@ -588,7 +587,8 @@ fn test_walk_ancestors() {
         ..new_tx(0)
     };
 
-    let mut graph = TxGraph::<BlockId>::new([
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.batch_insert_tx([
         tx_a0.clone(),
         tx_b0.clone(),
         tx_b1.clone(),
@@ -1049,7 +1049,8 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     let txids: Vec<Txid> = txs.iter().map(Transaction::compute_txid).collect();
 
     // graph
-    let mut graph = TxGraph::<BlockId>::new(txs);
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.batch_insert_tx(txs);
     let full_txs: Vec<_> = graph.full_txs().collect();
     assert_eq!(full_txs.len(), 2);
     let unseen_txs: Vec<_> = graph.txs_with_no_anchor_or_last_seen().collect();
@@ -1098,7 +1099,7 @@ fn insert_anchor_without_tx() {
 
     // insert anchor with no corresponding tx
     let mut changeset = graph.insert_anchor(txid, anchor);
-    assert!(changeset.anchors.contains(&(anchor, txid)));
+    assert!(changeset.tx_graph.anchors.contains(&(anchor, txid)));
     // recover from changeset
     let mut recovered = TxGraph::default();
     recovered.apply_changeset(changeset.clone());
@@ -1107,7 +1108,7 @@ fn insert_anchor_without_tx() {
     // now insert tx
     let tx = Arc::new(tx);
     let graph_changeset = graph.insert_tx(tx.clone());
-    assert!(graph_changeset.txs.contains(&tx));
+    assert!(graph_changeset.tx_graph.txs.contains(&tx));
     changeset.merge(graph_changeset);
     // recover from changeset again
     let mut recovered = TxGraph::default();

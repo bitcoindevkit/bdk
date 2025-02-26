@@ -16,6 +16,7 @@ use rusqlite::named_params;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::OptionalExtension;
 use rusqlite::Transaction;
+use tx_graph::changeset as tx;
 
 /// Table name for schemas.
 pub const SCHEMAS_TABLE_NAME: &str = "bdk_schemas";
@@ -199,8 +200,8 @@ fn to_sql_error<E: std::error::Error + Send + Sync + 'static>(err: E) -> rusqlit
     rusqlite::Error::ToSqlConversionFailure(Box::new(err))
 }
 
-impl tx_graph::ChangeSet<ConfirmationBlockTime> {
-    /// Schema name for [`tx_graph::ChangeSet`].
+impl tx::ChangeSet<ConfirmationBlockTime> {
+    /// Schema name for [`tx::ChangeSet`].
     pub const SCHEMA_NAME: &'static str = "bdk_txgraph";
     /// Name of table that stores full transactions and `last_seen` timestamps.
     pub const TXS_TABLE_NAME: &'static str = "bdk_txs";
@@ -209,7 +210,7 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
     /// Name of table that stores [`Anchor`]s.
     pub const ANCHORS_TABLE_NAME: &'static str = "bdk_anchors";
 
-    /// Get v0 of sqlite [tx_graph::ChangeSet] schema
+    /// Get v0 of sqlite [`tx::ChangeSet`] schema
     pub fn schema_v0() -> String {
         // full transactions
         let create_txs_table = format!(
@@ -247,7 +248,7 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
         format!("{create_txs_table}; {create_txouts_table}; {create_anchors_table}")
     }
 
-    /// Get v1 of sqlite [tx_graph::ChangeSet] schema
+    /// Get v1 of sqlite [`tx::ChangeSet`] schema
     pub fn schema_v1() -> String {
         let add_confirmation_time_column = format!(
             "ALTER TABLE {} ADD COLUMN confirmation_time INTEGER DEFAULT -1 NOT NULL",
@@ -567,7 +568,7 @@ mod test {
 
     #[test]
     fn can_persist_anchors_and_txs_independently() -> anyhow::Result<()> {
-        type ChangeSet = tx_graph::ChangeSet<ConfirmationBlockTime>;
+        type ChangeSet = tx::ChangeSet<ConfirmationBlockTime>;
         let mut conn = rusqlite::Connection::open_in_memory()?;
 
         // init tables
@@ -629,7 +630,7 @@ mod test {
 
     #[test]
     fn v0_to_v1_schema_migration_is_backward_compatible() -> anyhow::Result<()> {
-        type ChangeSet = tx_graph::ChangeSet<ConfirmationBlockTime>;
+        type ChangeSet = tx::ChangeSet<ConfirmationBlockTime>;
         let mut conn = rusqlite::Connection::open_in_memory()?;
 
         // Create initial database with v0 sqlite schema
