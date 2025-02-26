@@ -437,7 +437,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The supplied closure takes in two inputs `(depth, ancestor_tx)`:
     ///
     /// * `depth` is the distance between the starting `Transaction` and the `ancestor_tx`. I.e., if
-    ///    the `Transaction` is spending an output of the `ancestor_tx` then `depth` will be 1.
+    ///  the `Transaction` is spending an output of the `ancestor_tx` then `depth` will be 1.
     /// * `ancestor_tx` is the `Transaction`'s ancestor which we are considering to walk.
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each `Transaction`
@@ -455,7 +455,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The supplied closure takes in two inputs `(depth, descendant_txid)`:
     ///
     /// * `depth` is the distance between the starting `txid` and the `descendant_txid`. I.e., if the
-    ///     descendant is spending an output of the starting `txid` then `depth` will be 1.
+    ///  descendant is spending an output of the starting `txid` then `depth` will be 1.
     /// * `descendant_txid` is the descendant's txid which we are considering to walk.
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it visits
