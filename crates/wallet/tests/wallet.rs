@@ -821,14 +821,12 @@ fn test_create_tx_confirmation_policy() {
         .unsigned_tx
         .input
         .iter()
-        .find(|i| i.previous_output.txid == confirmed_txid)
-        .is_some());
-    assert!(ret
+        .any(|i| i.previous_output.txid == confirmed_txid));
+    assert!(!ret
         .unsigned_tx
         .input
         .iter()
-        .find(|i| i.previous_output.txid == unconfirmed_txid)
-        .is_none());
+        .any(|i| i.previous_output.txid == unconfirmed_txid));
 
     let mut builder = wallet.build_tx();
     builder
@@ -840,14 +838,12 @@ fn test_create_tx_confirmation_policy() {
         .unsigned_tx
         .input
         .iter()
-        .find(|i| i.previous_output.txid == unconfirmed_txid)
-        .is_some());
-    assert!(ret
+        .any(|i| i.previous_output.txid == unconfirmed_txid));
+    assert!(!ret
         .unsigned_tx
         .input
         .iter()
-        .find(|i| i.previous_output.txid == confirmed_txid)
-        .is_none());
+        .any(|i| i.previous_output.txid == confirmed_txid));
 
     let mut builder = wallet.build_tx();
     builder
