@@ -41,7 +41,6 @@ The project is split up into several crates in the `/crates` directory:
 
 - [`wallet`](./crates/wallet): Contains the central high level `Wallet` type that is built from the low-level mechanisms provided by the other components
 - [`chain`](./crates/chain): Tools for storing and indexing chain data
-- [`persist`](./crates/persist): Types that define data persistence of a BDK wallet
 - [`file_store`](./crates/file_store): A (experimental) persistence backend for storing chain data in a single file.
 - [`esplora`](./crates/esplora): Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume.
 - [`electrum`](./crates/electrum): Extends the [`electrum-client`] crate with methods to fetch chain data from an electrum server in the form that [`bdk_chain`] and `Wallet` can consume.
@@ -51,9 +50,9 @@ Fully working examples of how to use these components are in `/example-crates`:
 - [`example_electrum`](./example-crates/example_electrum): A command line Bitcoin wallet application built on top of `example_cli` and the `electrum` crate. It shows the power of the bdk tools (`chain` + `file_store` + `electrum`), without depending on the main `bdk_wallet` library.
 - [`example_esplora`](./example-crates/example_esplora): A command line Bitcoin wallet application built on top of `example_cli` and the `esplora` crate. It shows the power of the bdk tools (`chain` + `file_store` + `esplora`), without depending on the main `bdk_wallet` library.
 - [`example_bitcoind_rpc_polling`](./example-crates/example_bitcoind_rpc_polling): A command line Bitcoin wallet application built on top of `example_cli` and the `bitcoind_rpc` crate. It shows the power of the bdk tools (`chain` + `file_store` + `bitcoind_rpc`), without depending on the main `bdk_wallet` library.
-- [`wallet_esplora_blocking`](./example-crates/wallet_esplora_blocking): Uses the `Wallet` to sync and spend using the Esplora blocking interface.
-- [`wallet_esplora_async`](./example-crates/wallet_esplora_async): Uses the `Wallet` to sync and spend using the Esplora asynchronous interface.
-- [`wallet_electrum`](./example-crates/wallet_electrum): Uses the `Wallet` to sync and spend using Electrum.
+- [`example_wallet_esplora_blocking`](./example-crates/example_wallet_esplora_blocking): Uses the `Wallet` to sync and spend using the Esplora blocking interface.
+- [`example_wallet_esplora_async`](./example-crates/example_wallet_esplora_async): Uses the `Wallet` to sync and spend using the Esplora asynchronous interface.
+- [`example_wallet_electrum`](./example-crates/example_wallet_electrum): Uses the `Wallet` to sync and spend using Electrum.
 
 [`BDK 1.0 project page`]: https://github.com/orgs/bitcoindevkit/projects/14
 [`rust-miniscript`]: https://github.com/rust-bitcoin/rust-miniscript
