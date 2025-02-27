@@ -189,7 +189,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         assert!(emitter.next_block()?.is_none());
 
         let mempool_txs = emitter.mempool()?;
-        let indexed_additions = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs);
+        let indexed_additions = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs.new_txs);
         assert_eq!(
             indexed_additions
                 .tx_graph
@@ -437,6 +437,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     // the first emission should include all transactions
     let emitted_txids = emitter
         .mempool()?
+        .new_txs
         .into_iter()
         .map(|(tx, _)| tx.compute_txid())
         .collect::<BTreeSet<Txid>>();
@@ -447,7 +448,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
 
     // second emission should be empty
     assert!(
-        emitter.mempool()?.is_empty(),
+        emitter.mempool()?.new_txs.is_empty(),
         "second emission should be empty"
     );
 
@@ -457,7 +458,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     }
     while emitter.next_header()?.is_some() {}
     assert!(
-        emitter.mempool()?.is_empty(),
+        emitter.mempool()?.new_txs.is_empty(),
         "third emission, after chain tip is extended, should also be empty"
     );
 
@@ -506,6 +507,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
     assert_eq!(
         emitter
             .mempool()?
+            .new_txs
             .into_iter()
             .map(|(tx, _)| tx.compute_txid())
             .collect::<BTreeSet<_>>(),
@@ -515,6 +517,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
     assert_eq!(
         emitter
             .mempool()?
+            .new_txs
             .into_iter()
             .map(|(tx, _)| tx.compute_txid())
             .collect::<BTreeSet<_>>(),
@@ -535,6 +538,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
                 .collect::<BTreeSet<_>>();
             let emitted_txids = emitter
                 .mempool()?
+                .new_txs
                 .into_iter()
                 .map(|(tx, _)| tx.compute_txid())
                 .collect::<BTreeSet<_>>();
@@ -593,6 +597,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
     assert_eq!(
         emitter
             .mempool()?
+            .new_txs
             .into_iter()
             .map(|(tx, _)| tx.compute_txid())
             .collect::<BTreeSet<_>>(),
@@ -628,6 +633,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
             // include mempool txs introduced at reorg height or greater
             let mempool = emitter
                 .mempool()?
+                .new_txs
                 .into_iter()
                 .map(|(tx, _)| tx.compute_txid())
                 .collect::<BTreeSet<_>>();
@@ -643,6 +649,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
 
             let mempool = emitter
                 .mempool()?
+                .new_txs
                 .into_iter()
                 .map(|(tx, _)| tx.compute_txid())
                 .collect::<BTreeSet<_>>();
@@ -728,6 +735,112 @@ fn no_agreement_point() -> anyhow::Result<()> {
 
     assert_ne!(block_hash_99a, block_hash_99b);
     assert_eq!(block_hash_98a, block_hash_98b);
+
+    Ok(())
+}
+
+#[test]
+fn test_expect_tx_evicted() -> anyhow::Result<()> {
+    use bdk_bitcoind_rpc::bitcoincore_rpc::bitcoin;
+    use bdk_bitcoind_rpc::bitcoincore_rpc::bitcoincore_rpc_json::CreateRawTransactionInput;
+    use bdk_chain::miniscript;
+    use bdk_chain::spk_txout::SpkTxOutIndex;
+    use bdk_chain::ConfirmationBlockTime;
+    use bitcoin::constants::genesis_block;
+    use bitcoin::secp256k1::Secp256k1;
+    use bitcoin::Network;
+    use std::collections::HashMap;
+    let env = TestEnv::new()?;
+
+    let s = bdk_testenv::utils::DESCRIPTORS[0];
+    let desc = miniscript::Descriptor::parse_descriptor(&Secp256k1::new(), s)
+        .unwrap()
+        .0;
+    let spk = desc.at_derivation_index(0)?.script_pubkey();
+
+    let chain = LocalChain::from_genesis_hash(genesis_block(Network::Regtest).block_hash()).0;
+    let chain_tip = chain.tip().block_id();
+
+    let mut index = SpkTxOutIndex::default();
+    index.insert_spk(("external", 0u32), spk.clone());
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new(index);
+
+    // Receive tx1.
+    let _ = env.mine_blocks(100, None)?;
+    let txid_1 = env.send(
+        &Address::from_script(&spk, Network::Regtest)?,
+        Amount::ONE_BTC,
+    )?;
+
+    let mut emitter = Emitter::new(env.rpc_client(), chain.tip(), 1);
+    let changeset = graph.batch_insert_unconfirmed(emitter.mempool()?.new_txs);
+    assert!(changeset
+        .tx_graph
+        .txs
+        .iter()
+        .any(|tx| tx.compute_txid() == txid_1));
+    let seen_at = graph
+        .graph()
+        .get_tx_node(txid_1)
+        .unwrap()
+        .last_seen_unconfirmed
+        .unwrap();
+
+    // Double spend tx1.
+
+    // Get `prevout` from core.
+    let core = env.rpc_client();
+    let tx1 = &core.get_raw_transaction(&txid_1, None)?;
+    let txin = &tx1.input[0];
+    let op = txin.previous_output;
+
+    // Create `tx1b` using the previous output from tx1.
+    let utxo = CreateRawTransactionInput {
+        txid: op.txid,
+        vout: op.vout,
+        sequence: None,
+    };
+    let addr = core.get_new_address(None, None)?.assume_checked();
+    let tx = core.create_raw_transaction(
+        &[utxo],
+        &HashMap::from([(addr.to_string(), Amount::from_btc(49.99)?)]),
+        None,
+        None,
+    )?;
+    let res = core.sign_raw_transaction_with_wallet(&tx, None, None)?;
+    let tx1b = res.transaction()?;
+
+    // Send the tx.
+    let txid_2 = core.send_raw_transaction(&tx1b)?;
+
+    // Retrieve the expected unconfirmed txids and spks from the graph.
+    let exp_spk_txids = graph
+        .list_expected_spk_txids(&chain, chain_tip, ..)
+        .collect::<Vec<_>>();
+    assert_eq!(exp_spk_txids, vec![(spk, txid_1)]);
+
+    // Check that mempool emission contains evicted txid.
+    let mempool_event = emitter.mempool()?;
+    let unseen_txids: Vec<Txid> = mempool_event
+        .new_txs
+        .iter()
+        .map(|(tx, _)| tx.compute_txid())
+        .collect();
+    assert!(unseen_txids.contains(&txid_2));
+
+    // Update graph with evicted tx.
+    let exp_txids = exp_spk_txids.into_iter().map(|(_, txid)| txid);
+    let evicted_txids = mempool_event.evicted_txids(exp_txids);
+    for txid in evicted_txids {
+        let _ = graph.insert_evicted_at(txid, seen_at);
+    }
+
+    // tx1 should no longer be canonical.
+    assert!(graph
+        .graph()
+        .list_canonical_txs(&chain, chain_tip)
+        .next()
+        .is_none());
 
     Ok(())
 }

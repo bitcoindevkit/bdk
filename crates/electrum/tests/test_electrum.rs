@@ -45,7 +45,7 @@ where
     Spks::IntoIter: ExactSizeIterator + Send + 'static,
 {
     let update = client.sync(
-        SyncRequest::builder().chain_tip(chain.tip()).spks(spks),
+        SyncRequest::builder_now().chain_tip(chain.tip()).spks(spks),
         BATCH_SIZE,
         true,
     )?;
@@ -111,7 +111,7 @@ pub fn chained_mempool_tx_sync() -> anyhow::Result<()> {
     );
 
     let client = BdkElectrumClient::new(electrum_client);
-    let request = SyncRequest::builder().spks(core::iter::once(tracked_addr.script_pubkey()));
+    let request = SyncRequest::builder_now().spks(core::iter::once(tracked_addr.script_pubkey()));
     let _response = client.sync(request, 1, false)?;
 
     Ok(())
@@ -161,7 +161,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let cp_tip = env.make_checkpoint_tip();
 
     let sync_update = {
-        let request = SyncRequest::builder()
+        let request = SyncRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks(misc_spks);
         client.sync(request, 1, true)?
@@ -275,7 +275,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     // A scan with a stop_gap of 3 won't find the transaction, but a scan with a gap limit of 4
     // will.
     let full_scan_update = {
-        let request = FullScanRequest::builder()
+        let request = FullScanRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 3, 1, false)?
@@ -283,7 +283,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     assert!(full_scan_update.tx_update.txs.is_empty());
     assert!(full_scan_update.last_active_indices.is_empty());
     let full_scan_update = {
-        let request = FullScanRequest::builder()
+        let request = FullScanRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 4, 1, false)?
@@ -316,7 +316,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     // A scan with gap limit 5 won't find the second transaction, but a scan with gap limit 6 will.
     // The last active indice won't be updated in the first case but will in the second one.
     let full_scan_update = {
-        let request = FullScanRequest::builder()
+        let request = FullScanRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 5, 1, false)?
@@ -331,7 +331,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     assert!(txs.contains(&txid_4th_addr));
     assert_eq!(full_scan_update.last_active_indices[&0], 3);
     let full_scan_update = {
-        let request = FullScanRequest::builder()
+        let request = FullScanRequest::builder_now()
             .chain_tip(cp_tip.clone())
             .spks_for_keychain(0, spks.clone());
         client.full_scan(request, 6, 1, false)?
