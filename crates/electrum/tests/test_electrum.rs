@@ -75,7 +75,7 @@ pub fn chained_mempool_tx_sync() -> anyhow::Result<()> {
     env.mine_blocks(100, None)?;
 
     // First unconfirmed tx.
-    env.send(&tracked_addr, Amount::from_btc(1.0)?)?;
+    let txid1 = env.send(&tracked_addr, Amount::from_btc(1.0)?)?;
 
     // Create second unconfirmed tx that spends the first.
     let utxo = rpc_client
@@ -100,7 +100,7 @@ pub fn chained_mempool_tx_sync() -> anyhow::Result<()> {
     let signed_tx = rpc_client
         .sign_raw_transaction_with_wallet(tx_that_spends_unconfirmed.raw_hex(), None, None)?
         .transaction()?;
-    rpc_client.send_raw_transaction(signed_tx.raw_hex())?;
+    let txid2 = rpc_client.send_raw_transaction(signed_tx.raw_hex())?;
 
     env.wait_until_electrum_sees_txid(signed_tx.compute_txid(), Duration::from_secs(5))?;
 
@@ -111,8 +111,16 @@ pub fn chained_mempool_tx_sync() -> anyhow::Result<()> {
     );
 
     let client = BdkElectrumClient::new(electrum_client);
-    let request = SyncRequest::builder().spks(core::iter::once(tracked_addr.script_pubkey()));
-    let _response = client.sync(request, 1, false)?;
+    let req = SyncRequest::builder()
+        .spks(core::iter::once(tracked_addr.script_pubkey()))
+        .build();
+    let req_time = req.start_time();
+    let response = client.sync(req, 1, false)?;
+    assert_eq!(
+        response.tx_update.seen_ats,
+        [(txid1, req_time), (txid2, req_time)].into(),
+        "both txids must have `seen_at` time match the request's `start_time`",
+    );
 
     Ok(())
 }
