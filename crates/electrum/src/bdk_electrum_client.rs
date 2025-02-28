@@ -1,14 +1,13 @@
 use bdk_core::{
     bitcoin::{block::Header, BlockHash, OutPoint, ScriptBuf, Transaction, Txid},
-    collections::{BTreeMap, HashMap},
-    spk_client::{FullScanRequest, FullScanResponse, SyncRequest, SyncResponse},
+    collections::{BTreeMap, HashMap, HashSet},
+    spk_client::{
+        FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
+    },
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
@@ -138,7 +137,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         let mut last_active_indices = BTreeMap::<K, u32>::default();
         for keychain in request.keychains() {
-            let spks = request.iter_spks(keychain.clone());
+            let spks = request
+                .iter_spks(keychain.clone())
+                .map(|(spk_i, spk)| (spk_i, SpkWithExpectedTxids::from(spk)));
             if let Some(last_active_index) =
                 self.populate_with_spks(start_time, &mut tx_update, spks, stop_gap, batch_size)?
             {
@@ -209,7 +210,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             start_time,
             &mut tx_update,
             request
-                .iter_spks()
+                .iter_spks_with_expected_txids()
                 .enumerate()
                 .map(|(i, spk)| (i as u32, spk)),
             usize::MAX,
@@ -247,7 +248,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         &self,
         start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
-        mut spks: impl Iterator<Item = (u32, ScriptBuf)>,
+        mut spks_with_expected_txids: impl Iterator<Item = (u32, SpkWithExpectedTxids)>,
         stop_gap: usize,
         batch_size: usize,
     ) -> Result<Option<u32>, Error> {
@@ -256,17 +257,30 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         loop {
             let spks = (0..batch_size)
-                .map_while(|_| spks.next())
+                .map_while(|_| spks_with_expected_txids.next())
                 .collect::<Vec<_>>();
             if spks.is_empty() {
                 return Ok(last_active_index);
             }
 
+            let (spks, expected_spk_txids): (Vec<(u32, ScriptBuf)>, HashMap<ScriptBuf, _>) = spks
+                .iter()
+                .map(|(spk_i, spk_with_expected_txids)| {
+                    (
+                        (*spk_i, spk_with_expected_txids.spk.clone()),
+                        (
+                            spk_with_expected_txids.spk.clone(),
+                            spk_with_expected_txids.expected_txids.clone(),
+                        ),
+                    )
+                })
+                .unzip();
+
             let spk_histories = self
                 .inner
                 .batch_script_get_history(spks.iter().map(|(_, s)| s.as_script()))?;
 
-            for ((spk_index, _spk), spk_history) in spks.into_iter().zip(spk_histories) {
+            for ((spk_index, spk), spk_history) in spks.into_iter().zip(spk_histories) {
                 if spk_history.is_empty() {
                     unused_spk_count = unused_spk_count.saturating_add(1);
                     if unused_spk_count >= stop_gap {
@@ -275,6 +289,19 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 } else {
                     last_active_index = Some(spk_index);
                     unused_spk_count = 0;
+                }
+
+                let spk_history_set = spk_history
+                    .iter()
+                    .map(|res| res.tx_hash)
+                    .collect::<HashSet<_>>();
+
+                if let Some(expected_txids) = expected_spk_txids.get(&spk) {
+                    tx_update.evicted_ats.extend(
+                        expected_txids
+                            .difference(&spk_history_set)
+                            .map(|&txid| (txid, start_time)),
+                    );
                 }
 
                 for tx_res in spk_history {
