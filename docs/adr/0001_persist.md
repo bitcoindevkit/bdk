@@ -26,7 +26,7 @@ The first approach was to create another trait `PersistBackendAsync` that was es
 
 #### Option 2: Return futures from persistence backend functions
 
-Another idea that was offered was to return something implementing `Future` from methods like `commit`. The idea was that it would minimize added dependencies and increase flexiblity by allowing the caller to `await` the result. In the end it seems less of an effort was put toward executing this idea.
+Another idea that was offered was to return something implementing `Future` from methods like `commit`. The idea was that it would minimize added dependencies and increase flexibility by allowing the caller to `await` the result. In the end it seems less of an effort was put toward executing this idea.
 
 ## Decision
 

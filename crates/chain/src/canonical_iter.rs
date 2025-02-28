@@ -223,7 +223,7 @@ impl<A: Clone> CanonicalReason<A> {
         }
     }
 
-    /// Contruct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
+    /// Construct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
     ///
     /// This signals that either the [`ObservedIn`] or [`Anchor`] value belongs to the transaction's
     /// descendant, but is transitively relevant.
