@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 bdk_wallet = { path = "../../crates/wallet", features = ["file_store"] }
-bdk_electrum = { path = "../../crates/electrum" }
+bdk_electrum = { version = "0.21" }
 anyhow = "1"

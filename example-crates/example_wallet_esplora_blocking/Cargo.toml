@@ -8,5 +8,5 @@ publish = false
 
 [dependencies]
 bdk_wallet = { path = "../../crates/wallet", features = ["file_store"] }
-bdk_esplora = { path = "../../crates/esplora", features = ["blocking"] }
+bdk_esplora = { version = "0.20", features = ["blocking"] }
 anyhow = "1"
