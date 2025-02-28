@@ -29,7 +29,7 @@ jobs:
           - version: 1.63.0 # Overall MSRV
           - version: 1.75.0 # Specific MSRV for `bdk_electrum`
         features:
-          - --no-default-features --features miniscript/no-std
+          - --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
           - --all-features
     steps:
       - name: checkout

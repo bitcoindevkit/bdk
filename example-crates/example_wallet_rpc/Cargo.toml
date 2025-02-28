@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 bdk_wallet = { path = "../../crates/wallet", features = ["file_store"] }
-bdk_bitcoind_rpc = { path = "../../crates/bitcoind_rpc" }
+bdk_bitcoind_rpc = { version = "0.18" }
 
 anyhow = "1"
 clap = { version = "4.5.17", features = ["derive", "env"] }
