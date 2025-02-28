@@ -19,6 +19,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use coin_selection::CoinSelectionParams;
 use core::{cmp::Ordering, fmt, mem, ops::Deref};
 
 use bdk_chain::{
@@ -1451,14 +1452,15 @@ impl Wallet {
             coin_selection::filter_duplicates(required_utxos, optional_utxos);
 
         let coin_selection = coin_selection
-            .coin_select(
+            .coin_select(CoinSelectionParams {
                 required_utxos,
                 optional_utxos,
                 fee_rate,
-                outgoing + fee_amount,
-                &drain_script,
-                rng,
-            )
+                target_amount: outgoing + fee_amount,
+                drain_script: &drain_script,
+                rand: rng,
+                avoid_partial_spends: params.avoid_partial_spends,
+            })
             .map_err(CreateTxError::CoinSelection)?;
 
         let excess = &coin_selection.excess;
