@@ -42,7 +42,7 @@ The project is split up into several crates in the `/crates` directory:
 - [`wallet`](./crates/wallet): Contains the central high level `Wallet` type that is built from the low-level mechanisms provided by the other components
 - [`chain`](./crates/chain): Tools for storing and indexing chain data
 - [`persist`](./crates/persist): Types that define data persistence of a BDK wallet
-- [`file_store`](./crates/file_store): A (experimental) persistence backend for storing chain data in a single file.
+- [`file_store`](./crates/file_store): Persistence backend for storing chain data in a single file. Intended for testing and development purposes, not for production.
 - [`esplora`](./crates/esplora): Extends the [`esplora-client`] crate with methods to fetch chain data from an esplora HTTP server in the form that [`bdk_chain`] and `Wallet` can consume.
 - [`electrum`](./crates/electrum): Extends the [`electrum-client`] crate with methods to fetch chain data from an electrum server in the form that [`bdk_chain`] and `Wallet` can consume.
 
