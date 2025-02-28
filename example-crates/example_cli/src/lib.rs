@@ -17,7 +17,7 @@ use bdk_chain::miniscript::{
     descriptor::{DescriptorSecretKey, SinglePubKey},
     plan::{Assets, Plan},
     psbt::PsbtExt,
-    Descriptor, DescriptorPublicKey,
+    Descriptor, DescriptorPublicKey, ForEachKey,
 };
 use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
@@ -147,9 +147,14 @@ pub enum PsbtCmd<S: clap::Args> {
     /// Create a new PSBT.
     New {
         /// Amount to send in satoshis
+        #[clap(required = true)]
         value: u64,
         /// Recipient address
+        #[clap(required = true)]
         address: Address<NetworkUnchecked>,
+        /// Set the feerate of the tx (sat/vbyte)
+        #[clap(long, short, default_value = "1.0")]
+        feerate: Option<f32>,
         /// Set max absolute timelock (from consensus value)
         #[clap(long, short)]
         after: Option<u32>,
@@ -165,20 +170,21 @@ pub enum PsbtCmd<S: clap::Args> {
     },
     /// Sign with a hot signer
     Sign {
-        /// PSBT
-        #[clap(long)]
-        psbt: Option<String>,
-        /// Private descriptor
-        #[clap(long, short = 'd')]
+        /// Private descriptor [env: DESCRIPTOR=]
+        #[clap(long, short)]
         descriptor: Option<String>,
+        /// PSBT
+        #[clap(long, short, required = true)]
+        psbt: String,
     },
     /// Extract transaction
     Extract {
         /// PSBT
+        #[clap(long, short, required = true)]
         psbt: String,
         /// Whether to try broadcasting the tx
-        #[clap(long, short = 'b')]
-        try_broadcast: bool,
+        #[clap(long, short)]
+        broadcast: bool,
         #[clap(flatten)]
         chain_specific: S,
     },
@@ -260,6 +266,7 @@ pub fn create_tx<O: ChainOracle>(
     cs_algorithm: CoinSelectionAlgo,
     address: Address,
     value: u64,
+    feerate: f32,
 ) -> anyhow::Result<(Psbt, Option<ChangeInfo>)>
 where
     O::Error: std::error::Error + Send + Sync + 'static,
@@ -288,7 +295,7 @@ where
         .map(|(plan, utxo)| {
             Candidate::new(
                 utxo.txout.value.to_sat(),
-                plan.satisfaction_weight() as u32,
+                plan.satisfaction_weight() as u64,
                 plan.witness_version().is_some(),
             )
         })
@@ -330,9 +337,12 @@ where
         outputs: TargetOutputs::fund_outputs(
             outputs
                 .iter()
-                .map(|output| (output.weight().to_wu() as u32, output.value.to_sat())),
+                .map(|output| (output.weight().to_wu(), output.value.to_sat())),
         ),
-        fee: TargetFee::default(),
+        fee: TargetFee {
+            rate: FeeRate::from_sat_per_vb(feerate),
+            ..Default::default()
+        },
     };
 
     let change_policy = ChangePolicy {
@@ -444,7 +454,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
     chain: &Mutex<LocalChain>,
     db: &Mutex<Store<ChangeSet>>,
     network: Network,
-    broadcast: impl FnOnce(S, &Transaction) -> anyhow::Result<()>,
+    broadcast_fn: impl FnOnce(S, &Transaction) -> anyhow::Result<()>,
     cmd: Commands<CS, S>,
 ) -> anyhow::Result<()> {
     match cmd {
@@ -584,6 +594,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
             PsbtCmd::New {
                 value,
                 address,
+                feerate,
                 after,
                 older,
                 coin_select,
@@ -596,26 +607,30 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     let chain = chain.lock().unwrap();
 
                     // collect assets we can sign for
-                    let mut assets = Assets::new();
+                    let mut pks = vec![];
+                    for (_, desc) in graph.index.keychains() {
+                        desc.for_each_key(|k| {
+                            pks.push(k.clone());
+                            true
+                        });
+                    }
+                    let mut assets = Assets::new().add(pks);
                     if let Some(n) = after {
                         assets = assets.after(absolute::LockTime::from_consensus(n));
                     }
                     if let Some(n) = older {
                         assets = assets.older(relative::LockTime::from_consensus(n)?);
                     }
-                    for (_, desc) in graph.index.keychains() {
-                        match desc {
-                            Descriptor::Wpkh(wpkh) => {
-                                assets = assets.add(wpkh.clone().into_inner());
-                            }
-                            Descriptor::Tr(tr) => {
-                                assets = assets.add(tr.internal_key().clone());
-                            }
-                            _ => bail!("unsupported descriptor type"),
-                        }
-                    }
 
-                    create_tx(&mut graph, &*chain, &assets, coin_select, address, value)?
+                    create_tx(
+                        &mut graph,
+                        &*chain,
+                        &assets,
+                        coin_select,
+                        address,
+                        value,
+                        feerate.expect("must have feerate"),
+                    )?
                 };
 
                 if let Some(ChangeInfo {
@@ -659,7 +674,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 Ok(())
             }
             PsbtCmd::Sign { psbt, descriptor } => {
-                let mut psbt = Psbt::from_str(psbt.unwrap_or_default().as_str())?;
+                let mut psbt = Psbt::from_str(&psbt)?;
 
                 let desc_str = match descriptor {
                     Some(s) => s,
@@ -697,20 +712,20 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 Ok(())
             }
             PsbtCmd::Extract {
-                try_broadcast,
+                broadcast,
                 chain_specific,
                 psbt,
             } => {
-                let mut psbt = Psbt::from_str(psbt.as_str())?;
+                let mut psbt = Psbt::from_str(&psbt)?;
                 psbt.finalize_mut(&Secp256k1::new())
                     .map_err(|errors| anyhow::anyhow!("failed to finalize PSBT {errors:?}"))?;
 
                 let tx = psbt.extract_tx()?;
 
-                if try_broadcast {
+                if broadcast {
                     let mut graph = graph.lock().unwrap();
 
-                    match broadcast(chain_specific, &tx) {
+                    match broadcast_fn(chain_specific, &tx) {
                         Ok(_) => {
                             println!("Broadcasted Tx: {}", tx.compute_txid());
 
