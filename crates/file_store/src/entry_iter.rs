@@ -1,3 +1,4 @@
+use crate::StoreError;
 use bincode::Options;
 use std::{
     fs::File,
@@ -37,7 +38,7 @@ impl<T> Iterator for EntryIter<'_, T>
 where
     T: serde::de::DeserializeOwned,
 {
-    type Item = Result<T, IterError>;
+    type Item = Result<T, StoreError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.finished {
@@ -63,7 +64,7 @@ where
                         }
                     }
                     self.db_file.seek(io::SeekFrom::Start(pos_before_read))?;
-                    Err(IterError::Bincode(*e))
+                    Err(StoreError::Bincode(*e))
                 }
             }
         })()
@@ -80,29 +81,3 @@ impl<T> Drop for EntryIter<'_, T> {
         }
     }
 }
-
-/// Error type for [`EntryIter`].
-#[derive(Debug)]
-pub enum IterError {
-    /// Failure to read from the file.
-    Io(io::Error),
-    /// Failure to decode data from the file.
-    Bincode(bincode::ErrorKind),
-}
-
-impl core::fmt::Display for IterError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            IterError::Io(e) => write!(f, "io error trying to read entry {}", e),
-            IterError::Bincode(e) => write!(f, "bincode error while reading entry {}", e),
-        }
-    }
-}
-
-impl From<io::Error> for IterError {
-    fn from(value: io::Error) -> Self {
-        IterError::Io(value)
-    }
-}
-
-impl std::error::Error for IterError {}
