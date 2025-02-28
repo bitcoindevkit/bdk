@@ -134,6 +134,7 @@ pub(crate) struct TxParams {
     pub(crate) sequence: Option<Sequence>,
     pub(crate) version: Option<Version>,
     pub(crate) change_policy: ChangeSpendPolicy,
+    pub(crate) confirmation_policy: ConfirmationSpendPolicy,
     pub(crate) only_witness_utxo: bool,
     pub(crate) add_global_xpubs: bool,
     pub(crate) include_output_redeem_witness_script: bool,
@@ -493,6 +494,34 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         self
     }
 
+    /// Only spend confirmed outputs
+    ///
+    /// This effectively adds all the unconfirmed outputs to the "unspendable" list. See
+    /// [`TxBuilder::unspendable`].
+    pub fn only_spend_confirmed(&mut self) -> &mut Self {
+        self.params.confirmation_policy = ConfirmationSpendPolicy::OnlyConfirmed;
+        self
+    }
+
+    /// Only spend unconfirmed outputs
+    ///
+    /// This effectively adds all the confirmed outputs to the "unspendable" list. See
+    /// [`TxBuilder::unspendable`].
+    pub fn only_spend_unconfirmed(&mut self) -> &mut Self {
+        self.params.confirmation_policy = ConfirmationSpendPolicy::OnlyUnconfirmed;
+        self
+    }
+
+    /// Set a specific [`ConfirmationSpendPolicy`]. See [`TxBuilder::only_spend_confirmed`] and
+    /// [`TxBuilder::only_spend_unconfirmed`] for some shortcuts.
+    pub fn confirmation_policy(
+        &mut self,
+        confirmation_policy: ConfirmationSpendPolicy,
+    ) -> &mut Self {
+        self.params.confirmation_policy = confirmation_policy;
+        self
+    }
+
     /// Only Fill-in the [`psbt::Input::witness_utxo`](bitcoin::psbt::Input::witness_utxo) field when spending from
     /// SegWit descriptors.
     ///
@@ -814,6 +843,28 @@ impl ChangeSpendPolicy {
             ChangeSpendPolicy::ChangeAllowed => true,
             ChangeSpendPolicy::OnlyChange => utxo.keychain == KeychainKind::Internal,
             ChangeSpendPolicy::ChangeForbidden => utxo.keychain == KeychainKind::External,
+        }
+    }
+}
+
+/// Policy regarding the use of unconfirmed outputs when creating a transaction
+#[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Hash, Clone, Copy)]
+pub enum ConfirmationSpendPolicy {
+    /// Use both confirmed and unconfirmed outputs (default)
+    #[default]
+    UnconfirmedAllowed,
+    /// Only use confirmed outputs (see [`TxBuilder::only_spend_confirmed`])
+    OnlyConfirmed,
+    /// Only use unconfirmed outputs (see [`TxBuilder::only_spend_unconfirmed`])
+    OnlyUnconfirmed,
+}
+
+impl ConfirmationSpendPolicy {
+    pub(crate) fn is_satisfied_by(&self, utxo: &LocalOutput) -> bool {
+        match self {
+            ConfirmationSpendPolicy::UnconfirmedAllowed => true,
+            ConfirmationSpendPolicy::OnlyConfirmed => utxo.chain_position.is_confirmed(),
+            ConfirmationSpendPolicy::OnlyUnconfirmed => !utxo.chain_position.is_confirmed(),
         }
     }
 }
