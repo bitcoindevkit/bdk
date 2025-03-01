@@ -279,7 +279,7 @@ where
         CoinSelectionAlgo::NewestFirst => {
             plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.chain_position))
         }
-        CoinSelectionAlgo::BranchAndBound => plan_utxos.shuffle(&mut thread_rng()),
+        CoinSelectionAlgo::BranchAndBound => plan_utxos.shuffle(&mut rand::rng()),
     }
 
     // build candidate set
@@ -375,7 +375,7 @@ where
             indexer: changeset,
             index: change_index,
         });
-        outputs.shuffle(&mut thread_rng());
+        outputs.shuffle(&mut rand::rng());
     }
 
     let unsigned_tx = Transaction {
@@ -878,7 +878,7 @@ where
 fn generate_bip86_helper(network: impl Into<NetworkKind>) -> anyhow::Result<()> {
     let secp = Secp256k1::new();
     let mut seed = [0x00; 32];
-    thread_rng().fill_bytes(&mut seed);
+    rand::rng().fill_bytes(&mut seed);
 
     let m = bip32::Xpriv::new_master(network, &seed)?;
     let fp = m.fingerprint(&secp);
