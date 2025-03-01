@@ -272,16 +272,15 @@ impl WalletPersister for bdk_chain::rusqlite::Connection {
     type Error = bdk_chain::rusqlite::Error;
 
     fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error> {
-        let db_tx = persister.transaction()?;
-        ChangeSet::init_sqlite_tables(&db_tx)?;
-        let changeset = ChangeSet::from_sqlite(&db_tx)?;
+        let mut db_tx = persister.transaction()?;
+        let changeset = WalletPersister::initialize(&mut db_tx)?;
         db_tx.commit()?;
         Ok(changeset)
     }
 
     fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
-        let db_tx = persister.transaction()?;
-        changeset.persist_to_sqlite(&db_tx)?;
+        let mut db_tx = persister.transaction()?;
+        WalletPersister::persist(&mut db_tx, changeset)?;
         db_tx.commit()
     }
 }
