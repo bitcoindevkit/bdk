@@ -10,8 +10,9 @@
 #![warn(missing_docs)]
 
 use bdk_core::{BlockId, CheckPoint};
-use bitcoin::{block::Header, Block, BlockHash, Transaction};
+use bitcoin::{block::Header, Block, BlockHash, Transaction, Txid};
 use bitcoincore_rpc::bitcoincore_rpc_json;
+use std::collections::HashSet;
 
 pub mod bip158;
 
@@ -44,8 +45,7 @@ pub struct Emitter<'c, C> {
     /// there has been a reorg since our last mempool emission.
     last_mempool_tip: Option<u32>,
 
-    /// Unconfirmed txids that are expected to appear in mempool. This is used to determine if any
-    /// known txids have been evicted.
+    /// Expected mempool txs. TODO: Docs.
     expected_mempool_txids: HashSet<Txid>,
 }
 
@@ -57,9 +57,6 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     ///
     /// `start_height` starts emission from a given height (if there are no conflicts with the
     /// original chain).
-    ///
-    /// `expected_mempool_txids` is the initial set of unconfirmed txids. Once at tip, any that are
-    /// no longer in mempool are marked evicted.
     pub fn new(
         client: &'c C,
         last_cp: CheckPoint,
@@ -73,27 +70,23 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
             last_block: None,
             last_mempool_time: 0,
             last_mempool_tip: None,
+            expected_mempool_txids,
         }
     }
 
-    /// Emit mempool transactions and any evicted [`Txid`]s. Returns a `latest_update_time` which is
-    /// used for setting the timestamp for evicted transactions.
+    /// Emit mempool transactions and capture the initial snapshot of all mempool [`Txid`]s.
     ///
     /// This method returns a [`MempoolEvent`] containing the full transactions (with their
-    /// first-seen unix timestamps) that were emitted, and [`MempoolEvent::evicted_txids`] which are
-    /// any [`Txid`]s which were previously expected and are now missing from the mempool. Note that
-    /// [`Txid`]s are only evicted if the emitter is at the chain tip with the same height and hash
-    /// as the best block from the RPC.
-    ///
-    /// This method emits each transaction only once, unless we cannot guarantee the transaction's
-    /// ancestors are already emitted.
+    /// first-seen unix timestamps) that were emitted, and the set of all [`Txid`]s present from the
+    /// initial mempool query. Each transaction is emitted only once, unless we cannot guarantee the
+    /// transaction's ancestors are already emitted.
     ///
     /// To understand why, consider a receiver which filters transactions based on whether it
     /// alters the UTXO set of tracked script pubkeys. If an emitted mempool transaction spends a
     /// tracked UTXO which is confirmed at height `h`, but the receiver has only seen up to block
     /// of height `h-1`, we want to re-emit this transaction until the receiver has seen the block
     /// at height `h`.
-    pub fn mempool(&mut self) -> Result<Vec<(Transaction, u64)>, bitcoincore_rpc::Error> {
+    pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let client = self.client;
 
         // This is the emitted tip height during the last mempool emission.
@@ -103,20 +96,12 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
             // `start_height` has been emitted.
             .unwrap_or(self.start_height.saturating_sub(1));
 
-        // Get the raw mempool result from the RPC client which will be used to determine if any
-        // transactions have been evicted.
+        // Get the raw mempool result from the RPC client.
         let raw_mempool = client.get_raw_mempool_verbose()?;
         let raw_mempool_txids: HashSet<Txid> = raw_mempool.keys().copied().collect();
 
-        // Determine if height and hash matches the best block from the RPC. Evictions are deferred
-        // if we are not at the best block.
-        let height = client.get_block_count()?;
-        let at_tip = if height != self.last_cp.height() as u64 {
-            false
-        } else {
-            // Verify if block hash matches in case of re-org.
-            client.get_block_hash(height)? == self.last_cp.hash()
-        };
+        // Determine if height matches last emitted block.
+        let at_tip = client.get_block_count()? == self.last_cp.height() as u64;
 
         // If at tip, any expected txid missing from raw mempool is considered evicted;
         // if not at tip, we don't evict anything.
@@ -136,17 +121,16 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
         let prev_mempool_time = self.last_mempool_time;
         let mut latest_time = prev_mempool_time;
 
-        let txs_to_emit = client
-            .get_raw_mempool_verbose()?
+        let new_txs = raw_mempool
             .into_iter()
             .filter_map({
                 let latest_time = &mut latest_time;
+                let evicted_txids = &mut evicted_txids;
                 move |(txid, tx_entry)| -> Option<Result<_, bitcoincore_rpc::Error>> {
                     let tx_time = tx_entry.time as usize;
                     if tx_time > *latest_time {
                         *latest_time = tx_time;
                     }
-
                     // Avoid emitting transactions that are already emitted if we can guarantee
                     // blocks containing ancestors are already emitted. The bitcoind rpc interface
                     // provides us with the block height that the tx is introduced to the mempool.
@@ -157,14 +141,17 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
                     if is_already_emitted && is_within_height {
                         return None;
                     }
-
                     let tx = match client.get_raw_transaction(&txid, None) {
                         Ok(tx) => tx,
-                        // the tx is confirmed or evicted since `get_raw_mempool_verbose`
-                        Err(err) if err.is_not_found_error() => return None,
+                        Err(err) if err.is_not_found_error() => {
+                            // If at tip and the transaction isn't found, mark it as evicted.
+                            if at_tip {
+                                evicted_txids.insert(txid);
+                            }
+                            return None;
+                        }
                         Err(err) => return Some(Err(err)),
                     };
-
                     Some(Ok((tx, tx_time as u64)))
                 }
             })
@@ -172,14 +159,15 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
 
         self.last_mempool_time = latest_time;
         self.last_mempool_tip = Some(self.last_cp.height());
-
-        // If at tip, we replace `expected_mempool_txids` with just the new txids. Otherwise, we’re
-        // still catching up to the tip and keep accumulating.
         if at_tip {
             self.expected_mempool_txids = new_txs.iter().map(|(tx, _)| tx.compute_txid()).collect();
         } else {
-            self.expected_mempool_txids
-                .extend(new_txs.iter().map(|(tx, _)| tx.compute_txid()));
+            self.expected_mempool_txids.extend(
+                new_txs
+                    .iter()
+                    .map(|(tx, _)| tx.compute_txid())
+                    .collect::<Vec<_>>(),
+            );
         }
 
         Ok(MempoolEvent {
@@ -198,7 +186,6 @@ impl<'c, C: bitcoincore_rpc::RpcApi> Emitter<'c, C> {
     /// Emit the next block height and block (if any).
     pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
         if let Some((checkpoint, block)) = poll(self, |hash| self.client.get_block(hash))? {
-            // Stop tracking unconfirmed transactions that have been confirmed in this block.
             for tx in &block.txdata {
                 self.expected_mempool_txids.remove(&tx.compute_txid());
             }
@@ -412,5 +399,79 @@ impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
         } else {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{bitcoincore_rpc::RpcApi, Emitter};
+    use bdk_bitcoind_rpc::bitcoincore_rpc::bitcoin::Txid;
+    use bdk_chain::local_chain::LocalChain;
+    use bdk_testenv::{anyhow, TestEnv};
+    use bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash};
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_expected_mempool_txids_accumulate_and_remove() -> anyhow::Result<()> {
+        let env = TestEnv::new()?;
+        let chain = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?).0;
+        let chain_tip = chain.tip();
+        let mut emitter = Emitter::new(env.rpc_client(), chain_tip.clone(), 1, HashSet::new());
+
+        env.mine_blocks(100, None)?;
+        while emitter.next_block()?.is_some() {}
+
+        let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
+        let addr_to_track = Address::from_script(&spk_to_track, bitcoin::Network::Regtest)?;
+        let mut mempool_txids = HashSet::new();
+
+        // Send a tx at different heights and ensure txs are accumulating in expected_mempool_txids.
+        for _ in 0..10 {
+            let sent_txid = env.send(&addr_to_track, Amount::from_sat(1_000))?;
+            mempool_txids.insert(sent_txid);
+            emitter.mempool()?;
+            env.mine_blocks(1, None)?;
+
+            for txid in &mempool_txids {
+                assert!(
+                    emitter.expected_mempool_txids.contains(txid),
+                    "Expected txid {:?} missing",
+                    txid
+                );
+            }
+        }
+
+        // Process each block and check that confirmed txids are removed from from
+        // expected_mempool_txids.
+        while let Some(block_event) = emitter.next_block()? {
+            let confirmed_txids: HashSet<Txid> = block_event
+                .block
+                .txdata
+                .iter()
+                .map(|tx| tx.compute_txid())
+                .collect();
+            mempool_txids = mempool_txids
+                .difference(&confirmed_txids)
+                .copied()
+                .collect::<HashSet<_>>();
+            for txid in confirmed_txids {
+                assert!(
+                    !emitter.expected_mempool_txids.contains(&txid),
+                    "Expected txid {:?} should have been removed",
+                    txid
+                );
+            }
+            for txid in &mempool_txids {
+                assert!(
+                    emitter.expected_mempool_txids.contains(txid),
+                    "Expected txid {:?} missing",
+                    txid
+                );
+            }
+        }
+
+        assert!(emitter.expected_mempool_txids.is_empty());
+
+        Ok(())
     }
 }
