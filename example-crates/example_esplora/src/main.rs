@@ -174,7 +174,7 @@ fn main() -> anyhow::Result<()> {
             let mut graph = graph.lock().expect("mutex must not be poisoned");
             let mut chain = chain.lock().expect("mutex must not be poisoned");
             // Because we did a stop gap based scan we are likely to have some updates to our
-            // deriviation indices. Usually before a scan you are on a fresh wallet with no
+            // derivation indices. Usually before a scan you are on a fresh wallet with no
             // addresses derived so we need to derive up to last active addresses the scan found
             // before adding the transactions.
             (
