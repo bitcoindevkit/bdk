@@ -114,6 +114,21 @@ and good test coverage of the codebase is an important goal.
 Refactoring the project to enable fine-grained unit testing is also an ongoing
 effort.
 
+First Time Contributors
+-----------------------
+
+If it is your first time contributing to the BDK family of libraries, welcome! We're glad to have you with us. If your 
+first (or few first) PRs are focused on very small fixes to documentation, however, they might not meet our threshold 
+for acceptance for first time contributors.
+
+Minor grammar and punctuation fixes aren't a good way to start contributing to a project, and instead we suggest you 
+start with something a little more substantial. It's better to find an issue where you can demonstrate some knowledge 
+of bitcoin or the code base, such as improving the substance of documentation, testing, or fixing some small issue 
+even if it's considered low priority.
+
+This being said we are always looking forward to working with new folks interested in contributing to our libraries. 
+If you are looking for issues to work on, check out the good first issue label and join our Discord server!
+
 Going further
 -------------
 
