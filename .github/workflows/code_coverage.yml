@@ -36,7 +36,7 @@ jobs:
       - name: Run grcov
         run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --keep-only '**/crates/**' --ignore '**/tests/**' --ignore '**/examples/**' -o ./coverage/lcov.info
       - name: Generate HTML coverage report
-        run: genhtml -o coverage-report.html --ignore-errors source ./coverage/lcov.info
+        run: genhtml -o coverage-report.html --ignore-errors unmapped ./coverage/lcov.info
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
         with:
