@@ -27,10 +27,10 @@ pub struct Args {
     #[clap(env = "CHANGE_DESCRIPTOR")]
     pub change_descriptor: String,
     /// Earliest block height to start sync from
-    #[clap(env = "START_HEIGHT", long, default_value = "481824")]
+    #[clap(env = "START_HEIGHT", long, default_value = "0")]
     pub start_height: u32,
     /// Bitcoin network to connect to
-    #[clap(env = "BITCOIN_NETWORK", long, default_value = "testnet")]
+    #[clap(env = "BITCOIN_NETWORK", long, default_value = "regtest")]
     pub network: Network,
     /// Where to store wallet data
     #[clap(
@@ -41,7 +41,7 @@ pub struct Args {
     pub db_path: PathBuf,
 
     /// RPC URL
-    #[clap(env = "RPC_URL", long, default_value = "127.0.0.1:8332")]
+    #[clap(env = "RPC_URL", long, default_value = "127.0.0.1:18443")]
     pub url: String,
     /// RPC auth cookie file
     #[clap(env = "RPC_COOKIE", long)]
