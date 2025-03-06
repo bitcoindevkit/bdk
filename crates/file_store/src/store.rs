@@ -109,18 +109,24 @@ where
     /// # let new_len = file.seek(SeekFrom::End(-2))?;
     /// # file.set_len(new_len)?;
     ///
-    /// let mut new_store = match Store::<TestChangeSet>::load(&MAGIC_BYTES, &file_path) {
+    /// let (mut new_store, _aggregate_changeset) =
+    ///     match Store::<TestChangeSet>::load(&MAGIC_BYTES, &file_path) {
     /// #   Ok(_) => panic!("should have errored"),
-    ///     Ok((store, _aggregated_changeset)) => store,
-    ///     Err(StoreErrorWithDump { changeset, .. }) => {
-    ///         let new_file_path = file_path.with_extension("bkp");
-    ///         let mut new_store = Store::create(&MAGIC_BYTES, &new_file_path).unwrap();
-    ///         if let Some(aggregated_changeset) = changeset {
-    ///             new_store.append(&aggregated_changeset)?;
+    ///         Ok((store, changeset)) => (store, changeset),
+    ///         Err(StoreErrorWithDump { changeset, .. }) => {
+    ///             let new_file_path = file_path.with_extension("backup");
+    ///             let mut new_store =
+    ///                 Store::create(&MAGIC_BYTES, &new_file_path).expect("must create new file");
+    ///             if let Some(aggregated_changeset) = changeset {
+    ///                 new_store.append(&aggregated_changeset)?;
+    ///             }
+    ///             // The following will overwrite the original file. You will loose the corrupted
+    ///             // portion of the original file forever.
+    ///             drop(new_store);
+    ///             std::fs::rename(&new_file_path, &file_path)?;
+    ///             Store::load(&MAGIC_BYTES, &file_path).expect("must load new file")
     ///         }
-    ///         new_store
-    ///     }
-    /// };
+    ///     };
     /// #
     /// # assert_eq!(
     /// #     new_store.dump().expect("should dump changeset: {1, 2, 3} "),
