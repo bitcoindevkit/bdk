@@ -52,7 +52,7 @@ use rand_core::RngCore;
 use super::coin_selection::CoinSelectionAlgorithm;
 use super::utils::shuffle_slice;
 use super::{CreateTxError, Wallet};
-use crate::collections::{BTreeMap, HashSet};
+use crate::collections::{BTreeMap, HashMap, HashSet};
 use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 
 /// A transaction builder
@@ -125,7 +125,7 @@ pub(crate) struct TxParams {
     pub(crate) fee_policy: Option<FeePolicy>,
     pub(crate) internal_policy_path: Option<BTreeMap<String, Vec<usize>>>,
     pub(crate) external_policy_path: Option<BTreeMap<String, Vec<usize>>>,
-    pub(crate) utxos: Vec<WeightedUtxo>,
+    pub(crate) utxos: HashMap<OutPoint, WeightedUtxo>,
     pub(crate) unspendable: HashSet<OutPoint>,
     pub(crate) manually_selected_only: bool,
     pub(crate) sighash: Option<psbt::PsbtSighashType>,
@@ -274,26 +274,28 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     /// These have priority over the "unspendable" utxos, meaning that if a utxo is present both in
     /// the "utxos" and the "unspendable" list, it will be spent.
     pub fn add_utxos(&mut self, outpoints: &[OutPoint]) -> Result<&mut Self, AddUtxoError> {
-        {
-            let wallet = &mut self.wallet;
-            let utxos = outpoints
-                .iter()
-                .map(|outpoint| {
-                    wallet
-                        .get_utxo(*outpoint)
-                        .ok_or(AddUtxoError::UnknownUtxo(*outpoint))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            for utxo in utxos {
-                let descriptor = wallet.public_descriptor(utxo.keychain);
-                let satisfaction_weight = descriptor.max_weight_to_satisfy().unwrap();
-                self.params.utxos.push(WeightedUtxo {
-                    satisfaction_weight,
-                    utxo: Utxo::Local(utxo),
-                });
-            }
-        }
+        let utxo_batch = outpoints
+            .iter()
+            .map(|outpoint| {
+                self.wallet
+                    .get_utxo(*outpoint)
+                    .ok_or(AddUtxoError::UnknownUtxo(*outpoint))
+                    .map(|output| {
+                        (
+                            *outpoint,
+                            WeightedUtxo {
+                                satisfaction_weight: self
+                                    .wallet
+                                    .public_descriptor(output.keychain)
+                                    .max_weight_to_satisfy()
+                                    .unwrap(),
+                                utxo: Utxo::Local(output),
+                            },
+                        )
+                    })
+            })
+            .collect::<Result<HashMap<OutPoint, WeightedUtxo>, AddUtxoError>>()?;
+        self.params.utxos.extend(utxo_batch);
 
         Ok(self)
     }
@@ -306,7 +308,14 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         self.add_utxos(&[outpoint])
     }
 
-    /// Add a foreign UTXO i.e. a UTXO not owned by this wallet.
+    /// Add a foreign UTXO i.e. a UTXO not known by this wallet.
+    ///
+    /// There might be cases where the UTxO belongs to the wallet but it doesn't have knowledge of
+    /// it. This is possible if the wallet is not synced or its not being use to track
+    /// transactions. In those cases is the responsibility of the user to add any possible local
+    /// UTxOs through the [`TxBuilder::add_utxo`] method.
+    /// A manually added local UTxO will always have greater precedence than a foreign utxo. No
+    /// matter if it was added before or after the foreign UTxO.
     ///
     /// At a minimum to add a foreign UTXO we need:
     ///
@@ -393,14 +402,25 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
             }
         }
 
-        self.params.utxos.push(WeightedUtxo {
-            satisfaction_weight,
-            utxo: Utxo::Foreign {
+        if let Some(WeightedUtxo {
+            utxo: Utxo::Local { .. },
+            ..
+        }) = self.params.utxos.get(&outpoint)
+        {
+            None
+        } else {
+            self.params.utxos.insert(
                 outpoint,
-                sequence,
-                psbt_input: Box::new(psbt_input),
-            },
-        });
+                WeightedUtxo {
+                    satisfaction_weight,
+                    utxo: Utxo::Foreign {
+                        outpoint,
+                        sequence,
+                        psbt_input: Box::new(psbt_input),
+                    },
+                },
+            )
+        };
 
         Ok(self)
     }
@@ -1097,5 +1117,229 @@ mod test {
         );
         builder.fee_rate(FeeRate::from_sat_per_kwu(feerate + 250));
         let _ = builder.finish().unwrap();
+    }
+
+    #[test]
+    fn not_duplicated_utxos_in_required_list() {
+        let mut params = TxParams::default();
+        let test_utxos = get_test_utxos();
+        let fake_weighted_utxo = WeightedUtxo {
+            satisfaction_weight: Weight::from_wu(0),
+            utxo: Utxo::Local(test_utxos[0].clone()),
+        };
+        for _ in 0..3 {
+            params
+                .utxos
+                .insert(test_utxos[0].outpoint, fake_weighted_utxo.clone());
+        }
+        assert_eq!(
+            vec![(test_utxos[0].outpoint, fake_weighted_utxo)],
+            params.utxos.into_iter().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn not_duplicated_foreign_utxos_with_same_outpoint_but_different_weight() {
+        use crate::test_utils::{get_funded_wallet_single, get_funded_wallet_wpkh, get_test_wpkh};
+
+        // Use two different wallets to avoid adding local utxos
+        let (wallet1, txid1) = get_funded_wallet_wpkh();
+        let (mut wallet2, txid2) = get_funded_wallet_single(get_test_wpkh());
+
+        // if the transactions were produced by the same wallet the following assert should fail
+        assert_ne!(txid1, txid2);
+
+        let utxo1 = wallet1.list_unspent().next().unwrap();
+        let tx1 = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
+
+        let satisfaction_weight = wallet1
+            .public_descriptor(KeychainKind::External)
+            .max_weight_to_satisfy()
+            .unwrap();
+
+        let mut builder = wallet2.build_tx();
+
+        // add foreign utxo with satisfaction weight x
+        assert!(builder
+            .add_foreign_utxo(
+                utxo1.outpoint,
+                psbt::Input {
+                    non_witness_utxo: Some(tx1.as_ref().clone()),
+                    ..Default::default()
+                },
+                satisfaction_weight,
+            )
+            .is_ok());
+
+        let modified_satisfaction_weight = satisfaction_weight - Weight::from_wu(6);
+
+        assert_ne!(satisfaction_weight, modified_satisfaction_weight);
+
+        // add foreign utxo with same outpoint but satisfaction weight x - 6wu
+        assert!(builder
+            .add_foreign_utxo(
+                utxo1.outpoint,
+                psbt::Input {
+                    non_witness_utxo: Some(tx1.as_ref().clone()),
+                    ..Default::default()
+                },
+                modified_satisfaction_weight,
+            )
+            .is_ok());
+
+        let foreign_utxo_with_modified_weight =
+            builder.params.utxos.values().collect::<Vec<_>>()[0];
+
+        assert_eq!(builder.params.utxos.len(), 1);
+        assert_eq!(
+            foreign_utxo_with_modified_weight.satisfaction_weight,
+            modified_satisfaction_weight
+        );
+    }
+
+    #[test]
+    fn test_prexisting_local_utxo_have_precedence_over_foreign_utxo_with_same_outpoint() {
+        // In this test we are assuming a setup where there are two wallets using the same
+        // descriptor, but only one is tracking transactions, while the other is not.
+        // Within this conditions we want the second wallet to be able to consider the unknown
+        // LocalOutputs provided by the first wallet with greater precedence than any foreign utxo,
+        // even if the foreign utxo shares the same outpoint Remember the second wallet does not
+        // know about any UTxOs, so in principle, an unknown local utxo could be added as foreign.
+        //
+        // In this case, somehow the wallet has knowledge of one local utxo and it tries to add the
+        // same utxo as a foreign one, but the API ignores this, because local utxos have higher
+        // precedence.
+        use crate::test_utils::{get_funded_wallet_wpkh, get_test_wpkh_and_change_desc};
+        use bitcoin::Network;
+
+        // Use the same wallet twice
+        let (wallet1, txid1) = get_funded_wallet_wpkh();
+        // But the second one has no knowledge of tx associated with txid1
+        let (main_descriptor, change_descriptor) = get_test_wpkh_and_change_desc();
+        let mut wallet2 = Wallet::create(main_descriptor, change_descriptor)
+            .network(Network::Regtest)
+            .create_wallet_no_persist()
+            .expect("descriptors must be valid");
+
+        let utxo1 = wallet1.list_unspent().next().unwrap();
+        let tx1 = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
+
+        let satisfaction_weight = wallet1
+            .public_descriptor(KeychainKind::External)
+            .max_weight_to_satisfy()
+            .unwrap();
+
+        let mut builder = wallet2.build_tx();
+
+        // Add local UTxO manually, through tx_builder private parameters and not through
+        // add_utxo method because we are assuming wallet2 has not knowledge of utxo1 yet
+        builder.params.utxos.insert(
+            utxo1.outpoint,
+            WeightedUtxo {
+                satisfaction_weight: wallet1
+                    .public_descriptor(utxo1.keychain)
+                    .max_weight_to_satisfy()
+                    .unwrap(),
+                utxo: Utxo::Local(utxo1.clone()),
+            },
+        );
+
+        // add foreign utxo
+        assert!(builder
+            .add_foreign_utxo(
+                utxo1.outpoint,
+                psbt::Input {
+                    non_witness_utxo: Some(tx1.as_ref().clone()),
+                    ..Default::default()
+                },
+                satisfaction_weight,
+            )
+            .is_ok());
+
+        let utxo_should_still_be_local = builder.params.utxos.values().collect::<Vec<_>>()[0];
+
+        assert_eq!(builder.params.utxos.len(), 1);
+        assert_eq!(utxo_should_still_be_local.utxo.outpoint(), utxo1.outpoint);
+        // UTxO should still be LocalOutput
+        assert!(matches!(
+            utxo_should_still_be_local,
+            WeightedUtxo {
+                utxo: Utxo::Local(..),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_prexisting_foreign_utxo_have_no_precedence_over_local_utxo_with_same_outpoint() {
+        // In this test we are assuming a setup where there are two wallets using the same
+        // descriptor, but only one is tracking transactions, while the other is not.
+        // Within this conditions we want the second wallet to be able to consider the unknown
+        // LocalOutputs provided by the first wallet with greater precedence than any foreign utxo,
+        // even if the foreign utxo shares the same outpoint Remember the second wallet does not
+        // know about any UTxOs, so in principle, an unknown local utxo could be added as foreign.
+        //
+        // In this case, the wallet adds a local utxo as if it were foreign and after this it adds
+        // it as local utxo. In this case the local utxo should still have precedence over the
+        // foreign utxo.
+        use crate::test_utils::{get_funded_wallet_wpkh, get_test_wpkh_and_change_desc};
+        use bitcoin::Network;
+
+        // Use the same wallet twice
+        let (wallet1, txid1) = get_funded_wallet_wpkh();
+        // But the second one has no knowledge of tx associated with txid1
+        let (main_descriptor, change_descriptor) = get_test_wpkh_and_change_desc();
+        let mut wallet2 = Wallet::create(main_descriptor, change_descriptor)
+            .network(Network::Regtest)
+            .create_wallet_no_persist()
+            .expect("descriptors must be valid");
+
+        let utxo1 = wallet1.list_unspent().next().unwrap();
+        let tx1 = wallet1.get_tx(txid1).unwrap().tx_node.tx.clone();
+
+        let satisfaction_weight = wallet1
+            .public_descriptor(KeychainKind::External)
+            .max_weight_to_satisfy()
+            .unwrap();
+
+        let mut builder = wallet2.build_tx();
+
+        // add foreign utxo
+        assert!(builder
+            .add_foreign_utxo(
+                utxo1.outpoint,
+                psbt::Input {
+                    non_witness_utxo: Some(tx1.as_ref().clone()),
+                    ..Default::default()
+                },
+                satisfaction_weight,
+            )
+            .is_ok());
+
+        // Add local UTxO manually, through tx_builder private parameters and not through
+        // add_utxo method because we are assuming wallet2 has not knowledge of utxo1 yet
+        builder.params.utxos.insert(
+            utxo1.outpoint,
+            WeightedUtxo {
+                satisfaction_weight: wallet1
+                    .public_descriptor(utxo1.keychain)
+                    .max_weight_to_satisfy()
+                    .unwrap(),
+                utxo: Utxo::Local(utxo1.clone()),
+            },
+        );
+
+        let utxo_should_still_be_local = builder.params.utxos.values().collect::<Vec<_>>()[0];
+
+        assert_eq!(builder.params.utxos.len(), 1);
+        assert_eq!(utxo_should_still_be_local.utxo.outpoint(), utxo1.outpoint);
+        // UTxO should still be LocalOutput
+        assert!(matches!(
+            utxo_should_still_be_local,
+            WeightedUtxo {
+                utxo: Utxo::Local(..),
+                ..
+            }
+        ));
     }
 }
