@@ -818,8 +818,16 @@ fn test_create_tx_confirmation_policy() {
         .only_spend_confirmed();
     let ret = builder.finish().unwrap();
     assert_eq!(ret.unsigned_tx.input.len(), 2);
-    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == funding_txid));
-    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == confirmed_txid));
+    assert!(ret
+        .unsigned_tx
+        .input
+        .iter()
+        .any(|i| i.previous_output.txid == funding_txid));
+    assert!(ret
+        .unsigned_tx
+        .input
+        .iter()
+        .any(|i| i.previous_output.txid == confirmed_txid));
 
     let mut builder = wallet.build_tx();
     builder
@@ -827,8 +835,16 @@ fn test_create_tx_confirmation_policy() {
         .only_spend_confirmed_since(3_000);
     let ret = builder.finish().unwrap();
     assert_eq!(ret.unsigned_tx.input.len(), 2);
-    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == funding_txid));
-    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == confirmed_txid));
+    assert!(ret
+        .unsigned_tx
+        .input
+        .iter()
+        .any(|i| i.previous_output.txid == funding_txid));
+    assert!(ret
+        .unsigned_tx
+        .input
+        .iter()
+        .any(|i| i.previous_output.txid == confirmed_txid));
 
     let mut builder = wallet.build_tx();
     builder
@@ -836,7 +852,11 @@ fn test_create_tx_confirmation_policy() {
         .only_spend_confirmed_since(2_500);
     let ret = builder.finish().unwrap();
     assert_eq!(ret.unsigned_tx.input.len(), 1);
-    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == funding_txid));
+    assert!(ret
+        .unsigned_tx
+        .input
+        .iter()
+        .any(|i| i.previous_output.txid == funding_txid));
 
     let mut builder = wallet.build_tx();
     builder
@@ -844,7 +864,11 @@ fn test_create_tx_confirmation_policy() {
         .only_spend_unconfirmed();
     let ret = builder.finish().unwrap();
     assert_eq!(ret.unsigned_tx.input.len(), 1);
-    assert!(ret.unsigned_tx.input.iter().any(|i| i.previous_output.txid == unconfirmed_txid));
+    assert!(ret
+        .unsigned_tx
+        .input
+        .iter()
+        .any(|i| i.previous_output.txid == unconfirmed_txid));
 
     let mut builder = wallet.build_tx();
     builder
