@@ -169,7 +169,7 @@ fn main() -> anyhow::Result<()> {
                     let db = &mut *db.lock().unwrap();
                     last_db_commit = Instant::now();
                     if let Some(changeset) = db_stage.take() {
-                        db.append_changeset(&changeset)?;
+                        db.append(&changeset)?;
                     }
                     println!(
                         "[{:>10}s] committed to db (took {}s)",
@@ -213,7 +213,7 @@ fn main() -> anyhow::Result<()> {
                     ..Default::default()
                 });
                 if let Some(changeset) = db_stage.take() {
-                    db.append_changeset(&changeset)?;
+                    db.append(&changeset)?;
                 }
             }
         }
@@ -307,7 +307,7 @@ fn main() -> anyhow::Result<()> {
                     let db = &mut *db.lock().unwrap();
                     last_db_commit = Instant::now();
                     if let Some(changeset) = db_stage.take() {
-                        db.append_changeset(&changeset)?;
+                        db.append(&changeset)?;
                     }
                     println!(
                         "[{:>10}s] committed to db (took {}s)",
