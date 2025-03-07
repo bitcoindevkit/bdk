@@ -25,7 +25,7 @@ pub struct Args {
     pub descriptor: String,
     /// Wallet change descriptor
     #[clap(env = "CHANGE_DESCRIPTOR")]
-    pub change_descriptor: String,
+    pub change_descriptor: Option<String>,
     /// Earliest block height to start sync from
     #[clap(env = "START_HEIGHT", long, default_value = "0")]
     pub start_height: u32,
@@ -90,15 +90,20 @@ fn main() -> anyhow::Result<()> {
         Store::<bdk_wallet::ChangeSet>::open_or_create_new(DB_MAGIC.as_bytes(), args.db_path)?;
     let wallet_opt = Wallet::load()
         .descriptor(KeychainKind::External, Some(args.descriptor.clone()))
-        .descriptor(KeychainKind::Internal, Some(args.change_descriptor.clone()))
+        .descriptor(KeychainKind::Internal, args.change_descriptor.clone())
         .extract_keys()
         .check_network(args.network)
         .load_wallet(&mut db)?;
     let mut wallet = match wallet_opt {
         Some(wallet) => wallet,
-        None => Wallet::create(args.descriptor, args.change_descriptor)
-            .network(args.network)
-            .create_wallet(&mut db)?,
+        None => match &args.change_descriptor {
+            Some(change_desc) => Wallet::create(args.descriptor.clone(), change_desc.clone())
+                .network(args.network)
+                .create_wallet(&mut db)?,
+            None => Wallet::create_single(args.descriptor.clone())
+                .network(args.network)
+                .create_wallet(&mut db)?,
+        },
     };
     println!(
         "Loaded wallet in {}s",

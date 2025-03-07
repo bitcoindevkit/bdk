@@ -5,11 +5,11 @@ $ cargo run --bin example_wallet_rpc -- --help
 
 Bitcoind RPC example using `bdk_wallet::Wallet`
 
-Usage: example_wallet_rpc [OPTIONS] <DESCRIPTOR> <CHANGE_DESCRIPTOR>
+Usage: example_wallet_rpc [OPTIONS] <DESCRIPTOR> [CHANGE_DESCRIPTOR]
 
 Arguments:
   <DESCRIPTOR>         Wallet descriptor [env: DESCRIPTOR=]
-  <CHANGE_DESCRIPTOR>  Wallet change descriptor [env: CHANGE_DESCRIPTOR=]
+  [CHANGE_DESCRIPTOR]  Wallet change descriptor [env: CHANGE_DESCRIPTOR=]
 
 Options:
       --start-height <START_HEIGHT>  Earliest block height to start sync from [env: START_HEIGHT=] [default: 0]
