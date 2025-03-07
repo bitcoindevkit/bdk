@@ -4303,3 +4303,41 @@ fn test_wallet_transactions_relevant() {
     assert!(full_tx_count_before < full_tx_count_after);
     assert!(canonical_tx_count_before < canonical_tx_count_after);
 }
+
+#[test]
+fn test_avoid_partial_spends_effect() {
+    // Get a funded wallet.
+    let (descriptor, _) = get_test_wpkh_and_change_desc();
+    let (mut wallet, _) = get_wallet_with_only_reused_outputs(descriptor, None);
+
+    // Pick a destination (different from the above script) and a small amount.
+    let dest = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")
+        .expect("valid destination")
+        .assume_checked();
+    let amt = Amount::from_sat(1_000);
+
+    // --- Case 1: Without avoid_partial_spenqds
+    let mut builder1 = wallet.build_tx();
+    builder1.add_recipient(dest.script_pubkey(), amt);
+    let psbt1 = builder1.finish().expect("tx build should succeed");
+
+    // Without grouping, coin selection should choose a single UTXO.
+    assert_eq!(
+        psbt1.unsigned_tx.input.len(),
+        1,
+        "Expected 1 input without avoid_partial_spends"
+    );
+
+    // --- Case 2: With avoid_partial_spends enabled
+    let mut builder2 = wallet.build_tx();
+    builder2.add_recipient(dest.script_pubkey(), amt);
+    builder2.avoid_partial_spends();
+    let psbt2 = builder2.finish().expect("tx build should succeed");
+
+    // With grouping enabled, both UTXOs (from the same script) will be selected.
+    assert_eq!(
+        psbt2.unsigned_tx.input.len(),
+        2,
+        "Expected 2 inputs with avoid_partial_spends"
+    );
+}

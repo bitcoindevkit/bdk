@@ -119,6 +119,59 @@ fn new_funded_wallet(descriptor: &str, change_descriptor: Option<&str>) -> (Wall
     (wallet, tx1.compute_txid())
 }
 
+/// Return a fake wallet that has only reused outputs for testing.
+///
+/// The wallet contains two transactions with one output each, both paying to the same common
+/// script. The common script is derived from the first unused external address.
+pub fn get_wallet_with_only_reused_outputs(
+    descriptor: &str,
+    change_descriptor: Option<&str>,
+) -> (Wallet, (Txid, Txid)) {
+    // Create an empty wallet.
+    let params = if let Some(change_desc) = change_descriptor {
+        Wallet::create(descriptor.to_string(), change_desc.to_string())
+    } else {
+        Wallet::create_single(descriptor.to_string())
+    };
+
+    let mut wallet = params
+        .network(Network::Regtest)
+        .create_wallet_no_persist()
+        .expect("descriptors must be valid");
+
+    // Derive a common external address to be reused.
+    let common_addr = wallet.next_unused_address(KeychainKind::External).address;
+    let common_script = common_addr.script_pubkey();
+
+    // Fabricate transaction 1 with one output paying to the common script.
+    let tx1 = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![], // No inputs since it's fabricated.
+        output: vec![TxOut {
+            value: Amount::from_sat(500_000),
+            script_pubkey: common_script.clone(),
+        }],
+    };
+
+    // Fabricate transaction 2 with one output paying to the common script.
+    let tx2 = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![TxOut {
+            value: Amount::from_sat(100_000),
+            script_pubkey: common_script,
+        }],
+    };
+
+    // Insert these fabricated transactions into the wallet.
+    insert_tx(&mut wallet, tx1.clone());
+    insert_tx(&mut wallet, tx2.clone());
+
+    (wallet, (tx1.compute_txid(), tx2.compute_txid()))
+}
+
 /// Return a fake wallet that appears to be funded for testing.
 ///
 /// The funded wallet contains a tx with a 76_000 sats input and two outputs, one spending 25_000
