@@ -94,6 +94,7 @@ use crate::collections::*;
 use crate::BlockId;
 use crate::CanonicalIter;
 use crate::CanonicalReason;
+use crate::CanonicalizationMods;
 use crate::ObservedIn;
 use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
 use alloc::collections::vec_deque::VecDeque;
@@ -590,11 +591,20 @@ impl<A: Anchor> TxGraph<A> {
         let tx_node = self.txs.entry(txid).or_default();
         match tx_node {
             TxNodeInternal::Whole(existing_tx) => {
-                debug_assert_eq!(
-                    existing_tx.as_ref(),
-                    tx.as_ref(),
-                    "tx of same txid should never change"
-                );
+                // We want to be able to replace an unsigned tx with a signed tx.
+                // The tx with more weight has precedence (and tiebreak with the actual tx data).
+                // We can also check whether the witness is valid and also prioritize signatures
+                // with less weight, but that is more work and this solution is good enough.
+                if existing_tx.as_ref() != tx.as_ref() {
+                    let (_, tx_with_precedence) = Ord::max(
+                        (existing_tx.weight(), existing_tx.as_ref()),
+                        (tx.weight(), tx.as_ref()),
+                    );
+                    if tx_with_precedence == tx.as_ref() {
+                        *existing_tx = tx.clone();
+                        changeset.txs.insert(tx);
+                    }
+                }
             }
             partial_tx => {
                 for txin in &tx.input {
@@ -788,25 +798,46 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
+        mods: CanonicalizationMods,
     ) -> impl Iterator<Item = Result<CanonicalTx<'a, Arc<Transaction>, A>, C::Error>> {
-        self.canonical_iter(chain, chain_tip).flat_map(move |res| {
-            res.map(|(txid, _, canonical_reason)| {
-                let tx_node = self.get_tx_node(txid).expect("must contain tx");
-                let chain_position = match canonical_reason {
-                    CanonicalReason::Anchor { anchor, descendant } => match descendant {
-                        Some(_) => {
-                            let direct_anchor = tx_node
-                                .anchors
-                                .iter()
-                                .find_map(|a| -> Option<Result<A, C::Error>> {
-                                    match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
-                                        Ok(Some(true)) => Some(Ok(a.clone())),
-                                        Ok(Some(false)) | Ok(None) => None,
-                                        Err(err) => Some(Err(err)),
-                                    }
-                                })
-                                .transpose()?;
-                            match direct_anchor {
+        fn find_direct_anchor<A: Anchor, C: ChainOracle>(
+            tx_node: &TxNode<'_, Arc<Transaction>, A>,
+            chain: &C,
+            chain_tip: BlockId,
+        ) -> Result<Option<A>, C::Error> {
+            tx_node
+                .anchors
+                .iter()
+                .find_map(|a| -> Option<Result<A, C::Error>> {
+                    match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
+                        Ok(Some(true)) => Some(Ok(a.clone())),
+                        Ok(Some(false)) | Ok(None) => None,
+                        Err(err) => Some(Err(err)),
+                    }
+                })
+                .transpose()
+        }
+        self.canonical_iter(chain, chain_tip, mods)
+            .flat_map(move |res| {
+                res.map(|(txid, _, canonical_reason)| {
+                    let tx_node = self.get_tx_node(txid).expect("must contain tx");
+                    let chain_position = match canonical_reason {
+                        CanonicalReason::Assumed { descendant } => match descendant {
+                            Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
+                                Some(anchor) => ChainPosition::Confirmed {
+                                    anchor,
+                                    transitively: None,
+                                },
+                                None => ChainPosition::Unconfirmed {
+                                    last_seen: tx_node.last_seen_unconfirmed,
+                                },
+                            },
+                            None => ChainPosition::Unconfirmed {
+                                last_seen: tx_node.last_seen_unconfirmed,
+                            },
+                        },
+                        CanonicalReason::Anchor { anchor, descendant } => match descendant {
+                            Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
                                 Some(anchor) => ChainPosition::Confirmed {
                                     anchor,
                                     transitively: None,
@@ -815,26 +846,25 @@ impl<A: Anchor> TxGraph<A> {
                                     anchor,
                                     transitively: descendant,
                                 },
-                            }
-                        }
-                        None => ChainPosition::Confirmed {
-                            anchor,
-                            transitively: None,
+                            },
+                            None => ChainPosition::Confirmed {
+                                anchor,
+                                transitively: None,
+                            },
                         },
-                    },
-                    CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
-                        ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
-                            last_seen: Some(last_seen),
+                        CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
+                            ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
+                                last_seen: Some(last_seen),
+                            },
+                            ObservedIn::Block(_) => ChainPosition::Unconfirmed { last_seen: None },
                         },
-                        ObservedIn::Block(_) => ChainPosition::Unconfirmed { last_seen: None },
-                    },
-                };
-                Ok(CanonicalTx {
-                    chain_position,
-                    tx_node,
+                    };
+                    Ok(CanonicalTx {
+                        chain_position,
+                        tx_node,
+                    })
                 })
             })
-        })
     }
 
     /// List graph transactions that are in `chain` with `chain_tip`.
@@ -846,8 +876,9 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
+        mods: CanonicalizationMods,
     ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
-        self.try_list_canonical_txs(chain, chain_tip)
+        self.try_list_canonical_txs(chain, chain_tip, mods)
             .map(|res| res.expect("infallible"))
     }
 
@@ -874,11 +905,12 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
+        mods: CanonicalizationMods,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> Result<impl Iterator<Item = (OI, FullTxOut<A>)> + 'a, C::Error> {
         let mut canon_txs = HashMap::<Txid, CanonicalTx<Arc<Transaction>, A>>::new();
         let mut canon_spends = HashMap::<OutPoint, Txid>::new();
-        for r in self.try_list_canonical_txs(chain, chain_tip) {
+        for r in self.try_list_canonical_txs(chain, chain_tip, mods) {
             let canonical_tx = r?;
             let txid = canonical_tx.tx_node.txid;
 
@@ -947,8 +979,9 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
+        mods: CanonicalizationMods,
     ) -> CanonicalIter<'a, A, C> {
-        CanonicalIter::new(self, chain, chain_tip)
+        CanonicalIter::new(self, chain, chain_tip, mods)
     }
 
     /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
@@ -961,9 +994,10 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
+        mods: CanonicalizationMods,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
-        self.try_filter_chain_txouts(chain, chain_tip, outpoints)
+        self.try_filter_chain_txouts(chain, chain_tip, mods, outpoints)
             .expect("oracle is infallible")
     }
 
@@ -989,10 +1023,11 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
+        mods: CanonicalizationMods,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> Result<impl Iterator<Item = (OI, FullTxOut<A>)> + 'a, C::Error> {
         Ok(self
-            .try_filter_chain_txouts(chain, chain_tip, outpoints)?
+            .try_filter_chain_txouts(chain, chain_tip, mods, outpoints)?
             .filter(|(_, full_txo)| full_txo.spent_by.is_none()))
     }
 
@@ -1006,9 +1041,10 @@ impl<A: Anchor> TxGraph<A> {
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
+        mods: CanonicalizationMods,
         txouts: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
     ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
-        self.try_filter_chain_unspents(chain, chain_tip, txouts)
+        self.try_filter_chain_unspents(chain, chain_tip, mods, txouts)
             .expect("oracle is infallible")
     }
 
@@ -1028,6 +1064,7 @@ impl<A: Anchor> TxGraph<A> {
         &self,
         chain: &C,
         chain_tip: BlockId,
+        mods: CanonicalizationMods,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
         mut trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
     ) -> Result<Balance, C::Error> {
@@ -1036,7 +1073,7 @@ impl<A: Anchor> TxGraph<A> {
         let mut untrusted_pending = Amount::ZERO;
         let mut confirmed = Amount::ZERO;
 
-        for (spk_i, txout) in self.try_filter_chain_unspents(chain, chain_tip, outpoints)? {
+        for (spk_i, txout) in self.try_filter_chain_unspents(chain, chain_tip, mods, outpoints)? {
             match &txout.chain_position {
                 ChainPosition::Confirmed { .. } => {
                     if txout.is_confirmed_and_spendable(chain_tip.height) {
@@ -1072,10 +1109,11 @@ impl<A: Anchor> TxGraph<A> {
         &self,
         chain: &C,
         chain_tip: BlockId,
+        mods: CanonicalizationMods,
         outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
         trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
     ) -> Balance {
-        self.try_balance(chain, chain_tip, outpoints, trust_predicate)
+        self.try_balance(chain, chain_tip, mods, outpoints, trust_predicate)
             .expect("oracle is infallible")
     }
 }
