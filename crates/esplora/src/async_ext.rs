@@ -204,7 +204,7 @@ async fn fetch_block<S: Sleeper>(
     let &tip_height = latest_blocks
         .keys()
         .last()
-        .expect("must have atleast one entry");
+        .expect("must have at least one entry");
     if height > tip_height {
         return Ok(None);
     }
