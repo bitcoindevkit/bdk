@@ -112,7 +112,7 @@ impl fmt::Display for CreateTxError {
             Self::Descriptor(e) => e.fmt(f),
             Self::Policy(e) => e.fmt(f),
             CreateTxError::SpendingPolicyRequired(keychain_kind) => {
-                write!(f, "Spending policy required: {:?}", keychain_kind)
+                write!(f, "Spending policy required: {}", keychain_kind)
             }
             CreateTxError::Version0 => {
                 write!(f, "Invalid version `0`")
