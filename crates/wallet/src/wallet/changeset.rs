@@ -12,7 +12,7 @@ type IndexedTxGraphChangeSet =
 /// ## Definition
 ///
 /// The change set is responsible for transmiting data between the persistent storage layer and the
-/// core components of the library. Specifically, it serves two primary functions:
+/// core library components. Specifically, it serves two primary functions:
 ///
 /// 1) Recording incremental changes to the in-memory representation that need to be persisted
 ///     to disk
@@ -27,32 +27,38 @@ type IndexedTxGraphChangeSet =
 ///     above.
 /// * Change sets must implement [`Default`] as a way of instantiating new empty objects.
 /// * Change sets must implement [`Merge`] so that many instances can be aggregated into a single
-///     one.
+///     instance.
 /// * A change set is composed of a number of individual "sub-change sets" that adhere to the same
 ///     rules as above. This is for increased modularity and portability. For example the core
 ///     modules each have their own change set (`tx_graph`, `local_chain`, etc).
 ///
-/// ## Note
+/// ## Members and required fields
 ///
 /// The change set has certain required fields without which a `Wallet` cannot function.
 /// These include the [`descriptor`] and the [`network`] in use. These are required to be non-empty
-/// _in the aggregate_, meaning the field must be present and non-null in the union of all
-/// persisted changes, but may be empty in any one change set (where "empty" can describe an empty
-/// container or the `Option::None` variant). For example, the descriptor and network are
-/// present in the first change set after wallet creation, but are usually omitted from subsequent
-/// updates, as they are not permitted to change during the course of wallet operation.
+/// *in the aggregate*, meaning the field must be present and non-null in the union of all
+/// persisted changes, but may be empty in any one change set, where "empty" is defined by the
+/// [`Merge`](Merge::is_empty) implementation of that change set. This requirement also applies to
+/// the [`local_chain`] field in that the aggregate change set must include a genesis block.
+///
+/// For example, the descriptor and network are present in the first change set after wallet
+/// creation, but are usually omitted in subsequent updates, as they are not permitted to change
+/// at any point thereafter.
 ///
 /// Other fields of the change set are not required to be non-empty, that is they may be empty even
-/// in the aggregate. However in practice certain fields should always contain the data needed to
-/// recover a wallet state between sessions. These include:
-/// * [`change_descriptor`](Self::change_descriptor)
-/// * [`local_chain`](Self::local_chain)
+/// in the aggregate. However in practice they should contain the data needed to recover a wallet
+/// state between sessions. These include:
 /// * [`tx_graph`](Self::tx_graph)
 /// * [`indexer`](Self::indexer)
 ///
+/// The [`change_descriptor`] is special in that its presence is optional, however the value of the
+/// change descriptor should be defined at wallet creation time and respected for the life of the
+/// wallet, meaning that if a change descriptor is originally defined, it must also be present in
+/// the aggregate change set.
+///
 /// ## Staging
 ///
-/// For greater efficiency the [`Wallet`] is able to _stage_ the to-be-persisted changes. Many
+/// For greater efficiency the [`Wallet`] is able to *stage* the to-be-persisted changes. Many
 /// operations result in staged changes which require persistence on the part of the user. These
 /// include address revelation, applying an [`Update`], and introducing transactions and chain
 /// data to the wallet. To get the staged changes see [`Wallet::staged`] and similar methods. Once
@@ -60,32 +66,34 @@ type IndexedTxGraphChangeSet =
 /// discarded.
 ///
 /// Users should persist early and often generally speaking, however in principle there is no
-/// limit to the number or type of changes that can be staged prior to persistence or the order in
-/// in which they're staged. This is because changesets are designed to be [merged]. The change
+/// limit to the number or type of changes that can be staged prior to persisting or the order in
+/// which they're staged. This is because change sets are designed to be [merged]. The change
 /// that is ultimately persisted will encompass the combined effect of each change individually.
 ///
 /// ## Extensibility
 ///
-/// Existing fields may continue to exist in future versions and may be extended with additional
-/// sub-fields. New top-level fields may be added in the future to accommodate new features and
-/// data types.
+/// Existing fields may be extended in the future with additional sub-fields. New top-level fields
+/// are likely to be added as new features and core components are implemented. Existing fields may
+/// be removed in future versions of the library.
 ///
 /// BDK reserves the right to introduce breaking changes to the [`ChangeSet`] structure in a major
 /// version release. API changes that affect the kinds of data persisted will be displayed
-/// prominently in the release notes of newer versions. Users are advised to look for any such
+/// prominently in the release notes of new versions. Users are advised to look for any such
 /// changes and update their application accordingly.
 ///
-/// The resulting interface is designed to give the user greater control of what to persist and
-/// when to persist it. Custom implementations should consider and account for the possibility of
+/// The resulting interface is designed to give the user more control of what to persist and when
+/// to persist it. Custom implementations should consider and account for the possibility of
 /// partial or repeat writes, the atomicity of persistence operations, and the order of reads and
-/// writes among the fields of the change set. BDK imposes no strict requirements regarding these
-/// aspects but provides a straightforward solution in the case of [SQLite]. If implementing your
-/// own persistence, please refer to the documentation for [`WalletPersister`] and
-/// [`PersistedWallet`] for more information.
+/// writes among the fields of the change set. BDK comes with support for [SQLite] that handles
+/// the details for you and is recommended for many users. If implementing your own persistence,
+/// please refer to the documentation for [`WalletPersister`] and [`PersistedWallet`] for more
+/// information.
 ///
+/// [`change_descriptor`]: Self::change_descriptor
 /// [`descriptor`]: Self::descriptor
-/// [`network`]: Self::network
+/// [`local_chain`]: Self::local_chain
 /// [merged]: bdk_chain::Merge
+/// [`network`]: Self::network
 /// [`PersistedWallet`]: crate::PersistedWallet
 /// [SQLite]: bdk_chain::rusqlite_impl
 /// [`Update`]: crate::Update
