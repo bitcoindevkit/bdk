@@ -194,9 +194,9 @@ impl fmt::Display for LoadError {
             LoadError::MissingNetwork => write!(f, "loaded data is missing network type"),
             LoadError::MissingGenesis => write!(f, "loaded data is missing genesis hash"),
             LoadError::MissingDescriptor(k) => {
-                write!(f, "loaded data is missing descriptor for keychain {k:?}")
+                write!(f, "loaded data is missing descriptor for {k} keychain")
             }
-            LoadError::Mismatch(mismatch) => write!(f, "data mismatch: {mismatch:?}"),
+            LoadError::Mismatch(e) => write!(f, "{e}"),
         }
     }
 }
