@@ -12,6 +12,7 @@
 use alloc::boxed::Box;
 use chain::{ChainPosition, ConfirmationBlockTime};
 use core::convert::AsRef;
+use core::fmt;
 
 use bitcoin::transaction::{OutPoint, Sequence, TxOut};
 use bitcoin::{psbt, Weight};
@@ -33,6 +34,15 @@ impl KeychainKind {
         match self {
             KeychainKind::External => b'e',
             KeychainKind::Internal => b'i',
+        }
+    }
+}
+
+impl fmt::Display for KeychainKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KeychainKind::External => write!(f, "External"),
+            KeychainKind::Internal => write!(f, "Internal"),
         }
     }
 }
