@@ -232,6 +232,44 @@ pub enum LoadMismatch {
     },
 }
 
+impl fmt::Display for LoadMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LoadMismatch::Network { loaded, expected } => {
+                write!(
+                    f,
+                    "Network mismatch: loaded {}, expected {}",
+                    loaded, expected
+                )
+            }
+            LoadMismatch::Genesis { loaded, expected } => {
+                write!(
+                    f,
+                    "Genesis hash mismatch: loaded {}, expected {}",
+                    loaded, expected
+                )
+            }
+            LoadMismatch::Descriptor {
+                keychain,
+                loaded,
+                expected,
+            } => {
+                write!(
+                    f,
+                    "Descriptor mismatch for {} keychain: loaded {}, expected {}",
+                    keychain,
+                    loaded
+                        .as_ref()
+                        .map_or("None".to_string(), |d| d.to_string()),
+                    expected
+                        .as_ref()
+                        .map_or("None".to_string(), |d| d.to_string())
+                )
+            }
+        }
+    }
+}
+
 impl From<LoadMismatch> for LoadError {
     fn from(mismatch: LoadMismatch) -> Self {
         Self::Mismatch(mismatch)
