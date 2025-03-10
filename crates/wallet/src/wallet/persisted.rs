@@ -120,7 +120,7 @@ pub trait AsyncWalletPersister {
 #[derive(Debug)]
 pub struct PersistedWallet<P> {
     inner: Wallet,
-    marker: PhantomData<P>,
+    _marker: PhantomData<fn(&mut P)>,
 }
 
 impl<P> Deref for PersistedWallet<P> {
@@ -155,7 +155,7 @@ impl<P: WalletPersister> PersistedWallet<P> {
         }
         Ok(Self {
             inner,
-            marker: PhantomData,
+            _marker: PhantomData,
         })
     }
 
@@ -169,7 +169,7 @@ impl<P: WalletPersister> PersistedWallet<P> {
             .map(|opt| {
                 opt.map(|inner| PersistedWallet {
                     inner,
-                    marker: PhantomData,
+                    _marker: PhantomData,
                 })
             })
             .map_err(LoadWithPersistError::InvalidChangeSet)
@@ -214,7 +214,7 @@ impl<P: AsyncWalletPersister> PersistedWallet<P> {
         }
         Ok(Self {
             inner,
-            marker: PhantomData,
+            _marker: PhantomData,
         })
     }
 
@@ -230,7 +230,7 @@ impl<P: AsyncWalletPersister> PersistedWallet<P> {
             .map(|opt| {
                 opt.map(|inner| PersistedWallet {
                     inner,
-                    marker: PhantomData,
+                    _marker: PhantomData,
                 })
             })
             .map_err(LoadWithPersistError::InvalidChangeSet)

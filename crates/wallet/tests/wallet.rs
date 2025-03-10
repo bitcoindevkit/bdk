@@ -12,7 +12,9 @@ use bdk_wallet::psbt::PsbtUtils;
 use bdk_wallet::signer::{SignOptions, SignerError};
 use bdk_wallet::test_utils::*;
 use bdk_wallet::tx_builder::AddForeignUtxoError;
-use bdk_wallet::{AddressInfo, Balance, ChangeSet, Update, Wallet, WalletPersister, WalletTx};
+use bdk_wallet::{
+    AddressInfo, Balance, ChangeSet, PersistedWallet, Update, Wallet, WalletPersister, WalletTx,
+};
 use bdk_wallet::{KeychainKind, LoadError, LoadMismatch, LoadWithPersistError};
 use bitcoin::constants::{ChainHash, COINBASE_MATURITY};
 use bitcoin::hashes::Hash;
@@ -4209,6 +4211,7 @@ fn test_tx_cancellation() {
 fn test_thread_safety() {
     fn thread_safe<T: Send + Sync>() {}
     thread_safe::<Wallet>(); // compiles only if true
+    thread_safe::<PersistedWallet<bdk_chain::rusqlite::Connection>>();
 }
 
 #[test]
