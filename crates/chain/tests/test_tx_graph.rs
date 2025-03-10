@@ -115,7 +115,8 @@ fn insert_txouts() {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.clone().into(),
             anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
-            last_seen: [(hash!("tx2"), 1000000)].into()
+            last_seen: [(hash!("tx2"), 1000000)].into(),
+            last_evicted: [].into(),
         }
     );
 
@@ -168,7 +169,8 @@ fn insert_txouts() {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
             anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
-            last_seen: [(hash!("tx2"), 1000000)].into()
+            last_seen: [(hash!("tx2"), 1000000)].into(),
+            last_evicted: [].into(),
         }
     );
 }
