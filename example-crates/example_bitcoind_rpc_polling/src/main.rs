@@ -159,8 +159,7 @@ fn main() -> anyhow::Result<()> {
                 let graph_changeset = graph.apply_block_relevant(&emission.block, height);
                 db_stage.merge(ChangeSet {
                     local_chain: chain_changeset,
-                    tx_graph: graph_changeset.tx_graph,
-                    indexer: graph_changeset.indexer,
+                    tx_graph: graph_changeset,
                     ..Default::default()
                 });
 
@@ -183,7 +182,7 @@ fn main() -> anyhow::Result<()> {
                     last_print = Instant::now();
                     let synced_to = chain.tip();
                     let balance = {
-                        graph.graph().balance(
+                        graph.balance(
                             &*chain,
                             synced_to.block_id(),
                             graph.index.outpoints().iter().cloned(),
@@ -208,8 +207,7 @@ fn main() -> anyhow::Result<()> {
             {
                 let db = &mut *db.lock().unwrap();
                 db_stage.merge(ChangeSet {
-                    tx_graph: graph_changeset.tx_graph,
-                    indexer: graph_changeset.indexer,
+                    tx_graph: graph_changeset,
                     ..Default::default()
                 });
                 if let Some(changeset) = db_stage.take() {
@@ -298,8 +296,7 @@ fn main() -> anyhow::Result<()> {
 
                 db_stage.merge(ChangeSet {
                     local_chain: chain_changeset,
-                    tx_graph: graph_changeset.tx_graph,
-                    indexer: graph_changeset.indexer,
+                    tx_graph: graph_changeset,
                     ..Default::default()
                 });
 
@@ -320,7 +317,7 @@ fn main() -> anyhow::Result<()> {
                     last_print = Some(Instant::now());
                     let synced_to = chain.tip();
                     let balance = {
-                        graph.graph().balance(
+                        graph.balance(
                             &*chain,
                             synced_to.block_id(),
                             graph.index.outpoints().iter().cloned(),

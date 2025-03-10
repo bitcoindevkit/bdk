@@ -7,7 +7,7 @@ use bdk_chain::bitcoin::{constants::genesis_block, secp256k1::Secp256k1, Network
 use bdk_chain::indexer::keychain_txout::KeychainTxOutIndex;
 use bdk_chain::local_chain::LocalChain;
 use bdk_chain::miniscript::Descriptor;
-use bdk_chain::{BlockId, ConfirmationBlockTime, IndexedTxGraph, SpkIterator};
+use bdk_chain::{BlockId, ConfirmationBlockTime, SpkIterator, TxGraph};
 use bdk_testenv::anyhow;
 use bitcoin::Address;
 
@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
     let (descriptor, _) = Descriptor::parse_descriptor(&secp, EXTERNAL)?;
     let (change_descriptor, _) = Descriptor::parse_descriptor(&secp, INTERNAL)?;
     let (mut chain, _) = LocalChain::from_genesis_hash(genesis_block(NETWORK).block_hash());
-    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<&str>>::new({
+    let mut graph = TxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<&str>>::new({
         let mut index = KeychainTxOutIndex::default();
         index.insert_descriptor("external", descriptor.clone())?;
         index.insert_descriptor("internal", change_descriptor.clone())?;
@@ -88,7 +88,6 @@ fn main() -> anyhow::Result<()> {
     println!("\ntook: {}s", start.elapsed().as_secs());
     println!("Local tip: {}", chain.tip().height());
     let unspent: Vec<_> = graph
-        .graph()
         .filter_chain_unspents(
             &chain,
             chain.tip().block_id(),
