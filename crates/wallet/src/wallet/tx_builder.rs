@@ -602,8 +602,12 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     }
 
     /// Add a recipient to the internal list
-    pub fn add_recipient(&mut self, script_pubkey: ScriptBuf, amount: Amount) -> &mut Self {
-        self.params.recipients.push((script_pubkey, amount));
+    pub fn add_recipient(
+        &mut self,
+        script_pubkey: impl Into<ScriptBuf>,
+        amount: Amount,
+    ) -> &mut Self {
+        self.params.recipients.push((script_pubkey.into(), amount));
         self
     }
 
