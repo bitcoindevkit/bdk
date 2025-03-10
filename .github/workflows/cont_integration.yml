@@ -2,6 +2,8 @@ on: [push, pull_request]
 
 name: CI
 
+permissions: {}
+
 jobs:
 
   prepare:
