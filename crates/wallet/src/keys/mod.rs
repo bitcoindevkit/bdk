@@ -27,7 +27,7 @@ use bitcoin::secp256k1::{self, Secp256k1, Signing};
 use bitcoin::bip32;
 use bitcoin::{key::XOnlyPublicKey, Network, PrivateKey, PublicKey};
 
-use miniscript::descriptor::{Descriptor, DescriptorXKey, Wildcard};
+use miniscript::descriptor::{Descriptor, DescriptorMultiXKey, DescriptorXKey, Wildcard};
 pub use miniscript::descriptor::{
     DescriptorPublicKey, DescriptorSecretKey, KeyMap, SinglePriv, SinglePub, SinglePubKey,
     SortedMultiVec,
@@ -878,10 +878,20 @@ impl<Ctx: ScriptContext> IntoDescriptorKey<Ctx> for DescriptorPublicKey {
     fn into_descriptor_key(self) -> Result<DescriptorKey<Ctx>, KeyError> {
         let networks = match self {
             DescriptorPublicKey::Single(_) => any_network(),
-            DescriptorPublicKey::XPub(DescriptorXKey { xkey, .. }) if xkey.network.is_mainnet() => {
-                mainnet_network()
+            DescriptorPublicKey::XPub(DescriptorXKey { xkey, .. }) => {
+                if xkey.network.is_mainnet() {
+                    mainnet_network()
+                } else {
+                    test_networks()
+                }
             }
-            _ => test_networks(),
+            DescriptorPublicKey::MultiXPub(DescriptorMultiXKey { xkey, .. }) => {
+                if xkey.network.is_mainnet() {
+                    mainnet_network()
+                } else {
+                    test_networks()
+                }
+            }
         };
 
         Ok(DescriptorKey::from_public(self, networks))

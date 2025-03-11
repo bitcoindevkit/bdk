@@ -914,4 +914,48 @@ mod test {
         assert_eq!(psbt_input.redeem_script, Some(script.to_p2wsh()));
         assert_eq!(psbt_input.witness_script, Some(script));
     }
+
+    #[test]
+    fn test_into_wallet_descriptor_multi() -> anyhow::Result<()> {
+        // See <https://github.com/bitcoindevkit/bdk/issues/1845>
+        let secp = Secp256k1::new();
+
+        // multipath tpub
+        let descriptor_str = "wpkh([9a6a2580/84'/0'/0']tpubDDnGNapGEY6AZAdQbfRJgMg9fvz8pUBrLwvyvUqEgcUfgzM6zc2eVK4vY9x9L5FJWdX8WumXuLEDV5zDZnTfbn87vLe9XceCFwTu9so9Kks/<0;1>/*)";
+        let (descriptor, _key_map) = descriptor_str
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .expect("should parse multipath tpub");
+
+        assert!(descriptor.is_multipath());
+
+        // invalid network for descriptor
+        let descriptor_str = "wpkh([9a6a2580/84'/0'/0']xpub6DEzNop46vmxR49zYWFnMwmEfawSNmAMf6dLH5YKDY463twtvw1XD7ihwJRLPRGZJz799VPFzXHpZu6WdhT29WnaeuChS6aZHZPFmqczR5K/<0;1>/*)";
+        let res = descriptor_str.into_wallet_descriptor(&secp, Network::Testnet);
+
+        assert!(matches!(
+            res,
+            Err(DescriptorError::Key(KeyError::InvalidNetwork))
+        ));
+
+        // multipath xpub
+        let descriptor_str = "wpkh([9a6a2580/84'/0'/0']xpub6DEzNop46vmxR49zYWFnMwmEfawSNmAMf6dLH5YKDY463twtvw1XD7ihwJRLPRGZJz799VPFzXHpZu6WdhT29WnaeuChS6aZHZPFmqczR5K/<0;1>/*)";
+        let (descriptor, _key_map) = descriptor_str
+            .into_wallet_descriptor(&secp, Network::Bitcoin)
+            .expect("should parse multipath xpub");
+
+        assert!(descriptor.is_multipath());
+
+        // Miniscript can't make an extended private key with multiple paths into a public key.
+        // ref: <https://docs.rs/miniscript/12.3.0/miniscript/descriptor/enum.DescriptorSecretKey.html#method.to_public>
+        let descriptor_str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/<1;0>/*)";
+        assert!(matches!(
+            Descriptor::parse_descriptor(&secp, descriptor_str),
+            Err(miniscript::Error::Unexpected(..)),
+        ));
+        let _ = descriptor_str
+            .into_wallet_descriptor(&secp, Network::Testnet)
+            .unwrap_err();
+
+        Ok(())
+    }
 }
