@@ -101,9 +101,9 @@ jobs:
   check-wasm:
     needs: prepare
     name: Check WASM
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     env:
-      CC: clang-10
+      CC: clang-14
       CFLAGS: -I/usr/include
     steps:
       - name: Checkout
@@ -113,7 +113,7 @@ jobs:
         # Install a recent version of clang that supports wasm32
       - run: wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - || exit 1
       - run: sudo apt-get update || exit 1
-      - run: sudo apt-get install -y libclang-common-10-dev clang-10 libc6-dev-i386 || exit 1
+      - run: sudo apt-get install -y libclang-common-14-dev clang-14 libc6-dev-i386 || exit 1
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
