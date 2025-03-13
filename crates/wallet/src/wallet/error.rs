@@ -112,7 +112,7 @@ impl fmt::Display for CreateTxError {
             Self::Descriptor(e) => e.fmt(f),
             Self::Policy(e) => e.fmt(f),
             CreateTxError::SpendingPolicyRequired(keychain_kind) => {
-                write!(f, "Spending policy required: {:?}", keychain_kind)
+                write!(f, "Spending policy required: {}", keychain_kind)
             }
             CreateTxError::Version0 => {
                 write!(f, "Invalid version `0`")
@@ -127,12 +127,16 @@ impl fmt::Display for CreateTxError {
                 requested,
                 required,
             } => {
-                write!(f, "TxBuilder requested timelock of `{:?}`, but at least `{:?}` is required to spend from this script", required, requested)
+                if requested.is_block_height() && required.is_block_height() {
+                    write!(f, "TxBuilder requested timelock of `{}` blocks, but at least `{}` blocks are required to spend from this script", required, requested)
+                } else {
+                    write!(f, "TxBuilder requested timelock of `{}` seconds, but at least `{}` seconds are required to spend from this script", required, requested)
+                }
             }
             CreateTxError::RbfSequenceCsv { sequence, csv } => {
                 write!(
                     f,
-                    "Cannot enable RBF with nSequence `{:?}` given a required OP_CSV of `{:?}`",
+                    "Cannot enable RBF with nSequence `{}` given a required OP_CSV of `{}`",
                     sequence, csv
                 )
             }
