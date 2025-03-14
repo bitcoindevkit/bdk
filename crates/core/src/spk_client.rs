@@ -320,22 +320,14 @@ impl<I> SyncRequest<I> {
         self.chain_tip.clone()
     }
 
-    /// Advances the sync request and returns the next [`ScriptBuf`].
-    ///
-    /// Returns [`None`] when there are no more scripts remaining in the request.
-    pub fn next_spk(&mut self) -> Option<ScriptBuf> {
-        let (i, spk) = self.spks.pop_front()?;
-        self.spks_consumed += 1;
-        self._call_inspect(SyncItem::Spk(i, spk.as_script()));
-        Some(spk)
-    }
-
     /// Advances the sync request and returns the next [`ScriptBuf`] with corresponding [`Txid`]
     /// history.
     ///
     /// Returns [`None`] when there are no more scripts remaining in the request.
     pub fn next_spk_with_expected_txids(&mut self) -> Option<SpkWithExpectedTxids> {
-        let next_spk = self.next_spk()?;
+        let (i, next_spk) = self.spks.pop_front()?;
+        self.spks_consumed += 1;
+        self._call_inspect(SyncItem::Spk(i, next_spk.as_script()));
         let spk_history = self
             .spk_expected_txids
             .get(&next_spk)
@@ -365,11 +357,6 @@ impl<I> SyncRequest<I> {
         self.outpoints_consumed += 1;
         self._call_inspect(SyncItem::OutPoint(outpoint));
         Some(outpoint)
-    }
-
-    /// Iterate over [`ScriptBuf`]s contained in this request.
-    pub fn iter_spks(&mut self) -> impl ExactSizeIterator<Item = ScriptBuf> + '_ {
-        SyncIter::<I, ScriptBuf>::new(self)
     }
 
     /// Iterate over [`ScriptBuf`]s with corresponding [`Txid`] histories contained in this request.
@@ -604,19 +591,6 @@ impl<'r, I, Item> SyncIter<'r, I, Item> {
 }
 
 impl<'r, I, Item> ExactSizeIterator for SyncIter<'r, I, Item> where SyncIter<'r, I, Item>: Iterator {}
-
-impl<I> Iterator for SyncIter<'_, I, ScriptBuf> {
-    type Item = ScriptBuf;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.request.next_spk()
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.request.spks.len();
-        (remaining, Some(remaining))
-    }
-}
 
 impl<I> Iterator for SyncIter<'_, I, SpkWithExpectedTxids> {
     type Item = SpkWithExpectedTxids;
