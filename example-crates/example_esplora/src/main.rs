@@ -225,7 +225,11 @@ fn main() -> anyhow::Result<()> {
             {
                 let graph = graph.lock().unwrap();
                 let chain = chain.lock().unwrap();
-
+                request = request.expected_spk_txids(graph.list_expected_spk_txids(
+                    &*chain,
+                    local_tip.block_id(),
+                    ..,
+                ));
                 if *all_spks {
                     request = request.spks_with_indexes(graph.index.revealed_spks(..));
                 }
