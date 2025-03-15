@@ -215,6 +215,11 @@ fn main() -> anyhow::Result<()> {
                         eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
                     });
 
+            request = request.expected_spk_txids(graph.list_expected_spk_txids(
+                &*chain,
+                chain_tip.block_id(),
+                ..,
+            ));
             if all_spks {
                 request = request.spks_with_indexes(graph.index.revealed_spks(..));
             }

@@ -96,7 +96,7 @@ jobs:
       - name: Check esplora
         working-directory: ./crates/esplora
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
+        run: cargo check --no-default-features --features bdk_chain/hashbrown
 
   check-wasm:
     needs: prepare
@@ -128,7 +128,7 @@ jobs:
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
       - name: Check esplora
         working-directory: ./crates/esplora
-        run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown,async
+        run: cargo check --target wasm32-unknown-unknown --no-default-features --features bdk_core/hashbrown,async
 
   fmt:
     needs: prepare
