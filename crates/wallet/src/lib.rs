@@ -25,6 +25,7 @@ pub extern crate miniscript;
 pub extern crate serde;
 pub extern crate serde_json;
 
+pub mod bip322;
 pub mod descriptor;
 pub mod keys;
 pub mod psbt;
