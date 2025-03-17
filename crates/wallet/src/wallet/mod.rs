@@ -2502,6 +2502,12 @@ fn create_indexer(
                     InsertDescriptorError::KeychainAlreadyAssigned { .. } => {
                         unreachable!("this is the first time we're assigning internal")
                     }
+                    InsertDescriptorError::Miniscript(err) => {
+                        crate::descriptor::error::Error::Miniscript(err)
+                    }
+                    InsertDescriptorError::HardenedDerivationXpub => {
+                        crate::descriptor::error::Error::HardenedDerivationXpub
+                    }
                 }
             })?);
     }
