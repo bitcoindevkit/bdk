@@ -1,6 +1,4 @@
-use serde_json::json;
 use std::cmp;
-use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::str::FromStr;
@@ -10,11 +8,10 @@ use anyhow::bail;
 use anyhow::Context;
 use bdk_chain::bitcoin::{
     absolute, address::NetworkUnchecked, bip32, consensus, constants, hex::DisplayHex, relative,
-    secp256k1::Secp256k1, transaction, Address, Amount, Network, NetworkKind, PrivateKey, Psbt,
-    PublicKey, Sequence, Transaction, TxIn, TxOut,
+    secp256k1::Secp256k1, Address, Amount, Network, NetworkKind, Psbt, Transaction, TxOut, Txid,
 };
 use bdk_chain::miniscript::{
-    descriptor::{DescriptorSecretKey, SinglePubKey},
+    descriptor::DefiniteDescriptorKey,
     plan::{Assets, Plan},
     psbt::PsbtExt,
     Descriptor, DescriptorPublicKey, ForEachKey,
@@ -27,12 +24,14 @@ use bdk_chain::{
     tx_graph, ChainOracle, DescriptorExt, FullTxOut, IndexedTxGraph, Merge,
 };
 use bdk_coin_select::{
-    metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
-    TargetFee, TargetOutputs,
+    metrics, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target, TargetFee,
+    TargetOutputs,
 };
 use bdk_file_store::Store;
+use bdk_tx::{self, DataProvider, Signer};
 use clap::{Parser, Subcommand};
 use rand::prelude::*;
+use serde_json::json;
 
 pub use anyhow;
 pub use clap;
@@ -263,7 +262,7 @@ pub fn create_tx<O: ChainOracle>(
     graph: &mut KeychainTxGraph,
     chain: &O,
     assets: &Assets,
-    cs_algorithm: CoinSelectionAlgo,
+    coin_selection: CoinSelectionAlgo,
     address: Address,
     value: u64,
     feerate: f32,
@@ -271,13 +270,11 @@ pub fn create_tx<O: ChainOracle>(
 where
     O::Error: std::error::Error + Send + Sync + 'static,
 {
-    let mut changeset = keychain_txout::ChangeSet::default();
-
     // get planned utxos
     let mut plan_utxos = planned_utxos(graph, chain, assets)?;
 
-    // sort utxos if cs-algo requires it
-    match cs_algorithm {
+    // sort utxos if coin selection requires it
+    match coin_selection {
         CoinSelectionAlgo::LargestFirst => {
             plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.txout.value))
         }
@@ -301,11 +298,8 @@ where
         })
         .collect();
 
-    // create recipient output(s)
-    let mut outputs = vec![TxOut {
-        value: Amount::from_sat(value),
-        script_pubkey: address.script_pubkey(),
-    }];
+    // if this is a segwit spend, don't bother setting the input `non_witness_utxo`
+    let only_witness_utxo = candidates.iter().all(|c| c.is_segwit);
 
     let (change_keychain, _) = graph
         .index
@@ -313,16 +307,11 @@ where
         .last()
         .expect("must have a keychain");
 
-    let ((change_index, change_script), index_changeset) = graph
+    // get drain script
+    let ((drain_index, drain_spk), index_changeset) = graph
         .index
         .next_unused_spk(change_keychain)
         .expect("Must exist");
-    changeset.merge(index_changeset);
-
-    let mut change_output = TxOut {
-        value: Amount::ZERO,
-        script_pubkey: change_script,
-    };
 
     let change_desc = graph
         .index
@@ -330,14 +319,29 @@ where
         .find(|(k, _)| k == &change_keychain)
         .expect("must exist")
         .1;
+    let min_value = 3 * change_desc.dust_value().to_sat();
 
-    let min_drain_value = change_desc.dust_value().to_sat();
+    let change_policy = ChangePolicy {
+        min_value,
+        drain_weights: DrainWeights::TR_KEYSPEND,
+    };
 
+    let mut builder = bdk_tx::Builder::new();
+
+    let locktime = assets
+        .absolute_timelock
+        .unwrap_or(absolute::LockTime::from_consensus(
+            chain.get_chain_tip()?.height,
+        ));
+    builder.locktime(locktime);
+
+    // fund outputs
+    builder.add_outputs([(address.script_pubkey(), Amount::from_sat(value))]);
     let target = Target {
         outputs: TargetOutputs::fund_outputs(
-            outputs
-                .iter()
-                .map(|output| (output.weight().to_wu(), output.value.to_sat())),
+            builder
+                .target_outputs()
+                .map(|(w, v)| (w.to_wu(), v.to_sat())),
         ),
         fee: TargetFee {
             rate: FeeRate::from_sat_per_vb(feerate),
@@ -345,76 +349,58 @@ where
         },
     };
 
-    let change_policy = ChangePolicy {
-        min_value: min_drain_value,
-        drain_weights: DrainWeights::TR_KEYSPEND,
-    };
-
-    // run coin selection
+    // select coins
     let mut selector = CoinSelector::new(&candidates);
-    match cs_algorithm {
-        CoinSelectionAlgo::BranchAndBound => {
-            let metric = LowestFee {
-                target,
-                long_term_feerate: FeeRate::from_sat_per_vb(10.0),
-                change_policy,
-            };
-            match selector.run_bnb(metric, 10_000) {
-                Ok(_) => {}
-                Err(_) => selector
-                    .select_until_target_met(target)
-                    .context("selecting coins")?,
-            }
+    if let CoinSelectionAlgo::BranchAndBound = coin_selection {
+        let metric = metrics::Changeless {
+            target,
+            change_policy,
+        };
+        if selector.run_bnb(metric, 10_000).is_err() {
+            selector.select_until_target_met(target)?;
         }
-        _ => selector
-            .select_until_target_met(target)
-            .context("selecting coins")?,
+    } else {
+        selector.select_until_target_met(target)?;
     }
 
-    // get the selected plan utxos
-    let selected: Vec<_> = selector.apply_selection(&plan_utxos).collect();
+    // apply selection
+    let selection = selector
+        .apply_selection(&plan_utxos)
+        .cloned()
+        .map(|(plan, txo)| bdk_tx::PlanUtxo {
+            plan,
+            outpoint: txo.outpoint,
+            txout: txo.txout,
+        });
+    builder.add_inputs(selection);
 
-    // if the selection tells us to use change and the change value is sufficient, we add it as an output
-    let mut change_info = Option::<ChangeInfo>::None;
+    // if the selection tells us to use change, we add it as an output
+    // and fill in the change_info.
+    let mut change_info = None;
     let drain = selector.drain(target, change_policy);
-    if drain.value > min_drain_value {
-        change_output.value = Amount::from_sat(drain.value);
-        outputs.push(change_output);
+    if drain.is_some() {
+        builder.add_change_output(drain_spk, Amount::from_sat(drain.value));
         change_info = Some(ChangeInfo {
             change_keychain,
-            indexer: changeset,
-            index: change_index,
+            indexer: index_changeset,
+            index: drain_index,
         });
-        outputs.shuffle(&mut thread_rng());
     }
 
-    let unsigned_tx = Transaction {
-        version: transaction::Version::TWO,
-        lock_time: assets
-            .absolute_timelock
-            .unwrap_or(absolute::LockTime::from_height(
-                chain.get_chain_tip()?.height,
-            )?),
-        input: selected
-            .iter()
-            .map(|(plan, utxo)| TxIn {
-                previous_output: utxo.outpoint,
-                sequence: plan
-                    .relative_timelock
-                    .map_or(Sequence::ENABLE_RBF_NO_LOCKTIME, Sequence::from),
-                ..Default::default()
-            })
-            .collect(),
-        output: outputs,
+    // build psbt
+    let mut provider = Provider {
+        graph,
+        rng: &mut thread_rng(),
     };
 
-    // update psbt with plan
-    let mut psbt = Psbt::from_unsigned_tx(unsigned_tx)?;
-    for (i, (plan, utxo)) in selected.iter().enumerate() {
-        let psbt_input = &mut psbt.inputs[i];
-        plan.update_psbt_input(psbt_input);
-        psbt_input.witness_utxo = Some(utxo.txout.clone());
-    }
+    let mut updater = builder.build_psbt(&mut provider)?;
+    let opt = bdk_tx::UpdateOptions {
+        only_witness_utxo,
+        update_with_descriptor: true,
+        ..Default::default()
+    };
+    updater.update_psbt(&provider, opt)?;
+    let (psbt, _) = updater.into_finalizer();
 
     Ok((psbt, change_info))
 }
@@ -684,26 +670,11 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 let secp = Secp256k1::new();
                 let (_, keymap) = Descriptor::parse_descriptor(&secp, &desc_str)?;
                 if keymap.is_empty() {
-                    bail!("unable to sign")
+                    bail!("unable to sign");
                 }
-
-                // note: we're only looking at the first entry in the keymap
-                // the idea is to find something that impls `GetKey`
-                let sign_res = match keymap.iter().next().expect("not empty") {
-                    (DescriptorPublicKey::Single(single_pub), DescriptorSecretKey::Single(prv)) => {
-                        let pk = match single_pub.key {
-                            SinglePubKey::FullKey(pk) => pk,
-                            SinglePubKey::XOnly(_) => unimplemented!("single xonly pubkey"),
-                        };
-                        let keys: HashMap<PublicKey, PrivateKey> = [(pk, prv.key)].into();
-                        psbt.sign(&keys, &secp)
-                    }
-                    (_, DescriptorSecretKey::XPrv(k)) => psbt.sign(&k.xkey, &secp),
-                    _ => unimplemented!("multi xkey signer"),
-                };
-
-                let _ = sign_res
-                    .map_err(|errors| anyhow::anyhow!("failed to sign PSBT {:?}", errors))?;
+                let _ = psbt
+                    .sign(&Signer(keymap), &secp)
+                    .map_err(|(_, errors)| anyhow::anyhow!("failed to sign PSBT {:?}", errors))?;
 
                 let mut obj = serde_json::Map::new();
                 obj.insert("psbt".to_string(), json!(psbt.to_string()));
@@ -773,6 +744,36 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 Ok(())
             }
         },
+    }
+}
+
+/// Helper struct for providing transaction data to tx builder
+struct Provider<'a> {
+    graph: &'a KeychainTxGraph,
+    rng: &'a mut dyn RngCore,
+}
+
+impl DataProvider for Provider<'_> {
+    fn get_tx(&self, txid: Txid) -> Option<Transaction> {
+        self.graph
+            .graph()
+            .get_tx(txid)
+            .map(|tx| tx.as_ref().clone())
+    }
+
+    fn get_descriptor_for_txout(&self, txout: &TxOut) -> Option<Descriptor<DefiniteDescriptorKey>> {
+        let &(keychain, index) = self.graph.index.index_of_spk(txout.script_pubkey.clone())?;
+        let desc = self
+            .graph
+            .index
+            .get_descriptor(keychain)
+            .expect("must have descriptor");
+        desc.at_derivation_index(index).ok()
+    }
+
+    fn sort_transaction(&mut self, tx: &mut Transaction) {
+        tx.input.shuffle(self.rng);
+        tx.output.shuffle(self.rng);
     }
 }
 
