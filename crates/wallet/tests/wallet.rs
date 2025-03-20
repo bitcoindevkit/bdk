@@ -47,6 +47,61 @@ const P2WPKH_FAKE_WITNESS_SIZE: usize = 106;
 const DB_MAGIC: &[u8] = &[0x21, 0x24, 0x48];
 
 #[test]
+fn test_create_with_params_multipath() {
+    // `Wallet::create_single` parses a multipath descriptor and returns
+    // a wallet with 2 keychains
+    let xpub = "xpub6DEzNop46vmxR49zYWFnMwmEfawSNmAMf6dLH5YKDY463twtvw1XD7ihwJRLPRGZJz799VPFzXHpZu6WdhT29WnaeuChS6aZHZPFmqczR5K";
+
+    // test two different multipaths: <0;1> and <23;19>
+    for item in [[0, 1], [23, 19]] {
+        let i = item[0];
+        let j = item[1];
+
+        let desc_str = format!("wpkh({xpub}/<{i};{j}>/*)");
+        let wallet = Wallet::create_single(desc_str)
+            .create_wallet_no_persist()
+            .unwrap();
+
+        assert_eq!(wallet.keychains().count(), 2);
+
+        use KeychainKind::*;
+        // We should have parsed the descriptor into single descriptors
+        for (i, keychain) in item.into_iter().zip([External, Internal]) {
+            let desc = wallet.public_descriptor(keychain);
+            assert!(!desc.is_multipath(), "we should have split the descriptor");
+            assert!(!desc.to_string().contains(['<', '>', ';']));
+            // Steps in the multipath go to their respective keychains
+            let parsed = format!("{i}/*");
+            assert!(desc.to_string().contains(&parsed));
+        }
+    }
+}
+
+#[test]
+fn test_create_with_params_error_multipath() {
+    // `create_with_params` rejects a multipath *change* descriptor
+    let (desc, _) = get_test_wpkh_and_change_desc();
+    let multipath = get_test_wpkh_multipath();
+    let res = Wallet::create(desc, multipath)
+        .network(Network::Testnet)
+        .create_wallet_no_persist();
+    assert!(matches!(res, Err(DescriptorError::MultiPath)));
+
+    // rejects multipaths of mismatched length
+    let pk_0 = "xpub661MyMwAqRbcF3yVrV2KyYetLMYA5mCbv4BhrKwUrFE9LZM6JRR1AEt8Jq4V4C8LwtTke6YEEdCZqgXp85YRk2j74EfJKhe3QybQ9kcUjs4";
+    let pk_1 = "xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL";
+    let pk_2 = "xpub661MyMwAqRbcGDZQUKLqmWodYLcoBQnQH33yYkkF3jjxeLvY8qr2wWGEWkiKFaaQfJCoi3HeEq3Dc5DptfbCyjD38fNhSqtKc1UHaP4ba3t";
+    let desc_str = format!("tr({pk_0}/*,{{pk({pk_1}/<1;2;3>/*),pk({pk_2}/<1;2>/*)}})");
+    let res = Wallet::create_single(desc_str).create_wallet_no_persist();
+    assert!(matches!(
+        res,
+        Err(DescriptorError::Miniscript(
+            miniscript::Error::MultipathDescLenMismatch
+        ))
+    ));
+}
+
+#[test]
 fn wallet_is_persisted() -> anyhow::Result<()> {
     fn run<Db, CreateDb, OpenDb>(
         filename: &str,
