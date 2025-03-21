@@ -560,7 +560,7 @@ mod test {
         BlockId,
     };
     use bdk_core::{bitcoin, ConfirmationBlockTime};
-    use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
+    use bdk_testenv::{anyhow, TestEnv};
     use esplora_client::Builder;
 
     use crate::async_ext::{chain_update, fetch_latest_blocks};
@@ -577,7 +577,7 @@ mod test {
         let env = TestEnv::new()?;
         let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
         let client = Builder::new(base_url.as_str()).build_async()?;
-        let initial_height = env.rpc_client().get_block_count()? as u32;
+        let initial_height = env.rpc_client().get_block_count()?.into_model().0 as u32;
 
         let mine_to = 16;
         let _ = env.mine_blocks((mine_to - initial_height) as usize, None)?;
@@ -673,7 +673,11 @@ mod test {
                             ConfirmationBlockTime {
                                 block_id: BlockId {
                                     height,
-                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                    hash: env
+                                        .bitcoind
+                                        .client
+                                        .get_block_hash(height as _)?
+                                        .block_hash()?,
                                 },
                                 confirmation_time: height as _,
                             },
@@ -713,7 +717,11 @@ mod test {
                             ConfirmationBlockTime {
                                 block_id: BlockId {
                                     height,
-                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                    hash: env
+                                        .bitcoind
+                                        .client
+                                        .get_block_hash(height as _)?
+                                        .block_hash()?,
                                 },
                                 confirmation_time: height as _,
                             },
