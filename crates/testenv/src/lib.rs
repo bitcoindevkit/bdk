@@ -5,21 +5,17 @@ pub mod utils;
 use bdk_chain::{
     bitcoin::{
         address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash,
-        secp256k1::rand::random, transaction, Address, Amount, Block, BlockHash, CompactTarget,
-        ScriptBuf, ScriptHash, Transaction, TxIn, TxOut, Txid,
+        secp256k1::rand::random, transaction, Address, Amount, Block, BlockHash, ScriptBuf,
+        ScriptHash, Transaction, TxIn, TxOut, Txid,
     },
     local_chain::CheckPoint,
 };
-use bitcoincore_rpc::{
-    bitcoincore_rpc_json::{GetBlockTemplateModes, GetBlockTemplateRules},
-    RpcApi,
-};
-use electrsd::bitcoind::anyhow::Context;
+use electrsd::corepc_node::{anyhow::Context, TemplateRequest, TemplateRules};
 
 pub use electrsd;
-pub use electrsd::bitcoind;
-pub use electrsd::bitcoind::anyhow;
-pub use electrsd::bitcoind::bitcoincore_rpc;
+pub use electrsd::corepc_client;
+pub use electrsd::corepc_node;
+pub use electrsd::corepc_node::anyhow;
 pub use electrsd::electrum_client;
 use electrsd::electrum_client::ElectrumApi;
 use std::time::Duration;
@@ -27,7 +23,7 @@ use std::time::Duration;
 /// Struct for running a regtest environment with a single `bitcoind` node with an `electrs`
 /// instance connected to it.
 pub struct TestEnv {
-    pub bitcoind: electrsd::bitcoind::BitcoinD,
+    pub bitcoind: electrsd::corepc_node::Node,
     pub electrsd: electrsd::ElectrsD,
 }
 
@@ -35,7 +31,7 @@ pub struct TestEnv {
 #[derive(Debug)]
 pub struct Config<'a> {
     /// [`bitcoind::Conf`]
-    pub bitcoind: bitcoind::Conf<'a>,
+    pub bitcoind: corepc_node::Conf<'a>,
     /// [`electrsd::Conf`]
     pub electrsd: electrsd::Conf<'a>,
 }
@@ -45,7 +41,7 @@ impl Default for Config<'_> {
     /// which is required for testing `bdk_esplora`.
     fn default() -> Self {
         Self {
-            bitcoind: bitcoind::Conf::default(),
+            bitcoind: corepc_node::Conf::default(),
             electrsd: {
                 let mut conf = electrsd::Conf::default();
                 conf.http_enabled = true;
@@ -65,11 +61,11 @@ impl TestEnv {
     pub fn new_with_config(config: Config) -> anyhow::Result<Self> {
         let bitcoind_exe = match std::env::var("BITCOIND_EXE") {
             Ok(path) => path,
-            Err(_) => bitcoind::downloaded_exe_path().context(
+            Err(_) => corepc_node::downloaded_exe_path().context(
                 "you need to provide an env var BITCOIND_EXE or specify a bitcoind version feature",
             )?,
         };
-        let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &config.bitcoind)?;
+        let bitcoind = corepc_node::Node::with_conf(bitcoind_exe, &config.bitcoind)?;
 
         let electrs_exe = match std::env::var("ELECTRS_EXE") {
             Ok(path) => path,
@@ -87,7 +83,7 @@ impl TestEnv {
     }
 
     /// Exposes the [`RpcApi`] calls from [`bitcoincore_rpc`].
-    pub fn rpc_client(&self) -> &impl RpcApi {
+    pub fn rpc_client(&self) -> &corepc_node::Client {
         &self.bitcoind.client
     }
 
@@ -118,26 +114,27 @@ impl TestEnv {
     ) -> anyhow::Result<Vec<BlockHash>> {
         let coinbase_address = match address {
             Some(address) => address,
-            None => self
-                .bitcoind
-                .client
-                .get_new_address(None, None)?
-                .assume_checked(),
+            None => self.bitcoind.client.new_address()?,
         };
         let block_hashes = self
             .bitcoind
             .client
-            .generate_to_address(count as _, &coinbase_address)?;
+            .generate_to_address(count as _, &coinbase_address)?
+            .into_model()?
+            .0;
         Ok(block_hashes)
     }
 
     /// Mine a block that is guaranteed to be empty even with transactions in the mempool.
     pub fn mine_empty_block(&self) -> anyhow::Result<(usize, BlockHash)> {
-        let bt = self.bitcoind.client.get_block_template(
-            GetBlockTemplateModes::Template,
-            &[GetBlockTemplateRules::SegWit],
-            &[],
-        )?;
+        let request = TemplateRequest {
+            rules: vec![TemplateRules::Segwit],
+        };
+        let bt = self
+            .bitcoind
+            .client
+            .get_block_template(&request)?
+            .into_model()?;
 
         let txdata = vec![Transaction {
             version: transaction::Version::ONE,
@@ -146,7 +143,7 @@ impl TestEnv {
                 previous_output: bdk_chain::bitcoin::OutPoint::default(),
                 script_sig: ScriptBuf::builder()
                     .push_int(bt.height as _)
-                    // randomn number so that re-mining creates unique block
+                    // random number so that re-mining creates unique block
                     .push_int(random())
                     .into_script(),
                 sequence: bdk_chain::bitcoin::Sequence::default(),
@@ -158,19 +155,16 @@ impl TestEnv {
             }],
         }];
 
-        let bits: [u8; 4] = bt
-            .bits
-            .clone()
-            .try_into()
-            .expect("rpc provided us with invalid bits");
-
         let mut block = Block {
             header: Header {
-                version: bdk_chain::bitcoin::block::Version::default(),
+                version: bt.version,
                 prev_blockhash: bt.previous_block_hash,
                 merkle_root: TxMerkleNode::all_zeros(),
-                time: Ord::max(bt.min_time, std::time::UNIX_EPOCH.elapsed()?.as_secs()) as u32,
-                bits: CompactTarget::from_consensus(u32::from_be_bytes(bits)),
+                time: Ord::max(
+                    bt.min_time,
+                    std::time::UNIX_EPOCH.elapsed()?.as_secs() as u32,
+                ),
+                bits: bt.bits,
                 nonce: 0,
             },
             txdata,
@@ -186,6 +180,7 @@ impl TestEnv {
         }
 
         self.bitcoind.client.submit_block(&block)?;
+
         Ok((bt.height as usize, block.block_hash()))
     }
 
@@ -238,14 +233,15 @@ impl TestEnv {
 
     /// Invalidate a number of blocks of a given size `count`.
     pub fn invalidate_blocks(&self, count: usize) -> anyhow::Result<()> {
-        let mut hash = self.bitcoind.client.get_best_block_hash()?;
+        let mut hash = self.bitcoind.client.get_best_block_hash()?.block_hash()?;
         for _ in 0..count {
             let prev_hash = self
                 .bitcoind
                 .client
-                .get_block_info(&hash)?
-                .previousblockhash;
-            self.bitcoind.client.invalidate_block(&hash)?;
+                .get_block_verbose_one(hash)?
+                .into_model()?
+                .previous_block_hash;
+            self.bitcoind.client.invalidate_block(hash)?;
             match prev_hash {
                 Some(prev_hash) => hash = prev_hash,
                 None => break,
@@ -290,26 +286,30 @@ impl TestEnv {
         let txid = self
             .bitcoind
             .client
-            .send_to_address(address, amount, None, None, None, None, None, None)?;
+            .send_to_address(address, amount)?
+            .txid()?;
         Ok(txid)
     }
 
     /// Create a checkpoint linked list of all the blocks in the chain.
     pub fn make_checkpoint_tip(&self) -> CheckPoint<BlockHash> {
         CheckPoint::from_blocks((0_u32..).map_while(|height| {
-            self.bitcoind
-                .client
-                .get_block_hash(height as u64)
+            self.get_block_hash(height as u64)
                 .ok()
-                .map(|hash| (height, hash))
+                .map(|block_hash| (height, block_hash))
         }))
         .expect("must craft tip")
     }
 
     /// Get the genesis hash of the blockchain.
     pub fn genesis_hash(&self) -> anyhow::Result<BlockHash> {
-        let hash = self.bitcoind.client.get_block_hash(0)?;
+        let hash = self.bitcoind.client.get_block_hash(0)?.into_model()?.0;
         Ok(hash)
+    }
+
+    /// Get block hash by `height` from the `bitcoind` client.
+    pub fn get_block_hash(&self, height: u64) -> anyhow::Result<BlockHash> {
+        Ok(self.bitcoind.client.get_block_hash(height)?.block_hash()?)
     }
 }
 
@@ -318,7 +318,7 @@ impl TestEnv {
 mod test {
     use crate::TestEnv;
     use core::time::Duration;
-    use electrsd::bitcoind::{anyhow::Result, bitcoincore_rpc::RpcApi};
+    use electrsd::corepc_node::anyhow::Result;
 
     /// This checks that reorgs initiated by `bitcoind` is detected by our `electrsd` instance.
     #[test]
@@ -328,7 +328,7 @@ mod test {
         // Mine some blocks.
         env.mine_blocks(101, None)?;
         env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
-        let height = env.bitcoind.client.get_block_count()?;
+        let height = env.bitcoind.client.get_block_count()?.into_model().0;
         let blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
             .collect::<Result<Vec<_>, _>>()?;
@@ -336,7 +336,7 @@ mod test {
         // Perform reorg on six blocks.
         env.reorg(6)?;
         env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
-        let reorged_height = env.bitcoind.client.get_block_count()?;
+        let reorged_height = env.bitcoind.client.get_block_count()?.into_model().0;
         let reorged_blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
             .collect::<Result<Vec<_>, _>>()?;
