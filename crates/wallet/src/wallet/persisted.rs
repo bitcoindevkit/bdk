@@ -363,13 +363,15 @@ pub enum CreateWithPersistError<E> {
 impl<E: fmt::Display> fmt::Display for CreateWithPersistError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Persist(err) => fmt::Display::fmt(err, f),
+            Self::Persist(err) => write!(f, "Persistence error: {}", err),
             Self::DataAlreadyExists(changeset) => write!(
                 f,
                 "Cannot create wallet in persister which already contains wallet data: {:?}",
                 changeset
             ),
-            Self::Descriptor(err) => fmt::Display::fmt(&err, f),
+            Self::Descriptor(err) => {
+                write!(f, "Cannot construct wallet from loaded changeset: {}", err)
+            }
         }
     }
 }
