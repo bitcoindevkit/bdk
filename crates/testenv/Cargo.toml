@@ -26,7 +26,7 @@ bdk_testenv = { path = "." }
 [features]
 default = ["std", "download"]
 download = ["electrsd/corepc-node_28_2", "electrsd/esplora_a33e97e1"]
-std = ["bdk_chain/std", "bitcoin/rand-std"]
+std = ["bdk_chain/std"]
 serde = ["bdk_chain/serde"]
 
 [package.metadata.docs.rs]
