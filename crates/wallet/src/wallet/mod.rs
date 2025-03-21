@@ -44,7 +44,7 @@ use bitcoin::{
     Sequence, Transaction, TxOut, Txid, Weight, Witness,
 };
 use miniscript::{
-    descriptor::KeyMap,
+    descriptor::{Descriptor, KeyMap},
     psbt::{PsbtExt, PsbtInputExt, PsbtInputSatisfier},
 };
 use rand_core::RngCore;
@@ -281,24 +281,56 @@ impl std::error::Error for ApplyBlockError {}
 pub type WalletTx<'a> = CanonicalTx<'a, Arc<Transaction>, ConfirmationBlockTime>;
 
 impl Wallet {
-    /// Build a new single descriptor [`Wallet`].
+    /// Build a [`Wallet`] from a single descriptor.
     ///
     /// If you have previously created a wallet, use [`load`](Self::load) instead.
     ///
+    /// The structure of the resulting [`Wallet`] depends on whether the provided descriptor
+    /// contains multiple derivation paths. If the parsed descriptor is one of [`Single`] or
+    /// [`XPub`], the returned wallet will have only 1 keychain, the [`External`] kind. See
+    /// details and usage considerations below.
+    ///
+    /// If the descriptor is a [`MultiXPub`] we automatically attempt to parse it further
+    /// into two single descriptors and return a wallet with both external and internal keychains.
+    /// The index values of the multipath specifier must not be the same, and any indexes of a
+    /// multipath longer than 2 elements are discarded. A wallet created this way is
+    /// functionally equivalent to splitting a multipath descriptor into single descriptors
+    /// and passing them to [`Wallet::create`]. Note also that the [`ChangeSet`] produced
+    /// by such a wallet will have the [`change_descriptor`] set.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// // Create a wallet from a multipath descriptor string
+    /// # use bdk_wallet::Wallet;
+    /// # use bdk_wallet::KeychainKind::*;
+    /// # use bitcoin::Network;
+    /// # use bdk_wallet::rusqlite::Connection;
+    /// let mut db = Connection::open_in_memory()?;
+    /// let descriptor_str = "wpkh(xpub6DEzNop46vmxR49zYWFnMwmEfawSNmAMf6dLH5YKDY463twtvw1XD7ihwJRLPRGZJz799VPFzXHpZu6WdhT29WnaeuChS6aZHZPFmqczR5K/<0;1>/*)";
+    /// let wallet = Wallet::create_single(descriptor_str).create_wallet(&mut db)?;
+    /// assert_eq!(
+    ///     wallet.public_descriptor(External).to_string(),
+    ///     "wpkh(xpub6DEzNop46vmxR49zYWFnMwmEfawSNmAMf6dLH5YKDY463twtvw1XD7ihwJRLPRGZJz799VPFzXHpZu6WdhT29WnaeuChS6aZHZPFmqczR5K/0/*)#tp6xtjkj",
+    /// );
+    /// assert_eq!(
+    ///     wallet.public_descriptor(Internal).to_string(),
+    ///     "wpkh(xpub6DEzNop46vmxR49zYWFnMwmEfawSNmAMf6dLH5YKDY463twtvw1XD7ihwJRLPRGZJz799VPFzXHpZu6WdhT29WnaeuChS6aZHZPFmqczR5K/1/*)#64l8k8x2",
+    /// );
+    /// # Ok::<_, anyhow::Error>(())
+    /// ```
+    ///
     /// # Note
     ///
-    /// Only use this method when creating a wallet designed to be used with a single
-    /// descriptor and keychain. Otherwise the recommended way to construct a new wallet is
-    /// by using [`Wallet::create`]. It's worth noting that not all features are available
-    /// with single descriptor wallets, for example setting a [`change_policy`] on [`TxBuilder`]
-    /// and related methods such as [`do_not_spend_change`]. This is because all payments are
-    /// received on the external keychain (including change), and without a change keychain
-    /// BDK lacks enough information to distinguish between change and outside payments.
+    /// Users should be aware of the limitations that come with using single-keychain wallets.
+    /// For example the [`ChangeSpendPolicy`] is meaningless in this context because all payments
+    /// are received on the external keychain including change, and without a designated change
+    /// keychain BDK lacks the information to distinguish between change and incoming payments.
     ///
-    /// Additionally because this wallet has no internal (change) keychain, all methods that
-    /// require a [`KeychainKind`] as input, e.g. [`reveal_next_address`] should only be called
-    /// using the [`External`] variant. In most cases passing [`Internal`] is treated as the
-    /// equivalent of [`External`] but this behavior must not be relied on.
+    /// Additionally, for a wallet with no internal (change) keychain, any methods requiring a
+    /// [`KeychainKind`] as input, e.g. [`reveal_next_address`] should only be called with the
+    /// [`External`] variant. In some cases passing [`Internal`] is treated the same as
+    /// [`External`] but this behavior must not be relied on.
     ///
     /// # Example
     ///
@@ -308,7 +340,7 @@ impl Wallet {
     /// # const EXTERNAL_DESC: &str = "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/0/*)";
     /// # let temp_dir = tempfile::tempdir().expect("must create tempdir");
     /// # let file_path = temp_dir.path().join("store.db");
-    /// // Create a wallet that is persisted to SQLite database.
+    /// // Create a single keychain wallet persisted to a SQLite database.
     /// use bdk_wallet::rusqlite::Connection;
     /// let mut conn = Connection::open(file_path)?;
     /// let wallet = Wallet::create_single(EXTERNAL_DESC)
@@ -316,11 +348,14 @@ impl Wallet {
     ///     .create_wallet(&mut conn)?;
     /// # Ok::<_, anyhow::Error>(())
     /// ```
-    /// [`change_policy`]: TxBuilder::change_policy
-    /// [`do_not_spend_change`]: TxBuilder::do_not_spend_change
+    /// [`change_descriptor`]: ChangeSet::change_descriptor
+    /// [`ChangeSpendPolicy`]: crate::ChangeSpendPolicy
     /// [`External`]: KeychainKind::External
     /// [`Internal`]: KeychainKind::Internal
     /// [`reveal_next_address`]: Self::reveal_next_address
+    /// [`Single`]: miniscript::DescriptorPublicKey::Single
+    /// [`MultiXPub`]: miniscript::DescriptorPublicKey::MultiXPub
+    /// [`XPub`]: miniscript::DescriptorPublicKey::XPub
     pub fn create_single<D>(descriptor: D) -> CreateParams
     where
         D: IntoWalletDescriptor + Send + Clone + 'static,
@@ -331,6 +366,10 @@ impl Wallet {
     /// Build a new [`Wallet`].
     ///
     /// If you have previously created a wallet, use [`load`](Self::load) instead.
+    ///
+    /// This should be used when the parsed `descriptor` and `change_desctiptor` are either
+    /// a [`Single`] key or [`XPub`]. If creating a wallet from a [multipath] descriptor,
+    /// use [`create_single`] instead.
     ///
     /// # Synopsis
     ///
@@ -356,6 +395,11 @@ impl Wallet {
     /// # Ok(())
     /// # }
     /// ```
+    /// [`Single`]: miniscript::DescriptorPublicKey::Single
+    /// [`XPub`]: miniscript::DescriptorPublicKey::XPub
+    /// [`DescriptorPublicKey`]: miniscript::DescriptorPublicKey
+    /// [multipath]: miniscript::Descriptor::is_multipath
+    /// [`create_single`]: Wallet::create_single
     pub fn create<D>(descriptor: D, change_descriptor: D) -> CreateParams
     where
         D: IntoWalletDescriptor + Send + Clone + 'static,
@@ -363,10 +407,34 @@ impl Wallet {
         CreateParams::new(descriptor, change_descriptor)
     }
 
-    /// Create a new [`Wallet`] with given `params`.
+    /// Create a new [`Wallet`] with the given `params`. Refer to [`Wallet::create`] for more.
     ///
-    /// Refer to [`Wallet::create`] for more.
-    pub fn create_with_params(params: CreateParams) -> Result<Self, DescriptorError> {
+    /// Note on [multipath] descriptors:
+    ///
+    /// If the parsed descriptor is a [`MultiXPub`] we use the fully parsed single descriptors to
+    /// set the value of the change descriptor, meaning that if creating a wallet from a multipath
+    /// descriptor, only the first descriptor of the `params` is needed and the change descriptor
+    /// can be omitted.
+    ///
+    /// Extra options on the `params`, such as [`keymap`], should be provided assuming that
+    /// the descriptors have already been split into their single counterparts. See
+    /// [`create_single`](Self::create_single) for more details.
+    ///
+    /// # Errors
+    ///
+    /// This returns a [`DescriptorError`] in a number of situations:
+    ///
+    /// - If parsing a [`Descriptor`] fails
+    /// - If there's a mismatch in the length of two or more multipath specifiers
+    /// - If a multipath descriptor appears where one was not expected
+    /// - If the descriptor and change descriptor are the same
+    ///
+    /// [multipath]: miniscript::Descriptor::is_multipath
+    /// [`keymap`]: CreateParams::keymap
+    /// [`change_descriptor`]: CreateParams::change_descriptor
+    /// [`MultiXPub`]: miniscript::DescriptorPublicKey::MultiXPub
+    /// [`Descriptor`]: miniscript::Descriptor<DescriptorPublicKey>
+    pub fn create_with_params(mut params: CreateParams) -> Result<Self, DescriptorError> {
         let secp = SecpCtx::new();
         let network = params.network;
         let genesis_hash = params
@@ -374,7 +442,17 @@ impl Wallet {
             .unwrap_or(genesis_block(network).block_hash());
         let (chain, chain_changeset) = LocalChain::from_genesis_hash(genesis_hash);
 
-        let (descriptor, mut descriptor_keymap) = (params.descriptor)(&secp, network)?;
+        let (mut descriptor, mut descriptor_keymap) = (params.descriptor)(&secp, network)?;
+
+        // In case of multipath we parse the descriptor into single descriptors and
+        // assign each one back to the `descriptor` and `change_descriptor`.
+        if descriptor.is_multipath() {
+            let mut desc_iter = descriptor.into_single_descriptors()?.into_iter();
+            descriptor = desc_iter.next().expect("must have a descriptor");
+            descriptor_keymap = Descriptor::parse_descriptor(&secp, &descriptor.to_string())?.1;
+            params.change_descriptor = desc_iter.next().map(params::make_descriptor_to_extract);
+        }
+
         check_wallet_descriptor(&descriptor)?;
         descriptor_keymap.extend(params.descriptor_keymap);
 

@@ -145,6 +145,11 @@ pub fn get_test_wpkh_and_change_desc() -> (&'static str, &'static str) {
     "wpkh(tprv8ZgxMBicQKsPdy6LMhUtFHAgpocR8GC6QmwMSFpZs7h6Eziw3SpThFfczTDh5rW2krkqffa11UpX3XkeTTB2FvzZKWXqPY54Y6Rq4AQ5R8L/84'/1'/0'/1/*)")
 }
 
+/// `wpkh` multipath tpub
+pub fn get_test_wpkh_multipath() -> &'static str {
+    "wpkh([e273fe42/84'/1'/0']tpubDCmr3Luq75npLaYmRqqW1rLfSbfpnBXwLwAmUbR333fp95wjCHar3zoc9zSWovZFwrWr53mm3NTVqt6d1Pt6G26uf4etQjc3Pr5Hxe9QEQ2/<0;1>/*)"
+}
+
 /// `wsh` descriptor with policy `and(pk(A),older(6))`
 pub fn get_test_single_sig_csv() -> &'static str {
     "wsh(and_v(v:pk(cVpPVruEDdmutPzisEsYvtST1usBR3ntr8pXSyt6D2YYqXRyPcFW),older(6)))"
