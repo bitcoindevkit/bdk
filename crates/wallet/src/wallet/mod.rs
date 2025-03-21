@@ -1545,7 +1545,9 @@ impl Wallet {
     ///
     /// Returns an error if the transaction is already confirmed or doesn't explicitly signal
     /// *replace by fee* (RBF). If the transaction can be fee bumped then it returns a [`TxBuilder`]
-    /// pre-populated with the inputs and outputs of the original transaction.
+    /// pre-populated with the inputs and outputs of the original transaction. If you just
+    /// want to build a transaction that conflicts with the tx of the given `txid`, consider
+    /// using [`TxBuilder::replace_tx`].
     ///
     /// ## Example
     ///
@@ -2525,7 +2527,7 @@ macro_rules! floating_rate {
 /// Macro for getting a wallet for use in a doctest
 macro_rules! doctest_wallet {
     () => {{
-        use $crate::bitcoin::{BlockHash, Transaction, absolute, TxOut, Network, hashes::Hash};
+        use $crate::bitcoin::{absolute, transaction, Amount, BlockHash, Transaction, TxOut, Network, hashes::Hash};
         use $crate::chain::{ConfirmationBlockTime, BlockId, TxGraph, tx_graph};
         use $crate::{Update, KeychainKind, Wallet};
         use $crate::test_utils::*;
