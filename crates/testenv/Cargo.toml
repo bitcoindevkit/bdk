@@ -31,3 +31,19 @@ serde = ["bdk_chain/serde"]
 
 [package.metadata.docs.rs]
 no-default-features = true
+
+[patch.crates-io.corepc-types]
+git = "https://github.com/rust-bitcoin/corepc.git"
+branch = "master"
+
+[patch.crates-io.corepc-client]
+git = "https://github.com/rust-bitcoin/corepc.git"
+branch = "master"
+
+[patch.crates-io.corepc-node]
+git = "https://github.com/rust-bitcoin/corepc.git"
+branch = "master"
+
+[patch.crates-io.electrsd]
+git = "https://github.com/oleonardolima/electrsd.git"
+branch = "deps/bump-corepc-deps"

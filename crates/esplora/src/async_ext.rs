@@ -546,7 +546,7 @@ mod test {
         BlockId,
     };
     use bdk_core::ConfirmationBlockTime;
-    use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
+    use bdk_testenv::{anyhow, TestEnv};
     use esplora_client::Builder;
 
     use crate::async_ext::{chain_update, fetch_latest_blocks};
@@ -626,7 +626,11 @@ mod test {
                             ConfirmationBlockTime {
                                 block_id: BlockId {
                                     height,
-                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                    hash: env
+                                        .bitcoind
+                                        .client
+                                        .get_block_hash(height as _)?
+                                        .block_hash()?,
                                 },
                                 confirmation_time: height as _,
                             },
@@ -666,7 +670,11 @@ mod test {
                             ConfirmationBlockTime {
                                 block_id: BlockId {
                                     height,
-                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                    hash: env
+                                        .bitcoind
+                                        .client
+                                        .get_block_hash(height as _)?
+                                        .block_hash()?,
                                 },
                                 confirmation_time: height as _,
                             },
