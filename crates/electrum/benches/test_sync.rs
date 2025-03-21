@@ -10,7 +10,7 @@ use bdk_core::{
     CheckPoint,
 };
 use bdk_electrum::BdkElectrumClient;
-use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
+use bdk_testenv::{anyhow, TestEnv};
 use criterion::{criterion_group, criterion_main, Criterion};
 use electrum_client::ElectrumApi;
 use std::{collections::BTreeSet, time::Duration};
@@ -77,7 +77,15 @@ pub fn test_sync_performance(c: &mut Criterion) {
     );
 
     // Setup receiver.
-    let genesis_cp = CheckPoint::new(0, env.bitcoind.client.get_block_hash(0).unwrap());
+    let genesis_cp = CheckPoint::new(
+        0,
+        env.bitcoind
+            .client
+            .get_block_hash(0)
+            .unwrap()
+            .block_hash()
+            .unwrap(),
+    );
 
     {
         let electrum_client =
