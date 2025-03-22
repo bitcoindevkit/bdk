@@ -76,10 +76,10 @@ type IndexedTxGraphChangeSet =
 /// are likely to be added as new features and core components are implemented. Existing fields may
 /// be removed in future versions of the library.
 ///
-/// BDK reserves the right to introduce breaking changes to the [`ChangeSet`] structure in a major
-/// version release. API changes that affect the kinds of data persisted will be displayed
-/// prominently in the release notes of new versions. Users are advised to look for any such
-/// changes and update their application accordingly.
+/// The authors reserve the right to make breaking changes to the [`ChangeSet`] structure in
+/// a major version release. API changes affecting the types of data persisted will display
+/// prominently in the release notes. Users are advised to look for such changes and update their
+/// application accordingly.
 ///
 /// The resulting interface is designed to give the user more control of what to persist and when
 /// to persist it. Custom implementations should consider and account for the possibility of
