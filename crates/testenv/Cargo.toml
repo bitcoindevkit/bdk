@@ -17,16 +17,33 @@ workspace = true
 
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.21.1", default-features = false }
-electrsd = { version = "0.28.0", features = [ "legacy" ], default-features = false }
+electrsd = { version = "0.32.0", features = [ "legacy" ], default-features = false }
+serde = { version = "^1.0", features = ["derive"] }
 
 [dev-dependencies]
 bdk_testenv = { path = "." }
 
 [features]
 default = ["std", "download"]
-download = ["electrsd/bitcoind_25_0", "electrsd/esplora_a33e97e1"]
+download = ["electrsd/corepc-node_28_0", "electrsd/esplora_a33e97e1"]
 std = ["bdk_chain/std"]
 serde = ["bdk_chain/serde"]
 
 [package.metadata.docs.rs]
 no-default-features = true
+
+[patch.crates-io.corepc-types]
+git = "https://github.com/rust-bitcoin/corepc.git"
+branch = "master"
+
+[patch.crates-io.corepc-client]
+git = "https://github.com/rust-bitcoin/corepc.git"
+branch = "master"
+
+[patch.crates-io.corepc-node]
+git = "https://github.com/rust-bitcoin/corepc.git"
+branch = "master"
+
+[patch.crates-io.electrsd]
+git = "https://github.com/oleonardolima/electrsd.git"
+branch = "deps/bump-corepc-deps"
