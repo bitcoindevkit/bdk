@@ -20,6 +20,7 @@ use core::time::Duration;
 use electrum_client::ElectrumApi;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
+use std::time::Instant;
 
 // Batch size for `sync_with_electrum`.
 const BATCH_SIZE: usize = 5;
@@ -879,5 +880,53 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
         // Check that the calculated fee matches the fee from the transaction data.
         assert_eq!(fee, Amount::from_sat(tx_fee)); // 1650sat
     }
+    Ok(())
+}
+
+#[test]
+pub fn test_sync_performance() -> anyhow::Result<()> {
+    const EXPECTED_MAX_SYNC_TIME: Duration = Duration::from_secs(5);
+    const NUM_ADDRESSES: usize = 1000;
+
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    // Generate test addresses.
+    let mut spks = Vec::with_capacity(NUM_ADDRESSES);
+    for _ in 0..NUM_ADDRESSES {
+        spks.push(get_test_spk());
+    }
+
+    // Mine some blocks and send transactions.
+    env.mine_blocks(101, None)?;
+    for spk in spks.iter().take(10) {
+        let addr = Address::from_script(spk, Network::Regtest)?;
+        env.send(&addr, Amount::from_sat(10_000))?;
+    }
+    env.mine_blocks(1, None)?;
+
+    // Setup receiver.
+    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+    let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+        let mut recv_index = SpkTxOutIndex::default();
+        for spk in spks.iter() {
+            recv_index.insert_spk((), spk.clone());
+        }
+        recv_index
+    });
+
+    // Measure sync time.
+    let start = Instant::now();
+    let _ = sync_with_electrum(&client, spks.clone(), &mut recv_chain, &mut recv_graph)?;
+    let sync_duration = start.elapsed();
+
+    assert!(
+        sync_duration <= EXPECTED_MAX_SYNC_TIME,
+        "Sync took {:?}, which is longer than expected {:?}",
+        sync_duration,
+        EXPECTED_MAX_SYNC_TIME
+    );
+
     Ok(())
 }
