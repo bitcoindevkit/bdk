@@ -6,11 +6,14 @@ use bdk_core::{
     },
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
-use electrum_client::{ElectrumApi, Error, HeaderNotification};
+use electrum_client::{ElectrumApi, Error, HeaderNotification, GetMerkleRes};
 use std::sync::{Arc, Mutex};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
+
+/// Maximum batch size for Merkle proof requests
+const MAX_MERKLE_BATCH_SIZE: usize = 100;
 
 /// Wrapper around an [`electrum_client::ElectrumApi`] which includes an internal in-memory
 /// transaction cache to avoid re-fetching already downloaded transactions.
@@ -22,6 +25,8 @@ pub struct BdkElectrumClient<E> {
     tx_cache: Mutex<HashMap<Txid, Arc<Transaction>>>,
     /// The header cache
     block_header_cache: Mutex<HashMap<u32, Header>>,
+    /// The Merkle proof cache
+    merkle_cache: Mutex<HashMap<(Txid, u32), GetMerkleRes>>,
 }
 
 impl<E: ElectrumApi> BdkElectrumClient<E> {
@@ -31,6 +36,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             inner: client,
             tx_cache: Default::default(),
             block_header_cache: Default::default(),
+            merkle_cache: Default::default(),
         }
     }
 
@@ -254,13 +260,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ) -> Result<Option<u32>, Error> {
         let mut unused_spk_count = 0_usize;
         let mut last_active_index = Option::<u32>::None;
+        let mut txs_to_validate = Vec::new();
 
         loop {
             let spks = (0..batch_size)
                 .map_while(|_| spks_with_expected_txids.next())
                 .collect::<Vec<_>>();
             if spks.is_empty() {
-                return Ok(last_active_index);
+                break;
             }
 
             let spk_histories = self
@@ -271,7 +278,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 if spk_history.is_empty() {
                     unused_spk_count = unused_spk_count.saturating_add(1);
                     if unused_spk_count >= stop_gap {
-                        return Ok(last_active_index);
+                        break;
                     }
                 } else {
                     last_active_index = Some(spk_index);
@@ -294,7 +301,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     match tx_res.height.try_into() {
                         // Returned heights 0 & -1 are reserved for unconfirmed txs.
                         Ok(height) if height > 0 => {
-                            self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, height)?;
+                            txs_to_validate.push((tx_res.tx_hash, height));
                         }
                         _ => {
                             tx_update.seen_ats.insert((tx_res.tx_hash, start_time));
@@ -303,6 +310,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 }
             }
         }
+
+        // Batch validate all collected transactions
+        if !txs_to_validate.is_empty() {
+            let proofs = self.batch_fetch_merkle_proofs(&txs_to_validate)?;
+            self.batch_validate_merkle_proofs(tx_update, proofs)?;
+        }
+
+        Ok(last_active_index)
     }
 
     /// Populate the `tx_update` with associated transactions/anchors of `outpoints`.
@@ -315,6 +330,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
     ) -> Result<(), Error> {
+        let mut txs_to_validate = Vec::new();
+
         for outpoint in outpoints {
             let op_txid = outpoint.txid;
             let op_tx = self.fetch_tx(op_txid)?;
@@ -339,7 +356,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     match res.height.try_into() {
                         // Returned heights 0 & -1 are reserved for unconfirmed txs.
                         Ok(height) if height > 0 => {
-                            self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                            txs_to_validate.push((res.tx_hash, height));
                         }
                         _ => {
                             tx_update.seen_ats.insert((res.tx_hash, start_time));
@@ -361,7 +378,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     match res.height.try_into() {
                         // Returned heights 0 & -1 are reserved for unconfirmed txs.
                         Ok(height) if height > 0 => {
-                            self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                            txs_to_validate.push((res.tx_hash, height));
                         }
                         _ => {
                             tx_update.seen_ats.insert((res.tx_hash, start_time));
@@ -370,6 +387,13 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 }
             }
         }
+
+        // Batch validate all collected transactions
+        if !txs_to_validate.is_empty() {
+            let proofs = self.batch_fetch_merkle_proofs(&txs_to_validate)?;
+            self.batch_validate_merkle_proofs(tx_update, proofs)?;
+        }
+
         Ok(())
     }
 
@@ -380,6 +404,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
     ) -> Result<(), Error> {
+        let mut txs_to_validate = Vec::new();
+
         for txid in txids {
             let tx = match self.fetch_tx(txid) {
                 Ok(tx) => tx,
@@ -404,7 +430,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 match r.height.try_into() {
                     // Returned heights 0 & -1 are reserved for unconfirmed txs.
                     Ok(height) if height > 0 => {
-                        self.validate_merkle_for_anchor(tx_update, txid, height)?;
+                        txs_to_validate.push((txid, height));
                     }
                     _ => {
                         tx_update.seen_ats.insert((r.tx_hash, start_time));
@@ -414,45 +440,95 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
             tx_update.txs.push(tx);
         }
+
+        // Batch validate all collected transactions
+        if !txs_to_validate.is_empty() {
+            let proofs = self.batch_fetch_merkle_proofs(&txs_to_validate)?;
+            self.batch_validate_merkle_proofs(tx_update, proofs)?;
+        }
+
         Ok(())
     }
 
-    // Helper function which checks if a transaction is confirmed by validating the merkle proof.
-    // An anchor is inserted if the transaction is validated to be in a confirmed block.
-    fn validate_merkle_for_anchor(
+    /// Batch fetch Merkle proofs for multiple transactions
+    fn batch_fetch_merkle_proofs(
+        &self,
+        txs_with_heights: &[(Txid, usize)],
+    ) -> Result<Vec<(Txid, GetMerkleRes)>, Error> {
+        let mut results = Vec::with_capacity(txs_with_heights.len());
+        let mut to_fetch = Vec::new();
+
+        // Check cache first
+        {
+            let merkle_cache = self.merkle_cache.lock().unwrap();
+            for &(txid, height) in txs_with_heights {
+                if let Some(proof) = merkle_cache.get(&(txid, height as u32)) {
+                    results.push((txid, proof.clone()));
+                } else {
+                    to_fetch.push((txid, height));
+                }
+            }
+        }
+
+        // Fetch missing proofs in batches
+        for chunk in to_fetch.chunks(MAX_MERKLE_BATCH_SIZE) {
+            for &(txid, height) in chunk {
+                if let Ok(merkle_res) = self.inner.transaction_get_merkle(&txid, height) {
+                    let mut cache = self.merkle_cache.lock().unwrap();
+                    cache.insert((txid, height as u32), merkle_res.clone());
+                    results.push((txid, merkle_res));
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Batch validate Merkle proofs
+    fn batch_validate_merkle_proofs(
         &self,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
-        txid: Txid,
-        confirmation_height: usize,
+        proofs: Vec<(Txid, GetMerkleRes)>,
     ) -> Result<(), Error> {
-        if let Ok(merkle_res) = self
-            .inner
-            .transaction_get_merkle(&txid, confirmation_height)
-        {
-            let mut header = self.fetch_header(merkle_res.block_height as u32)?;
+        // Pre-fetch all required headers
+        let heights: HashSet<u32> = proofs.iter()
+            .map(|(_, proof)| proof.block_height as u32)
+            .collect();
+        
+        let mut headers = HashMap::new();
+        for height in heights {
+            headers.insert(height, self.fetch_header(height)?);
+        }
+
+        // Validate proofs
+        for (txid, merkle_res) in proofs {
+            let height = merkle_res.block_height as u32;
+            let header = headers.get(&height).unwrap();
+
             let mut is_confirmed_tx = electrum_client::utils::validate_merkle_proof(
                 &txid,
                 &header.merkle_root,
                 &merkle_res,
             );
 
-            // Merkle validation will fail if the header in `block_header_cache` is outdated, so we
-            // want to check if there is a new header and validate against the new one.
+            // Retry with updated header if validation fails
             if !is_confirmed_tx {
-                header = self.update_header(merkle_res.block_height as u32)?;
+                let updated_header = self.update_header(height)?;
+                headers.insert(height, updated_header);
                 is_confirmed_tx = electrum_client::utils::validate_merkle_proof(
                     &txid,
-                    &header.merkle_root,
+                    &updated_header.merkle_root,
                     &merkle_res,
                 );
             }
 
             if is_confirmed_tx {
+                let header = headers.get(&height).unwrap();
                 tx_update.anchors.insert((
                     ConfirmationBlockTime {
                         confirmation_time: header.time as u64,
                         block_id: BlockId {
-                            height: merkle_res.block_height as u32,
+                            height,
                             hash: header.block_hash(),
                         },
                     },
@@ -460,7 +536,20 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 ));
             }
         }
+
         Ok(())
+    }
+
+    // Replace the old validate_merkle_for_anchor with optimized batch version
+    fn validate_merkle_for_anchor(
+        &self,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
+        txid: Txid,
+        confirmation_height: usize,
+    ) -> Result<(), Error> {
+        // Use the batch processing functions even for single tx
+        let proofs = self.batch_fetch_merkle_proofs(&[(txid, confirmation_height)])?;
+        self.batch_validate_merkle_proofs(tx_update, proofs)
     }
 
     // Helper function which fetches the `TxOut`s of our relevant transactions' previous transactions,
