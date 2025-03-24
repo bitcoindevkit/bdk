@@ -2153,11 +2153,17 @@ impl Wallet {
 
         let prev_output = utxo.outpoint;
         if let Some(prev_tx) = self.indexed_graph.graph().get_tx(prev_output.txid) {
-            if desc.is_witness() || desc.is_taproot() {
-                psbt_input.witness_utxo = Some(prev_tx.output[prev_output.vout as usize].clone());
-            }
-            if !desc.is_taproot() && (!desc.is_witness() || !only_witness_utxo) {
-                psbt_input.non_witness_utxo = Some(prev_tx.as_ref().clone());
+            if (prev_output.vout as usize) < prev_tx.output.len() {
+                if desc.is_witness() || desc.is_taproot() {
+                    psbt_input.witness_utxo =
+                        Some(prev_tx.output[prev_output.vout as usize].clone());
+                }
+                if !desc.is_taproot() && (!desc.is_witness() || !only_witness_utxo) {
+                    psbt_input.non_witness_utxo = Some(prev_tx.as_ref().clone());
+                }
+            } else {
+                // Handle the out-of-bounds case by returning an appropriate error
+                return Err(CreateTxError::InvalidVoutIndex(prev_output));
             }
         }
         Ok(psbt_input)
