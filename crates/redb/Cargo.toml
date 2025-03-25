@@ -1,0 +1,19 @@
+[package]
+name = "bdk_redb"
+version = "0.1.0"
+edition = "2021"
+description = "Redb storage backend for Bitcoin Dev Kit"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/bitcoindevkit/bdk"
+authors = ["Bitcoin Dev Kit Developers"]
+
+[dependencies]
+bdk_wallet = { path = "../wallet", version = "1.1.0" }
+bdk_chain = { path = "../chain", version = "0.21.1", default-features = false }
+redb = "1.0.0"
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
+
+[dev-dependencies]
+tempfile = "3.0"
+bitcoin = { version = "0.32.4", features = ["serde"] }
