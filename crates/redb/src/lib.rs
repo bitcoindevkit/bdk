@@ -3,16 +3,16 @@
 //! This crate provides redb based implementation of `Wallet Persister`
 //! from the `bdk_wallet` crate.
 
-use std::path::Path;
-use std::fmt;
 use std::error::Error as StdError;
+use std::fmt;
+use std::path::Path;
 
-use redb::{
-    Database, ReadableTable, TableDefinition,
-    DatabaseError, TransactionError, TableError, CommitError, StorageError
-};
 use bdk_wallet::{ChangeSet, WalletPersister};
 use bincode::{DefaultOptions, Options};
+use redb::{
+    CommitError, Database, DatabaseError, ReadableTable, StorageError, TableDefinition, TableError,
+    TransactionError,
+};
 
 // using single table with string keys for simplicity
 const WALLET_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("wallet_data");
@@ -137,8 +137,7 @@ impl RedbStore {
     pub fn open_or_create<P: AsRef<Path>>(path: P) -> Result<Self, RedbStoreError> {
         if path.as_ref().exists() {
             Self::open(path)
-        } 
-        else {
+        } else {
             Self::create(path)
         }
     }
@@ -150,89 +149,87 @@ impl WalletPersister for RedbStore {
     fn initialize(persister: &mut Self) -> Result<ChangeSet, Self::Error> {
         // start read transaction
         let read_txn = persister.db.begin_read()?;
-        
+
         // open wallet data table
         let table = read_txn.open_table(WALLET_TABLE)?;
-        
+
         // create an empty changeset
         let mut changeset = ChangeSet::default();
-        
+
         // load each component of the changeset
         // desc
         if let Some(value) = table.get(DESCRIPTOR_KEY)? {
             changeset.descriptor = Some(
                 bincode_options()
                     .deserialize(value.value())
-                    .map_err(RedbStoreError::Serialization)?
+                    .map_err(RedbStoreError::Serialization)?,
             );
         }
-        
+
         // change desc
         if let Some(value) = table.get(CHANGE_DESCRIPTOR_KEY)? {
             changeset.change_descriptor = Some(
                 bincode_options()
                     .deserialize(value.value())
-                    .map_err(RedbStoreError::Serialization)?
+                    .map_err(RedbStoreError::Serialization)?,
             );
         }
-        
+
         // network
         if let Some(value) = table.get(NETWORK_KEY)? {
             changeset.network = Some(
                 bincode_options()
                     .deserialize(value.value())
-                    .map_err(RedbStoreError::Serialization)?
+                    .map_err(RedbStoreError::Serialization)?,
             );
         }
-        
+
         // local chain
         if let Some(value) = table.get(LOCAL_CHAIN_KEY)? {
-            changeset.local_chain = 
-                bincode_options()
-                    .deserialize(value.value())
-                    .map_err(RedbStoreError::Serialization)?;
+            changeset.local_chain = bincode_options()
+                .deserialize(value.value())
+                .map_err(RedbStoreError::Serialization)?;
         }
-        
+
         // Tx graph
         if let Some(value) = table.get(TX_GRAPH_KEY)? {
-            changeset.tx_graph = 
-                bincode_options()
-                    .deserialize(value.value())
-                    .map_err(RedbStoreError::Serialization)?;
+            changeset.tx_graph = bincode_options()
+                .deserialize(value.value())
+                .map_err(RedbStoreError::Serialization)?;
         }
-        
+
         // indxr
         if let Some(value) = table.get(INDEXER_KEY)? {
-            changeset.indexer = 
-                bincode_options()
-                    .deserialize(value.value())
-                    .map_err(RedbStoreError::Serialization)?;
+            changeset.indexer = bincode_options()
+                .deserialize(value.value())
+                .map_err(RedbStoreError::Serialization)?;
         }
-        
+
         Ok(changeset)
     }
 
     fn persist(persister: &mut Self, changeset: &ChangeSet) -> Result<(), Self::Error> {
         // skip if the changeset is completely empty
-        if changeset.descriptor.is_none() &&
-           changeset.change_descriptor.is_none() &&
-           changeset.network.is_none() &&
-           changeset.local_chain.blocks.is_empty() &&
-           changeset.tx_graph.txs.is_empty() &&
-           changeset.tx_graph.txouts.is_empty() &&
-           changeset.indexer.last_revealed.is_empty() {
+        if changeset.descriptor.is_none()
+            && changeset.change_descriptor.is_none()
+            && changeset.network.is_none()
+            && changeset.local_chain.blocks.is_empty()
+            && changeset.tx_graph.txs.is_empty()
+            && changeset.tx_graph.txouts.is_empty()
+            && changeset.indexer.last_revealed.is_empty()
+        {
             return Ok(());
         }
-        
+
         // start write transaction
         let write_txn = persister.db.begin_write()?;
 
         {
             // open wallet data table
             let mut table = write_txn.open_table(WALLET_TABLE)?;
-            
+
             // store each component of the changeset if it's not empty
-            
+
             // desc
             if let Some(descriptor) = &changeset.descriptor {
                 let serialized = bincode_options()
@@ -240,7 +237,7 @@ impl WalletPersister for RedbStore {
                     .map_err(RedbStoreError::Serialization)?;
                 table.insert(DESCRIPTOR_KEY, serialized.as_slice())?;
             }
-            
+
             // change desc
             if let Some(change_descriptor) = &changeset.change_descriptor {
                 let serialized = bincode_options()
@@ -248,7 +245,7 @@ impl WalletPersister for RedbStore {
                     .map_err(RedbStoreError::Serialization)?;
                 table.insert(CHANGE_DESCRIPTOR_KEY, serialized.as_slice())?;
             }
-            
+
             // network
             if let Some(network) = &changeset.network {
                 let serialized = bincode_options()
@@ -256,7 +253,7 @@ impl WalletPersister for RedbStore {
                     .map_err(RedbStoreError::Serialization)?;
                 table.insert(NETWORK_KEY, serialized.as_slice())?;
             }
-            
+
             // local chain (check if it has any blocks)
             if !changeset.local_chain.blocks.is_empty() {
                 let serialized = bincode_options()
@@ -264,18 +261,19 @@ impl WalletPersister for RedbStore {
                     .map_err(RedbStoreError::Serialization)?;
                 table.insert(LOCAL_CHAIN_KEY, serialized.as_slice())?;
             }
-            
+
             // Tx graph (check if it has any tx or outputs)
-            if !changeset.tx_graph.txs.is_empty() || 
-               !changeset.tx_graph.txouts.is_empty() ||
-               !changeset.tx_graph.anchors.is_empty() ||
-               !changeset.tx_graph.last_seen.is_empty() {
+            if !changeset.tx_graph.txs.is_empty()
+                || !changeset.tx_graph.txouts.is_empty()
+                || !changeset.tx_graph.anchors.is_empty()
+                || !changeset.tx_graph.last_seen.is_empty()
+            {
                 let serialized = bincode_options()
                     .serialize(&changeset.tx_graph)
                     .map_err(RedbStoreError::Serialization)?;
                 table.insert(TX_GRAPH_KEY, serialized.as_slice())?;
             }
-            
+
             // idxr (check if it has any revealed indices)
             if !changeset.indexer.last_revealed.is_empty() {
                 let serialized = bincode_options()
@@ -284,10 +282,10 @@ impl WalletPersister for RedbStore {
                 table.insert(INDEXER_KEY, serialized.as_slice())?;
             }
         }
-        
+
         // commit the Tx
         write_txn.commit()?;
-        
+
         Ok(())
     }
 }
@@ -295,16 +293,16 @@ impl WalletPersister for RedbStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use bitcoin::Network;
-    
+    use tempfile::tempdir;
+
     #[test]
     fn test_empty_store() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("wallet.redb");
-        
+
         let mut store = RedbStore::create(&db_path).unwrap();
-        
+
         // initialize should return an empty changeset
         let changeset = WalletPersister::initialize(&mut store).unwrap();
         assert!(changeset.descriptor.is_none());
@@ -314,28 +312,28 @@ mod tests {
         assert!(changeset.tx_graph.txs.is_empty());
         assert!(changeset.indexer.last_revealed.is_empty());
     }
-    
+
     #[test]
     fn test_persist_and_retrieve() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("wallet.redb");
-        
+
         // create a store and persist a changeset
         {
             let mut store = RedbStore::create(&db_path).unwrap();
-            
+
             // creating simple changeset with just a network value
             let mut changeset = ChangeSet::default();
             changeset.network = Some(Network::Testnet);
-            
+
             // persist the changeset
             WalletPersister::persist(&mut store, &changeset).unwrap();
         }
-        
+
         // open store again and check if the changeset was persisted
         {
             let mut store = RedbStore::open(&db_path).unwrap();
-            
+
             // initialized should return the persisted changeset
             let changeset = WalletPersister::initialize(&mut store).unwrap();
             assert_eq!(changeset.network, Some(Network::Testnet));
