@@ -10,7 +10,7 @@ authors = ["Bitcoin Dev Kit Developers"]
 [dependencies]
 bdk_wallet = { path = "../wallet", version = "1.1.0" }
 bdk_chain = { path = "../chain", version = "0.21.1", default-features = false }
-redb = "1.0.0"
+redb = "0.8.0"
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
 

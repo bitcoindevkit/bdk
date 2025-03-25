@@ -9,13 +9,10 @@ use std::path::Path;
 
 use bdk_wallet::{ChangeSet, WalletPersister};
 use bincode::{DefaultOptions, Options};
-use redb::{
-    CommitError, Database, DatabaseError, ReadableTable, StorageError, TableDefinition, TableError,
-    TransactionError,
-};
+use redb::{Database, Error as RedbError, ReadableTable, TableDefinition};
 
 // using single table with string keys for simplicity
-const WALLET_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("wallet_data");
+const WALLET_TABLE: TableDefinition<str, [u8]> = TableDefinition::new("wallet_data");
 
 // keys for different components fo changeset
 const DESCRIPTOR_KEY: &str = "descriptor";
@@ -28,16 +25,6 @@ const INDEXER_KEY: &str = "indexer";
 /// error type for redb wallet persister
 #[derive(Debug)]
 pub enum RedbStoreError {
-    /// database error
-    Database(redb::DatabaseError),
-    /// transaction error
-    Transaction(redb::TransactionError),
-    /// table error
-    Table(redb::TableError),
-    /// commit error
-    Commit(redb::CommitError),
-    /// storage error
-    Storage(redb::StorageError),
     /// redb error
     Redb(redb::Error),
     /// serialization error
@@ -47,11 +34,6 @@ pub enum RedbStoreError {
 impl fmt::Display for RedbStoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RedbStoreError::Database(e) => write!(f, "Database error: {}", e),
-            RedbStoreError::Transaction(e) => write!(f, "Transaction error: {}", e),
-            RedbStoreError::Table(e) => write!(f, "Table error: {}", e),
-            RedbStoreError::Commit(e) => write!(f, "Commit error: {}", e),
-            RedbStoreError::Storage(e) => write!(f, "Storage error: {}", e),
             RedbStoreError::Redb(e) => write!(f, "Redb error: {}", e),
             RedbStoreError::Serialization(e) => write!(f, "Serialization error: {}", e),
         }
@@ -60,38 +42,8 @@ impl fmt::Display for RedbStoreError {
 
 impl StdError for RedbStoreError {}
 
-impl From<DatabaseError> for RedbStoreError {
-    fn from(e: DatabaseError) -> Self {
-        RedbStoreError::Database(e)
-    }
-}
-
-impl From<TransactionError> for RedbStoreError {
-    fn from(e: TransactionError) -> Self {
-        RedbStoreError::Transaction(e)
-    }
-}
-
-impl From<TableError> for RedbStoreError {
-    fn from(e: TableError) -> Self {
-        RedbStoreError::Table(e)
-    }
-}
-
-impl From<CommitError> for RedbStoreError {
-    fn from(e: CommitError) -> Self {
-        RedbStoreError::Commit(e)
-    }
-}
-
-impl From<StorageError> for RedbStoreError {
-    fn from(e: StorageError) -> Self {
-        RedbStoreError::Storage(e)
-    }
-}
-
-impl From<redb::Error> for RedbStoreError {
-    fn from(e: redb::Error) -> Self {
+impl From<RedbError> for RedbStoreError {
+    fn from(e: RedbError) -> Self {
         RedbStoreError::Redb(e)
     }
 }
@@ -114,7 +66,12 @@ fn bincode_options() -> impl bincode::Options {
 impl RedbStore {
     /// create new redb store at given path
     pub fn create<P: AsRef<Path>>(path: P) -> Result<Self, RedbStoreError> {
-        let db = Database::create(path)?;
+        // Default database size (10MB should be sufficient for most wallets)
+        const DEFAULT_DB_SIZE: usize = 10 * 1024 * 1024; // 10MB
+
+        // SAFETY: We're creating a new database file. The caller is responsible for ensuring
+        // the path is valid and the file can be created safely.
+        let db = unsafe { Database::create(path, DEFAULT_DB_SIZE)? };
 
         // initialize tables
         let write_txn = db.begin_write()?;
@@ -128,8 +85,12 @@ impl RedbStore {
     }
 
     /// open existing redb store at given path
+    /// As per redb 0.8.0 Database::open is unsafe
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, RedbStoreError> {
-        let db = Database::open(path)?;
+        // SAFETY: We're opening a database file that we expect to exist and be a valid redb database.
+        // The caller is responsible for ensuring the path is valid and the file is not concurrently
+        // modified in ways that would violate redb's assumptions.
+        let db = unsafe { Database::open(path)? };
         Ok(Self { db })
     }
 
@@ -161,7 +122,7 @@ impl WalletPersister for RedbStore {
         if let Some(value) = table.get(DESCRIPTOR_KEY)? {
             changeset.descriptor = Some(
                 bincode_options()
-                    .deserialize(value.value())
+                    .deserialize(value)
                     .map_err(RedbStoreError::Serialization)?,
             );
         }
@@ -170,7 +131,7 @@ impl WalletPersister for RedbStore {
         if let Some(value) = table.get(CHANGE_DESCRIPTOR_KEY)? {
             changeset.change_descriptor = Some(
                 bincode_options()
-                    .deserialize(value.value())
+                    .deserialize(value)
                     .map_err(RedbStoreError::Serialization)?,
             );
         }
@@ -179,7 +140,7 @@ impl WalletPersister for RedbStore {
         if let Some(value) = table.get(NETWORK_KEY)? {
             changeset.network = Some(
                 bincode_options()
-                    .deserialize(value.value())
+                    .deserialize(value)
                     .map_err(RedbStoreError::Serialization)?,
             );
         }
@@ -187,21 +148,21 @@ impl WalletPersister for RedbStore {
         // local chain
         if let Some(value) = table.get(LOCAL_CHAIN_KEY)? {
             changeset.local_chain = bincode_options()
-                .deserialize(value.value())
+                .deserialize(value)
                 .map_err(RedbStoreError::Serialization)?;
         }
 
         // Tx graph
         if let Some(value) = table.get(TX_GRAPH_KEY)? {
             changeset.tx_graph = bincode_options()
-                .deserialize(value.value())
+                .deserialize(value)
                 .map_err(RedbStoreError::Serialization)?;
         }
 
         // indxr
         if let Some(value) = table.get(INDEXER_KEY)? {
             changeset.indexer = bincode_options()
-                .deserialize(value.value())
+                .deserialize(value)
                 .map_err(RedbStoreError::Serialization)?;
         }
 
@@ -294,6 +255,7 @@ impl WalletPersister for RedbStore {
 mod tests {
     use super::*;
     use bitcoin::Network;
+    use std::path::Path;
     use tempfile::tempdir;
 
     #[test]
@@ -337,6 +299,87 @@ mod tests {
             // initialized should return the persisted changeset
             let changeset = WalletPersister::initialize(&mut store).unwrap();
             assert_eq!(changeset.network, Some(Network::Testnet));
+        }
+    }
+
+    #[test]
+    fn test_open_nonexistent_file() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("nonexistent.redb");
+
+        // trying to open a non-existent file should fail
+        let result = RedbStore::open(&db_path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_open_or_create() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("new_wallet.redb");
+
+        // first call should create the file
+        {
+            let store = RedbStore::open_or_create(&db_path);
+            assert!(store.is_ok());
+            assert!(Path::new(&db_path).exists());
+        }
+
+        // second call should open the existing file
+        {
+            let store = RedbStore::open_or_create(&db_path);
+            assert!(store.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_empty_changeset() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("wallet.redb");
+
+        let mut store = RedbStore::create(&db_path).unwrap();
+
+        // persisting an empty changeset should do nothing
+        let empty_changeset = ChangeSet::default();
+        let result = WalletPersister::persist(&mut store, &empty_changeset);
+        assert!(result.is_ok());
+
+        // initialize should still return an empty changeset
+        let loaded = WalletPersister::initialize(&mut store).unwrap();
+        assert!(loaded.descriptor.is_none());
+        assert!(loaded.network.is_none());
+    }
+
+    #[test]
+    fn test_update_existing_data() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("wallet.redb");
+
+        // create initial data
+        {
+            let mut store = RedbStore::create(&db_path).unwrap();
+
+            let mut changeset = ChangeSet::default();
+            changeset.network = Some(Network::Testnet);
+
+            WalletPersister::persist(&mut store, &changeset).unwrap();
+        }
+
+        // update with new data
+        {
+            let mut store = RedbStore::open(&db_path).unwrap();
+
+            let mut changeset = ChangeSet::default();
+            changeset.network = Some(Network::Bitcoin);
+
+            WalletPersister::persist(&mut store, &changeset).unwrap();
+        }
+
+        // verify data was updated
+        {
+            let mut store = RedbStore::open(&db_path).unwrap();
+            let loaded = WalletPersister::initialize(&mut store).unwrap();
+
+            assert_eq!(loaded.network, Some(Network::Bitcoin));
         }
     }
 }
