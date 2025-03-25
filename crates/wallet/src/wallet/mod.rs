@@ -1642,10 +1642,15 @@ impl Wallet {
                             .ok_or(BuildFeeBumpError::UnknownUtxo(txin.previous_output))
                             .map(|chain_position| (prev_tx, chain_position))
                     })
-                    .map(|(prev_tx, chain_position)| {
+                    .and_then(|(prev_tx, chain_position)| {
+                        if txin.previous_output.vout as usize >= prev_tx.output.len() {
+                            return Err(BuildFeeBumpError::InvalidOutputIndex(
+                                txin.previous_output,
+                            ));
+                        }
                         let txout = prev_tx.output[txin.previous_output.vout as usize].clone();
                         match txout_index.index_of_spk(txout.script_pubkey.clone()) {
-                            Some(&(keychain, derivation_index)) => (
+                            Some(&(keychain, derivation_index)) => Ok((
                                 txin.previous_output,
                                 WeightedUtxo {
                                     satisfaction_weight: self
@@ -1661,14 +1666,14 @@ impl Wallet {
                                         chain_position,
                                     }),
                                 },
-                            ),
+                            )),
                             None => {
                                 let satisfaction_weight = Weight::from_wu_usize(
                                     serialize(&txin.script_sig).len() * 4
                                         + serialize(&txin.witness).len(),
                                 );
 
-                                (
+                                Ok((
                                     txin.previous_output,
                                     WeightedUtxo {
                                         utxo: Utxo::Foreign {
@@ -1685,7 +1690,7 @@ impl Wallet {
                                         },
                                         satisfaction_weight,
                                     },
-                                )
+                                ))
                             }
                         }
                     })

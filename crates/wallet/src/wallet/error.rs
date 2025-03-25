@@ -223,6 +223,8 @@ pub enum BuildFeeBumpError {
     IrreplaceableTransaction(Txid),
     /// Node doesn't have data to estimate a fee rate
     FeeRateUnavailable,
+    /// Input references an invalid output index in the previous transaction
+    InvalidOutputIndex(OutPoint),
 }
 
 impl fmt::Display for BuildFeeBumpError {
@@ -247,6 +249,11 @@ impl fmt::Display for BuildFeeBumpError {
                 write!(f, "Transaction can't be replaced with txid: {}", txid)
             }
             Self::FeeRateUnavailable => write!(f, "Fee rate unavailable"),
+            Self::InvalidOutputIndex(outpoint) => write!(
+                f,
+                "Input references an invalid output index {} in transaction {}",
+                outpoint.vout, outpoint.txid
+            ),
         }
     }
 }
