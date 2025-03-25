@@ -37,7 +37,9 @@
 //! ```
 
 use alloc::{boxed::Box, string::String, vec::Vec};
+use bitcoin::absolute::LockTime;
 use core::fmt;
+use rand::Rng;
 
 use alloc::sync::Arc;
 
@@ -53,6 +55,7 @@ use super::coin_selection::CoinSelectionAlgorithm;
 use super::utils::shuffle_slice;
 use super::{CreateTxError, Wallet};
 use crate::collections::{BTreeMap, HashMap, HashSet};
+use crate::descriptor::DescriptorMeta;
 use crate::{KeychainKind, LocalOutput, Utxo, WeightedUtxo};
 
 /// A transaction builder
@@ -189,6 +192,171 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     pub fn fee_absolute(&mut self, fee_amount: Amount) -> &mut Self {
         self.params.fee_policy = Some(FeePolicy::FeeAmount(fee_amount));
         self
+    }
+
+    /// anti-fee snipping
+    fn apply_anti_fee_sniping<T: Rng>(
+        &mut self,
+        rng: &mut T,
+    ) -> Result<&mut Self, AntiFeeSnipingError> {
+        const USE_NLOCKTIME_PROBABILITY: f64 = 0.5;
+        const FURTHER_BACK_PROBABILITY: f64 = 0.1;
+        const MAX_RANDOM_OFFSET: u32 = 100;
+        const MAX_SEQUENCE_VALUE: u32 = 65535;
+        const MIN_SEQUENCE_VALUE: u32 = 1;
+
+        if self.params.version.is_none() {
+            self.params.version = Some(Version(2));
+        }
+
+        let current_height = self
+            .params
+            .current_height
+            .and_then(|h| h.is_block_height().then(|| h.to_consensus_u32()))
+            .ok_or(AntiFeeSnipingError::InvalidBlockHeight {
+                height: self.params.current_height.unwrap(),
+            })?;
+
+        let mut utxos_info = Vec::new();
+        let mut can_use_nsequence = true;
+
+        for (outpoint, weighted_utxo) in &self.params.utxos {
+            match &weighted_utxo.utxo {
+                Utxo::Local(output) => {
+                    // Get transaction details
+                    let wallet_tx = self.wallet.get_tx(output.outpoint.txid).ok_or({
+                        AntiFeeSnipingError::TransactionNotFound {
+                            txid: output.outpoint.txid,
+                        }
+                    })?;
+
+                    let highest_anchor = wallet_tx
+                        .tx_node
+                        .anchors
+                        .iter()
+                        .max_by_key(|anchor| anchor.block_id.height);
+
+                    let confirmation_height = match highest_anchor {
+                        Some(anchor) => {
+                            let height = anchor.block_id.height;
+                            if height > current_height {
+                                return Err(AntiFeeSnipingError::InvalidBlockchainState {
+                                    current_height,
+                                    anchor_height: height,
+                                });
+                            }
+                            current_height - height
+                        }
+                        None => {
+                            can_use_nsequence = false;
+                            continue;
+                        }
+                    };
+
+                    let is_taproot = self.wallet.public_descriptor(output.keychain).is_taproot();
+                    utxos_info.push((*outpoint, confirmation_height));
+
+                    if confirmation_height > MAX_SEQUENCE_VALUE || !is_taproot {
+                        can_use_nsequence = false;
+                        continue;
+                    }
+                }
+                Utxo::Foreign { .. } => {
+                    // getting the confirmation count of foreign UTXO isn't reliable,
+                    // so we set it to zero, we use locktime and not sequence
+                    utxos_info.push((*outpoint, 0));
+                    can_use_nsequence = false;
+                }
+            }
+        }
+
+        // If we have no valid UTXOs, we can't apply anti-fee-sniping
+        if utxos_info.is_empty() {
+            return Err(AntiFeeSnipingError::NoValidUtxos);
+        }
+
+        // Get RBF setting - if user set sequence manually, preserve that
+        let is_rbf = self.params.sequence.map_or(true, |seq| seq.is_rbf());
+
+        // Determine if we should use nLockTime or nSequence
+        let use_nlocktime = !can_use_nsequence || rng.gen_bool(USE_NLOCKTIME_PROBABILITY);
+
+        if use_nlocktime {
+            let mut locktime_height = current_height;
+
+            if rng.gen_bool(FURTHER_BACK_PROBABILITY) {
+                let random_offset = rng.gen_range(0..MAX_RANDOM_OFFSET);
+                locktime_height = locktime_height.saturating_sub(random_offset);
+            }
+
+            let lock_time = LockTime::from_height(locktime_height).map_err(|_| {
+                AntiFeeSnipingError::InvalidLocktime {
+                    height: locktime_height,
+                }
+            })?;
+
+            self.nlocktime(lock_time);
+
+            if self.params.sequence.is_none() {
+                let seq = if is_rbf {
+                    Sequence::ENABLE_RBF_NO_LOCKTIME
+                } else {
+                    Sequence::from_consensus(0xFFFFFFFE)
+                };
+                self.params.sequence = Some(seq);
+            }
+        } else {
+            self.params.locktime = Some(LockTime::ZERO);
+
+            let selected_idx = rng.gen_range(0..utxos_info.len());
+            let (_, confirmations) = utxos_info[selected_idx];
+
+            let mut sequence_value = confirmations;
+
+            if rng.gen_bool(FURTHER_BACK_PROBABILITY) {
+                let random_offset = rng.gen_range(0..MAX_RANDOM_OFFSET);
+                sequence_value = sequence_value.saturating_sub(random_offset);
+                sequence_value = sequence_value.max(MIN_SEQUENCE_VALUE);
+            }
+
+            let sequence = Sequence::from_height(sequence_value.try_into().unwrap());
+            self.params.sequence = Some(sequence);
+        }
+
+        Ok(self)
+    }
+
+    /// Enables anti-fee-sniping protection as specified in BIP326.
+    ///
+    /// This will set either nLockTime or nSequence randomly to protect against fee sniping attacks.
+    /// For this to work properly, you should also call `current_height()` with the current
+    /// blockchain height.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use bdk_wallet::*;
+    /// # use bitcoin::*;
+    ///
+    /// # let mut wallet = doctest_wallet!();
+    /// # let mut rng = rand::thread_rng();
+    /// let mut tx_builder = wallet.build_tx();
+    /// tx_builder
+    ///     .current_height(800000)
+    ///     .enable_anti_fee_sniping()
+    ///     // ... other settings
+    ///     ;
+    /// ```
+    pub fn enable_anti_fee_sniping(&mut self) -> Result<&mut Self, AntiFeeSnipingError> {
+        self.enable_anti_fee_sniping_with_rng(&mut rand::thread_rng())
+    }
+
+    /// Enables anti-fee-sniping protection with a custom RNG.
+    pub fn enable_anti_fee_sniping_with_rng<T: Rng>(
+        &mut self,
+        rng: &mut T,
+    ) -> Result<&mut Self, AntiFeeSnipingError> {
+        self.apply_anti_fee_sniping(rng)
     }
 
     /// Set the policy path to use while creating the transaction for a given keychain.
@@ -842,6 +1010,69 @@ impl ChangeSpendPolicy {
     }
 }
 
+/// Custom error enum for BIP326 anti-fee-sniping operations
+#[derive(Debug)]
+pub enum AntiFeeSnipingError {
+    /// Indicates an invalid blockchain state where anchor height exceeds current height
+    InvalidBlockchainState {
+        /// block height
+        current_height: u32,
+        /// anchor height
+        anchor_height: u32,
+    },
+
+    /// Error when transaction cannot be found in wallet
+    TransactionNotFound {
+        /// transaction ID
+        txid: bitcoin::Txid,
+    },
+
+    /// Error when no valid UTXOs are available for anti-fee-sniping
+    NoValidUtxos,
+
+    /// Error when creating locktime fails
+    InvalidLocktime {
+        /// block height that cause locktime creation to fail
+        height: u32,
+    },
+
+    /// Error when the current height is not valid
+    InvalidBlockHeight {
+        /// the block height
+        height: LockTime,
+    },
+}
+
+impl fmt::Display for AntiFeeSnipingError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AntiFeeSnipingError::InvalidBlockchainState {
+                current_height,
+                anchor_height,
+            } => write!(
+                f,
+                "Invalid blockchain state: anchor height {} exceeds current height {}",
+                anchor_height, current_height
+            ),
+
+            AntiFeeSnipingError::TransactionNotFound { txid } => {
+                write!(f, "Transaction not found in wallet: {}", txid)
+            }
+
+            AntiFeeSnipingError::NoValidUtxos => {
+                write!(f, "No valid UTXOs available for anti-fee-sniping")
+            }
+
+            AntiFeeSnipingError::InvalidLocktime { height } => {
+                write!(f, "Cannot create locktime for height: {}", height)
+            }
+            AntiFeeSnipingError::InvalidBlockHeight { height } => {
+                write!(f, "Current height is not valid: {}", height)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     const ORDERING_TEST_TX: &str = "0200000003c26f3eb7932f7acddc5ddd26602b77e7516079b03090a16e2c2f54\
@@ -1345,5 +1576,143 @@ mod test {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn test_anti_fee_sniping() {
+        use crate::test_utils::get_funded_wallet_wpkh;
+
+        let (mut wallet, _) = get_funded_wallet_wpkh();
+        let utxo = wallet.list_unspent().next().unwrap();
+
+        let satisfaction_weight_utxo = wallet
+            .public_descriptor(utxo.keychain)
+            .max_weight_to_satisfy()
+            .unwrap();
+
+        let mut tx_builder = wallet.build_tx();
+
+        tx_builder.params.utxos.insert(
+            utxo.outpoint,
+            WeightedUtxo {
+                satisfaction_weight: satisfaction_weight_utxo,
+                utxo: Utxo::Local(utxo.clone()),
+            },
+        );
+
+        assert!(tx_builder.params.locktime.is_none());
+
+        let _ = tx_builder.current_height(8000).enable_anti_fee_sniping();
+
+        let locktime = tx_builder.params.locktime;
+        let sequence = tx_builder.params.sequence;
+        assert!(locktime.is_some());
+        assert!(sequence.is_some());
+
+        let lower_bound = LockTime::from_height(7900).unwrap();
+        let upper_bound = LockTime::from_height(8000).unwrap();
+        assert!((lower_bound..=upper_bound).contains(&locktime.unwrap()));
+    }
+
+    #[test]
+    fn test_anti_fee_sniping_with_foreign_utxo() {
+        use crate::test_utils::get_funded_wallet_wpkh;
+
+        let (mut wallet, txid) = get_funded_wallet_wpkh();
+
+        let utxo = wallet.list_unspent().next().unwrap();
+        let tx = wallet.get_tx(txid).unwrap().tx_node.tx.clone();
+
+        let satisfaction_weight = wallet
+            .public_descriptor(KeychainKind::External)
+            .max_weight_to_satisfy()
+            .unwrap();
+
+        let mut tx_builder = wallet.build_tx();
+
+        tx_builder
+            .add_foreign_utxo(
+                utxo.outpoint,
+                psbt::Input {
+                    non_witness_utxo: Some(tx.as_ref().clone()),
+                    ..Default::default()
+                },
+                satisfaction_weight,
+            )
+            .unwrap();
+
+        assert!(tx_builder.params.locktime.is_none());
+
+        let _ = tx_builder.current_height(8000).enable_anti_fee_sniping();
+
+        let locktime = tx_builder.params.locktime;
+        let sequence = tx_builder.params.sequence;
+        assert!(locktime.is_some());
+        assert!(sequence.is_some());
+
+        let lower_bound = LockTime::from_height(7900).unwrap();
+        let upper_bound = LockTime::from_height(8000).unwrap();
+        assert!((lower_bound..=upper_bound).contains(&locktime.unwrap()));
+    }
+
+    #[test]
+    fn test_anti_fee_sniping_with_taproot() {
+        use crate::test_utils::{get_funded_wallet_single, get_test_tr_single_sig};
+
+        let (mut wallet, _) = get_funded_wallet_single(get_test_tr_single_sig());
+
+        let utxo = wallet.list_unspent().next().unwrap();
+
+        let satisfaction_weight_utxo = wallet
+            .public_descriptor(utxo.keychain)
+            .max_weight_to_satisfy()
+            .unwrap();
+
+        let mut tx_builder = wallet.build_tx();
+
+        tx_builder.params.utxos.insert(
+            utxo.outpoint,
+            WeightedUtxo {
+                satisfaction_weight: satisfaction_weight_utxo,
+                utxo: Utxo::Local(utxo.clone()),
+            },
+        );
+
+        assert!(tx_builder.params.locktime.is_none());
+
+        let block_height = 5000;
+        let _ = tx_builder
+            .current_height(block_height)
+            .enable_anti_fee_sniping();
+
+        let locktime = tx_builder.params.locktime;
+        let sequence = tx_builder.params.sequence;
+        assert!(locktime.is_some());
+        assert!(sequence.is_some());
+
+        let lower_bound = LockTime::from_height(4900).unwrap();
+        let upper_bound = LockTime::from_height(5000).unwrap();
+        if locktime.unwrap() > absolute::LockTime::from_height(0).unwrap() || block_height > 65535 {
+            assert!((lower_bound..=upper_bound).contains(&locktime.unwrap()));
+        } else {
+            assert_eq!(
+                locktime.unwrap(),
+                absolute::LockTime::from_height(0).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn test_anti_fee_sniping_empty_utxo() {
+        use crate::test_utils::{get_funded_wallet_single, get_test_tr_single_sig};
+
+        let (mut wallet, _) = get_funded_wallet_single(get_test_tr_single_sig());
+        let mut tx_builder = wallet.build_tx();
+
+        let _ = tx_builder.current_height(7000).enable_anti_fee_sniping();
+
+        assert!(tx_builder.params.utxos.is_empty());
+        assert!(tx_builder.params.locktime.is_none());
+        assert!(tx_builder.params.sequence.is_none());
     }
 }
