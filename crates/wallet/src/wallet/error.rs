@@ -102,8 +102,6 @@ pub enum CreateTxError {
     UnknownUtxo,
     /// Missing non_witness_utxo on foreign utxo for given `OutPoint`
     MissingNonWitnessUtxo(OutPoint),
-    /// Invalid vout index in transaction
-    InvalidVoutIndex(OutPoint),
     /// Miniscript PSBT error
     MiniscriptPsbt(MiniscriptPsbtError),
 }
@@ -169,9 +167,6 @@ impl fmt::Display for CreateTxError {
             }
             CreateTxError::MissingNonWitnessUtxo(outpoint) => {
                 write!(f, "Missing non_witness_utxo on foreign utxo {}", outpoint)
-            }
-            CreateTxError::InvalidVoutIndex(outpoint) => {
-                write!(f, "Invalid vout index in transaction: {}", outpoint)
             }
             CreateTxError::MiniscriptPsbt(err) => {
                 write!(f, "Miniscript PSBT error: {}", err)

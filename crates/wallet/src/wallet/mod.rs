@@ -2153,17 +2153,23 @@ impl Wallet {
 
         let prev_output = utxo.outpoint;
         if let Some(prev_tx) = self.indexed_graph.graph().get_tx(prev_output.txid) {
-            if (prev_output.vout as usize) < prev_tx.output.len() {
+            // First validate that the vout index is within bounds
+            let vout_index = prev_output.vout as usize;
+            let outputs_len = prev_tx.output.len();
+
+            if vout_index < outputs_len {
                 if desc.is_witness() || desc.is_taproot() {
-                    psbt_input.witness_utxo =
-                        Some(prev_tx.output[prev_output.vout as usize].clone());
+                    psbt_input.witness_utxo = Some(prev_tx.output[vout_index].clone());
                 }
                 if !desc.is_taproot() && (!desc.is_witness() || !only_witness_utxo) {
                     psbt_input.non_witness_utxo = Some(prev_tx.as_ref().clone());
                 }
             } else {
-                // Handle the out-of-bounds case by returning an appropriate error
-                return Err(CreateTxError::InvalidVoutIndex(prev_output));
+                // Use the existing UtxoUpdateError::IndexOutOfBounds variant
+                return Err(MiniscriptPsbtError::UtxoUpdate(
+                    miniscript::psbt::UtxoUpdateError::IndexOutOfBounds(vout_index, outputs_len),
+                )
+                .into());
             }
         }
         Ok(psbt_input)
