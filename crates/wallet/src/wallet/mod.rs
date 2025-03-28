@@ -2167,7 +2167,7 @@ impl Wallet {
             } else {
                 // Use the existing UtxoUpdateError::IndexOutOfBounds variant
                 return Err(MiniscriptPsbtError::UtxoUpdate(
-                    miniscript::psbt::UtxoUpdateError::IndexOutOfBounds(vout_index, outputs_len),
+                    miniscript::psbt::UtxoUpdateError::UtxoCheck
                 )
                 .into());
             }
