@@ -4,7 +4,7 @@
 mod common;
 
 use bdk_chain::{Balance, BlockId};
-use bdk_testenv::{block_id, hash, local_chain};
+use bdk_testenv::{anyhow, block_id, hash, local_chain};
 use bitcoin::{Amount, OutPoint, ScriptBuf};
 use common::*;
 use std::collections::{BTreeSet, HashSet};
@@ -763,4 +763,70 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
     }
+}
+
+#[test]
+fn tx_spends_from_conflicting_txs() -> anyhow::Result<()> {
+    const EXTERNAL: &str = "external";
+    const INTERNAL: &str = "internal";
+
+    /// A changeset for [`Wallet`](crate::Wallet).
+    #[derive(Default, Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+    pub struct ChangeSet {
+        /// Descriptor for recipient addresses.
+        pub descriptor: Option<miniscript::Descriptor<miniscript::DescriptorPublicKey>>,
+        /// Descriptor for change addresses.
+        pub change_descriptor: Option<miniscript::Descriptor<miniscript::DescriptorPublicKey>>,
+        /// Stores the network type of the transaction data.
+        pub network: Option<bitcoin::Network>,
+        /// Changes to the [`LocalChain`](local_chain::LocalChain).
+        pub local_chain: bdk_chain::local_chain::ChangeSet,
+        /// Changes to [`TxGraph`](tx_graph::TxGraph).
+        pub tx_graph: bdk_chain::tx_graph::ChangeSet<bdk_core::ConfirmationBlockTime>,
+        /// Changes to [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex).
+        pub indexer: bdk_chain::keychain_txout::ChangeSet,
+    }
+
+    struct Wallet {
+        chain: bdk_chain::local_chain::LocalChain,
+        graph: bdk_chain::IndexedTxGraph<
+            bdk_core::ConfirmationBlockTime,
+            bdk_chain::keychain_txout::KeychainTxOutIndex<&'static str>,
+        >,
+    }
+
+    impl Wallet {
+        pub fn new(changeset: &ChangeSet) -> anyhow::Result<Self> {
+            let mut indexer = bdk_chain::keychain_txout::KeychainTxOutIndex::default();
+            if let Some(desc) = changeset.descriptor.clone() {
+                indexer.insert_descriptor(EXTERNAL, desc)?;
+            }
+            if let Some(desc) = changeset.change_descriptor.clone() {
+                indexer.insert_descriptor(INTERNAL, desc)?;
+            }
+            let mut graph = bdk_chain::IndexedTxGraph::new(indexer);
+            graph.apply_changeset(bdk_chain::indexed_tx_graph::ChangeSet {
+                tx_graph: changeset.tx_graph.clone(),
+                indexer: changeset.indexer.clone(),
+            });
+            let chain =
+                bdk_chain::local_chain::LocalChain::from_changeset(changeset.local_chain.clone())?;
+            Ok(Self { chain, graph })
+        }
+    }
+
+    let changeset = serde_json::from_slice::<ChangeSet>(include_bytes!(
+        "assets/tx_that_spends_from_conflicting_txs.changeset.json"
+    ))?;
+    let wallet = Wallet::new(&changeset)?;
+
+    let txouts = wallet.graph.graph().try_filter_chain_txouts(
+        &wallet.chain,
+        wallet.chain.tip().block_id(),
+        wallet.graph.index.outpoints().clone(),
+    )?;
+
+    for _ in txouts {}
+
+    Ok(())
 }
