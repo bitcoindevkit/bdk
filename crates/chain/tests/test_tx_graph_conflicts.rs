@@ -686,7 +686,111 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("tx", 0)]),
             exp_unspents: HashSet::from([("tx", 0)]),
             exp_balance: Balance { trusted_pending: Amount::from_sat(9000), ..Default::default() }
-        }
+        },
+        Scenario {
+            name: "tx spends from 2 conflicting transactions where a conflict spends another",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10_000, None)],
+                    last_seen: Some(1),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S1",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(9_000, None)],
+                    last_seen: Some(2),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S2",
+                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::PrevTx("S1", 0)],
+                    outputs: &[TxOutTemplate::new(17_000, None)],
+                    last_seen: Some(3),
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["A", "S1"]),
+            exp_chain_txouts: HashSet::from([]),
+            exp_unspents: HashSet::from([]),
+            exp_balance: Balance::default(),
+        },
+        Scenario {
+            name: "tx spends from 2 conflicting transactions where the conflict is nested",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10_000, Some(0))],
+                    last_seen: Some(1),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S1",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(9_000, Some(0))],
+                    last_seen: Some(3),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("S1", 0)],
+                    outputs: &[TxOutTemplate::new(8_000, Some(0))],
+                    last_seen: Some(2),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S2",
+                    inputs: &[TxInTemplate::PrevTx("B", 0), TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(17_000, Some(0))],
+                    last_seen: Some(4),
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["A", "S1", "B"]),
+            exp_chain_txouts: HashSet::from([("A", 0), ("B", 0), ("S1", 0)]),
+            exp_unspents: HashSet::from([("B", 0)]),
+            exp_balance: Balance { trusted_pending: Amount::from_sat(8_000), ..Default::default() },
+        },
+        Scenario {
+            name: "tx spends from 2 conflicting transactions where the conflict is nested (different last_seens)",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10_000, Some(0))],
+                    last_seen: Some(1),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S1",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(9_000, Some(0))],
+                    last_seen: Some(4),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("S1", 0)],
+                    outputs: &[TxOutTemplate::new(8_000, Some(0))],
+                    last_seen: Some(2),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S2",
+                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::PrevTx("B", 0)],
+                    outputs: &[TxOutTemplate::new(17_000, Some(0))],
+                    last_seen: Some(3),
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["A", "S1", "B"]),
+            exp_chain_txouts: HashSet::from([("A", 0), ("B", 0), ("S1", 0)]),
+            exp_unspents: HashSet::from([("B", 0)]),
+            exp_balance: Balance { trusted_pending: Amount::from_sat(8_000), ..Default::default() },
+        },
     ];
 
     for scenario in scenarios {

@@ -31,7 +31,7 @@ bdk_testenv = { path = "../testenv", default-features = false }
 criterion = { version = "0.2" }
 serde_json = "1.0"
 serde = { version = "1", features = ["derive", "rc"] }
-bdk_chain = { path = ".", features = ["serde"]}
+bdk_chain = { path = ".", features = ["serde"] }
 
 [features]
 default = ["std", "miniscript"]
