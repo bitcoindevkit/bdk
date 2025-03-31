@@ -7,14 +7,7 @@ use bitcoin::psbt;
 use bitcoin::{Address, Amount};
 use std::str::FromStr;
 
-macro_rules! check_fee {
-    ($wallet:expr, $psbt: expr) => {{
-        let tx = $psbt.clone().extract_tx().expect("failed to extract tx");
-        let tx_fee = $wallet.calculate_fee(&tx).ok();
-        assert_eq!(tx_fee, $psbt.fee_amount());
-        tx_fee
-    }};
-}
+mod common;
 
 #[test]
 fn test_add_foreign_utxo() {
