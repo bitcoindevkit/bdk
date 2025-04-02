@@ -400,7 +400,6 @@ fn filter_iter_handles_reorg() -> anyhow::Result<()> {
 
 // Test that while a reorg is detected we delay incrementing the best height
 #[test]
-#[ignore]
 fn repeat_reorgs() -> anyhow::Result<()> {
     const MINE_TO: u32 = 11;
 
