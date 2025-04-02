@@ -39,7 +39,6 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use bitcoin::absolute::LockTime;
 use core::fmt;
-use rand::Rng;
 
 use alloc::sync::Arc;
 
@@ -49,7 +48,7 @@ use bitcoin::{
     absolute, transaction::Version, Amount, FeeRate, OutPoint, ScriptBuf, Sequence, Transaction,
     TxIn, TxOut, Txid, Weight,
 };
-use rand_core::RngCore;
+use rand_core::{OsRng, RngCore};
 
 use super::coin_selection::CoinSelectionAlgorithm;
 use super::utils::shuffle_slice;
@@ -195,9 +194,9 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     }
 
     /// anti-fee snipping
-    fn apply_anti_fee_sniping<T: Rng>(
+    fn apply_anti_fee_sniping<R: RngCore>(
         &mut self,
-        rng: &mut T,
+        rng: &mut R,
     ) -> Result<&mut Self, AntiFeeSnipingError> {
         const USE_NLOCKTIME_PROBABILITY: f64 = 0.5;
         const FURTHER_BACK_PROBABILITY: f64 = 0.1;
@@ -279,13 +278,15 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         let is_rbf = self.params.sequence.map_or(true, |seq| seq.is_rbf());
 
         // Determine if we should use nLockTime or nSequence
-        let use_nlocktime = !can_use_nsequence || rng.gen_bool(USE_NLOCKTIME_PROBABILITY);
+        let use_nlocktime = !can_use_nsequence
+            || (rng.next_u32() as f64 / u32::MAX as f64) < USE_NLOCKTIME_PROBABILITY;
 
         if use_nlocktime {
             let mut locktime_height = current_height;
 
-            if rng.gen_bool(FURTHER_BACK_PROBABILITY) {
-                let random_offset = rng.gen_range(0..MAX_RANDOM_OFFSET);
+            if (rng.next_u32() as f64 / u32::MAX as f64) < FURTHER_BACK_PROBABILITY {
+                let random_offset = rng.next_u32() % MAX_RANDOM_OFFSET;
+                // let random_offset = rng.gen_range(0..MAX_RANDOM_OFFSET);
                 locktime_height = locktime_height.saturating_sub(random_offset);
             }
 
@@ -308,13 +309,13 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
         } else {
             self.params.locktime = Some(LockTime::ZERO);
 
-            let selected_idx = rng.gen_range(0..utxos_info.len());
+            let selected_idx = (rng.next_u32() % utxos_info.len() as u32) as usize;
             let (_, confirmations) = utxos_info[selected_idx];
 
             let mut sequence_value = confirmations;
 
-            if rng.gen_bool(FURTHER_BACK_PROBABILITY) {
-                let random_offset = rng.gen_range(0..MAX_RANDOM_OFFSET);
+            if (rng.next_u32() as f64 / u32::MAX as f64) < FURTHER_BACK_PROBABILITY {
+                let random_offset = rng.next_u32() % MAX_RANDOM_OFFSET;
                 sequence_value = sequence_value.saturating_sub(random_offset);
                 sequence_value = sequence_value.max(MIN_SEQUENCE_VALUE);
             }
@@ -348,13 +349,14 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
     ///     ;
     /// ```
     pub fn enable_anti_fee_sniping(&mut self) -> Result<&mut Self, AntiFeeSnipingError> {
-        self.enable_anti_fee_sniping_with_rng(&mut rand::thread_rng())
+        let mut os_rng = OsRng;
+        self.enable_anti_fee_sniping_with_rng(&mut os_rng)
     }
 
     /// Enables anti-fee-sniping protection with a custom RNG.
-    pub fn enable_anti_fee_sniping_with_rng<T: Rng>(
+    pub fn enable_anti_fee_sniping_with_rng<R: RngCore>(
         &mut self,
-        rng: &mut T,
+        rng: &mut R,
     ) -> Result<&mut Self, AntiFeeSnipingError> {
         self.apply_anti_fee_sniping(rng)
     }
