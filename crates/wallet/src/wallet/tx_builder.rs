@@ -138,6 +138,7 @@ pub(crate) struct TxParams {
     pub(crate) add_global_xpubs: bool,
     pub(crate) include_output_redeem_witness_script: bool,
     pub(crate) bumping_fee: Option<PreviousFee>,
+    pub(crate) replacing: HashSet<OutPoint>,
     pub(crate) current_height: Option<absolute::LockTime>,
     pub(crate) allow_dust: bool,
 }
@@ -281,17 +282,17 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
             .collect::<HashMap<_, _>>();
         let utxo_batch = outpoints
             .iter()
-            .map(|outpoint| {
+            .map(|&outpoint| -> Result<_, AddUtxoError> {
                 let output = outputs
-                    .get(outpoint)
+                    .get(&outpoint)
                     .cloned()
-                    .ok_or(AddUtxoError::UnknownUtxo(*outpoint))?;
-                // the output should be unspent unless we're doing a RBF
-                if self.params.bumping_fee.is_none() && output.is_spent {
-                    return Err(AddUtxoError::UnknownUtxo(*outpoint));
+                    .ok_or(AddUtxoError::UnknownUtxo(outpoint))?;
+                // The output must be unspent unless the outpoint opts-in to replacement
+                if output.is_spent && !self.params.replacing.contains(&outpoint) {
+                    return Err(AddUtxoError::UnknownUtxo(outpoint));
                 }
                 Ok((
-                    *outpoint,
+                    outpoint,
                     WeightedUtxo {
                         satisfaction_weight: self
                             .wallet
@@ -393,14 +394,22 @@ impl<'a, Cs> TxBuilder<'a, Cs> {
             .map(|(op, _)| op)
             .ok_or(ReplaceTxError::NonReplaceable)?;
 
-        // add previous fee
-        let absolute = self.wallet.calculate_fee(&tx).unwrap_or_default();
-        let rate = absolute / tx.weight();
-        self.params.bumping_fee = Some(PreviousFee { absolute, rate });
+        // Inform the builder that all of the previous outputs *may* be replaced
+        // before adding our chosen outpoint.
+        self.params
+            .replacing
+            .extend(tx.input.iter().map(|txin| txin.previous_output));
 
-        self.add_utxo(outpoint).expect("we must have the utxo");
+        self.add_utxo(outpoint)
+            .expect("we have the utxo and opted to replace it");
 
-        // do not allow spending outputs descending from the replaced tx
+        // Add the previous fee
+        if let Ok(absolute) = self.wallet.calculate_fee(&tx) {
+            let rate = absolute / tx.weight();
+            self.params.bumping_fee = Some(PreviousFee { absolute, rate });
+        }
+
+        // Do not allow spending outputs descending from the replaced tx
         core::iter::once((txid, tx))
             .chain(
                 self.wallet
@@ -1520,16 +1529,17 @@ mod test {
         // now replace tx1 with a new transaction
         let mut builder = wallet.build_tx();
         builder.replace_tx(txid1).expect("should replace input");
+
+        // `replace_tx` should allow replacing any of the remaining inputs
+        // of the original tx
+        assert_eq!(builder.params.replacing, [outpoint_1, outpoint_2].into());
+        builder.add_utxo(outpoint_2).expect("should add output");
+
         let prev_feerate = builder.previous_fee().unwrap().1;
         builder.add_recipient(recip, Amount::from_sat(98_500));
         builder.fee_rate(FeeRate::from_sat_per_kwu(
             prev_feerate.to_sat_per_kwu() + 250,
         ));
-
-        // Because outpoint 2 was spent in tx1, by default it won't be available for selection,
-        // but we can add it manually, with the caveat that the builder is in a bump-fee
-        // context.
-        builder.add_utxo(outpoint_2).expect("should add output");
         let psbt = builder.finish().unwrap();
 
         assert!(psbt
