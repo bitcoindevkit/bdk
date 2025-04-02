@@ -1,7 +1,5 @@
 #![cfg(feature = "miniscript")]
 
-#[macro_use]
-mod common;
 use bdk_chain::{collections::*, BlockId, ConfirmationBlockTime};
 use bdk_chain::{
     local_chain::LocalChain,
@@ -9,14 +7,18 @@ use bdk_chain::{
     tx_graph::{ChangeSet, TxGraph},
     Anchor, ChainOracle, ChainPosition, Merge,
 };
-use bdk_testenv::{block_id, hash, utils::new_tx};
+use bdk_testenv::{
+    block_id, hash,
+    tx_template::{init_graph, TxInTemplate, TxOutTemplate, TxTemplate},
+    utils::new_tx,
+};
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,
     Transaction, TxIn, TxOut, Txid,
 };
-use common::*;
 use core::iter;
 use rand::RngCore;
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::vec;
 
@@ -1136,28 +1138,28 @@ fn call_map_anchors_with_non_deterministic_anchor() {
 
     let template = [
         TxTemplate {
-            tx_name: "tx1",
-            inputs: &[TxInTemplate::Bogus],
-            outputs: &[TxOutTemplate::new(10000, Some(1))],
-            anchors: &[block_id!(1, "A")],
+            tx_name: Cow::Borrowed("tx1"),
+            inputs: Cow::Borrowed(&[TxInTemplate::Bogus]),
+            outputs: Cow::Owned(vec![TxOutTemplate::new(10000, Some(1))]),
+            anchors: Cow::Owned(vec![block_id!(1, "A")]),
             last_seen: None,
         },
         TxTemplate {
-            tx_name: "tx2",
-            inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-            outputs: &[TxOutTemplate::new(20000, Some(2))],
-            anchors: &[block_id!(2, "B")],
+            tx_name: Cow::Borrowed("tx2"),
+            inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx1"), 0)]),
+            outputs: Cow::Owned(vec![TxOutTemplate::new(20000, Some(2))]),
+            anchors: Cow::Owned(vec![block_id!(2, "B")]),
             ..Default::default()
         },
         TxTemplate {
-            tx_name: "tx3",
-            inputs: &[TxInTemplate::PrevTx("tx2", 0)],
-            outputs: &[TxOutTemplate::new(30000, Some(3))],
-            anchors: &[block_id!(3, "C"), block_id!(4, "D")],
+            tx_name: Cow::Borrowed("tx3"),
+            inputs: Cow::Borrowed(&[TxInTemplate::PrevTx(Cow::Borrowed("tx2"), 0)]),
+            outputs: Cow::Owned(vec![TxOutTemplate::new(30000, Some(3))]),
+            anchors: Cow::Owned(vec![block_id!(3, "C"), block_id!(4, "D")]),
             ..Default::default()
         },
     ];
-    let (graph, _, _) = init_graph(&template);
+    let (graph, _, _) = init_graph(template);
     let new_graph = graph.clone().map_anchors(|a| NonDeterministicAnchor {
         anchor_block: a,
         // A non-deterministic value
