@@ -367,7 +367,7 @@ impl Wallet {
     ///
     /// If you have previously created a wallet, use [`load`](Self::load) instead.
     ///
-    /// This should be used when the parsed `descriptor` and `change_desctiptor` are either
+    /// This should be used when the parsed `descriptor` and `change_descriptor` are either
     /// a [`Single`] key or [`XPub`]. If creating a wallet from a [multipath] descriptor,
     /// use [`create_single`] instead.
     ///
