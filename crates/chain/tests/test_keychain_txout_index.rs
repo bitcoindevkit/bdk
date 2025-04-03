@@ -601,6 +601,19 @@ fn lookahead_to_target() {
 }
 
 #[test]
+fn insert_descriptor_should_reject_hardened_steps() {
+    use bdk_chain::keychain_txout::KeychainTxOutIndex;
+
+    // This descriptor has hardened child steps
+    let s = "wpkh([e273fe42/84h/1h/0h/0h]tpubDEBY7DLZ5kK6pMC2qdtVvKpe6CiAmVDx1SiLtLS3V4GAGyRvsuVbCYReJ9oQz1rfMapghJyUAYLqkqJ3Xadp3GSTCtdAFcKPgzAXC1hzz8a/*h)";
+    let (desc, _) =
+        <Descriptor<DescriptorPublicKey>>::parse_descriptor(&Secp256k1::new(), s).unwrap();
+
+    let mut indexer = KeychainTxOutIndex::<&str>::new(10);
+    assert!(indexer.insert_descriptor("keychain", desc).is_err())
+}
+
+#[test]
 fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
     let desc = parse_descriptor(DESCRIPTORS[0]);
     let changesets: &[ChangeSet] = &[
