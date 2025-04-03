@@ -8,6 +8,7 @@ use bdk_wallet::{
     KeychainKind, Wallet,
 };
 use clap::{self, Parser};
+use serde_json::json;
 use std::{path::PathBuf, sync::mpsc::sync_channel, thread::spawn, time::Instant};
 
 const DB_MAGIC: &str = "bdk-rpc-wallet-example";
@@ -81,8 +82,11 @@ fn main() -> anyhow::Result<()> {
 
     let rpc_client = args.client()?;
     println!(
-        "Connected to Bitcoin Core RPC at {:?}",
-        rpc_client.get_blockchain_info().unwrap()
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "event": "connection",
+            "blockchain_info": rpc_client.get_blockchain_info().unwrap()
+        }))?
     );
 
     let start_load_wallet = Instant::now();
@@ -105,19 +109,19 @@ fn main() -> anyhow::Result<()> {
                 .create_wallet(&mut db)?,
         },
     };
-    println!(
-        "Loaded wallet in {}s",
-        start_load_wallet.elapsed().as_secs_f32()
-    );
-
     let balance = wallet.balance();
-    println!("Wallet balance before syncing: {}", balance.total());
-
     let wallet_tip = wallet.latest_checkpoint();
     println!(
-        "Wallet tip: {} at height {}",
-        wallet_tip.hash(),
-        wallet_tip.height()
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "event": "wallet_loaded",
+            "duration_seconds": start_load_wallet.elapsed().as_secs_f32(),
+            "initial_balance": balance.total(),
+            "tip": {
+                "hash": wallet_tip.hash().to_string(),
+                "height": wallet_tip.height()
+            }
+        }))?
     );
 
     let (sender, receiver) = sync_channel::<Emission>(21);
@@ -143,7 +147,13 @@ fn main() -> anyhow::Result<()> {
     for emission in receiver {
         match emission {
             Emission::SigTerm => {
-                println!("Sigterm received, exiting...");
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "event": "sigterm",
+                        "message": "Sigterm received, exiting..."
+                    }))?
+                );
                 break;
             }
             Emission::Block(block_emission) => {
@@ -156,8 +166,15 @@ fn main() -> anyhow::Result<()> {
                 wallet.persist(&mut db)?;
                 let elapsed = start_apply_block.elapsed().as_secs_f32();
                 println!(
-                    "Applied block {} at height {} in {}s",
-                    hash, height, elapsed
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "event": "block_applied",
+                        "block": {
+                            "hash": hash.to_string(),
+                            "height": height
+                        },
+                        "duration_seconds": elapsed
+                    }))?
                 );
             }
             Emission::Mempool(mempool_emission) => {
@@ -165,30 +182,35 @@ fn main() -> anyhow::Result<()> {
                 wallet.apply_unconfirmed_txs(mempool_emission);
                 wallet.persist(&mut db)?;
                 println!(
-                    "Applied unconfirmed transactions in {}s",
-                    start_apply_mempool.elapsed().as_secs_f32()
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "event": "mempool_applied",
+                        "duration_seconds": start_apply_mempool.elapsed().as_secs_f32()
+                    }))?
                 );
                 break;
             }
         }
     }
+
     let wallet_tip_end = wallet.latest_checkpoint();
     let balance = wallet.balance();
     println!(
-        "Synced {} blocks in {}s",
-        blocks_received,
-        start_load_wallet.elapsed().as_secs_f32(),
-    );
-    println!(
-        "Wallet tip is '{}:{}'",
-        wallet_tip_end.height(),
-        wallet_tip_end.hash()
-    );
-    println!("Wallet balance is {}", balance.total());
-    println!(
-        "Wallet has {} transactions and {} utxos",
-        wallet.transactions().count(),
-        wallet.list_unspent().count()
+        "{}",
+        serde_json::to_string_pretty(&json!({
+            "event": "sync_complete",
+            "blocks_processed": blocks_received,
+            "total_duration_seconds": start_load_wallet.elapsed().as_secs_f32(),
+            "final_state": {
+                "tip": {
+                    "height": wallet_tip_end.height(),
+                    "hash": wallet_tip_end.hash().to_string()
+                },
+                "balance": balance.total(),
+                "transaction_count": wallet.transactions().count(),
+                "utxo_count": wallet.list_unspent().count()
+            }
+        }))?
     );
 
     Ok(())

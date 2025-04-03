@@ -3,6 +3,10 @@ name = "example_wallet_rpc"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "example_wallet_rpc"
+path = "src/main.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -12,3 +16,4 @@ bdk_bitcoind_rpc = { version = "0.18" }
 anyhow = "1"
 clap = { version = "4.5.17", features = ["derive", "env"] }
 ctrlc = "2.0.1"
+serde_json = "1.0"
