@@ -20,9 +20,12 @@ jobs:
   build-test:
     needs: prepare
     name: Build & Test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
         rust:
           - version: ${{ needs.prepare.outputs.rust_version }}
             clippy: true
@@ -58,13 +61,29 @@ jobs:
       - name: Build + Test
         env:
           MATRIX_RUST_VERSION: ${{ matrix.rust.version }}
+          MATRIX_OS: ${{ matrix.os }}
         run: |
-          if [ $MATRIX_RUST_VERSION = '1.63.0' ]; then
-            cargo build --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
-            cargo test --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
+          if [ "$MATRIX_OS" = "ubuntu-24.04-arm" ]; then
+            # On ARM, exclude both electrs-dependent tests and example_* files
+            echo "Running on ARM architecture - excluding electrs-dependent tests"
+            if [ "$MATRIX_RUST_VERSION" = "1.63.0" ]; then
+              cargo build --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
+              # Run tests with --exclude patterns for electrs-dependent tests
+              cargo test --workspace --exclude 'example_*' --exclude 'bdk_electrum' --exclude 'bdk_bitcoind_rpc' --exclude 'bdk_testenv' --exclude 'bdk_esplora' ${{ matrix.features }}
+            else
+              cargo build --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
+              # Run tests with --exclude patterns for electrs-dependent tests
+              cargo test --workspace --exclude 'example_*' --exclude 'bdk_electrum' --exclude 'bdk_bitcoind_rpc' --exclude 'bdk_testenv' --exclude 'bdk_esplora' ${{ matrix.features }}
+            fi
           else
-            cargo build --workspace --exclude 'example_*' ${{ matrix.features }}
-            cargo test --workspace --exclude 'example_*' ${{ matrix.features }}
+            # On x86, run tests normally
+            if [ "$MATRIX_RUST_VERSION" = "1.63.0" ]; then
+              cargo build --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
+              cargo test --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
+            else
+              cargo build --workspace --exclude 'example_*' ${{ matrix.features }}
+              cargo test --workspace --exclude 'example_*' ${{ matrix.features }}
+            fi
           fi
 
   check-no-std:
@@ -175,9 +194,12 @@ jobs:
   build-examples:
     needs: prepare
     name: Build & Test Examples
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
         example-dir:
           - example_cli
           - example_bitcoind_rpc_polling
@@ -202,4 +224,13 @@ jobs:
         uses: Swatinem/rust-cache@v2.7.7
       - name: Build
         working-directory: example-crates/${{ matrix.example-dir }}
-        run: cargo build
+        env:
+          MATRIX_OS: ${{ matrix.os }}
+          EXAMPLE_DIR: ${{ matrix.example-dir }}
+        run: |
+          if [ "$MATRIX_OS" = "ubuntu-24.04-arm" ] && [[ "$EXAMPLE_DIR" == *"electrum"* ]]; then
+            echo "Skipping electrum-dependent example on ARM architecture"
+            exit 0
+          else
+            cargo build
+          fi
