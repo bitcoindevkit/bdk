@@ -7,6 +7,22 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [wallet-1.2.0]
+
+### Changed
+
+- Accept any type that is convertible to a `ScriptBuf` in `TxBuilder::add_recipient` #1841
+- Refactor/use iterators to preselect utxos #1798
+- Bump bitcoin dependency to v0.32.4 #1853
+- Pin bdk_chain version to latest release #1860
+- chore: bump `miniscript` to `12.3.1` #1924
+
+### Fixed
+
+- Fix off-by-one error checking coinbase maturity in optional UTxOs #1830
+- Fix PersistedWallet to be Send + Sync, even when used with a !Sync persister type such as rusqlite::Connection. #1874
+
+
 ## [wallet-1.1.0]
 
 ### Added
@@ -1255,3 +1271,4 @@ final transaction is created by calling `finish` on the builder.
 [v1.0.0-beta.6]: https://github.com/bitcoindevkit/bdk/releases/tag/v1.0.0-beta.6
 [wallet-1.0.0]: https://github.com/bitcoindevkit/bdk/releases/tag/wallet-1.0.0
 [wallet-1.1.0]: https://github.com/bitcoindevkit/bdk/releases/tag/wallet-1.1.0
+[wallet-1.2.0]: https://github.com/bitcoindevkit/bdk/releases/tag/wallet-1.2.0
