@@ -22,7 +22,7 @@ type DescriptorToExtract = Box<
         + 'static,
 >;
 
-fn make_descriptor_to_extract<D>(descriptor: D) -> DescriptorToExtract
+pub(crate) fn make_descriptor_to_extract<D>(descriptor: D) -> DescriptorToExtract
 where
     D: IntoWalletDescriptor + Send + 'static,
 {
