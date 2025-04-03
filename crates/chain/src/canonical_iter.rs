@@ -1,9 +1,10 @@
-use crate::collections::{hash_map, HashMap, HashSet, VecDeque};
+use crate::collections::{HashMap, HashSet, VecDeque};
 use crate::tx_graph::{TxAncestors, TxDescendants};
 use crate::{Anchor, ChainOracle, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use bdk_core::BlockId;
 use bitcoin::{Transaction, Txid};
 
@@ -92,10 +93,15 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
     fn mark_canonical(&mut self, txid: Txid, tx: Arc<Transaction>, reason: CanonicalReason<A>) {
         let starting_txid = txid;
         let mut is_root = true;
-        TxAncestors::new_include_root(
+
+        let mut staged_not_canonical = HashSet::<Txid>::new();
+        let mut staged_canonical = Vec::<(Txid, (Arc<Transaction>, CanonicalReason<A>))>::new();
+        let mut detected_overlap = false;
+
+        let staged_queue = TxAncestors::new_include_root(
             self.tx_graph,
             tx,
-            |_: usize, tx: Arc<Transaction>| -> Option<()> {
+            |_: usize, tx: Arc<Transaction>| -> Option<Txid> {
                 let this_txid = tx.compute_txid();
                 let this_reason = if is_root {
                     is_root = false;
@@ -103,11 +109,10 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 } else {
                     reason.to_transitive(starting_txid)
                 };
-                let canonical_entry = match self.canonical.entry(this_txid) {
+                if self.canonical.contains_key(&this_txid) {
                     // Already visited tx before, exit early.
-                    hash_map::Entry::Occupied(_) => return None,
-                    hash_map::Entry::Vacant(entry) => entry,
-                };
+                    return None;
+                }
                 // Any conflicts with a canonical tx can be added to `not_canonical`. Descendants
                 // of `not_canonical` txs can also be added to `not_canonical`.
                 for (_, conflict_txid) in self.tx_graph.direct_conflicts(&tx) {
@@ -115,7 +120,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                         self.tx_graph,
                         conflict_txid,
                         |_: usize, txid: Txid| -> Option<()> {
-                            if self.not_canonical.insert(txid) {
+                            if staged_not_canonical.insert(txid) {
                                 Some(())
                             } else {
                                 None
@@ -124,12 +129,28 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                     )
                     .run_until_finished()
                 }
-                canonical_entry.insert((tx, this_reason));
-                self.queue.push_back(this_txid);
-                Some(())
+                if staged_not_canonical.contains(&this_txid) {
+                    detected_overlap = true;
+                    return None;
+                }
+                staged_canonical.push((this_txid, (tx, this_reason)));
+                Some(this_txid)
             },
         )
-        .run_until_finished()
+        .collect::<Vec<Txid>>();
+
+        if !detected_overlap {
+            debug_assert_eq!(
+                staged_not_canonical
+                    .intersection(&staged_canonical.iter().map(|(txid, _)| *txid).collect())
+                    .count(),
+                0
+            );
+            self.canonical
+                .extend(staged_canonical.iter().map(|(txid, v)| (*txid, v.clone())));
+            self.not_canonical.extend(staged_not_canonical.iter());
+            self.queue.extend(staged_queue);
+        }
     }
 }
 
