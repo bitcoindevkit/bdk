@@ -89,10 +89,6 @@ jobs:
         working-directory: ./crates/chain
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
         run: cargo check --no-default-features --features miniscript/no-std,hashbrown
-      - name: Check bdk wallet
-        working-directory: ./crates/wallet
-        # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
       - name: Check esplora
         working-directory: ./crates/esplora
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
@@ -123,9 +119,6 @@ jobs:
             target: "wasm32-unknown-unknown"
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.7.7
-      - name: Check bdk wallet
-        working-directory: ./crates/wallet
-        run: cargo check --target wasm32-unknown-unknown --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
       - name: Check esplora
         working-directory: ./crates/esplora
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features bdk_core/hashbrown,async
@@ -183,10 +176,6 @@ jobs:
           - example_bitcoind_rpc_polling
           - example_electrum
           - example_esplora
-          - example_wallet_electrum
-          - example_wallet_esplora_async
-          - example_wallet_esplora_blocking
-          - example_wallet_rpc
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -201,5 +190,5 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.7.7
       - name: Build
-        working-directory: example-crates/${{ matrix.example-dir }}
+        working-directory: examples/${{ matrix.example-dir }}
         run: cargo build
