@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/wallet",
     "crates/chain",
     "crates/core",
     "crates/file_store",
@@ -13,10 +12,6 @@ members = [
     "example-crates/example_electrum",
     "example-crates/example_esplora",
     "example-crates/example_bitcoind_rpc_polling",
-    "example-crates/example_wallet_electrum",
-    "example-crates/example_wallet_esplora_blocking",
-    "example-crates/example_wallet_esplora_async",
-    "example-crates/example_wallet_rpc",
 ]
 
 [workspace.package]

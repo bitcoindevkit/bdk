@@ -1,9 +1,0 @@
-[package]
-name = "example_wallet_electrum"
-version = "0.2.0"
-edition = "2021"
-
-[dependencies]
-bdk_wallet = { path = "../../crates/wallet", features = ["file_store"] }
-bdk_electrum = { version = "0.21" }
-anyhow = "1"
