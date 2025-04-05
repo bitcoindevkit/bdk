@@ -43,6 +43,8 @@ pub enum Error {
     Hex(bitcoin::hex::HexToBytesError),
     /// The provided wallet descriptors are identical
     ExternalAndInternalAreTheSame,
+    /// The provided parameters mismatch
+    Mismatch(MismatchError),
 }
 
 impl From<crate::keys::KeyError> for Error {
@@ -83,6 +85,7 @@ impl fmt::Display for Error {
             Self::ExternalAndInternalAreTheSame => {
                 write!(f, "External and internal descriptors are the same")
             }
+            Self::Mismatch(mismatch) => write!(f, "The provided parameters mismatch: {mismatch:?}"),
         }
     }
 }
@@ -124,4 +127,16 @@ impl From<crate::descriptor::policy::PolicyError> for Error {
     fn from(err: crate::descriptor::policy::PolicyError) -> Self {
         Error::Policy(err)
     }
+}
+
+#[derive(Debug, PartialEq)]
+/// Represents a mismatch within the parameters that passed as [`crate::wallet::CreateParams`].
+pub enum MismatchError {
+    /// Genesis hash does not match.
+    Genesis {
+        /// The genesis hash for the given network parameter.
+        network: bitcoin::BlockHash,
+        /// The genesis hash given as parameter.
+        parameter: bitcoin::BlockHash,
+    },
 }
