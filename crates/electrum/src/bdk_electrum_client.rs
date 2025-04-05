@@ -6,7 +6,7 @@ use bdk_core::{
     },
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
-use electrum_client::{ElectrumApi, Error, HeaderNotification, GetMerkleRes};
+use electrum_client::{ElectrumApi, Error, GetMerkleRes, HeaderNotification};
 use std::sync::{Arc, Mutex};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
@@ -491,10 +491,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         proofs: Vec<(Txid, GetMerkleRes)>,
     ) -> Result<(), Error> {
         // Pre-fetch all required headers
-        let heights: HashSet<u32> = proofs.iter()
+        let heights: HashSet<u32> = proofs
+            .iter()
             .map(|(_, proof)| proof.block_height as u32)
             .collect();
-        
+
         let mut headers = HashMap::new();
         for height in heights {
             headers.insert(height, self.fetch_header(height)?);

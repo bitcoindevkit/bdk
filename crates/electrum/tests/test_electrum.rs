@@ -913,12 +913,7 @@ pub fn test_sync_performance() -> anyhow::Result<()> {
 
     // Measure sync time
     let start = Instant::now();
-    let _ = sync_with_electrum(
-        &client,
-        spks.clone(),
-        &mut recv_chain,
-        &mut recv_graph,
-    )?;
+    let _ = sync_with_electrum(&client, spks.clone(), &mut recv_chain, &mut recv_graph)?;
     let sync_duration = start.elapsed();
 
     assert!(
