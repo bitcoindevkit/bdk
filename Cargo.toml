@@ -8,10 +8,10 @@ members = [
     "crates/esplora",
     "crates/bitcoind_rpc",
     "crates/testenv",
-    "example-crates/example_cli",
-    "example-crates/example_electrum",
-    "example-crates/example_esplora",
-    "example-crates/example_bitcoind_rpc_polling",
+    "examples/example_cli",
+    "examples/example_electrum",
+    "examples/example_esplora",
+    "examples/example_bitcoind_rpc_polling",
 ]
 
 [workspace.package]

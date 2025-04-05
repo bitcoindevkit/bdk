@@ -13,7 +13,7 @@
 //!
 //! Refer to [`example_electrum`] for a complete example.
 //!
-//! [`example_electrum`]: https://github.com/bitcoindevkit/bdk/tree/master/example-crates/example_electrum
+//! [`example_electrum`]: https://github.com/bitcoindevkit/bdk/tree/master/examples/example_electrum
 //! [`SyncResponse`]: bdk_core::spk_client::SyncResponse
 //! [`FullScanResponse`]: bdk_core::spk_client::FullScanResponse
 
