@@ -1216,6 +1216,13 @@ impl<A: Anchor> TxGraph<A> {
         self.try_list_expected_spk_txids(chain, chain_tip, indexer, spk_index_range)
             .map(|r| r.expect("infallible"))
     }
+
+    /// Construct a `TxGraph` from a `changeset`.
+    pub fn from_changeset(changeset: ChangeSet<A>) -> Self {
+        let mut graph = Self::default();
+        graph.apply_changeset(changeset);
+        graph
+    }
 }
 
 /// The [`ChangeSet`] represents changes to a [`TxGraph`].
