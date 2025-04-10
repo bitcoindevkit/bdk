@@ -263,6 +263,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut txs_to_validate = Vec::new();
 
         loop {
+            if unused_spk_count >= stop_gap {
+                break;
+            }
+
             let spks = (0..batch_size)
                 .map_while(|_| spks_with_expected_txids.next())
                 .collect::<Vec<_>>();
@@ -277,9 +281,6 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             for ((spk_index, spk), spk_history) in spks.into_iter().zip(spk_histories) {
                 if spk_history.is_empty() {
                     unused_spk_count = unused_spk_count.saturating_add(1);
-                    if unused_spk_count >= stop_gap {
-                        break;
-                    }
                 } else {
                     last_active_index = Some(spk_index);
                     unused_spk_count = 0;
