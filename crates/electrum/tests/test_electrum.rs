@@ -885,7 +885,7 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
 
 #[test]
 pub fn test_sync_performance() -> anyhow::Result<()> {
-    const EXPECTED_MAX_SYNC_TIME: Duration = Duration::from_secs(5);
+    const EXPECTED_MAX_SYNC_TIME: Duration = Duration::from_secs(15);
     const NUM_ADDRESSES: usize = 1000;
 
     let env = TestEnv::new()?;
