@@ -309,6 +309,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     }
                 }
             }
+
+            if unused_spk_count >= stop_gap {
+                break;
+            }
         }
 
         // Batch validate all collected transactions
@@ -542,6 +546,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     }
 
     // Replace the old validate_merkle_for_anchor with optimized batch version
+    #[allow(dead_code)]
     fn validate_merkle_for_anchor(
         &self,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
