@@ -339,6 +339,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     }
                 }
             }
+
+            if unused_spk_count >= stop_gap {
+                break;
+            }
         }
 
         Ok(last_active_index)
