@@ -4,7 +4,7 @@
 mod common;
 
 use bdk_chain::{Balance, BlockId};
-use bdk_testenv::{block_id, hash, local_chain};
+use bdk_testenv::{anyhow, block_id, hash, local_chain};
 use bitcoin::{Amount, OutPoint, ScriptBuf};
 use common::*;
 use std::collections::{BTreeSet, HashSet};
@@ -686,7 +686,111 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("tx", 0)]),
             exp_unspents: HashSet::from([("tx", 0)]),
             exp_balance: Balance { trusted_pending: Amount::from_sat(9000), ..Default::default() }
-        }
+        },
+        Scenario {
+            name: "tx spends from 2 conflicting transactions where a conflict spends another",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10_000, None)],
+                    last_seen: Some(1),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S1",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(9_000, None)],
+                    last_seen: Some(2),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S2",
+                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::PrevTx("S1", 0)],
+                    outputs: &[TxOutTemplate::new(17_000, None)],
+                    last_seen: Some(3),
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["A", "S1"]),
+            exp_chain_txouts: HashSet::from([]),
+            exp_unspents: HashSet::from([]),
+            exp_balance: Balance::default(),
+        },
+        Scenario {
+            name: "tx spends from 2 conflicting transactions where the conflict is nested",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10_000, Some(0))],
+                    last_seen: Some(1),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S1",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(9_000, Some(0))],
+                    last_seen: Some(3),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("S1", 0)],
+                    outputs: &[TxOutTemplate::new(8_000, Some(0))],
+                    last_seen: Some(2),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S2",
+                    inputs: &[TxInTemplate::PrevTx("B", 0), TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(17_000, Some(0))],
+                    last_seen: Some(4),
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["A", "S1", "B"]),
+            exp_chain_txouts: HashSet::from([("A", 0), ("B", 0), ("S1", 0)]),
+            exp_unspents: HashSet::from([("B", 0)]),
+            exp_balance: Balance { trusted_pending: Amount::from_sat(8_000), ..Default::default() },
+        },
+        Scenario {
+            name: "tx spends from 2 conflicting transactions where the conflict is nested (different last_seens)",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "A",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(10_000, Some(0))],
+                    last_seen: Some(1),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S1",
+                    inputs: &[TxInTemplate::PrevTx("A", 0)],
+                    outputs: &[TxOutTemplate::new(9_000, Some(0))],
+                    last_seen: Some(4),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "B",
+                    inputs: &[TxInTemplate::PrevTx("S1", 0)],
+                    outputs: &[TxOutTemplate::new(8_000, Some(0))],
+                    last_seen: Some(2),
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "S2",
+                    inputs: &[TxInTemplate::PrevTx("A", 0), TxInTemplate::PrevTx("B", 0)],
+                    outputs: &[TxOutTemplate::new(17_000, Some(0))],
+                    last_seen: Some(3),
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["A", "S1", "B"]),
+            exp_chain_txouts: HashSet::from([("A", 0), ("B", 0), ("S1", 0)]),
+            exp_unspents: HashSet::from([("B", 0)]),
+            exp_balance: Balance { trusted_pending: Amount::from_sat(8_000), ..Default::default() },
+        },
     ];
 
     for scenario in scenarios {
@@ -763,4 +867,70 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
     }
+}
+
+#[test]
+fn tx_spends_from_conflicting_txs() -> anyhow::Result<()> {
+    const EXTERNAL: &str = "external";
+    const INTERNAL: &str = "internal";
+
+    /// A changeset for [`Wallet`](crate::Wallet).
+    #[derive(Default, Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+    pub struct ChangeSet {
+        /// Descriptor for recipient addresses.
+        pub descriptor: Option<miniscript::Descriptor<miniscript::DescriptorPublicKey>>,
+        /// Descriptor for change addresses.
+        pub change_descriptor: Option<miniscript::Descriptor<miniscript::DescriptorPublicKey>>,
+        /// Stores the network type of the transaction data.
+        pub network: Option<bitcoin::Network>,
+        /// Changes to the [`LocalChain`](local_chain::LocalChain).
+        pub local_chain: bdk_chain::local_chain::ChangeSet,
+        /// Changes to [`TxGraph`](tx_graph::TxGraph).
+        pub tx_graph: bdk_chain::tx_graph::ChangeSet<bdk_core::ConfirmationBlockTime>,
+        /// Changes to [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex).
+        pub indexer: bdk_chain::keychain_txout::ChangeSet,
+    }
+
+    struct Wallet {
+        chain: bdk_chain::local_chain::LocalChain,
+        graph: bdk_chain::IndexedTxGraph<
+            bdk_core::ConfirmationBlockTime,
+            bdk_chain::keychain_txout::KeychainTxOutIndex<&'static str>,
+        >,
+    }
+
+    impl Wallet {
+        pub fn new(changeset: &ChangeSet) -> anyhow::Result<Self> {
+            let mut indexer = bdk_chain::keychain_txout::KeychainTxOutIndex::default();
+            if let Some(desc) = changeset.descriptor.clone() {
+                indexer.insert_descriptor(EXTERNAL, desc)?;
+            }
+            if let Some(desc) = changeset.change_descriptor.clone() {
+                indexer.insert_descriptor(INTERNAL, desc)?;
+            }
+            let mut graph = bdk_chain::IndexedTxGraph::new(indexer);
+            graph.apply_changeset(bdk_chain::indexed_tx_graph::ChangeSet {
+                tx_graph: changeset.tx_graph.clone(),
+                indexer: changeset.indexer.clone(),
+            });
+            let chain =
+                bdk_chain::local_chain::LocalChain::from_changeset(changeset.local_chain.clone())?;
+            Ok(Self { chain, graph })
+        }
+    }
+
+    let changeset = serde_json::from_slice::<ChangeSet>(include_bytes!(
+        "assets/tx_that_spends_from_conflicting_txs.changeset.json"
+    ))?;
+    let wallet = Wallet::new(&changeset)?;
+
+    let txouts = wallet.graph.graph().try_filter_chain_txouts(
+        &wallet.chain,
+        wallet.chain.tip().block_id(),
+        wallet.graph.index.outpoints().clone(),
+    )?;
+
+    for _ in txouts {}
+
+    Ok(())
 }
