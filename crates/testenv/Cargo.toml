@@ -18,15 +18,14 @@ workspace = true
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.21.1", default-features = false }
 electrsd = { version = "0.28.0", features = [ "legacy" ], default-features = false }
-
-[dev-dependencies]
-bdk_testenv = { path = "." }
+rand = {version = "0.8", optional = true}
 
 [features]
 default = ["std", "download"]
 download = ["electrsd/bitcoind_25_0", "electrsd/esplora_a33e97e1"]
 std = ["bdk_chain/std"]
 serde = ["bdk_chain/serde"]
+miniscript = ["bdk_chain/miniscript", "rand"]
 
 [package.metadata.docs.rs]
 no-default-features = true
