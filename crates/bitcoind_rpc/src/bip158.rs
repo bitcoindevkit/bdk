@@ -31,8 +31,10 @@ pub struct FilterIter<'c, C> {
     spks: Vec<ScriptBuf>,
     // local cp
     cp: Option<CheckPoint>,
-    // blocks map
-    blocks: BTreeMap<Height, BlockHash>,
+    // map of height -> (hash, is_match)
+    blocks: BTreeMap<Height, (BlockHash, bool)>,
+    // initial height
+    start: Height,
     // best height counter
     height: Height,
     // stop height
@@ -47,6 +49,7 @@ impl<'c, C: RpcApi> FilterIter<'c, C> {
             spks: vec![],
             cp: None,
             blocks: BTreeMap::new(),
+            start: height,
             height,
             stop: 0,
         }
@@ -69,22 +72,14 @@ impl<'c, C: RpcApi> FilterIter<'c, C> {
         self.spks.push(spk);
     }
 
-    /// Get the next filter and increment the current best height.
-    ///
-    /// Returns `Ok(None)` when the stop height is exceeded.
-    fn next_filter(&mut self) -> Result<Option<NextFilter>, Error> {
-        if self.height > self.stop {
-            return Ok(None);
-        }
-        let height = self.height;
-        let hash = match self.blocks.get(&height) {
-            Some(h) => *h,
-            None => self.client.get_block_hash(height as u64)?,
-        };
-        let filter_bytes = self.client.get_block_filter(&hash)?.filter;
-        let filter = BlockFilter::new(&filter_bytes);
-        self.height += 1;
-        Ok(Some((BlockId { height, hash }, filter)))
+    /// Get the block hash by `height` if it is found in the blocks map.
+    fn get_block_hash(&self, height: &Height) -> Option<BlockHash> {
+        Some(self.blocks.get(height)?.0)
+    }
+
+    /// Insert a (non-matching) block height and hash into the blocks map.
+    fn insert_block(&mut self, height: Height, hash: BlockHash) {
+        self.blocks.insert(height, (hash, false));
     }
 
     /// Get the remote tip.
@@ -93,33 +88,17 @@ impl<'c, C: RpcApi> FilterIter<'c, C> {
     /// [`FilterIter`].
     pub fn get_tip(&mut self) -> Result<Option<BlockId>, Error> {
         let tip_hash = self.client.get_best_block_hash()?;
-        let mut header = self.client.get_block_header_info(&tip_hash)?;
+        let header = self.client.get_block_header_info(&tip_hash)?;
         let tip_height = header.height as u32;
         if self.height >= tip_height {
             // nothing to do
             return Ok(None);
         }
-        self.blocks.insert(tip_height, tip_hash);
 
-        // if we have a checkpoint we use a lookback of ten blocks
-        // to ensure consistency of the local chain
+        // start scanning from point of agreement + 1
         if let Some(cp) = self.cp.as_ref() {
-            // adjust start height to point of agreement + 1
             let base = self.find_base_with(cp.clone())?;
-            self.height = base.height + 1;
-
-            for _ in 0..9 {
-                let hash = match header.previous_block_hash {
-                    Some(hash) => hash,
-                    None => break,
-                };
-                header = self.client.get_block_header_info(&hash)?;
-                let height = header.height as u32;
-                if height < self.height {
-                    break;
-                }
-                self.blocks.insert(height, hash);
-            }
+            self.height = base.height.saturating_add(1);
         }
 
         self.stop = tip_height;
@@ -130,9 +109,6 @@ impl<'c, C: RpcApi> FilterIter<'c, C> {
         }))
     }
 }
-
-/// Alias for a compact filter and associated block id.
-type NextFilter = (BlockId, BlockFilter);
 
 /// Event inner type
 #[derive(Debug, Clone)]
@@ -171,27 +147,53 @@ impl<C: RpcApi> Iterator for FilterIter<'_, C> {
     type Item = Result<Event, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        (|| -> Result<_, Error> {
-            // if the next filter matches any of our watched spks, get the block
-            // and return it, inserting relevant block ids along the way
-            self.next_filter()?.map_or(Ok(None), |(block, filter)| {
-                let height = block.height;
-                let hash = block.hash;
-
-                if self.spks.is_empty() {
-                    Err(Error::NoScripts)
-                } else if filter
-                    .match_any(&hash, self.spks.iter().map(|script| script.as_bytes()))
-                    .map_err(Error::Bip158)?
-                {
-                    let block = self.client.get_block(&hash)?;
-                    self.blocks.insert(height, hash);
-                    let inner = EventInner { height, block };
-                    Ok(Some(Event::Block(inner)))
-                } else {
-                    Ok(Some(Event::NoMatch(height)))
+        (|| -> Result<Option<_>, Error> {
+            if self.height > self.stop {
+                return Ok(None);
+            }
+            // Fetch next filter
+            let mut height = self.height;
+            let mut hash = self.client.get_block_hash(height as _)?;
+            loop {
+                let header = self.client.get_block_header(&hash)?;
+                let prev_height = height.saturating_sub(1);
+                let prev_hash = match self.get_block_hash(&prev_height) {
+                    Some(hash) => hash,
+                    None => break,
+                };
+                if header.prev_blockhash == prev_hash {
+                    break;
                 }
-            })
+                // reorg detected, keep backtracking
+                height = height.saturating_sub(1);
+                hash = self.client.get_block_hash(height as _)?;
+            }
+            let filter_bytes = self.client.get_block_filter(&hash)?.filter;
+            let filter = BlockFilter::new(&filter_bytes);
+
+            // record the scanned block
+            self.insert_block(height, hash);
+            // increment best height
+            self.height = height.saturating_add(1);
+
+            // If the filter matches any of our watched SPKs, fetch the full
+            // block, and record the matching block entry.
+            if self.spks.is_empty() {
+                Err(Error::NoScripts)
+            } else if filter
+                .match_any(&hash, self.spks.iter().map(|s| s.as_bytes()))
+                .map_err(Error::Bip158)?
+            {
+                let block = self.client.get_block(&hash)?;
+                // update for matched block
+                self.blocks.entry(height).and_modify(|(_, is_match)| {
+                    *is_match = true;
+                });
+                let inner = EventInner { height, block };
+                Ok(Some(Event::Block(inner)))
+            } else {
+                Ok(Some(Event::NoMatch(height)))
+            }
         })()
         .transpose()
     }
@@ -202,18 +204,18 @@ impl<C: RpcApi> FilterIter<'_, C> {
     fn find_base_with(&mut self, mut cp: CheckPoint) -> Result<BlockId, Error> {
         loop {
             let height = cp.height();
-            let fetched_hash = match self.blocks.get(&height) {
-                Some(hash) => *hash,
+            let fetched_hash = match self.get_block_hash(&height) {
+                Some(hash) => hash,
                 None if height == 0 => cp.hash(),
                 _ => self.client.get_block_hash(height as _)?,
             };
             if cp.hash() == fetched_hash {
                 // ensure this block also exists in self
-                self.blocks.insert(height, cp.hash());
+                self.insert_block(height, cp.hash());
                 return Ok(cp.block_id());
             }
             // remember conflicts
-            self.blocks.insert(height, fetched_hash);
+            self.insert_block(height, fetched_hash);
             cp = cp.prev().expect("must break before genesis");
         }
     }
@@ -221,17 +223,26 @@ impl<C: RpcApi> FilterIter<'_, C> {
     /// Returns a chain update from the newly scanned blocks.
     ///
     /// Returns `None` if this [`FilterIter`] was not constructed using a [`CheckPoint`], or
-    /// if no blocks have been fetched for example by using [`get_tip`](Self::get_tip).
+    /// if not all events have been emitted (by calling `next`).
     pub fn chain_update(&mut self) -> Option<CheckPoint> {
-        if self.cp.is_none() || self.blocks.is_empty() {
+        if self.cp.is_none() || self.blocks.is_empty() || self.height <= self.stop {
             return None;
         }
 
-        // note: to connect with the local chain we must guarantee that `self.blocks.first()`
-        // is also the point of agreement with `self.cp`.
+        // We return blocks up to and including the initial height, all of the matching blocks,
+        // and blocks in the terminal range.
+        let tail_range = self.stop.saturating_sub(9)..=self.stop;
         Some(
-            CheckPoint::from_block_ids(self.blocks.iter().map(BlockId::from))
-                .expect("blocks must be in order"),
+            CheckPoint::from_block_ids(self.blocks.iter().filter_map(
+                |(&height, &(hash, is_match))| {
+                    if height <= self.start || is_match || tail_range.contains(&height) {
+                        Some(BlockId { height, hash })
+                    } else {
+                        None
+                    }
+                },
+            ))
+            .expect("blocks must be in order"),
         )
     }
 }
