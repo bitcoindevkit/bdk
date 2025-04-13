@@ -263,10 +263,6 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut txs_to_validate = Vec::new();
 
         loop {
-            if unused_spk_count >= stop_gap {
-                break;
-            }
-
             let spks = (0..batch_size)
                 .map_while(|_| spks_with_expected_txids.next())
                 .collect::<Vec<_>>();
@@ -281,6 +277,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             for ((spk_index, spk), spk_history) in spks.into_iter().zip(spk_histories) {
                 if spk_history.is_empty() {
                     unused_spk_count = unused_spk_count.saturating_add(1);
+                    if unused_spk_count >= stop_gap {
+                        break;
+                    }
                 } else {
                     last_active_index = Some(spk_index);
                     unused_spk_count = 0;
@@ -309,6 +308,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         }
                     }
                 }
+            }
+
+            if unused_spk_count >= stop_gap {
+                break;
             }
         }
 
@@ -540,18 +543,6 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
 
         Ok(())
-    }
-
-    // Replace the old validate_merkle_for_anchor with optimized batch version
-    fn validate_merkle_for_anchor(
-        &self,
-        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
-        txid: Txid,
-        confirmation_height: usize,
-    ) -> Result<(), Error> {
-        // Use the batch processing functions even for single tx
-        let proofs = self.batch_fetch_merkle_proofs(&[(txid, confirmation_height)])?;
-        self.batch_validate_merkle_proofs(tx_update, proofs)
     }
 
     // Helper function which fetches the `TxOut`s of our relevant transactions' previous transactions,
