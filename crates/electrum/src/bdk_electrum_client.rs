@@ -545,6 +545,19 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         Ok(())
     }
 
+    // Replace the old validate_merkle_for_anchor with optimized batch version
+    #[allow(dead_code)]
+    fn validate_merkle_for_anchor(
+        &self,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
+        txid: Txid,
+        confirmation_height: usize,
+    ) -> Result<(), Error> {
+        // Use the batch processing functions even for single tx
+        let proofs = self.batch_fetch_merkle_proofs(&[(txid, confirmation_height)])?;
+        self.batch_validate_merkle_proofs(tx_update, proofs)
+    }
+
     // Helper function which fetches the `TxOut`s of our relevant transactions' previous transactions,
     // which we do not have by default. This data is needed to calculate the transaction fee.
     fn fetch_prev_txout(
