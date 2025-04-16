@@ -160,21 +160,24 @@ fn test_list_owned_txouts() {
 
     {
         // we need to scope here to take immutable reference of the graph
-        for _ in 0..10 {
-            let ((_, script), _) = graph
+        for i in 0..10 {
+            let ((index, script), _) = graph
                 .index
                 .reveal_next_spk("keychain_1".to_string())
                 .unwrap();
-            // TODO Assert indexes
+            // Assert that index matches expected sequential derivation index
+            assert_eq!(index, i, "Failed asserting index {} equals expected {}", index, i);
             trusted_spks.push(script.to_owned());
         }
     }
     {
-        for _ in 0..10 {
-            let ((_, script), _) = graph
+        for i in 0..10 {
+            let ((index, script), _) = graph
                 .index
                 .reveal_next_spk("keychain_2".to_string())
                 .unwrap();
+            // Assert that index matches expected sequential derivation index
+            assert_eq!(index, i, "Failed asserting index {} equals expected {}", index, i);
             untrusted_spks.push(script.to_owned());
         }
     }
