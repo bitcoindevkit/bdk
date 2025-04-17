@@ -20,3 +20,8 @@ authors = ["Bitcoin Dev Kit Developers"]
 [workspace.lints.clippy]
 print_stdout = "deny"
 print_stderr = "deny"
+
+# TODO: (@leonardo) remove this patched dependency, once it's released.
+[patch.crates-io.electrum-client]
+git = "https://github.com/oleonardolima/rust-electrum-client.git"
+branch = "release/bump-version-to-0.23.1"

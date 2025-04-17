@@ -1,6 +1,6 @@
 [package]
 name = "bdk_electrum"
-version = "0.21.0"
+version = "0.22.0"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.5.0" }
-electrum-client = { version = "0.23", features = [ "proxy" ], default-features = false }
+electrum-client = { version = "0.23.1", features = [ "proxy" ], default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv" }
@@ -29,3 +29,7 @@ use-openssl = ["electrum-client/use-openssl"]
 [[test]]
 name = "test_electrum"
 required-features = ["use-rustls"]
+
+[patch.crates-io.electrum-client]
+git = "https://github.com/oleonardolima/rust-electrum-client.git"
+branch = "release/bump-version-to-0.23.1"
