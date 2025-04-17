@@ -1,6 +1,6 @@
 [package]
 name = "bdk_esplora"
-version = "0.20.1"
+version = "0.21.0"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
@@ -16,12 +16,12 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.5.0", default-features = false }
-esplora-client = { version = "0.11.0", default-features = false }
+esplora-client = { version = "0.12.0", default-features = false }
 async-trait = { version = "0.1.66", optional = true }
 futures = { version = "0.3.26", optional = true }
 
 [dev-dependencies]
-esplora-client = { version = "0.11.0" }
+esplora-client = { version = "0.12.0" }
 bdk_chain = { path = "../chain" }
 bdk_testenv = { path = "../testenv" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
@@ -46,3 +46,7 @@ required-features = ["blocking"]
 [[test]]
 name = "async_ext"
 required-features = ["async"]
+
+[patch.crates-io.esplora-client]
+git = "https://github.com/oleonardolima/rust-esplora-client.git"
+branch = "release/bump-version-to-0.12.0"
