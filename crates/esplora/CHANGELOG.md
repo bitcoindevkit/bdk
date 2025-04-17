@@ -7,6 +7,12 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [esplora-0.21.0]
+
+### Changed
+
+<!-- TODO: (@leonardo) fill the CHANGELOG's prior to release -->
+
 ## [esplora-0.20.1]
 
 ### Changed
