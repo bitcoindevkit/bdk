@@ -92,6 +92,7 @@ fn main() -> anyhow::Result<()> {
         .filter_chain_unspents(
             &chain,
             chain.tip().block_id(),
+            Default::default(),
             graph.index.outpoints().clone(),
         )
         .collect();
