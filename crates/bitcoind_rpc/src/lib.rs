@@ -1,7 +1,8 @@
 //! This crate is used for emitting blockchain data from the `bitcoind` RPC interface. It does not
 //! use the wallet RPC API, so this crate can be used with wallet-disabled Bitcoin Core nodes.
 //!
-//! [`Emitter`] is the main structure which sources blockchain data from [`bitcoincore_rpc::Client`].
+//! [`Emitter`] is the main structure which sources blockchain data from
+//! [`bitcoincore_rpc::Client`].
 //!
 //! To only get block updates (exclude mempool transactions), the caller can use
 //! [`Emitter::next_block`] or/and [`Emitter::next_header`] until it returns `Ok(None)` (which means
@@ -153,8 +154,8 @@ pub struct BlockEvent<B> {
     /// The checkpoint of the new block.
     ///
     /// A [`CheckPoint`] is a node of a linked list of [`BlockId`]s. This checkpoint is linked to
-    /// all [`BlockId`]s originally passed in [`Emitter::new`] as well as emitted blocks since then.
-    /// These blocks are guaranteed to be of the same chain.
+    /// all [`BlockId`]s originally passed in [`Emitter::new`] as well as emitted blocks since
+    /// then. These blocks are guaranteed to be of the same chain.
     ///
     /// This is important as BDK structures require block-to-apply to be connected with another
     /// block in the original chain.
