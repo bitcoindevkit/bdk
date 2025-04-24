@@ -503,7 +503,7 @@ mod test {
     use bdk_chain::local_chain::LocalChain;
     use bdk_chain::BlockId;
     use bdk_core::ConfirmationBlockTime;
-    use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, TestEnv};
+    use bdk_testenv::{anyhow, TestEnv};
     use esplora_client::{BlockHash, Builder};
     use std::collections::{BTreeMap, BTreeSet};
     use std::time::Duration;
@@ -591,7 +591,11 @@ mod test {
                             ConfirmationBlockTime {
                                 block_id: BlockId {
                                     height,
-                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                    hash: env
+                                        .bitcoind
+                                        .client
+                                        .get_block_hash(height as _)?
+                                        .block_hash()?,
                                 },
                                 confirmation_time: height as _,
                             },
@@ -630,7 +634,11 @@ mod test {
                             ConfirmationBlockTime {
                                 block_id: BlockId {
                                     height,
-                                    hash: env.bitcoind.client.get_block_hash(height as _)?,
+                                    hash: env
+                                        .bitcoind
+                                        .client
+                                        .get_block_hash(height as _)?
+                                        .block_hash()?,
                                 },
                                 confirmation_time: height as _,
                             },
@@ -693,10 +701,10 @@ mod test {
         let env = TestEnv::new()?;
         let blocks = {
             let bitcoind_client = &env.bitcoind.client;
-            assert_eq!(bitcoind_client.get_block_count()?, 1);
+            assert_eq!(bitcoind_client.get_block_count()?.0, 1);
             [
-                (0, bitcoind_client.get_block_hash(0)?),
-                (1, bitcoind_client.get_block_hash(1)?),
+                (0, bitcoind_client.get_block_hash(0)?.block_hash()?),
+                (1, bitcoind_client.get_block_hash(1)?.block_hash()?),
             ]
             .into_iter()
             .chain((2..).zip(env.mine_blocks((TIP_HEIGHT - 1) as usize, None)?))

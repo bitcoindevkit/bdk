@@ -20,3 +20,19 @@ authors = ["Bitcoin Dev Kit Developers"]
 [workspace.lints.clippy]
 print_stdout = "deny"
 print_stderr = "deny"
+
+[patch.crates-io.corepc-types]
+git = "https://github.com/rust-bitcoin/corepc.git"
+branch = "master"
+
+[patch.crates-io.corepc-client]
+git = "https://github.com/rust-bitcoin/corepc.git"
+branch = "master"
+
+[patch.crates-io.corepc-node]
+git = "https://github.com/rust-bitcoin/corepc.git"
+branch = "master"
+
+[patch.crates-io.electrsd]
+git = "https://github.com/oleonardolima/electrsd.git"
+branch = "deps/bump-corepc-deps"
