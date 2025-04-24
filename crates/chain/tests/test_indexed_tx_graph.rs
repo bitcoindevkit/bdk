@@ -632,7 +632,10 @@ fn test_get_chain_position() {
             },
             anchor: None,
             last_seen: Some(2),
-            exp_pos: Some(ChainPosition::Unconfirmed { last_seen: Some(2) }),
+            exp_pos: Some(ChainPosition::Unconfirmed {
+                last_seen: Some(2),
+                first_seen: Some(2),
+            }),
         },
         TestCase {
             name: "tx anchor in best chain - confirmed",
@@ -661,7 +664,10 @@ fn test_get_chain_position() {
             },
             anchor: Some(block_id!(2, "B'")),
             last_seen: Some(2),
-            exp_pos: Some(ChainPosition::Unconfirmed { last_seen: Some(2) }),
+            exp_pos: Some(ChainPosition::Unconfirmed {
+                last_seen: Some(2),
+                first_seen: Some(2),
+            }),
         },
         TestCase {
             name: "tx unknown anchor - unconfirmed",
@@ -674,7 +680,10 @@ fn test_get_chain_position() {
             },
             anchor: Some(block_id!(2, "B'")),
             last_seen: None,
-            exp_pos: Some(ChainPosition::Unconfirmed { last_seen: None }),
+            exp_pos: Some(ChainPosition::Unconfirmed {
+                last_seen: None,
+                first_seen: None,
+            }),
         },
     ]
     .into_iter()

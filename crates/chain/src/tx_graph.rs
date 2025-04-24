@@ -177,6 +177,7 @@ pub struct TxGraph<A = ConfirmationBlockTime> {
     txs: HashMap<Txid, TxNodeInternal>,
     spends: BTreeMap<OutPoint, HashSet<Txid>>,
     anchors: HashMap<Txid, BTreeSet<A>>,
+    first_seen: HashMap<Txid, u64>,
     last_seen: HashMap<Txid, u64>,
     last_evicted: HashMap<Txid, u64>,
 
@@ -195,6 +196,7 @@ impl<A> Default for TxGraph<A> {
             txs: Default::default(),
             spends: Default::default(),
             anchors: Default::default(),
+            first_seen: Default::default(),
             last_seen: Default::default(),
             last_evicted: Default::default(),
             txs_by_highest_conf_heights: Default::default(),
@@ -214,8 +216,10 @@ pub struct TxNode<'a, T, A> {
     pub tx: T,
     /// The blocks that the transaction is "anchored" in.
     pub anchors: &'a BTreeSet<A>,
+    /// The first-seen unix timestamp of the transaction as unconfirmed.
+    pub first_seen: Option<u64>,
     /// The last-seen unix timestamp of the transaction as unconfirmed.
-    pub last_seen_unconfirmed: Option<u64>,
+    pub last_seen: Option<u64>,
 }
 
 impl<T, A> Deref for TxNode<'_, T, A> {
@@ -337,7 +341,8 @@ impl<A> TxGraph<A> {
                 txid,
                 tx: tx.clone(),
                 anchors: self.anchors.get(&txid).unwrap_or(&self.empty_anchors),
-                last_seen_unconfirmed: self.last_seen.get(&txid).copied(),
+                first_seen: self.first_seen.get(&txid).copied(),
+                last_seen: self.last_seen.get(&txid).copied(),
             }),
             TxNodeInternal::Partial(_) => None,
         })
@@ -348,7 +353,7 @@ impl<A> TxGraph<A> {
         &self,
     ) -> impl Iterator<Item = TxNode<'_, Arc<Transaction>, A>> {
         self.full_txs().filter_map(|tx| {
-            if tx.anchors.is_empty() && tx.last_seen_unconfirmed.is_none() {
+            if tx.anchors.is_empty() && tx.last_seen.is_none() {
                 Some(tx)
             } else {
                 None
@@ -372,7 +377,8 @@ impl<A> TxGraph<A> {
                 txid,
                 tx: tx.clone(),
                 anchors: self.anchors.get(&txid).unwrap_or(&self.empty_anchors),
-                last_seen_unconfirmed: self.last_seen.get(&txid).copied(),
+                first_seen: self.first_seen.get(&txid).copied(),
+                last_seen: self.last_seen.get(&txid).copied(),
             }),
             _ => None,
         }
@@ -787,10 +793,48 @@ impl<A: Anchor> TxGraph<A> {
         changeset
     }
 
-    /// Inserts the given `seen_at` for `txid` into [`TxGraph`].
+    /// Updates the first-seen and last-seen timestamps for a given `txid` in the [`TxGraph`].
     ///
-    /// Note that [`TxGraph`] only keeps track of the latest `seen_at`.
+    /// This method records the time a transaction was observed by updating both:
+    /// - the **first-seen** timestamp, which only changes if `seen_at` is earlier than the current value, and
+    /// - the **last-seen** timestamp, which only changes if `seen_at` is later than the current value.
+    ///
+    /// `seen_at` is a UNIX timestamp in seconds.
+    ///
+    /// Returns a [`ChangeSet`] representing any changes applied.
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
+        let mut changeset_first_seen = self.update_first_seen(txid, seen_at);
+        let changeset_last_seen = self.update_last_seen(txid, seen_at);
+        changeset_first_seen.merge(changeset_last_seen);
+        changeset_first_seen
+    }
+
+    /// Updates `first_seen` given a new `seen_at`.
+    fn update_first_seen(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
+        let is_changed = match self.first_seen.entry(txid) {
+            hash_map::Entry::Occupied(mut e) => {
+                let first_seen = e.get_mut();
+                let change = *first_seen > seen_at;
+                if change {
+                    *first_seen = seen_at;
+                }
+                change
+            }
+            hash_map::Entry::Vacant(e) => {
+                e.insert(seen_at);
+                true
+            }
+        };
+
+        let mut changeset = ChangeSet::<A>::default();
+        if is_changed {
+            changeset.first_seen.insert(txid, seen_at);
+        }
+        changeset
+    }
+
+    /// Updates `last_seen` given a new `seen_at`.
+    fn update_last_seen(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
         let mut old_last_seen = None;
         let is_changed = match self.last_seen.entry(txid) {
             hash_map::Entry::Occupied(mut e) => {
@@ -904,6 +948,7 @@ impl<A: Anchor> TxGraph<A> {
                 .iter()
                 .flat_map(|(txid, anchors)| anchors.iter().map(|a| (a.clone(), *txid)))
                 .collect(),
+            first_seen: self.first_seen.iter().map(|(&k, &v)| (k, v)).collect(),
             last_seen: self.last_seen.iter().map(|(&k, &v)| (k, v)).collect(),
             last_evicted: self.last_evicted.iter().map(|(&k, &v)| (k, v)).collect(),
         }
@@ -978,11 +1023,13 @@ impl<A: Anchor> TxGraph<A> {
                                     transitively: None,
                                 },
                                 None => ChainPosition::Unconfirmed {
-                                    last_seen: tx_node.last_seen_unconfirmed,
+                                    first_seen: tx_node.first_seen,
+                                    last_seen: tx_node.last_seen,
                                 },
                             },
                             None => ChainPosition::Unconfirmed {
-                                last_seen: tx_node.last_seen_unconfirmed,
+                                first_seen: tx_node.first_seen,
+                                last_seen: tx_node.last_seen,
                             },
                         },
                         CanonicalReason::Anchor { anchor, descendant } => match descendant {
@@ -1003,9 +1050,13 @@ impl<A: Anchor> TxGraph<A> {
                         },
                         CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
                             ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
+                                first_seen: tx_node.first_seen,
                                 last_seen: Some(last_seen),
                             },
-                            ObservedIn::Block(_) => ChainPosition::Unconfirmed { last_seen: None },
+                            ObservedIn::Block(_) => ChainPosition::Unconfirmed {
+                                first_seen: tx_node.first_seen,
+                                last_seen: None,
+                            },
                         },
                     };
                     Ok(CanonicalTx {
@@ -1372,6 +1423,9 @@ pub struct ChangeSet<A = ()> {
     /// Added timestamps of when a transaction is last evicted from the mempool.
     #[cfg_attr(feature = "serde", serde(default))]
     pub last_evicted: BTreeMap<Txid, u64>,
+    /// Added first-seen unix timestamps of transactions.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub first_seen: BTreeMap<Txid, u64>,
 }
 
 impl<A> Default for ChangeSet<A> {
@@ -1380,6 +1434,7 @@ impl<A> Default for ChangeSet<A> {
             txs: Default::default(),
             txouts: Default::default(),
             anchors: Default::default(),
+            first_seen: Default::default(),
             last_seen: Default::default(),
             last_evicted: Default::default(),
         }
@@ -1428,6 +1483,18 @@ impl<A: Ord> Merge for ChangeSet<A> {
         self.txouts.extend(other.txouts);
         self.anchors.extend(other.anchors);
 
+        // first_seen timestamps should only decrease
+        self.first_seen.extend(
+            other
+                .first_seen
+                .into_iter()
+                .filter(|(txid, update_fs)| match self.first_seen.get(txid) {
+                    Some(existing) => update_fs < existing,
+                    None => true,
+                })
+                .collect::<Vec<_>>(),
+        );
+
         // last_seen timestamps should only increase
         self.last_seen.extend(
             other
@@ -1450,6 +1517,7 @@ impl<A: Ord> Merge for ChangeSet<A> {
         self.txs.is_empty()
             && self.txouts.is_empty()
             && self.anchors.is_empty()
+            && self.first_seen.is_empty()
             && self.last_seen.is_empty()
             && self.last_evicted.is_empty()
     }
@@ -1470,6 +1538,7 @@ impl<A: Ord> ChangeSet<A> {
             anchors: BTreeSet::<(A2, Txid)>::from_iter(
                 self.anchors.into_iter().map(|(a, txid)| (f(a), txid)),
             ),
+            first_seen: self.first_seen,
             last_seen: self.last_seen,
             last_evicted: self.last_evicted,
         }
