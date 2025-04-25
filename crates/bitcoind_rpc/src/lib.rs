@@ -236,6 +236,14 @@ pub struct MempoolEvent {
     pub latest_update_time: u64,
 }
 
+impl MempoolEvent {
+    /// Returns an iterator of `(txid, evicted_at)` pairs for all evicted transactions.
+    pub fn evicted_ats(&self) -> impl ExactSizeIterator<Item = (Txid, u64)> + '_ {
+        let time = self.latest_update_time;
+        self.evicted_txids.iter().map(move |&txid| (txid, time))
+    }
+}
+
 /// A newly emitted block from [`Emitter`].
 #[derive(Debug)]
 pub struct BlockEvent<B> {

@@ -835,6 +835,26 @@ impl<A: Anchor> TxGraph<A> {
         changeset
     }
 
+    /// Batch inserts `(txid, evicted_at)` pairs into [`TxGraph`] for `txid`s that the graph is
+    /// tracking.
+    ///
+    /// The `evicted_at` timestamp represents the last known time when the transaction was observed
+    /// to be missing from the mempool. If `txid` was previously recorded with an earlier
+    /// `evicted_at` value, it is updated only if the new value is greater.
+    pub fn batch_insert_relevant_evicted_at(
+        &mut self,
+        evicted_ats: impl IntoIterator<Item = (Txid, u64)>,
+    ) -> ChangeSet<A> {
+        let mut changeset = ChangeSet::default();
+        for (txid, evicted_at) in evicted_ats {
+            // Only record evictions for transactions the graph is tracking.
+            if self.txs.contains_key(&txid) {
+                changeset.merge(self.insert_evicted_at(txid, evicted_at));
+            }
+        }
+        changeset
+    }
+
     /// Extends this graph with the given `update`.
     ///
     /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions that

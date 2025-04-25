@@ -289,11 +289,9 @@ fn main() -> anyhow::Result<()> {
                     Emission::Mempool(mempool_txs) => {
                         let mut graph_changeset =
                             graph.batch_insert_relevant_unconfirmed(mempool_txs.new_txs.clone());
-                        for txid in mempool_txs.evicted_txids {
-                            graph_changeset.merge(
-                                graph.insert_evicted_at(txid, mempool_txs.latest_update_time),
-                            );
-                        }
+                        graph_changeset.merge(
+                            graph.batch_insert_relevant_evicted_at(mempool_txs.evicted_ats()),
+                        );
                         (local_chain::ChangeSet::default(), graph_changeset)
                     }
                     Emission::Tip(h) => {

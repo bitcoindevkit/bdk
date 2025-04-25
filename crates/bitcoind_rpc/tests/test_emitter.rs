@@ -847,11 +847,7 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     assert!(mempool_event.evicted_txids.contains(&txid_1));
 
     // Update graph with evicted tx.
-    for txid in mempool_event.evicted_txids {
-        if graph.graph().get_tx_node(txid).is_some() {
-            let _ = graph.insert_evicted_at(txid, mempool_event.latest_update_time);
-        }
-    }
+    let _ = graph.batch_insert_relevant_evicted_at(mempool_event.evicted_ats());
 
     let canonical_txids = graph
         .graph()

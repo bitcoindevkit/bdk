@@ -145,6 +145,22 @@ where
         }
     }
 
+    /// Batch inserts `(txid, evicted_at)` pairs for `txid`s that the graph is tracking.
+    ///
+    /// The `evicted_at` timestamp represents the last known time when the transaction was observed
+    /// to be missing from the mempool. If `txid` was previously recorded with an earlier
+    /// `evicted_at` value, it is updated only if the new value is greater.
+    pub fn batch_insert_relevant_evicted_at(
+        &mut self,
+        evicted_ats: impl IntoIterator<Item = (Txid, u64)>,
+    ) -> ChangeSet<A, I::ChangeSet> {
+        let tx_graph = self.graph.batch_insert_relevant_evicted_at(evicted_ats);
+        ChangeSet {
+            tx_graph,
+            ..Default::default()
+        }
+    }
+
     /// Batch insert transactions, filtering out those that are irrelevant.
     ///
     /// Relevancy is determined by the [`Indexer::is_tx_relevant`] implementation of `I`. Irrelevant
