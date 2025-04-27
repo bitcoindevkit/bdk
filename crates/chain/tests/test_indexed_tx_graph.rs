@@ -1,8 +1,5 @@
 #![cfg(feature = "miniscript")]
 
-#[macro_use]
-mod common;
-
 use std::{collections::BTreeSet, sync::Arc};
 
 use bdk_chain::{

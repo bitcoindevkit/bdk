@@ -1,3 +1,4 @@
+pub mod tx_template;
 pub mod utils;
 
 use bdk_chain::{
