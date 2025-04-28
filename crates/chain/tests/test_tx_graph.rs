@@ -287,7 +287,7 @@ fn insert_tx_displaces_txouts() {
 }
 
 #[test]
-fn insert_signed_tx_displaces_unsigned() {
+fn insert_tx_witness_precedence() {
     let previous_output = OutPoint::new(hash!("prev"), 2);
     let unsigned_tx = Transaction {
         version: transaction::Version::ONE,
@@ -351,6 +351,67 @@ fn insert_signed_tx_displaces_unsigned() {
             }
         );
         assert!(changeset_insert_unsigned.is_empty());
+    }
+
+    // Smaller witness displaces larger witness and witnesses must not get cleared.
+    {
+        let previous_output_2 = OutPoint::new(hash!("prev"), 3);
+        let small_wit = Witness::from_slice(&[vec![0u8; 10]]);
+        let large_wit = Witness::from_slice(&[vec![0u8; 20]]);
+        let other_wit = Witness::from_slice(&[vec![0u8; 21]]);
+        let tx_small = Transaction {
+            input: vec![
+                TxIn {
+                    previous_output,
+                    sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                    witness: small_wit.clone(),
+                    ..Default::default()
+                },
+                TxIn {
+                    previous_output: previous_output_2,
+                    sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                    witness: other_wit,
+                    ..Default::default()
+                },
+            ],
+            ..unsigned_tx.clone()
+        };
+        let tx_large = Transaction {
+            input: vec![
+                // This input has a larger witness than the previous, so we expect that the witness
+                // for this input does not get replaced.
+                TxIn {
+                    previous_output,
+                    sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                    witness: large_wit.clone(),
+                    ..Default::default()
+                },
+                // This input has no witness, so we expect that the witness for this input does not
+                // get replaced either.
+                TxIn {
+                    previous_output: previous_output_2,
+                    sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                    ..Default::default()
+                },
+            ],
+            ..unsigned_tx.clone()
+        };
+
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let changeset_small = tx_graph.insert_tx(tx_small.clone());
+        let changeset_large = tx_graph.insert_tx(tx_large);
+        assert_eq!(
+            changeset_small,
+            ChangeSet {
+                txs: [Arc::new(tx_small.clone())].into(),
+                ..Default::default()
+            }
+        );
+        assert!(changeset_large.is_empty());
+        let tx = tx_graph
+            .get_tx(tx_small.compute_txid())
+            .expect("tx must exist");
+        assert_eq!(tx.as_ref().clone(), tx_small, "tx must not have changed");
     }
 }
 
