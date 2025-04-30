@@ -102,18 +102,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// returns updates for [`bdk_chain`] data structures.
     ///
     /// - `request`: struct with data required to perform a spk-based blockchain client full scan,
-    ///              see [`FullScanRequest`].
+    ///   see [`FullScanRequest`].
     /// - `stop_gap`: the full scan for each keychain stops after a gap of script pubkeys with no
-    ///               associated transactions.
+    ///   associated transactions.
     /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
-    ///                 request.
+    ///   request.
     /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation.
-    ///                        Note that this requires additional calls to the Electrum server, but
-    ///                        is necessary for calculating the fee on a transaction if your wallet
-    ///                        does not own the inputs. Methods like [`Wallet.calculate_fee`] and
-    ///                        [`Wallet.calculate_fee_rate`] will return a
-    ///                        [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not
-    ///                        present in the transaction graph.
+    ///   Note that this requires additional calls to the Electrum server, but is necessary for
+    ///   calculating the fee on a transaction if your wallet does not own the inputs. Methods like
+    ///   [`Wallet.calculate_fee`] and [`Wallet.calculate_fee_rate`] will return a
+    ///   [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not present in the
+    ///   transaction graph.
     ///
     /// [`bdk_chain`]: ../bdk_chain/index.html
     /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
@@ -172,16 +171,15 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// and returns updates for [`bdk_chain`] data structures.
     ///
     /// - `request`: struct with data required to perform a spk-based blockchain client sync,
-    ///              see [`SyncRequest`]
+    ///   see [`SyncRequest`]
     /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
-    ///                 request
+    ///   request
     /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation.
-    ///                        Note that this requires additional calls to the Electrum server, but
-    ///                        is necessary for calculating the fee on a transaction if your wallet
-    ///                        does not own the inputs. Methods like [`Wallet.calculate_fee`] and
-    ///                        [`Wallet.calculate_fee_rate`] will return a
-    ///                        [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not
-    ///                        present in the transaction graph.
+    ///   Note that this requires additional calls to the Electrum server, but is necessary for
+    ///   calculating the fee on a transaction if your wallet does not own the inputs. Methods like
+    ///   [`Wallet.calculate_fee`] and [`Wallet.calculate_fee_rate`] will return a
+    ///   [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not present in the
+    ///   transaction graph.
     ///
     /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
