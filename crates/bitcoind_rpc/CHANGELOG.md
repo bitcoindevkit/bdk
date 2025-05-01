@@ -7,6 +7,15 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [bitcoind_rpc-0.19.0]
+
+## Changed
+
+- feat(rpc)!: Update Emitter::mempool to support evicted_at #1857
+- Change Emitter::mempool to return MempoolEvents which contain mempool-eviction data.
+- Change Emitter::client to have more relaxed generic bounds. C: Deref, C::Target: RpcApi are the new bounds.
+- deps: bump `bdk_core` to 0.5.0
+
 ## [bitcoind_rpc-0.18.0]
 
 ### Added
@@ -21,3 +30,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [bitcoind_rpc-0.17.1]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.17.1
 [bitcoind_rpc-0.18.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.18.0
+[bitcoind_rpc-0.19.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.19.0
