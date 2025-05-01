@@ -40,6 +40,11 @@ impl<A> ChainPosition<A> {
     pub fn is_confirmed(&self) -> bool {
         matches!(self, Self::Confirmed { .. })
     }
+
+    /// Returns whether [`ChainPosition`] is unconfirmed or not.
+    pub fn is_unconfirmed(&self) -> bool {
+        matches!(self, Self::Unconfirmed { .. })
+    }
 }
 
 impl<A: Clone> ChainPosition<&A> {

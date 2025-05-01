@@ -11,10 +11,7 @@ use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
-use bdk_chain::{
-    bitcoin::{Block, Transaction},
-    local_chain, CanonicalizationParams, Merge,
-};
+use bdk_chain::{bitcoin::Block, local_chain, CanonicalizationParams, Merge};
 use example_cli::{
     anyhow,
     clap::{self, Args, Subcommand},
@@ -36,7 +33,7 @@ const DB_COMMIT_DELAY: Duration = Duration::from_secs(60);
 #[derive(Debug)]
 enum Emission {
     Block(bdk_bitcoind_rpc::BlockEvent<Block>),
-    Mempool(Vec<(Transaction, u64)>),
+    Mempool(bdk_bitcoind_rpc::MempoolEvent),
     Tip(u32),
 }
 
@@ -139,9 +136,24 @@ fn main() -> anyhow::Result<()> {
                 fallback_height, ..
             } = rpc_args;
 
-            let chain_tip = chain.lock().unwrap().tip();
             let rpc_client = rpc_args.new_client()?;
-            let mut emitter = Emitter::new(&rpc_client, chain_tip, fallback_height);
+            let mut emitter = {
+                let chain = chain.lock().unwrap();
+                let graph = graph.lock().unwrap();
+                Emitter::new(
+                    &rpc_client,
+                    chain.tip(),
+                    fallback_height,
+                    graph
+                        .graph()
+                        .list_canonical_txs(
+                            &*chain,
+                            chain.tip().block_id(),
+                            CanonicalizationParams::default(),
+                        )
+                        .filter(|tx| tx.chain_position.is_unconfirmed()),
+                )
+            };
             let mut db_stage = ChangeSet::default();
 
             let mut last_db_commit = Instant::now();
@@ -205,7 +217,7 @@ fn main() -> anyhow::Result<()> {
             let graph_changeset = graph
                 .lock()
                 .unwrap()
-                .batch_insert_relevant_unconfirmed(mempool_txs);
+                .batch_insert_relevant_unconfirmed(mempool_txs.new_txs);
             {
                 let db = &mut *db.lock().unwrap();
                 db_stage.merge(ChangeSet {
@@ -224,7 +236,24 @@ fn main() -> anyhow::Result<()> {
             } = rpc_args;
             let sigterm_flag = start_ctrlc_handler();
 
-            let last_cp = chain.lock().unwrap().tip();
+            let rpc_client = Arc::new(rpc_args.new_client()?);
+            let mut emitter = {
+                let chain = chain.lock().unwrap();
+                let graph = graph.lock().unwrap();
+                Emitter::new(
+                    rpc_client.clone(),
+                    chain.tip(),
+                    fallback_height,
+                    graph
+                        .graph()
+                        .list_canonical_txs(
+                            &*chain,
+                            chain.tip().block_id(),
+                            CanonicalizationParams::default(),
+                        )
+                        .filter(|tx| tx.chain_position.is_unconfirmed()),
+                )
+            };
 
             println!(
                 "[{:>10}s] starting emitter thread...",
@@ -232,9 +261,6 @@ fn main() -> anyhow::Result<()> {
             );
             let (tx, rx) = std::sync::mpsc::sync_channel::<Emission>(CHANNEL_BOUND);
             let emission_jh = std::thread::spawn(move || -> anyhow::Result<()> {
-                let rpc_client = rpc_args.new_client()?;
-                let mut emitter = Emitter::new(&rpc_client, last_cp, fallback_height);
-
                 let mut block_count = rpc_client.get_block_count()? as u32;
                 tx.send(Emission::Tip(block_count))?;
 
@@ -288,7 +314,11 @@ fn main() -> anyhow::Result<()> {
                         (chain_changeset, graph_changeset)
                     }
                     Emission::Mempool(mempool_txs) => {
-                        let graph_changeset = graph.batch_insert_relevant_unconfirmed(mempool_txs);
+                        let mut graph_changeset =
+                            graph.batch_insert_relevant_unconfirmed(mempool_txs.new_txs.clone());
+                        graph_changeset.merge(
+                            graph.batch_insert_relevant_evicted_at(mempool_txs.evicted_ats()),
+                        );
                         (local_chain::ChangeSet::default(), graph_changeset)
                     }
                     Emission::Tip(h) => {
