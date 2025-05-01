@@ -2,7 +2,7 @@
 
 #[macro_use]
 mod common;
-use bdk_chain::{collections::*, BlockId, ConfirmationBlockTime};
+use bdk_chain::{collections::*, BlockId, CanonicalizationParams, ConfirmationBlockTime};
 use bdk_chain::{
     local_chain::LocalChain,
     tx_graph::{self, CalculateFeeError},
@@ -10,6 +10,8 @@ use bdk_chain::{
     Anchor, ChainOracle, ChainPosition, Merge,
 };
 use bdk_testenv::{block_id, hash, utils::new_tx};
+use bitcoin::hex::FromHex;
+use bitcoin::Witness;
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,
     Transaction, TxIn, TxOut, Txid,
@@ -282,6 +284,135 @@ fn insert_tx_displaces_txouts() {
     assert!(changeset.txouts.is_empty());
     assert!(tx_graph.get_tx(txid).is_some());
     assert_eq!(tx_graph.get_txout(outpoint), Some(txout));
+}
+
+#[test]
+fn insert_tx_witness_precedence() {
+    let previous_output = OutPoint::new(hash!("prev"), 2);
+    let unsigned_tx = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output,
+            script_sig: ScriptBuf::default(),
+            sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+            witness: Witness::default(),
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(24_000),
+            script_pubkey: ScriptBuf::default(),
+        }],
+    };
+    let signed_tx = Transaction {
+        input: vec![TxIn {
+            previous_output,
+            script_sig: ScriptBuf::default(),
+            sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+            witness: Witness::from_slice(&[
+                // Random witness from mempool.space
+                Vec::from_hex("d59118058bf9e8604cec5c0b4a13430b07286482784da313594e932faad074dc4bd27db7cbfff9ad32450db097342d0148ec21c3033b0c27888fd2fd0de2e9b5")
+                    .unwrap(),
+            ]),
+        }],
+        ..unsigned_tx.clone()
+    };
+
+    // Signed tx must displace unsigned.
+    {
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let changeset_insert_unsigned = tx_graph.insert_tx(unsigned_tx.clone());
+        let changeset_insert_signed = tx_graph.insert_tx(signed_tx.clone());
+        assert_eq!(
+            changeset_insert_unsigned,
+            ChangeSet {
+                txs: [Arc::new(unsigned_tx.clone())].into(),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            changeset_insert_signed,
+            ChangeSet {
+                txs: [Arc::new(signed_tx.clone())].into(),
+                ..Default::default()
+            }
+        );
+    }
+
+    // Unsigned tx must not displace signed.
+    {
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let changeset_insert_signed = tx_graph.insert_tx(signed_tx.clone());
+        let changeset_insert_unsigned = tx_graph.insert_tx(unsigned_tx.clone());
+        assert_eq!(
+            changeset_insert_signed,
+            ChangeSet {
+                txs: [Arc::new(signed_tx)].into(),
+                ..Default::default()
+            }
+        );
+        assert!(changeset_insert_unsigned.is_empty());
+    }
+
+    // Smaller witness displaces larger witness and witnesses must not get cleared.
+    {
+        let previous_output_2 = OutPoint::new(hash!("prev"), 3);
+        let small_wit = Witness::from_slice(&[vec![0u8; 10]]);
+        let large_wit = Witness::from_slice(&[vec![0u8; 20]]);
+        let other_wit = Witness::from_slice(&[vec![0u8; 21]]);
+        let tx_small = Transaction {
+            input: vec![
+                TxIn {
+                    previous_output,
+                    sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                    witness: small_wit.clone(),
+                    ..Default::default()
+                },
+                TxIn {
+                    previous_output: previous_output_2,
+                    sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                    witness: other_wit,
+                    ..Default::default()
+                },
+            ],
+            ..unsigned_tx.clone()
+        };
+        let tx_large = Transaction {
+            input: vec![
+                // This input has a larger witness than the previous, so we expect that the witness
+                // for this input does not get replaced.
+                TxIn {
+                    previous_output,
+                    sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                    witness: large_wit.clone(),
+                    ..Default::default()
+                },
+                // This input has no witness, so we expect that the witness for this input does not
+                // get replaced either.
+                TxIn {
+                    previous_output: previous_output_2,
+                    sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                    ..Default::default()
+                },
+            ],
+            ..unsigned_tx.clone()
+        };
+
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let changeset_small = tx_graph.insert_tx(tx_small.clone());
+        let changeset_large = tx_graph.insert_tx(tx_large);
+        assert_eq!(
+            changeset_small,
+            ChangeSet {
+                txs: [Arc::new(tx_small.clone())].into(),
+                ..Default::default()
+            }
+        );
+        assert!(changeset_large.is_empty());
+        let tx = tx_graph
+            .get_tx(tx_small.compute_txid())
+            .expect("tx must exist");
+        assert_eq!(tx.as_ref().clone(), tx_small, "tx must not have changed");
+    }
 }
 
 #[test]
@@ -885,6 +1016,7 @@ fn test_chain_spends() {
                 .filter_chain_txouts(
                     chain,
                     tip.block_id(),
+                    CanonicalizationParams::default(),
                     tx_graph.all_txouts().map(|(op, _)| ((), op)),
                 )
                 .filter_map(|(_, full_txo)| Some((full_txo.outpoint, full_txo.spent_by?)))
@@ -894,7 +1026,7 @@ fn test_chain_spends() {
                                      tx_graph: &TxGraph<ConfirmationBlockTime>|
      -> HashMap<Txid, ChainPosition<ConfirmationBlockTime>> {
         tx_graph
-            .list_canonical_txs(chain, tip.block_id())
+            .list_canonical_txs(chain, tip.block_id(), CanonicalizationParams::default())
             .map(|canon_tx| (canon_tx.tx_node.txid, canon_tx.chain_position))
             .collect()
     };
@@ -1063,13 +1195,21 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
     let canonical_txs: Vec<_> = graph
-        .list_canonical_txs(&chain, chain.tip().block_id())
+        .list_canonical_txs(
+            &chain,
+            chain.tip().block_id(),
+            CanonicalizationParams::default(),
+        )
         .collect();
     assert!(canonical_txs.is_empty());
 
     // tx0 with seen_at should be returned by canonical txs
     let _ = graph.insert_seen_at(txids[0], 2);
-    let mut canonical_txs = graph.list_canonical_txs(&chain, chain.tip().block_id());
+    let mut canonical_txs = graph.list_canonical_txs(
+        &chain,
+        chain.tip().block_id(),
+        CanonicalizationParams::default(),
+    );
     assert_eq!(
         canonical_txs.next().map(|tx| tx.tx_node.txid).unwrap(),
         txids[0]
@@ -1079,7 +1219,11 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     // tx1 with anchor is also canonical
     let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
     let canonical_txids: Vec<_> = graph
-        .list_canonical_txs(&chain, chain.tip().block_id())
+        .list_canonical_txs(
+            &chain,
+            chain.tip().block_id(),
+            CanonicalizationParams::default(),
+        )
         .map(|tx| tx.tx_node.txid)
         .collect();
     assert!(canonical_txids.contains(&txids[1]));
@@ -1141,6 +1285,7 @@ fn call_map_anchors_with_non_deterministic_anchor() {
             outputs: &[TxOutTemplate::new(10000, Some(1))],
             anchors: &[block_id!(1, "A")],
             last_seen: None,
+            ..Default::default()
         },
         TxTemplate {
             tx_name: "tx2",
@@ -1157,7 +1302,7 @@ fn call_map_anchors_with_non_deterministic_anchor() {
             ..Default::default()
         },
     ];
-    let (graph, _, _) = init_graph(&template);
+    let graph = init_graph(&template).tx_graph;
     let new_graph = graph.clone().map_anchors(|a| NonDeterministicAnchor {
         anchor_block: a,
         // A non-deterministic value
