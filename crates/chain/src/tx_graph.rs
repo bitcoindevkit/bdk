@@ -251,6 +251,18 @@ pub struct CanonicalTx<'a, T, A> {
     pub tx_node: TxNode<'a, T, A>,
 }
 
+impl<'a, T, A> From<CanonicalTx<'a, T, A>> for Txid {
+    fn from(tx: CanonicalTx<'a, T, A>) -> Self {
+        tx.tx_node.txid
+    }
+}
+
+impl<'a, A> From<CanonicalTx<'a, Arc<Transaction>, A>> for Arc<Transaction> {
+    fn from(tx: CanonicalTx<'a, Arc<Transaction>, A>) -> Self {
+        tx.tx_node.tx
+    }
+}
+
 /// Errors returned by `TxGraph::calculate_fee`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CalculateFeeError {
