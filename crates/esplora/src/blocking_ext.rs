@@ -208,9 +208,9 @@ fn fetch_block(
 fn chain_update(
     client: &esplora_client::BlockingClient,
     latest_blocks: &BTreeMap<u32, BlockHash>,
-    local_tip: &CheckPoint,
+    local_tip: &CheckPoint<BlockHash>,
     anchors: &BTreeSet<(ConfirmationBlockTime, Txid)>,
-) -> Result<CheckPoint, Error> {
+) -> Result<CheckPoint<BlockHash>, Error> {
     let mut point_of_agreement = None;
     let mut conflicts = vec![];
     for local_cp in local_tip.iter() {
@@ -235,7 +235,7 @@ fn chain_update(
     let mut tip = point_of_agreement.expect("remote esplora should have same genesis block");
 
     tip = tip
-        .extend(conflicts.into_iter().rev())
+        .extend_block_ids(conflicts.into_iter().rev())
         .expect("evicted are in order");
 
     for (anchor, _) in anchors {
@@ -245,14 +245,14 @@ fn chain_update(
                 Some(hash) => hash,
                 None => continue,
             };
-            tip = tip.insert(BlockId { height, hash });
+            tip = tip.insert_block_id(BlockId { height, hash });
         }
     }
 
     // insert the most recent blocks at the tip to make sure we update the tip and make the update
     // robust.
     for (&height, &hash) in latest_blocks.iter() {
-        tip = tip.insert(BlockId { height, hash });
+        tip = tip.insert_block_id(BlockId { height, hash });
     }
 
     Ok(tip)

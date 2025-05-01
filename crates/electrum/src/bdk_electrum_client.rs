@@ -489,8 +489,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 /// fetched to construct checkpoint updates with the proper [`BlockHash`] in case of re-org.
 fn fetch_tip_and_latest_blocks(
     client: &impl ElectrumApi,
-    prev_tip: CheckPoint,
-) -> Result<(CheckPoint, BTreeMap<u32, BlockHash>), Error> {
+    prev_tip: CheckPoint<BlockHash>,
+) -> Result<(CheckPoint<BlockHash>, BTreeMap<u32, BlockHash>), Error> {
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
     let new_tip_height = height as u32;
 
@@ -514,7 +514,7 @@ fn fetch_tip_and_latest_blocks(
 
     // Find the "point of agreement" (if any).
     let agreement_cp = {
-        let mut agreement_cp = Option::<CheckPoint>::None;
+        let mut agreement_cp = Option::<CheckPoint<BlockHash>>::None;
         for cp in prev_tip.iter() {
             let cp_block = cp.block_id();
             let hash = match new_blocks.get(&cp_block.height) {
@@ -549,7 +549,7 @@ fn fetch_tip_and_latest_blocks(
         })
         .fold(agreement_cp, |prev_cp, block| {
             Some(match prev_cp {
-                Some(cp) => cp.push(block).expect("must extend checkpoint"),
+                Some(cp) => cp.push_block_id(block).expect("must extend checkpoint"),
                 None => CheckPoint::new(block),
             })
         })
@@ -561,10 +561,10 @@ fn fetch_tip_and_latest_blocks(
 // Add a corresponding checkpoint per anchor height if it does not yet exist. Checkpoints should not
 // surpass `latest_blocks`.
 fn chain_update(
-    mut tip: CheckPoint,
+    mut tip: CheckPoint<BlockHash>,
     latest_blocks: &BTreeMap<u32, BlockHash>,
     anchors: impl Iterator<Item = (ConfirmationBlockTime, Txid)>,
-) -> Result<CheckPoint, Error> {
+) -> Result<CheckPoint<BlockHash>, Error> {
     for (anchor, _txid) in anchors {
         let height = anchor.block_id.height;
 
@@ -575,7 +575,7 @@ fn chain_update(
                 Some(&hash) => hash,
                 None => anchor.block_id.hash,
             };
-            tip = tip.insert(BlockId { hash, height });
+            tip = tip.insert_block_id(BlockId { hash, height });
         }
     }
     Ok(tip)

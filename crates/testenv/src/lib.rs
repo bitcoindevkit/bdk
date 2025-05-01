@@ -292,7 +292,7 @@ impl TestEnv {
     }
 
     /// Create a checkpoint linked list of all the blocks in the chain.
-    pub fn make_checkpoint_tip(&self) -> CheckPoint {
+    pub fn make_checkpoint_tip(&self) -> CheckPoint<BlockHash> {
         CheckPoint::from_block_ids((0_u32..).map_while(|height| {
             self.bitcoind
                 .client
