@@ -1,6 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashSet},
+    ops::Deref,
+};
 
-use bdk_bitcoind_rpc::Emitter;
+use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXIDS};
 use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     local_chain::{CheckPoint, LocalChain},
@@ -22,7 +25,12 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let network_tip = env.rpc_client().get_block_count()?;
     let (mut local_chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
-    let mut emitter = Emitter::new(env.rpc_client(), local_chain.tip(), 0, HashSet::new());
+    let mut emitter = Emitter::new(
+        env.rpc_client(),
+        local_chain.tip(),
+        0,
+        NO_EXPECTED_MEMPOOL_TXIDS,
+    );
 
     // Mine some blocks and return the actual block hashes.
     // Because initializing `ElectrsD` already mines some blocks, we must include those too when
@@ -156,7 +164,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         index
     });
 
-    let emitter = &mut Emitter::new(env.rpc_client(), chain.tip(), 0, HashSet::new());
+    let emitter = &mut Emitter::new(env.rpc_client(), chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXIDS);
 
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
@@ -252,7 +260,7 @@ fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         EMITTER_START_HEIGHT as _,
-        HashSet::new(),
+        NO_EXPECTED_MEMPOOL_TXIDS,
     );
 
     env.mine_blocks(CHAIN_TIP_HEIGHT, None)?;
@@ -292,7 +300,8 @@ fn sync_from_emitter<C>(
     emitter: &mut Emitter<C>,
 ) -> anyhow::Result<()>
 where
-    C: bitcoincore_rpc::RpcApi,
+    C: Deref,
+    C::Target: bitcoincore_rpc::RpcApi,
 {
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
@@ -333,7 +342,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
-        HashSet::new(),
+        NO_EXPECTED_MEMPOOL_TXIDS,
     );
 
     // setup addresses
@@ -425,7 +434,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
-        HashSet::new(),
+        NO_EXPECTED_MEMPOOL_TXIDS,
     );
 
     // mine blocks and sync up emitter
@@ -492,7 +501,7 @@ fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
-        HashSet::new(),
+        NO_EXPECTED_MEMPOOL_TXIDS,
     );
 
     // mine blocks to get initial balance, sync emitter up to tip
@@ -584,7 +593,7 @@ fn mempool_during_reorg() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
-        HashSet::new(),
+        NO_EXPECTED_MEMPOOL_TXIDS,
     );
 
     // mine blocks to get initial balance
@@ -712,7 +721,7 @@ fn no_agreement_point() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         (PREMINE_COUNT - 2) as u32,
-        HashSet::new(),
+        NO_EXPECTED_MEMPOOL_TXIDS,
     );
 
     // mine 101 blocks
