@@ -1,3 +1,4 @@
+use core::fmt;
 use core::ops::RangeBounds;
 
 use alloc::sync::Arc;
@@ -10,7 +11,7 @@ use crate::BlockId;
 /// Checkpoints are cheaply cloneable and are useful to find the agreement point between two sparse
 /// block chains.
 #[derive(Debug)]
-pub struct CheckPoint<H = Header>(Arc<CPInner<H>>);
+pub struct CheckPoint<H = BlockHash>(Arc<CPInner<H>>);
 
 impl<H> Clone for CheckPoint<H> {
     fn clone(&self) -> Self {
@@ -21,7 +22,7 @@ impl<H> Clone for CheckPoint<H> {
 /// The internal contents of [`CheckPoint`].
 #[derive(Debug)]
 struct CPInner<H> {
-    /// Block data.
+    /// Block id
     block_id: BlockId,
     /// Data.
     data: H,
@@ -75,10 +76,7 @@ impl ToBlockHash for Header {
     }
 }
 
-impl<H> PartialEq for CheckPoint<H>
-where
-    H: core::cmp::PartialEq,
-{
+impl<H> PartialEq for CheckPoint<H> {
     fn eq(&self, other: &Self) -> bool {
         let self_cps = self.iter().map(|cp| cp.block_id());
         let other_cps = other.iter().map(|cp| cp.block_id());
@@ -86,6 +84,7 @@ where
     }
 }
 
+// Methods for `CheckPoint<BlockHash>`
 impl CheckPoint<BlockHash> {
     /// Construct a new base [`CheckPoint`] at the front of a linked list.
     pub fn new(block: BlockId) -> Self {
@@ -98,9 +97,9 @@ impl CheckPoint<BlockHash> {
     /// we return a checkpoint linked with the previous block.
     #[deprecated(
         since = "0.5.0",
-        note = "Please use [`CheckPoint::blockhash_checkpoint_from_header`] instead. To create a CheckPoint<Header>, please use [`CheckPoint::from_data`]."
+        note = "Use `blockhash_checkpoint_from_header` instead."
     )]
-    pub fn from_header(header: &bitcoin::block::Header, height: u32) -> Self {
+    pub fn from_header(header: &Header, height: u32) -> Self {
         CheckPoint::blockhash_checkpoint_from_header(header, height)
     }
 
@@ -110,7 +109,7 @@ impl CheckPoint<BlockHash> {
     /// we return a checkpoint linked with the previous block.
     ///
     /// [`prev`]: CheckPoint::prev
-    pub fn blockhash_checkpoint_from_header(header: &bitcoin::block::Header, height: u32) -> Self {
+    pub fn blockhash_checkpoint_from_header(header: &Header, height: u32) -> Self {
         let hash = header.block_hash();
         let this_block_id = BlockId { height, hash };
 
@@ -143,13 +142,7 @@ impl CheckPoint<BlockHash> {
     pub fn from_block_ids(
         block_ids: impl IntoIterator<Item = BlockId>,
     ) -> Result<Self, Option<Self>> {
-        let mut blocks = block_ids.into_iter();
-        let block = blocks.next().ok_or(None)?;
-        let mut acc = CheckPoint::new(block);
-        for id in blocks {
-            acc = acc.push_block_id(id).map_err(Some)?;
-        }
-        Ok(acc)
+        Self::from_block_data(block_ids.into_iter().map(|b| (b.height, b.hash)))
     }
 
     /// Extends the checkpoint linked list by a iterator of block ids.
@@ -188,6 +181,7 @@ impl CheckPoint<BlockHash> {
     }
 }
 
+// Methods for any `H`
 impl<H> CheckPoint<H> {
     /// Get a reference of the `data` of the checkpoint.
     pub fn data_ref(&self) -> &H {
@@ -256,11 +250,17 @@ impl<H> CheckPoint<H> {
                 core::ops::Bound::Unbounded => true,
             })
     }
+
+    /// This method tests for `self` and `other` to have equal internal pointers.
+    pub fn eq_ptr(&self, other: &Self) -> bool {
+        Arc::as_ptr(&self.0) == Arc::as_ptr(&other.0)
+    }
 }
 
+// Methods where `H: ToBlockHash`
 impl<H> CheckPoint<H>
 where
-    H: Copy + core::fmt::Debug + ToBlockHash,
+    H: ToBlockHash + fmt::Debug + Copy,
 {
     /// Construct a new base [`CheckPoint`] from given `height` and `data` at the front of a linked
     /// list.
@@ -275,16 +275,31 @@ where
         }))
     }
 
+    /// New from an iterator of block data.
+    ///
+    /// Returns `Err(None)` if `blocks` doesn't yield any data. If the blocks are not in ascending
+    /// height order, then returns the last [`CheckPoint`] that would have been extended.
+    pub fn from_block_data(
+        blocks: impl IntoIterator<Item = (u32, H)>,
+    ) -> Result<Self, Option<Self>> {
+        let mut blocks = blocks.into_iter();
+        let (height, data) = blocks.next().ok_or(None)?;
+        let mut cp = CheckPoint::from_data(height, data);
+        cp = cp.extend(blocks)?;
+
+        Ok(cp)
+    }
+
     /// Extends the checkpoint linked list by a iterator containing `height` and `data`.
     ///
     /// Returns an `Err(self)` if there is block which does not have a greater height than the
     /// previous one.
     pub fn extend(self, blockdata: impl IntoIterator<Item = (u32, H)>) -> Result<Self, Self> {
-        let mut curr = self.clone();
+        let mut cp = self.clone();
         for (height, data) in blockdata {
-            curr = curr.push(height, data).map_err(|_| self.clone())?;
+            cp = cp.push(height, data)?;
         }
-        Ok(curr)
+        Ok(cp)
     }
 
     /// Inserts `data` at its `height` within the chain.
@@ -344,15 +359,10 @@ where
             Err(self)
         }
     }
-
-    /// This method tests for `self` and `other` to have equal internal pointers.
-    pub fn eq_ptr(&self, other: &Self) -> bool {
-        Arc::as_ptr(&self.0) == Arc::as_ptr(&other.0)
-    }
 }
 
 /// Iterates over checkpoints backwards.
-pub struct CheckPointIter<H = Header> {
+pub struct CheckPointIter<H> {
     current: Option<Arc<CPInner<H>>>,
 }
 
