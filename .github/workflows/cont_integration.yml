@@ -20,9 +20,12 @@ jobs:
   build-test:
     needs: prepare
     name: Build & Test
-    runs-on: ubuntu-latest
+    runs-on: ${{matrix.os}}
     strategy:
       matrix:
+        os: 
+          - ubuntu-latest
+          - ubuntu-24.04-arm
         rust:
           - version: ${{ needs.prepare.outputs.rust_version }}
             clippy: true
