@@ -26,7 +26,7 @@ pub struct BdkElectrumClient<E> {
     /// The header cache
     block_header_cache: Mutex<HashMap<u32, Header>>,
     /// The Merkle proof cache
-    merkle_cache: Mutex<HashMap<(Txid, u32), GetMerkleRes>>,
+    merkle_cache: Mutex<HashMap<(Txid, BlockHash), GetMerkleRes>>,
 }
 
 impl<E: ElectrumApi> BdkElectrumClient<E> {
@@ -315,7 +315,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             }
         }
 
-        // Batch validate all collected transactions
+        // Batch validate all collected transactions.
         if !txs_to_validate.is_empty() {
             let proofs = self.batch_fetch_merkle_proofs(&txs_to_validate)?;
             self.batch_validate_merkle_proofs(tx_update, proofs)?;
@@ -345,7 +345,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             };
             debug_assert_eq!(op_tx.compute_txid(), op_txid);
 
-            // attempt to find the following transactions (alongside their chain positions), and
+            // Attempt to find the following transactions (alongside their chain positions), and
             // add to our sparsechain `update`:
             let mut has_residing = false; // tx in which the outpoint resides
             let mut has_spending = false; // tx that spends the outpoint
@@ -370,7 +370,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
                 if !has_spending && res.tx_hash != op_txid {
                     let res_tx = self.fetch_tx(res.tx_hash)?;
-                    // we exclude txs/anchors that do not spend our specified outpoint(s)
+                    // We exclude txs/anchors that do not spend our specified outpoint(s).
                     has_spending = res_tx
                         .input
                         .iter()
@@ -392,7 +392,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             }
         }
 
-        // Batch validate all collected transactions
+        // Batch validate all collected transactions.
         if !txs_to_validate.is_empty() {
             let proofs = self.batch_fetch_merkle_proofs(&txs_to_validate)?;
             self.batch_validate_merkle_proofs(tx_update, proofs)?;
@@ -423,8 +423,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .map(|txo| &txo.script_pubkey)
                 .expect("tx must have an output");
 
-            // because of restrictions of the Electrum API, we have to use the `script_get_history`
-            // call to get confirmation status of our transaction
+            // Because of restrictions of the Electrum API, we have to use the `script_get_history`
+            // call to get confirmation status of our transaction.
             if let Some(r) = self
                 .inner
                 .script_get_history(spk)?
@@ -445,7 +445,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             tx_update.txs.push(tx);
         }
 
-        // Batch validate all collected transactions
+        // Batch validate all collected transactions.
         if !txs_to_validate.is_empty() {
             let proofs = self.batch_fetch_merkle_proofs(&txs_to_validate)?;
             self.batch_validate_merkle_proofs(tx_update, proofs)?;
@@ -454,47 +454,65 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         Ok(())
     }
 
-    /// Batch fetch Merkle proofs for multiple transactions
+    /// Batch fetch Merkle proofs for multiple transactions.
     fn batch_fetch_merkle_proofs(
         &self,
         txs_with_heights: &[(Txid, usize)],
     ) -> Result<Vec<(Txid, GetMerkleRes)>, Error> {
+        // Evict proofs whose block hash is no longer on our current chain.
+        self.clear_stale_proofs()?;
+
         let mut results = Vec::with_capacity(txs_with_heights.len());
         let mut to_fetch = Vec::new();
 
-        // Check cache first
+        // Build a map for height to block hash conversions. This is for obtaining block hash data
+        // with minimum `fetch_header` calls.
+        let mut height_to_hash: HashMap<u32, BlockHash> = HashMap::new();
+        for &(_, height) in txs_with_heights {
+            let h = height as u32;
+            if !height_to_hash.contains_key(&h) {
+                // Try to obtain hash from the header cache, or fetch the header if absent.
+                let hash = self.fetch_header(h)?.block_hash();
+                height_to_hash.insert(h, hash);
+            }
+        }
+
+        // Check cache.
         {
             let merkle_cache = self.merkle_cache.lock().unwrap();
             for &(txid, height) in txs_with_heights {
-                if let Some(proof) = merkle_cache.get(&(txid, height as u32)) {
+                let h = height as u32;
+                let hash = height_to_hash[&h];
+                if let Some(proof) = merkle_cache.get(&(txid, hash)) {
                     results.push((txid, proof.clone()));
                 } else {
-                    to_fetch.push((txid, height));
+                    to_fetch.push((txid, height, hash));
                 }
             }
         }
 
-        // Fetch missing proofs in batches
+        // Fetch missing proofs in batches.
         for chunk in to_fetch.chunks(MAX_MERKLE_BATCH_SIZE) {
-            for &(txid, height) in chunk {
-                if let Ok(merkle_res) = self.inner.transaction_get_merkle(&txid, height) {
-                    let mut cache = self.merkle_cache.lock().unwrap();
-                    cache.insert((txid, height as u32), merkle_res.clone());
-                    results.push((txid, merkle_res));
-                }
+            for &(txid, height, hash) in chunk {
+                let merkle_res = self.inner.transaction_get_merkle(&txid, height)?;
+                self.merkle_cache
+                    .lock()
+                    .unwrap()
+                    .insert((txid, hash), merkle_res.clone());
+                results.push((txid, merkle_res));
             }
         }
 
         Ok(results)
     }
 
-    /// Batch validate Merkle proofs
+    /// Batch validate Merkle proofs.
     fn batch_validate_merkle_proofs(
         &self,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         proofs: Vec<(Txid, GetMerkleRes)>,
     ) -> Result<(), Error> {
-        // Pre-fetch all required headers
+        // Pre-fetch all required headers.
         let heights: HashSet<u32> = proofs
             .iter()
             .map(|(_, proof)| proof.block_height as u32)
@@ -505,7 +523,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             headers.insert(height, self.fetch_header(height)?);
         }
 
-        // Validate proofs
+        // Validate proofs.
         for (txid, merkle_res) in proofs {
             let height = merkle_res.block_height as u32;
             let header = headers.get(&height).unwrap();
@@ -516,7 +534,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 &merkle_res,
             );
 
-            // Retry with updated header if validation fails
+            // Retry with updated header if validation fails.
             if !is_confirmed_tx {
                 let updated_header = self.update_header(height)?;
                 headers.insert(height, updated_header);
@@ -545,7 +563,35 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         Ok(())
     }
 
-    // Replace the old validate_merkle_for_anchor with optimized batch version
+    /// Remove any proofs for blocks that may have been re-orged out.
+    ///
+    /// Checks if the latest cached block hash matches the current chain tip. If not, evicts proofs
+    /// for blocks that were re-orged out, stopping at the fork point.
+    fn clear_stale_proofs(&self) -> Result<(), Error> {
+        let mut cache = self.merkle_cache.lock().unwrap();
+
+        // Collect one (height, old_hash) pair per proof.
+        let mut entries: Vec<(u32, BlockHash)> = cache
+            .iter()
+            .map(|((_, old_hash), res)| (res.block_height as u32, *old_hash))
+            .collect();
+
+        // Sort descending and dedup so we only check each height once.
+        entries.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        entries.dedup();
+
+        // Evict any stale proofs until fork point is found.
+        for (height, old_hash) in entries {
+            let current_hash = self.fetch_header(height)?.block_hash();
+            if current_hash == old_hash {
+                break;
+            }
+            cache.retain(|&(_txid, bh), _| bh != old_hash);
+        }
+        Ok(())
+    }
+
+    /// Validate the Merkle proof for a single transaction using the batch APIs.
     #[allow(dead_code)]
     fn validate_merkle_for_anchor(
         &self,
@@ -553,7 +599,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         txid: Txid,
         confirmation_height: usize,
     ) -> Result<(), Error> {
-        // Use the batch processing functions even for single tx
+        // Use the batch processing functions even for single tx.
         let proofs = self.batch_fetch_merkle_proofs(&[(txid, confirmation_height)])?;
         self.batch_validate_merkle_proofs(tx_update, proofs)
     }
