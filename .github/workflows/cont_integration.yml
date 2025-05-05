@@ -135,7 +135,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: ${{ needs.prepare.outputs.rust_version }}
+            toolchain: nightly
             override: true
             profile: minimal
             components: rustfmt
