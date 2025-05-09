@@ -10,10 +10,12 @@ use crate::BlockId;
 /// Checkpoints are cheaply cloneable and are useful to find the agreement point between two sparse
 /// block chains.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct CheckPoint(Arc<CPInner>);
 
 /// The internal contents of [`CheckPoint`].
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 struct CPInner {
     /// Block id (hash and height).
     block: BlockId,
