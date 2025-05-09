@@ -19,8 +19,9 @@ use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 /// tx_update.anchors.insert((anchor, txid));
 /// ```
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[non_exhaustive]
-pub struct TxUpdate<A = ()> {
+pub struct TxUpdate<A: Ord = ()> {
     /// Full transactions. These are transactions that were determined to be relevant to the wallet
     /// given the request.
     pub txs: Vec<Arc<Transaction>>,
@@ -52,7 +53,7 @@ pub struct TxUpdate<A = ()> {
     pub evicted_ats: HashSet<(Txid, u64)>,
 }
 
-impl<A> Default for TxUpdate<A> {
+impl<A: Ord> Default for TxUpdate<A> {
     fn default() -> Self {
         Self {
             txs: Default::default(),
