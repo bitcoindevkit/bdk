@@ -28,7 +28,7 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.7.8
       - name: Install grcov
-        run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
+        run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov --version 0.8.20; fi
       - name: Test
         run: cargo test --all-features
       - name: Make coverage directory
