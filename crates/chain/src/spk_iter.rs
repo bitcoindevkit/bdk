@@ -11,8 +11,8 @@ pub const BIP32_MAX_INDEX: u32 = (1 << 31) - 1;
 /// An iterator for derived script pubkeys.
 ///
 /// [`SpkIterator`] is an implementation of the [`Iterator`] trait which possesses its own `next()`
-/// and `nth()` functions, both of which circumvent the unnecessary intermediate derivations required
-/// when using their default implementations.
+/// and `nth()` functions, both of which circumvent the unnecessary intermediate derivations
+/// required when using their default implementations.
 ///
 /// ## Examples
 ///
@@ -101,8 +101,8 @@ where
     type Item = Indexed<ScriptBuf>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // For non-wildcard descriptors, we expect the first element to be Some((0, spk)), then None after.
-        // For wildcard descriptors, we expect it to keep iterating until exhausted.
+        // For non-wildcard descriptors, we expect the first element to be Some((0, spk)), then None
+        // after. For wildcard descriptors, we expect it to keep iterating until exhausted.
         if self.next_index >= self.end {
             return None;
         }

@@ -102,18 +102,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// returns updates for [`bdk_chain`] data structures.
     ///
     /// - `request`: struct with data required to perform a spk-based blockchain client full scan,
-    ///              see [`FullScanRequest`].
+    ///   see [`FullScanRequest`].
     /// - `stop_gap`: the full scan for each keychain stops after a gap of script pubkeys with no
-    ///               associated transactions.
+    ///   associated transactions.
     /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
-    ///                 request.
-    /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation.
-    ///                        Note that this requires additional calls to the Electrum server, but
-    ///                        is necessary for calculating the fee on a transaction if your wallet
-    ///                        does not own the inputs. Methods like [`Wallet.calculate_fee`] and
-    ///                        [`Wallet.calculate_fee_rate`] will return a
-    ///                        [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not
-    ///                        present in the transaction graph.
+    ///   request.
+    /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation. Note
+    ///   that this requires additional calls to the Electrum server, but is necessary for
+    ///   calculating the fee on a transaction if your wallet does not own the inputs. Methods like
+    ///   [`Wallet.calculate_fee`] and [`Wallet.calculate_fee_rate`] will return a
+    ///   [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not present in the
+    ///   transaction graph.
     ///
     /// [`bdk_chain`]: ../bdk_chain/index.html
     /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
@@ -171,17 +170,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Sync a set of scripts with the blockchain (via an Electrum client) for the data specified
     /// and returns updates for [`bdk_chain`] data structures.
     ///
-    /// - `request`: struct with data required to perform a spk-based blockchain client sync,
-    ///              see [`SyncRequest`]
+    /// - `request`: struct with data required to perform a spk-based blockchain client sync, see
+    ///   [`SyncRequest`]
     /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
-    ///                 request
-    /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation.
-    ///                        Note that this requires additional calls to the Electrum server, but
-    ///                        is necessary for calculating the fee on a transaction if your wallet
-    ///                        does not own the inputs. Methods like [`Wallet.calculate_fee`] and
-    ///                        [`Wallet.calculate_fee_rate`] will return a
-    ///                        [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not
-    ///                        present in the transaction graph.
+    ///   request
+    /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation. Note
+    ///   that this requires additional calls to the Electrum server, but is necessary for
+    ///   calculating the fee on a transaction if your wallet does not own the inputs. Methods like
+    ///   [`Wallet.calculate_fee`] and [`Wallet.calculate_fee_rate`] will return a
+    ///   [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not present in the
+    ///   transaction graph.
     ///
     /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
@@ -307,8 +305,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
     /// Populate the `tx_update` with associated transactions/anchors of `outpoints`.
     ///
-    /// Transactions in which the outpoint resides, and transactions that spend from the outpoint are
-    /// included. Anchors of the aforementioned transactions are included.
+    /// Transactions in which the outpoint resides, and transactions that spend from the outpoint
+    /// are included. Anchors of the aforementioned transactions are included.
     fn populate_with_outpoints(
         &self,
         start_time: u64,
@@ -463,8 +461,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         Ok(())
     }
 
-    // Helper function which fetches the `TxOut`s of our relevant transactions' previous transactions,
-    // which we do not have by default. This data is needed to calculate the transaction fee.
+    // Helper function which fetches the `TxOut`s of our relevant transactions' previous
+    // transactions, which we do not have by default. This data is needed to calculate the
+    // transaction fee.
     fn fetch_prev_txout(
         &self,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
