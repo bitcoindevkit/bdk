@@ -23,13 +23,13 @@
 //!
 //! * [`list_canonical_txs`](TxGraph::list_canonical_txs) lists canonical transactions.
 //! * [`filter_chain_txouts`](TxGraph::filter_chain_txouts) filters out canonical outputs from a
-//!     list of outpoints.
+//!   list of outpoints.
 //! * [`filter_chain_unspents`](TxGraph::filter_chain_unspents) filters out canonical unspent
-//!     outputs from a list of outpoints.
+//!   outputs from a list of outpoints.
 //! * [`balance`](TxGraph::balance) gets the total sum of unspent outputs filtered from a list of
-//!     outpoints.
+//!   outpoints.
 //! * [`canonical_iter`](TxGraph::canonical_iter) returns the [`CanonicalIter`] which contains all
-//!     of the canonicalization logic.
+//!   of the canonicalization logic.
 //!
 //! All these methods require a `chain` and `chain_tip` argument. The `chain` must be a
 //! [`ChainOracle`] implementation (such as [`LocalChain`](crate::local_chain::LocalChain)) which
@@ -39,17 +39,17 @@
 //! transactions have precedence over others:
 //!
 //! * [`Anchor`] - This bit of data represents that a transaction is anchored in a given block. If
-//!     the transaction is anchored in chain of `chain_tip`, or is an ancestor of a transaction
-//!     anchored in chain of `chain_tip`, then the transaction must be canonical.
+//!   the transaction is anchored in chain of `chain_tip`, or is an ancestor of a transaction
+//!   anchored in chain of `chain_tip`, then the transaction must be canonical.
 //! * `last_seen` - This is the timestamp of when a transaction is last-seen in the mempool. This
-//!     value is updated by [`insert_seen_at`](TxGraph::insert_seen_at) and
-//!     [`apply_update`](TxGraph::apply_update). Transactions that are seen later have higher
-//!     priority than those that are seen earlier. `last_seen` values are transitive. This means
-//!     that the actual `last_seen` value of a transaction is the max of all the `last_seen` values
-//!     from it's descendants.
+//!   value is updated by [`insert_seen_at`](TxGraph::insert_seen_at) and
+//!   [`apply_update`](TxGraph::apply_update). Transactions that are seen later have higher
+//!   priority than those that are seen earlier. `last_seen` values are transitive. This means
+//!   that the actual `last_seen` value of a transaction is the max of all the `last_seen` values
+//!   from it's descendants.
 //! * `last_evicted` - This is the timestamp of when a transaction last went missing from the
-//!     mempool. If this value is equal to or higher than the transaction's `last_seen` value, then
-//!     it will not be considered canonical.
+//!   mempool. If this value is equal to or higher than the transaction's `last_seen` value, then
+//!   it will not be considered canonical.
 //!
 //! # Graph traversal
 //!
@@ -490,7 +490,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The supplied closure takes in two inputs `(depth, ancestor_tx)`:
     ///
     /// * `depth` is the distance between the starting `Transaction` and the `ancestor_tx`. I.e., if
-    ///    the `Transaction` is spending an output of the `ancestor_tx` then `depth` will be 1.
+    ///   the `Transaction` is spending an output of the `ancestor_tx` then `depth` will be 1.
     /// * `ancestor_tx` is the `Transaction`'s ancestor which we are considering to walk.
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each `Transaction`
@@ -508,7 +508,7 @@ impl<A: Clone + Ord> TxGraph<A> {
     /// The supplied closure takes in two inputs `(depth, descendant_txid)`:
     ///
     /// * `depth` is the distance between the starting `txid` and the `descendant_txid`. I.e., if the
-    ///     descendant is spending an output of the starting `txid` then `depth` will be 1.
+    ///   descendant is spending an output of the starting `txid` then `depth` will be 1.
     /// * `descendant_txid` is the descendant's txid which we are considering to walk.
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it visits
@@ -648,7 +648,7 @@ impl<A: Anchor> TxGraph<A> {
     /// * A non-empty witness has precedence over an empty witness.
     /// * A smaller witness has precedence over a larger witness.
     /// * If the witness sizes are the same, we prioritize the two witnesses with lexicographical
-    ///     order.
+    ///   order.
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A> {
         // This returns `Some` only if the merged tx is different to the `original_tx`.
         fn _merge_tx_witnesses(
