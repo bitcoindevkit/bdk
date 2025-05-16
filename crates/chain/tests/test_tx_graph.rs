@@ -117,6 +117,7 @@ fn insert_txouts() {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.clone().into(),
             anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
+            first_seen: [(hash!("tx2"), 1000000)].into(),
             last_seen: [(hash!("tx2"), 1000000)].into(),
             last_evicted: [].into(),
         }
@@ -171,6 +172,7 @@ fn insert_txouts() {
             txs: [Arc::new(update_tx.clone())].into(),
             txouts: update_ops.into_iter().chain(original_ops).collect(),
             anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
+            first_seen: [(hash!("tx2"), 1000000)].into(),
             last_seen: [(hash!("tx2"), 1000000)].into(),
             last_evicted: [].into(),
         }
@@ -1076,7 +1078,8 @@ fn test_chain_spends() {
                 .cloned(),
             Some((
                 ChainPosition::Unconfirmed {
-                    last_seen: Some(1234567)
+                    last_seen: Some(1234567),
+                    first_seen: Some(1234567)
                 },
                 tx_2.compute_txid()
             ))
@@ -1122,7 +1125,8 @@ fn test_chain_spends() {
                 .get(&tx_2_conflict.compute_txid())
                 .cloned(),
             Some(ChainPosition::Unconfirmed {
-                last_seen: Some(1234568)
+                last_seen: Some(1234568),
+                first_seen: Some(1234568)
             })
         );
 
@@ -1133,7 +1137,8 @@ fn test_chain_spends() {
                 .cloned(),
             Some((
                 ChainPosition::Unconfirmed {
-                    last_seen: Some(1234568)
+                    last_seen: Some(1234568),
+                    first_seen: Some(1234568)
                 },
                 tx_2_conflict.compute_txid()
             ))
@@ -1321,10 +1326,7 @@ fn call_map_anchors_with_non_deterministic_anchor() {
         let new_txnode = new_txs.next().unwrap();
         assert_eq!(new_txnode.txid, tx_node.txid);
         assert_eq!(new_txnode.tx, tx_node.tx);
-        assert_eq!(
-            new_txnode.last_seen_unconfirmed,
-            tx_node.last_seen_unconfirmed
-        );
+        assert_eq!(new_txnode.last_seen, tx_node.last_seen);
         assert_eq!(new_txnode.anchors.len(), tx_node.anchors.len());
 
         let mut new_anchors: Vec<_> = new_txnode.anchors.iter().map(|a| a.anchor_block).collect();
@@ -1469,4 +1471,75 @@ fn tx_graph_update_conversion() {
             test_name
         );
     }
+}
+
+#[test]
+fn test_seen_at_updates() {
+    // Update both first_seen and last_seen
+    let seen_at = 1000000_u64;
+    let mut graph = TxGraph::<BlockId>::default();
+    let mut changeset = graph.insert_seen_at(hash!("tx1"), seen_at);
+    assert_eq!(
+        changeset,
+        ChangeSet {
+            first_seen: [(hash!("tx1"), 1000000)].into(),
+            last_seen: [(hash!("tx1"), 1000000)].into(),
+            ..Default::default()
+        }
+    );
+
+    // Update first_seen but not last_seen
+    let earlier_seen_at = 999_999_u64;
+    changeset = graph.insert_seen_at(hash!("tx1"), earlier_seen_at);
+    assert_eq!(
+        changeset,
+        ChangeSet {
+            first_seen: [(hash!("tx1"), 999999)].into(),
+            ..Default::default()
+        }
+    );
+
+    // Update last_seen but not first_seen
+    let later_seen_at = 1_000_001_u64;
+    changeset = graph.insert_seen_at(hash!("tx1"), later_seen_at);
+    assert_eq!(
+        changeset,
+        ChangeSet {
+            last_seen: [(hash!("tx1"), 1000001)].into(),
+            ..Default::default()
+        }
+    );
+
+    // Should not change anything
+    changeset = graph.insert_seen_at(hash!("tx1"), 1000000);
+    assert!(changeset.first_seen.is_empty());
+    assert!(changeset.last_seen.is_empty());
+}
+
+#[test]
+fn test_get_first_seen_of_a_tx() {
+    let mut graph = TxGraph::<BlockId>::default();
+
+    let tx = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::null(),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+    };
+    let txid = tx.compute_txid();
+    let seen_at = 1_000_000_u64;
+
+    let changeset_tx = graph.insert_tx(Arc::new(tx));
+    graph.apply_changeset(changeset_tx);
+    let changeset_seen = graph.insert_seen_at(txid, seen_at);
+    graph.apply_changeset(changeset_seen);
+
+    let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
+    assert_eq!(first_seen, Some(seen_at));
 }

@@ -27,6 +27,10 @@ pub enum ChainPosition<A> {
     },
     /// The chain data is not confirmed.
     Unconfirmed {
+        /// When the chain data was first seen in the mempool.
+        ///
+        /// This value will be `None` if the chain data was never seen in the mempool.
+        first_seen: Option<u64>,
         /// When the chain data is last seen in the mempool.
         ///
         /// This value will be `None` if the chain data was never seen in the mempool and only seen
@@ -58,7 +62,13 @@ impl<A: Clone> ChainPosition<&A> {
                 anchor: anchor.clone(),
                 transitively,
             },
-            ChainPosition::Unconfirmed { last_seen } => ChainPosition::Unconfirmed { last_seen },
+            ChainPosition::Unconfirmed {
+                last_seen,
+                first_seen,
+            } => ChainPosition::Unconfirmed {
+                last_seen,
+                first_seen,
+            },
         }
     }
 }
@@ -165,9 +175,11 @@ mod test {
     fn chain_position_ord() {
         let unconf1 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
             last_seen: Some(10),
+            first_seen: Some(10),
         };
         let unconf2 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
             last_seen: Some(20),
+            first_seen: Some(20),
         };
         let conf1 = ChainPosition::Confirmed {
             anchor: ConfirmationBlockTime {
@@ -195,6 +207,52 @@ mod test {
         assert!(
             conf2 > conf1,
             "confirmation_height is higher then it should be higher ord"
+        );
+    }
+
+    #[test]
+    fn test_sort_unconfirmed_chain_position() {
+        let mut v = vec![
+            ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+                first_seen: Some(5),
+                last_seen: Some(20),
+            },
+            ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+                first_seen: Some(15),
+                last_seen: Some(30),
+            },
+            ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+                first_seen: Some(1),
+                last_seen: Some(10),
+            },
+            ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+                first_seen: Some(3),
+                last_seen: Some(6),
+            },
+        ];
+
+        v.sort();
+
+        assert_eq!(
+            v,
+            vec![
+                ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+                    first_seen: Some(1),
+                    last_seen: Some(10)
+                },
+                ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+                    first_seen: Some(3),
+                    last_seen: Some(6)
+                },
+                ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+                    first_seen: Some(5),
+                    last_seen: Some(20)
+                },
+                ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+                    first_seen: Some(15),
+                    last_seen: Some(30)
+                },
+            ]
         );
     }
 }
