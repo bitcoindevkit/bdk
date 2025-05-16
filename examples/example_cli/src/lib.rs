@@ -1,6 +1,4 @@
-use serde_json::json;
-use std::cmp;
-use std::collections::HashMap;
+use core::convert::Infallible;
 use std::env;
 use std::fmt;
 use std::str::FromStr;
@@ -10,30 +8,29 @@ use anyhow::bail;
 use anyhow::Context;
 use bdk_chain::bitcoin::{
     absolute, address::NetworkUnchecked, bip32, consensus, constants, hex::DisplayHex, relative,
-    secp256k1::Secp256k1, transaction, Address, Amount, Network, NetworkKind, PrivateKey, Psbt,
-    PublicKey, Sequence, Transaction, TxIn, TxOut,
+    secp256k1::Secp256k1, Address, Amount, Network, NetworkKind, OutPoint, Psbt, Sequence,
+    Transaction,
 };
 use bdk_chain::miniscript::{
-    descriptor::{DescriptorSecretKey, SinglePubKey},
     plan::{Assets, Plan},
     psbt::PsbtExt,
     Descriptor, DescriptorPublicKey, ForEachKey,
 };
-use bdk_chain::CanonicalizationParams;
-use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
     indexed_tx_graph,
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
-    tx_graph, ChainOracle, DescriptorExt, FullTxOut, IndexedTxGraph, Merge,
-};
-use bdk_coin_select::{
-    metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
-    TargetFee, TargetOutputs,
+    tx_graph, Anchor, CanonicalizationParams, ChainOracle, ChainPosition, ConfirmationBlockTime,
+    IndexedTxGraph, Merge,
 };
 use bdk_file_store::Store;
+use bdk_tx::{
+    CanonicalUnspents, ChangePolicyType, InputCandidates, Output, PsbtParams, Selector,
+    SelectorParams, Signer, TxStatus,
+};
 use clap::{Parser, Subcommand};
 use rand::prelude::*;
+use serde_json::json;
 
 pub use anyhow;
 pub use clap;
@@ -162,9 +159,10 @@ pub enum PsbtCmd<S: clap::Args> {
         /// Set max relative timelock (from consensus value)
         #[clap(long, short)]
         older: Option<u32>,
-        /// Coin selection algorithm
-        #[clap(long, short, default_value = "bnb")]
-        coin_select: CoinSelectionAlgo,
+        // TODO: Reenable the `coin_select` option.
+        // Coin selection algorithm
+        // #[clap(long, short, default_value = "bnb")]
+        // coin_select: CoinSelectionAlgo,
         /// Debug print the PSBT
         #[clap(long, short)]
         debug: bool,
@@ -260,199 +258,138 @@ pub struct ChangeInfo {
     pub index: u32,
 }
 
-pub fn create_tx<O: ChainOracle>(
+pub fn create_psbt<O>(
     graph: &mut KeychainTxGraph,
     chain: &O,
     assets: &Assets,
-    cs_algorithm: CoinSelectionAlgo,
     address: Address,
     value: u64,
     feerate: f32,
 ) -> anyhow::Result<(Psbt, Option<ChangeInfo>)>
 where
-    O::Error: std::error::Error + Send + Sync + 'static,
+    O: ChainOracle<Error = Infallible>,
 {
-    let mut changeset = keychain_txout::ChangeSet::default();
+    use bdk_tx::group_by_spk;
+    use bdk_tx::selection_algorithm_lowest_fee_bnb;
 
-    // get planned utxos
-    let mut plan_utxos = planned_utxos(graph, chain, assets)?;
-
-    // sort utxos if cs-algo requires it
-    match cs_algorithm {
-        CoinSelectionAlgo::LargestFirst => {
-            plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.txout.value))
-        }
-        CoinSelectionAlgo::SmallestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.txout.value),
-        CoinSelectionAlgo::OldestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.chain_position),
-        CoinSelectionAlgo::NewestFirst => {
-            plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.chain_position))
-        }
-        CoinSelectionAlgo::BranchAndBound => plan_utxos.shuffle(&mut thread_rng()),
-    }
-
-    // build candidate set
-    let candidates: Vec<Candidate> = plan_utxos
-        .iter()
-        .map(|(plan, utxo)| {
-            Candidate::new(
-                utxo.txout.value.to_sat(),
-                plan.satisfaction_weight() as u64,
-                plan.witness_version().is_some(),
-            )
-        })
-        .collect();
-
-    // create recipient output(s)
-    let mut outputs = vec![TxOut {
-        value: Amount::from_sat(value),
-        script_pubkey: address.script_pubkey(),
-    }];
-
-    let (change_keychain, _) = graph
-        .index
-        .keychains()
-        .last()
-        .expect("must have a keychain");
-
-    let ((change_index, change_script), index_changeset) = graph
+    let feerate = bitcoin::FeeRate::from_sat_per_kwu((feerate * 250.0).round() as u64);
+    let longterm_feerate = bitcoin::FeeRate::from_sat_per_vb_unchecked(10);
+    let change_keychain = graph.index.keychains().last().expect("must have one").0;
+    let ((next_index, _), index_changeset) = graph
         .index
         .next_unused_spk(change_keychain)
-        .expect("Must exist");
-    changeset.merge(index_changeset);
-
-    let mut change_output = TxOut {
-        value: Amount::ZERO,
-        script_pubkey: change_script,
-    };
-
+        .expect("keychain must exist");
     let change_desc = graph
         .index
-        .keychains()
-        .find(|(k, _)| k == &change_keychain)
-        .expect("must exist")
-        .1;
+        .get_descriptor(change_keychain)
+        .cloned()
+        .expect("must have descriptor");
+    let mut change_info = None;
 
-    let min_drain_value = change_desc.dust_value().to_sat();
+    let amount = Amount::from_sat(value);
 
-    let target = Target {
-        outputs: TargetOutputs::fund_outputs(
-            outputs
-                .iter()
-                .map(|output| (output.weight().to_wu(), output.value.to_sat())),
-        ),
-        fee: TargetFee {
-            rate: FeeRate::from_sat_per_vb(feerate),
-            ..Default::default()
-        },
-    };
+    let output = match graph.index.index_of_spk(address.script_pubkey()) {
+        // If we have the recipient address indexed, we want to include the
+        // descriptor with the output so that it can be used to update the psbt.
+        Some(&(keychain, index)) => {
+            let desc = graph
+                .index
+                .get_descriptor(keychain)
+                .expect("must have descriptor")
+                .at_derivation_index(index)?;
 
-    let change_policy = ChangePolicy {
-        min_value: min_drain_value,
-        drain_weights: DrainWeights::TR_KEYSPEND,
-    };
-
-    // run coin selection
-    let mut selector = CoinSelector::new(&candidates);
-    match cs_algorithm {
-        CoinSelectionAlgo::BranchAndBound => {
-            let metric = LowestFee {
-                target,
-                long_term_feerate: FeeRate::from_sat_per_vb(10.0),
-                change_policy,
-            };
-            match selector.run_bnb(metric, 10_000) {
-                Ok(_) => {}
-                Err(_) => selector
-                    .select_until_target_met(target)
-                    .context("selecting coins")?,
-            }
+            Output::with_descriptor(desc, amount)
         }
-        _ => selector
-            .select_until_target_met(target)
-            .context("selecting coins")?,
-    }
+        None => Output::with_script(address.script_pubkey(), amount),
+    };
 
-    // get the selected plan utxos
-    let selected: Vec<_> = selector.apply_selection(&plan_utxos).collect();
+    let input_candidates = all_input_candidates(graph, chain, assets).regroup(group_by_spk());
 
-    // if the selection tells us to use change and the change value is sufficient, we add it as an output
-    let mut change_info = Option::<ChangeInfo>::None;
-    let drain = selector.drain(target, change_policy);
-    if drain.value > min_drain_value {
-        change_output.value = Amount::from_sat(drain.value);
-        outputs.push(change_output);
+    let mut selector = Selector::new(
+        &input_candidates,
+        SelectorParams::new(
+            feerate,
+            vec![output],
+            change_desc.at_derivation_index(next_index)?,
+            ChangePolicyType::NoDustAndLeastWaste { longterm_feerate },
+        ),
+    )?;
+    selector.select_with_algorithm(selection_algorithm_lowest_fee_bnb(
+        longterm_feerate,
+        100_000,
+    ))?;
+    let selection = selector
+        .try_finalize()
+        .ok_or(anyhow::anyhow!("cannot meet target"))?;
+    if selector.has_change() == Some(true) {
         change_info = Some(ChangeInfo {
             change_keychain,
-            indexer: changeset,
-            index: change_index,
+            indexer: index_changeset,
+            index: next_index,
         });
-        outputs.shuffle(&mut thread_rng());
     }
 
-    let unsigned_tx = Transaction {
-        version: transaction::Version::TWO,
-        lock_time: assets
-            .absolute_timelock
-            .unwrap_or(absolute::LockTime::from_height(
-                chain.get_chain_tip()?.height,
-            )?),
-        input: selected
-            .iter()
-            .map(|(plan, utxo)| TxIn {
-                previous_output: utxo.outpoint,
-                sequence: plan
-                    .relative_timelock
-                    .map_or(Sequence::ENABLE_RBF_NO_LOCKTIME, Sequence::from),
-                ..Default::default()
-            })
-            .collect(),
-        output: outputs,
-    };
+    let chain_tip = chain.get_chain_tip()?;
+    let fallback_locktime = absolute::LockTime::from_consensus(chain_tip.height);
 
-    // update psbt with plan
-    let mut psbt = Psbt::from_unsigned_tx(unsigned_tx)?;
-    for (i, (plan, utxo)) in selected.iter().enumerate() {
-        let psbt_input = &mut psbt.inputs[i];
-        plan.update_psbt_input(psbt_input);
-        psbt_input.witness_utxo = Some(utxo.txout.clone());
-    }
+    let psbt = selection.create_psbt(PsbtParams {
+        fallback_locktime,
+        fallback_sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
+        ..Default::default()
+    })?;
 
     Ok((psbt, change_info))
 }
 
-// Alias the elements of `planned_utxos`
-pub type PlanUtxo = (Plan, FullTxOut<ConfirmationBlockTime>);
-
-pub fn planned_utxos<O: ChainOracle>(
-    graph: &KeychainTxGraph,
-    chain: &O,
-    assets: &Assets,
-) -> Result<Vec<PlanUtxo>, O::Error> {
-    let chain_tip = chain.get_chain_tip()?;
-    let outpoints = graph.index.outpoints();
-    graph
+fn all_input_candidates<O>(graph: &KeychainTxGraph, chain: &O, assets: &Assets) -> InputCandidates
+where
+    O: ChainOracle<Error = Infallible>,
+{
+    let indexer = &graph.index;
+    let txs_with_status = graph
         .graph()
-        .try_filter_chain_unspents(
+        .list_canonical_txs(
             chain,
-            chain_tip,
+            chain.get_chain_tip().expect("infallible"),
             CanonicalizationParams::default(),
-            outpoints.iter().cloned(),
-        )?
-        .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
-            let desc = graph
-                .index
-                .keychains()
-                .find(|(keychain, _)| *keychain == k)
-                .expect("keychain must exist")
-                .1
-                .at_derivation_index(i)
-                .expect("i can't be hardened");
+        )
+        .map(|c_tx| (c_tx.tx_node.tx, status_from_position(c_tx.chain_position)));
+    let canon_utxos = CanonicalUnspents::new(txs_with_status);
+    let can_select = canon_utxos.try_get_unspents(
+        indexer
+            .outpoints()
+            .iter()
+            .filter_map(|&(_, op)| Some((op, try_plan(graph, op, assets)?))),
+    );
+    InputCandidates::new([], can_select)
+}
 
-            let plan = desc.plan(assets).ok()?;
+fn status_from_position(pos: ChainPosition<ConfirmationBlockTime>) -> Option<TxStatus> {
+    if let ChainPosition::Confirmed { anchor, .. } = pos {
+        let conf_height = anchor.confirmation_height_upper_bound();
+        let height =
+            absolute::Height::from_consensus(conf_height).expect("must be valid block height");
+        let time = absolute::Time::from_consensus(
+            anchor
+                .confirmation_time
+                .try_into()
+                .expect("confirmation time should fit into u32"),
+        )
+        .expect("must be valid block time");
 
-            Some(Ok((plan, full_txo)))
-        })
-        .collect()
+        return Some(TxStatus { height, time });
+    }
+    None
+}
+
+fn try_plan(graph: &KeychainTxGraph, outpoint: OutPoint, assets: &Assets) -> Option<Plan> {
+    let indexer = &graph.index;
+    let ((keychain, index), _) = indexer.txout(outpoint)?;
+    let desc = indexer
+        .get_descriptor(keychain)?
+        .at_derivation_index(index)
+        .expect("must be valid derivation index");
+    desc.plan(assets).ok()
 }
 
 pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
@@ -609,7 +546,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 feerate,
                 after,
                 older,
-                coin_select,
+                // coin_select: _,
                 debug,
             } => {
                 let address = address.require_network(network)?;
@@ -634,11 +571,10 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                         assets = assets.older(relative::LockTime::from_consensus(n)?);
                     }
 
-                    create_tx(
+                    create_psbt(
                         &mut graph,
                         &*chain,
                         &assets,
-                        coin_select,
                         address,
                         value,
                         feerate.expect("must have feerate"),
@@ -696,26 +632,11 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 let secp = Secp256k1::new();
                 let (_, keymap) = Descriptor::parse_descriptor(&secp, &desc_str)?;
                 if keymap.is_empty() {
-                    bail!("unable to sign")
+                    bail!("unable to sign");
                 }
-
-                // note: we're only looking at the first entry in the keymap
-                // the idea is to find something that impls `GetKey`
-                let sign_res = match keymap.iter().next().expect("not empty") {
-                    (DescriptorPublicKey::Single(single_pub), DescriptorSecretKey::Single(prv)) => {
-                        let pk = match single_pub.key {
-                            SinglePubKey::FullKey(pk) => pk,
-                            SinglePubKey::XOnly(_) => unimplemented!("single xonly pubkey"),
-                        };
-                        let keys: HashMap<PublicKey, PrivateKey> = [(pk, prv.key)].into();
-                        psbt.sign(&keys, &secp)
-                    }
-                    (_, DescriptorSecretKey::XPrv(k)) => psbt.sign(&k.xkey, &secp),
-                    _ => unimplemented!("multi xkey signer"),
-                };
-
-                let _ = sign_res
-                    .map_err(|errors| anyhow::anyhow!("failed to sign PSBT {:?}", errors))?;
+                let _ = psbt
+                    .sign(&Signer(keymap), &secp)
+                    .map_err(|(_, errors)| anyhow::anyhow!("failed to sign PSBT {:?}", errors))?;
 
                 let mut obj = serde_json::Map::new();
                 obj.insert("psbt".to_string(), json!(psbt.to_string()));
