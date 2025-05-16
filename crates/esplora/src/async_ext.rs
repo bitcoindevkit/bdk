@@ -557,7 +557,8 @@ mod test {
         }};
     }
 
-    /// Ensure that update does not remove heights (from original), and all anchor heights are included.
+    /// Ensure that update does not remove heights (from original), and all anchor heights are
+    /// included.
     #[tokio::test]
     pub async fn test_finalize_chain_update() -> anyhow::Result<()> {
         struct TestCase<'a> {
@@ -569,8 +570,8 @@ mod test {
             initial_cps: &'a [u32],
             /// The final blockchain height of the env.
             final_env_height: u32,
-            /// The anchors to test with: `(height, txid)`. Only the height is provided as we can fetch
-            /// the blockhash from the env.
+            /// The anchors to test with: `(height, txid)`. Only the height is provided as we can
+            /// fetch the blockhash from the env.
             anchors: &'a [(u32, Txid)],
         }
 

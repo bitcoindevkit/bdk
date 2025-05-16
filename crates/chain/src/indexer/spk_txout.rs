@@ -1,4 +1,5 @@
-//! [`SpkTxOutIndex`] is an index storing [`TxOut`]s that have a script pubkey that matches those in a list.
+//! [`SpkTxOutIndex`] is an index storing [`TxOut`]s that have a script pubkey that matches those in
+//! a list.
 
 use core::ops::RangeBounds;
 
@@ -15,14 +16,14 @@ use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txi
 /// index will look at any txouts you pass in and store and index any txouts matching one of its
 /// script pubkeys.
 ///
-/// Each script pubkey is associated with an application-defined index script index `I`, which must be
-/// [`Ord`]. Usually, this is used to associate the derivation index of the script pubkey or even a
-/// combination of `(keychain, derivation_index)`.
+/// Each script pubkey is associated with an application-defined index script index `I`, which must
+/// be [`Ord`]. Usually, this is used to associate the derivation index of the script pubkey or even
+/// a combination of `(keychain, derivation_index)`.
 ///
 /// Note there is no harm in scanning transactions that disappear from the blockchain or were never
 /// in there in the first place. `SpkTxOutIndex` is intentionally *monotone* -- you cannot delete or
-/// modify txouts that have been indexed. To find out which txouts from the index are actually in the
-/// chain or unspent, you must use other sources of information like a [`TxGraph`].
+/// modify txouts that have been indexed. To find out which txouts from the index are actually in
+/// the chain or unspent, you must use other sources of information like a [`TxGraph`].
 ///
 /// [`TxOut`]: bitcoin::TxOut
 /// [`insert_spk`]: Self::insert_spk
@@ -89,9 +90,10 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     ///
     /// Typically, this is used in two situations:
     ///
-    /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore all
-    ///    your txouts.
-    /// 2. When getting new data from the chain, you usually scan it before incorporating it into your chain state.
+    /// 1. After loading transaction data from the disk, you may scan over all the txouts to restore
+    ///    all your txouts.
+    /// 2. When getting new data from the chain, you usually scan it before incorporating it into
+    ///    your chain state.
     pub fn scan(&mut self, tx: &Transaction) -> BTreeSet<I> {
         let mut scanned_indices = BTreeSet::new();
         let txid = tx.compute_txid();
@@ -191,7 +193,8 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
         &self.spks
     }
 
-    /// Adds a script pubkey to scan for. Returns `false` and does nothing if spk already exists in the map
+    /// Adds a script pubkey to scan for. Returns `false` and does nothing if spk already exists in
+    /// the map
     ///
     /// the index will look for outputs spending to this spk whenever it scans new data.
     pub fn insert_spk(&mut self, index: I, spk: ScriptBuf) -> bool {
@@ -243,14 +246,14 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
         !self.unused.contains(index)
     }
 
-    /// Marks the script pubkey at `index` as used even though it hasn't seen an output spending to it.
-    /// This only affects when the `index` had already been added to `self` and was unused.
+    /// Marks the script pubkey at `index` as used even though it hasn't seen an output spending to
+    /// it. This only affects when the `index` had already been added to `self` and was unused.
     ///
     /// Returns whether the `index` was initially present as `unused`.
     ///
     /// This is useful when you want to reserve a script pubkey for something but don't want to add
-    /// the transaction output using it to the index yet. Other callers will consider the `index` used
-    /// until you call [`unmark_used`].
+    /// the transaction output using it to the index yet. Other callers will consider the `index`
+    /// used until you call [`unmark_used`].
     ///
     /// [`unmark_used`]: Self::unmark_used
     pub fn mark_used(&mut self, index: &I) -> bool {
@@ -326,8 +329,8 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// matches one of our script pubkeys.
     ///
     /// It is easily possible to misuse this method and get false negatives by calling it before you
-    /// have scanned the `TxOut`s the transaction is spending. For example, if you want to filter out
-    /// all the transactions in a block that are irrelevant, you **must first scan all the
+    /// have scanned the `TxOut`s the transaction is spending. For example, if you want to filter
+    /// out all the transactions in a block that are irrelevant, you **must first scan all the
     /// transactions in the block** and only then use this method.
     pub fn is_relevant(&self, tx: &Transaction) -> bool {
         let input_matches = tx
