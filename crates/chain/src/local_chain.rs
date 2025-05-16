@@ -545,31 +545,46 @@ impl std::error::Error for ApplyHeaderError {}
 
 /// Applies `update_tip` onto `original_tip`.
 ///
-/// On success, a tuple is returned `(changeset, can_replace)`. If `can_replace` is true, then the
-/// `update_tip` can replace the `original_tip`.
+/// On success, a tuple is returned ([`CheckPoint`], [`ChangeSet`]).
+///
+/// # Errors
+///
+/// [`CannotConnectError`] occurs when the `original_tip` and `update_tip` chains are disjoint:
+///
+/// - If no point of agreement is found between the update and original chains.
+/// - A point of agreement is found but the update is ambiguous above the point of agreement (a.k.a.
+///   the update and original chain both have a block above the point of agreement, but their
+///   heights do not overlap).
+/// - The update attempts to replace the genesis block of the original chain.
 fn merge_chains(
     original_tip: CheckPoint,
     update_tip: CheckPoint,
 ) -> Result<(CheckPoint, ChangeSet), CannotConnectError> {
     let mut changeset = ChangeSet::default();
+
     let mut orig = original_tip.iter();
     let mut update = update_tip.iter();
+
     let mut curr_orig = None;
     let mut curr_update = None;
+
     let mut prev_orig: Option<CheckPoint> = None;
     let mut prev_update: Option<CheckPoint> = None;
+
     let mut point_of_agreement_found = false;
+
     let mut prev_orig_was_invalidated = false;
+
     let mut potentially_invalidated_heights = vec![];
 
     // If we can, we want to return the update tip as the new tip because this allows checkpoints
     // in multiple locations to keep the same `Arc` pointers when they are being updated from each
-    // other using this function. We can do this as long as long as the update contains every
+    // other using this function. We can do this as long as the update contains every
     // block's height of the original chain.
     let mut is_update_height_superset_of_original = true;
 
     // To find the difference between the new chain and the original we iterate over both of them
-    // from the tip backwards in tandem. We always dealing with the highest one from either chain
+    // from the tip backwards in tandem. We are always dealing with the highest one from either chain
     // first and move to the next highest. The crucial logic is applied when they have blocks at the
     // same height.
     loop {
