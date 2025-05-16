@@ -1,5 +1,5 @@
 use bdk_core::{
-    bitcoin::{block::Header, BlockHash, OutPoint, Transaction, Txid},
+    bitcoin::{block::Header, OutPoint, Transaction, Txid},
     collections::{BTreeMap, HashMap, HashSet},
     spk_client::{
         FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
@@ -130,7 +130,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let start_time = request.start_time();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(fetch_tip(&self.inner, chain_tip)?),
             None => None,
         };
 
@@ -153,9 +153,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
 
         let chain_update = match tip_and_latest_blocks {
-            Some((chain_tip, latest_blocks)) => Some(chain_update(
+            Some(chain_tip) => Some(populate_chain_with_anchor_heights(
                 chain_tip,
-                &latest_blocks,
                 tx_update.anchors.iter().cloned(),
             )?),
             _ => None,
@@ -201,7 +200,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let start_time = request.start_time();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(fetch_tip(&self.inner, chain_tip)?),
             None => None,
         };
 
@@ -225,9 +224,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
 
         let chain_update = match tip_and_latest_blocks {
-            Some((chain_tip, latest_blocks)) => Some(chain_update(
+            Some(chain_tip) => Some(populate_chain_with_anchor_heights(
                 chain_tip,
-                &latest_blocks,
                 tx_update.anchors.iter().cloned(),
             )?),
             None => None,
@@ -485,25 +483,15 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     }
 }
 
-/// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`. The latest blocks are
-/// fetched to construct checkpoint updates with the proper [`BlockHash`] in case of re-org.
-fn fetch_tip_and_latest_blocks(
-    client: &impl ElectrumApi,
-    prev_tip: CheckPoint,
-) -> Result<(CheckPoint, BTreeMap<u32, BlockHash>), Error> {
+/// Return a [`CheckPoint`] of the latest tip that connects with `prev_tip`.
+fn fetch_tip(client: &impl ElectrumApi, local_tip: CheckPoint) -> Result<CheckPoint, Error> {
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
-    let new_tip_height = height as u32;
-
-    // If electrum returns a tip height that is lower than our previous tip, then checkpoints do
-    // not need updating. We just return the previous tip and use that as the point of agreement.
-    if new_tip_height < prev_tip.height() {
-        return Ok((prev_tip, BTreeMap::new()));
-    }
+    let remote_tip_height = height as u32;
 
     // Atomically fetch the latest `CHAIN_SUFFIX_LENGTH` count of blocks from Electrum. We use this
     // to construct our checkpoint update.
     let mut new_blocks = {
-        let start_height = new_tip_height.saturating_sub(CHAIN_SUFFIX_LENGTH - 1);
+        let start_height = remote_tip_height.saturating_sub(CHAIN_SUFFIX_LENGTH - 1);
         let hashes = client
             .block_headers(start_height as _, CHAIN_SUFFIX_LENGTH as _)?
             .headers
@@ -515,13 +503,13 @@ fn fetch_tip_and_latest_blocks(
     // Find the "point of agreement" (if any).
     let agreement_cp = {
         let mut agreement_cp = Option::<CheckPoint>::None;
-        for cp in prev_tip.iter() {
+        for cp in local_tip.iter() {
             let cp_block = cp.block_id();
             let hash = match new_blocks.get(&cp_block.height) {
                 Some(&hash) => hash,
                 None => {
                     assert!(
-                        new_tip_height >= cp_block.height,
+                        remote_tip_height >= cp_block.height,
                         "already checked that electrum's tip cannot be smaller"
                     );
                     let hash = client.block_header(cp_block.height as _)?.block_hash();
@@ -537,45 +525,33 @@ fn fetch_tip_and_latest_blocks(
         agreement_cp
     };
 
-    let agreement_height = agreement_cp.as_ref().map(CheckPoint::height);
-
-    let new_tip = new_blocks
-        .iter()
-        // Prune `new_blocks` to only include blocks that are actually new.
-        .filter(|(height, _)| Some(*<&u32>::clone(height)) > agreement_height)
-        .map(|(height, hash)| BlockId {
-            height: *height,
-            hash: *hash,
-        })
-        .fold(agreement_cp, |prev_cp, block| {
-            Some(match prev_cp {
-                Some(cp) => cp.push(block).expect("must extend checkpoint"),
-                None => CheckPoint::new(block),
-            })
-        })
-        .expect("must have at least one checkpoint");
-
-    Ok((new_tip, new_blocks))
+    // Contruct the new tip.
+    let mut new_tip = agreement_cp.unwrap_or(local_tip);
+    for (height, hash) in new_blocks {
+        new_tip = new_tip.insert(BlockId { height, hash });
+    }
+    Ok(new_tip)
 }
 
 // Add a corresponding checkpoint per anchor height if it does not yet exist. Checkpoints should not
 // surpass `latest_blocks`.
-fn chain_update(
+fn populate_chain_with_anchor_heights<A>(
     mut tip: CheckPoint,
-    latest_blocks: &BTreeMap<u32, BlockHash>,
-    anchors: impl Iterator<Item = (ConfirmationBlockTime, Txid)>,
-) -> Result<CheckPoint, Error> {
+    anchors: A,
+) -> Result<CheckPoint, Error>
+where
+    A: Iterator<Item = (ConfirmationBlockTime, Txid)>,
+{
+    let tip_height = tip.height();
+    let exclude_from = tip_height - CHAIN_SUFFIX_LENGTH;
+
     for (anchor, _txid) in anchors {
         let height = anchor.block_id.height;
 
         // Checkpoint uses the `BlockHash` from `latest_blocks` so that the hash will be consistent
         // in case of a re-org.
-        if tip.get(height).is_none() && height <= tip.height() {
-            let hash = match latest_blocks.get(&height) {
-                Some(&hash) => hash,
-                None => anchor.block_id.hash,
-            };
-            tip = tip.insert(BlockId { hash, height });
+        if tip.get(height).is_none() && height < exclude_from {
+            tip = tip.insert(anchor.block_id);
         }
     }
     Ok(tip)
