@@ -2,7 +2,7 @@ use core::fmt;
 use core::ops::RangeBounds;
 
 use alloc::sync::Arc;
-use bitcoin::{block::Header, BlockHash};
+use bitcoin::{block::Header, Block, BlockHash};
 
 use crate::BlockId;
 
@@ -11,9 +11,9 @@ use crate::BlockId;
 /// Checkpoints are cheaply cloneable and are useful to find the agreement point between two sparse
 /// block chains.
 #[derive(Debug)]
-pub struct CheckPoint<H = BlockHash>(Arc<CPInner<H>>);
+pub struct CheckPoint<D = BlockHash>(Arc<CPInner<D>>);
 
-impl<H> Clone for CheckPoint<H> {
+impl<D> Clone for CheckPoint<D> {
     fn clone(&self) -> Self {
         CheckPoint(Arc::clone(&self.0))
     }
@@ -21,13 +21,13 @@ impl<H> Clone for CheckPoint<H> {
 
 /// The internal contents of [`CheckPoint`].
 #[derive(Debug)]
-struct CPInner<H> {
+struct CPInner<D> {
     /// Block id
     block_id: BlockId,
     /// Data.
-    data: H,
+    data: D,
     /// Previous checkpoint (if any).
-    prev: Option<Arc<CPInner<H>>>,
+    prev: Option<Arc<CPInner<D>>>,
 }
 
 /// When a `CPInner` is dropped we need to go back down the chain and manually remove any
@@ -35,7 +35,7 @@ struct CPInner<H> {
 /// leads to recursive logic and stack overflows
 ///
 /// https://github.com/bitcoindevkit/bdk/issues/1634
-impl<H> Drop for CPInner<H> {
+impl<D> Drop for CPInner<D> {
     fn drop(&mut self) {
         // Take out `prev` so its `drop` won't be called when this drop is finished
         let mut current = self.prev.take();
@@ -59,6 +59,9 @@ impl<H> Drop for CPInner<H> {
 }
 
 /// Trait that converts [`CheckPoint`] `data` to [`BlockHash`].
+///
+/// Implementations of [`ToBlockHash`] must consist exclusively of the data to be hashed — do not
+/// include any extraneous fields.
 pub trait ToBlockHash {
     /// Returns the [`BlockHash`] for the associated [`CheckPoint`] `data` type.
     fn to_blockhash(&self) -> BlockHash;
@@ -76,7 +79,13 @@ impl ToBlockHash for Header {
     }
 }
 
-impl<H> PartialEq for CheckPoint<H> {
+impl ToBlockHash for Block {
+    fn to_blockhash(&self) -> BlockHash {
+        self.block_hash()
+    }
+}
+
+impl<D> PartialEq for CheckPoint<D> {
     fn eq(&self, other: &Self) -> bool {
         let self_cps = self.iter().map(|cp| cp.block_id());
         let other_cps = other.iter().map(|cp| cp.block_id());
@@ -86,23 +95,6 @@ impl<H> PartialEq for CheckPoint<H> {
 
 // Methods for `CheckPoint<BlockHash>`
 impl CheckPoint<BlockHash> {
-    /// Construct a new base [`CheckPoint`] at the front of a linked list.
-    pub fn new(block: BlockId) -> Self {
-        CheckPoint::from_data(block.height, block.hash)
-    }
-
-    /// Construct a checkpoint from the given `header` and block `height`.
-    ///
-    /// If `header` is of the genesis block, the checkpoint won't have a `prev` node. Otherwise,
-    /// we return a checkpoint linked with the previous block.
-    #[deprecated(
-        since = "0.5.0",
-        note = "Use `blockhash_checkpoint_from_header` instead."
-    )]
-    pub fn from_header(header: &Header, height: u32) -> Self {
-        CheckPoint::blockhash_checkpoint_from_header(header, height)
-    }
-
     /// Construct a checkpoint from the given `header` and block `height`.
     ///
     /// If `header` is of the genesis block, the checkpoint won't have a [`prev`] node. Otherwise,
@@ -111,87 +103,29 @@ impl CheckPoint<BlockHash> {
     /// [`prev`]: CheckPoint::prev
     pub fn blockhash_checkpoint_from_header(header: &Header, height: u32) -> Self {
         let hash = header.block_hash();
-        let this_block_id = BlockId { height, hash };
 
-        let prev_height = match height.checked_sub(1) {
-            Some(h) => h,
-            None => return Self::new(this_block_id),
+        let (prev_height, prev_hash) = match height.checked_sub(1) {
+            Some(h) => (h, header.prev_blockhash),
+            None => return CheckPoint::new(0, hash),
         };
 
-        let prev_block_id = BlockId {
-            height: prev_height,
-            hash: header.prev_blockhash,
-        };
-
-        CheckPoint::new(prev_block_id)
-            .push_block_id(this_block_id)
+        CheckPoint::new(prev_height, prev_hash)
+            .push(height, hash)
             .expect("must construct checkpoint")
-    }
-
-    /// Construct a checkpoint from a list of [`BlockId`]s in ascending height order.
-    ///
-    /// # Errors
-    ///
-    /// This method will error if any of the follow occurs:
-    ///
-    /// - The `blocks` iterator is empty, in which case, the error will be `None`.
-    /// - The `blocks` iterator is not in ascending height order.
-    /// - The `blocks` iterator contains multiple [`BlockId`]s of the same height.
-    ///
-    /// The error type is the last successful checkpoint constructed (if any).
-    pub fn from_block_ids(
-        block_ids: impl IntoIterator<Item = BlockId>,
-    ) -> Result<Self, Option<Self>> {
-        Self::from_block_data(block_ids.into_iter().map(|b| (b.height, b.hash)))
-    }
-
-    /// Extends the checkpoint linked list by a iterator of block ids.
-    ///
-    /// Returns an `Err(self)` if there is block which does not have a greater height than the
-    /// previous one.
-    pub fn extend_block_ids(
-        self,
-        blockdata: impl IntoIterator<Item = BlockId>,
-    ) -> Result<Self, Self> {
-        self.extend(
-            blockdata
-                .into_iter()
-                .map(|block| (block.height, block.hash)),
-        )
-    }
-
-    /// Inserts `block_id` at its height within the chain.
-    ///
-    /// The effect of `insert` depends on whether a height already exists. If it doesn't the
-    /// `block_id` we inserted and all pre-existing blocks higher than it will be re-inserted after
-    /// it. If the height already existed and has a conflicting block hash then it will be purged
-    /// along with all blocks following it. The returned chain will have a tip of the `block_id`
-    /// passed in. Of course, if the `block_id` was already present then this just returns `self`.
-    #[must_use]
-    pub fn insert_block_id(self, block_id: BlockId) -> Self {
-        self.insert(block_id.height, block_id.hash)
-    }
-
-    /// Puts another checkpoint onto the linked list representing the blockchain.
-    ///
-    /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the one you
-    /// are pushing on to.
-    pub fn push_block_id(self, block: BlockId) -> Result<Self, Self> {
-        self.push(block.height, block.hash)
     }
 }
 
-// Methods for any `H`
-impl<H> CheckPoint<H> {
+// Methods for any `D`
+impl<D> CheckPoint<D> {
     /// Get a reference of the `data` of the checkpoint.
-    pub fn data_ref(&self) -> &H {
+    pub fn data_ref(&self) -> &D {
         &self.0.data
     }
 
     /// Get the `data` of a the checkpoint.
-    pub fn data(&self) -> H
+    pub fn data(&self) -> D
     where
-        H: Clone,
+        D: Clone,
     {
         self.0.data.clone()
     }
@@ -212,12 +146,12 @@ impl<H> CheckPoint<H> {
     }
 
     /// Get the previous checkpoint in the chain.
-    pub fn prev(&self) -> Option<CheckPoint<H>> {
+    pub fn prev(&self) -> Option<CheckPoint<D>> {
         self.0.prev.clone().map(CheckPoint)
     }
 
     /// Iterate from this checkpoint in descending height.
-    pub fn iter(&self) -> CheckPointIter<H> {
+    pub fn iter(&self) -> CheckPointIter<D> {
         self.clone().into_iter()
     }
 
@@ -232,7 +166,7 @@ impl<H> CheckPoint<H> {
     ///
     /// Note that we always iterate checkpoints in reverse height order (iteration starts at tip
     /// height).
-    pub fn range<R>(&self, range: R) -> impl Iterator<Item = CheckPoint<H>>
+    pub fn range<R>(&self, range: R) -> impl Iterator<Item = CheckPoint<D>>
     where
         R: RangeBounds<u32>,
     {
@@ -257,14 +191,14 @@ impl<H> CheckPoint<H> {
     }
 }
 
-// Methods where `H: ToBlockHash`
-impl<H> CheckPoint<H>
+// Methods where `D: ToBlockHash`
+impl<D> CheckPoint<D>
 where
-    H: ToBlockHash + fmt::Debug + Copy,
+    D: ToBlockHash + fmt::Debug + Copy,
 {
     /// Construct a new base [`CheckPoint`] from given `height` and `data` at the front of a linked
     /// list.
-    pub fn from_data(height: u32, data: H) -> Self {
+    pub fn new(height: u32, data: D) -> Self {
         Self(Arc::new(CPInner {
             block_id: BlockId {
                 height,
@@ -279,12 +213,10 @@ where
     ///
     /// Returns `Err(None)` if `blocks` doesn't yield any data. If the blocks are not in ascending
     /// height order, then returns the last [`CheckPoint`] that would have been extended.
-    pub fn from_block_data(
-        blocks: impl IntoIterator<Item = (u32, H)>,
-    ) -> Result<Self, Option<Self>> {
+    pub fn from_blocks(blocks: impl IntoIterator<Item = (u32, D)>) -> Result<Self, Option<Self>> {
         let mut blocks = blocks.into_iter();
         let (height, data) = blocks.next().ok_or(None)?;
-        let mut cp = CheckPoint::from_data(height, data);
+        let mut cp = CheckPoint::new(height, data);
         cp = cp.extend(blocks)?;
 
         Ok(cp)
@@ -294,7 +226,7 @@ where
     ///
     /// Returns an `Err(self)` if there is block which does not have a greater height than the
     /// previous one.
-    pub fn extend(self, blockdata: impl IntoIterator<Item = (u32, H)>) -> Result<Self, Self> {
+    pub fn extend(self, blockdata: impl IntoIterator<Item = (u32, D)>) -> Result<Self, Self> {
         let mut cp = self.clone();
         for (height, data) in blockdata {
             cp = cp.push(height, data)?;
@@ -314,7 +246,7 @@ where
     ///
     /// This panics if called with a genesis block that differs from that of `self`.
     #[must_use]
-    pub fn insert(self, height: u32, data: H) -> Self {
+    pub fn insert(self, height: u32, data: D) -> Self {
         let mut cp = self.clone();
         let mut tail = vec![];
         let base = loop {
@@ -345,7 +277,7 @@ where
     ///
     /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the one you
     /// are pushing on to.
-    pub fn push(self, height: u32, data: H) -> Result<Self, Self> {
+    pub fn push(self, height: u32, data: D) -> Result<Self, Self> {
         if self.height() < height {
             Ok(Self(Arc::new(CPInner {
                 block_id: BlockId {
@@ -362,12 +294,12 @@ where
 }
 
 /// Iterates over checkpoints backwards.
-pub struct CheckPointIter<H> {
-    current: Option<Arc<CPInner<H>>>,
+pub struct CheckPointIter<D> {
+    current: Option<Arc<CPInner<D>>>,
 }
 
-impl<H> Iterator for CheckPointIter<H> {
-    type Item = CheckPoint<H>;
+impl<D> Iterator for CheckPointIter<D> {
+    type Item = CheckPoint<D>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let current = self.current.clone()?;
@@ -376,9 +308,9 @@ impl<H> Iterator for CheckPointIter<H> {
     }
 }
 
-impl<H> IntoIterator for CheckPoint<H> {
-    type Item = CheckPoint<H>;
-    type IntoIter = CheckPointIter<H>;
+impl<D> IntoIterator for CheckPoint<D> {
+    type Item = CheckPoint<D>;
+    type IntoIter = CheckPointIter<D>;
 
     fn into_iter(self) -> Self::IntoIter {
         CheckPointIter {

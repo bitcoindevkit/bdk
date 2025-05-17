@@ -369,8 +369,9 @@ fn local_chain_insert_block() {
 
     for (i, t) in test_cases.into_iter().enumerate() {
         let mut chain = t.original;
+        let block_id: BlockId = t.insert.into();
         assert_eq!(
-            chain.insert_block(t.insert.into()),
+            chain.insert_block(block_id.height, block_id.hash),
             t.expected_result,
             "[{}] unexpected result when inserting block",
             i,
@@ -407,8 +408,10 @@ fn local_chain_insert_header() {
     let headers = build_headers(5);
 
     fn local_chain(data: Vec<(u32, Header)>) -> LocalChain<Header> {
-        bdk_chain::local_chain::LocalChain::from_data(data.into_iter().collect::<BTreeMap<_, _>>())
-            .expect("chain must have genesis block")
+        bdk_chain::local_chain::LocalChain::from_blocks(
+            data.into_iter().collect::<BTreeMap<_, _>>(),
+        )
+        .expect("chain must have genesis block")
     }
 
     struct TestCase {
@@ -463,7 +466,7 @@ fn local_chain_insert_header() {
     for (i, t) in test_cases.into_iter().enumerate() {
         let mut chain = t.original;
         assert_eq!(
-            chain.insert_data(t.insert.0, t.insert.1),
+            chain.insert_block(t.insert.0, t.insert.1),
             t.expected_result,
             "[{}] unexpected result when inserting block",
             i,
@@ -585,11 +588,7 @@ fn checkpoint_from_block_ids() {
     ];
 
     for (i, t) in test_cases.into_iter().enumerate() {
-        let result = CheckPoint::from_block_ids(
-            t.blocks
-                .iter()
-                .map(|&(height, hash)| BlockId { height, hash }),
-        );
+        let result = CheckPoint::<BlockHash>::from_blocks(t.blocks.iter().copied());
         match t.exp_result {
             Ok(_) => {
                 assert!(result.is_ok(), "[{}:{}] should be Ok", i, t.name);
@@ -734,18 +733,23 @@ fn checkpoint_insert() {
     }
 
     for t in test_cases.into_iter() {
-        let chain = CheckPoint::from_block_ids(
-            genesis_block().chain(t.chain.iter().copied().map(BlockId::from)),
+        let chain = CheckPoint::from_blocks(
+            genesis_block()
+                .chain(t.chain.iter().copied().map(BlockId::from))
+                .map(|block_id| (block_id.height, block_id.hash)),
         )
         .expect("test formed incorrectly, must construct checkpoint chain");
 
-        let exp_final_chain = CheckPoint::from_block_ids(
-            genesis_block().chain(t.exp_final_chain.iter().copied().map(BlockId::from)),
+        let exp_final_chain = CheckPoint::from_blocks(
+            genesis_block()
+                .chain(t.exp_final_chain.iter().copied().map(BlockId::from))
+                .map(|block_id| (block_id.height, block_id.hash)),
         )
         .expect("test formed incorrectly, must construct checkpoint chain");
 
+        let BlockId { height, hash } = t.to_insert.into();
         assert_eq!(
-            chain.insert_block_id(t.to_insert.into()),
+            chain.insert(height, hash),
             exp_final_chain,
             "unexpected final chain"
         );
@@ -925,9 +929,9 @@ fn generate_checkpoints(
 ) -> impl Strategy<Value = CheckPoint<BlockHash>> {
     proptest::collection::btree_set(1..max_height, 0..max_count).prop_map(|mut heights| {
         heights.insert(0); // must have genesis
-        CheckPoint::from_block_ids(heights.into_iter().map(|height| {
+        CheckPoint::from_blocks(heights.into_iter().map(|height| {
             let hash = bitcoin::hashes::Hash::hash(height.to_le_bytes().as_slice());
-            BlockId { height, hash }
+            (height, hash)
         }))
         .expect("blocks must be in order as it comes from btreeset")
     })

@@ -76,8 +76,12 @@ fn add_ancestor_tx(graph: &mut KeychainTxGraph, block_id: BlockId, locktime: u32
 
 fn setup<F: Fn(&mut KeychainTxGraph, &LocalChain)>(f: F) -> (KeychainTxGraph, LocalChain) {
     const DESC: &str = "tr([ab28dc00/86h/1h/0h]tpubDCdDtzAMZZrkwKBxwNcGCqe4FRydeD9rfMisoi7qLdraG79YohRfPW4YgdKQhpgASdvh612xXNY5xYzoqnyCgPbkpK4LSVcH5Xv4cK7johH/0/*)";
-    let cp = CheckPoint::from_block_ids([genesis_block_id(), tip_block_id()])
-        .expect("blocks must be chronological");
+    let cp = CheckPoint::from_blocks(
+        [genesis_block_id(), tip_block_id()]
+            .into_iter()
+            .map(|block_id| (block_id.height, block_id.hash)),
+    )
+    .expect("blocks must be chronological");
     let chain = LocalChain::from_tip(cp).unwrap();
 
     let (desc, _) =

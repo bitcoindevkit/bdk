@@ -230,7 +230,7 @@ impl<C: RpcApi> FilterIter<'_, C> {
         // note: to connect with the local chain we must guarantee that `self.blocks.first()`
         // is also the point of agreement with `self.cp`.
         Some(
-            CheckPoint::from_block_ids(self.blocks.iter().map(BlockId::from))
+            CheckPoint::from_blocks(self.blocks.iter().map(|(&height, &hash)| (height, hash)))
                 .expect("blocks must be in order"),
         )
     }

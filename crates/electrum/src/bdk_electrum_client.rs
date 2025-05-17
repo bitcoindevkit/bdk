@@ -549,8 +549,10 @@ fn fetch_tip_and_latest_blocks(
         })
         .fold(agreement_cp, |prev_cp, block| {
             Some(match prev_cp {
-                Some(cp) => cp.push_block_id(block).expect("must extend checkpoint"),
-                None => CheckPoint::new(block),
+                Some(cp) => cp
+                    .push(block.height, block.hash)
+                    .expect("must extend checkpoint"),
+                None => CheckPoint::new(block.height, block.hash),
             })
         })
         .expect("must have at least one checkpoint");
@@ -575,7 +577,7 @@ fn chain_update(
                 Some(&hash) => hash,
                 None => anchor.block_id.hash,
             };
-            tip = tip.insert_block_id(BlockId { hash, height });
+            tip = tip.insert(height, hash);
         }
     }
     Ok(tip)

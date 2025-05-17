@@ -112,8 +112,8 @@ impl From<ScriptBuf> for SpkWithExpectedTxids {
 ///
 /// Construct with [`SyncRequest::builder`].
 #[must_use]
-pub struct SyncRequestBuilder<I = (), B = BlockHash> {
-    inner: SyncRequest<I, B>,
+pub struct SyncRequestBuilder<I = (), D = BlockHash> {
+    inner: SyncRequest<I, D>,
 }
 
 impl SyncRequestBuilder<()> {
@@ -123,11 +123,11 @@ impl SyncRequestBuilder<()> {
     }
 }
 
-impl<I, B> SyncRequestBuilder<I, B> {
+impl<I, D> SyncRequestBuilder<I, D> {
     /// Set the initial chain tip for the sync request.
     ///
     /// This is used to update [`LocalChain`](../../bdk_chain/local_chain/struct.LocalChain.html).
-    pub fn chain_tip(mut self, cp: CheckPoint<B>) -> Self {
+    pub fn chain_tip(mut self, cp: CheckPoint<D>) -> Self {
         self.inner.chain_tip = Some(cp);
         self
     }
@@ -212,7 +212,7 @@ impl<I, B> SyncRequestBuilder<I, B> {
     }
 
     /// Build the [`SyncRequest`].
-    pub fn build(self) -> SyncRequest<I, B> {
+    pub fn build(self) -> SyncRequest<I, D> {
         self.inner
     }
 }
@@ -226,7 +226,7 @@ impl<I, B> SyncRequestBuilder<I, B> {
 /// ```rust
 /// # use bdk_chain::{bitcoin::{hashes::Hash, ScriptBuf}, local_chain::LocalChain};
 /// # use bdk_chain::spk_client::SyncRequest;
-/// # let (local_chain, _) = LocalChain::from_genesis_hash(Hash::all_zeros());
+/// # let (local_chain, _) = LocalChain::from_genesis(Hash::all_zeros());
 /// # let scripts = [ScriptBuf::default(), ScriptBuf::default()];
 /// // Construct a sync request.
 /// let sync_request = SyncRequest::builder()
@@ -240,9 +240,9 @@ impl<I, B> SyncRequestBuilder<I, B> {
 ///     .build();
 /// ```
 #[must_use]
-pub struct SyncRequest<I = (), B = BlockHash> {
+pub struct SyncRequest<I = (), D = BlockHash> {
     start_time: u64,
-    chain_tip: Option<CheckPoint<B>>,
+    chain_tip: Option<CheckPoint<D>>,
     spks: VecDeque<(I, ScriptBuf)>,
     spks_consumed: usize,
     spk_expected_txids: HashMap<ScriptBuf, HashSet<Txid>>,
@@ -253,13 +253,13 @@ pub struct SyncRequest<I = (), B = BlockHash> {
     inspect: Box<InspectSync<I>>,
 }
 
-impl<I, B> From<SyncRequestBuilder<I, B>> for SyncRequest<I, B> {
-    fn from(builder: SyncRequestBuilder<I, B>) -> Self {
+impl<I, D> From<SyncRequestBuilder<I, D>> for SyncRequest<I, D> {
+    fn from(builder: SyncRequestBuilder<I, D>) -> Self {
         builder.inner
     }
 }
 
-impl<I, B> SyncRequest<I, B> {
+impl<I, D> SyncRequest<I, D> {
     /// Start building [`SyncRequest`] with a given `start_time`.
     ///
     /// `start_time` specifies the start time of sync. Chain sources can use this value to set
@@ -268,7 +268,7 @@ impl<I, B> SyncRequest<I, B> {
     ///
     /// Use [`SyncRequest::builder`] to use the current timestamp as `start_time` (this requires
     /// `feature = "std"`).
-    pub fn builder_at(start_time: u64) -> SyncRequestBuilder<I, B> {
+    pub fn builder_at(start_time: u64) -> SyncRequestBuilder<I, D> {
         SyncRequestBuilder {
             inner: Self {
                 start_time,
@@ -291,7 +291,7 @@ impl<I, B> SyncRequest<I, B> {
     /// is not available.
     #[cfg(feature = "std")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn builder() -> SyncRequestBuilder<I, B> {
+    pub fn builder() -> SyncRequestBuilder<I, D> {
         let start_time = std::time::UNIX_EPOCH
             .elapsed()
             .expect("failed to get current timestamp")
@@ -317,7 +317,7 @@ impl<I, B> SyncRequest<I, B> {
     }
 
     /// Get the chain tip [`CheckPoint`] of this request (if any).
-    pub fn chain_tip(&self) -> Option<CheckPoint<B>> {
+    pub fn chain_tip(&self) -> Option<CheckPoint<D>> {
         self.chain_tip.clone()
     }
 
@@ -364,17 +364,17 @@ impl<I, B> SyncRequest<I, B> {
     pub fn iter_spks_with_expected_txids(
         &mut self,
     ) -> impl ExactSizeIterator<Item = SpkWithExpectedTxids> + '_ {
-        SyncIter::<I, B, SpkWithExpectedTxids>::new(self)
+        SyncIter::<I, D, SpkWithExpectedTxids>::new(self)
     }
 
     /// Iterate over [`Txid`]s contained in this request.
     pub fn iter_txids(&mut self) -> impl ExactSizeIterator<Item = Txid> + '_ {
-        SyncIter::<I, B, Txid>::new(self)
+        SyncIter::<I, D, Txid>::new(self)
     }
 
     /// Iterate over [`OutPoint`]s contained in this request.
     pub fn iter_outpoints(&mut self) -> impl ExactSizeIterator<Item = OutPoint> + '_ {
-        SyncIter::<I, B, OutPoint>::new(self)
+        SyncIter::<I, D, OutPoint>::new(self)
     }
 
     fn _call_inspect(&mut self, item: SyncItem<I>) {
@@ -388,14 +388,14 @@ impl<I, B> SyncRequest<I, B> {
 /// See also [`SyncRequest`].
 #[must_use]
 #[derive(Debug)]
-pub struct SyncResponse<B = BlockHash, A = ConfirmationBlockTime> {
+pub struct SyncResponse<A = ConfirmationBlockTime, D = BlockHash> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,
     /// Changes to the chain discovered during the scan.
-    pub chain_update: Option<CheckPoint<B>>,
+    pub chain_update: Option<CheckPoint<D>>,
 }
 
-impl<B, A> Default for SyncResponse<B, A> {
+impl<A, D> Default for SyncResponse<A, D> {
     fn default() -> Self {
         Self {
             tx_update: Default::default(),
@@ -408,15 +408,15 @@ impl<B, A> Default for SyncResponse<B, A> {
 ///
 /// Construct with [`FullScanRequest::builder`].
 #[must_use]
-pub struct FullScanRequestBuilder<K, B = BlockHash> {
-    inner: FullScanRequest<K, B>,
+pub struct FullScanRequestBuilder<K, D = BlockHash> {
+    inner: FullScanRequest<K, D>,
 }
 
-impl<K: Ord, B> FullScanRequestBuilder<K, B> {
+impl<K: Ord, D> FullScanRequestBuilder<K, D> {
     /// Set the initial chain tip for the full scan request.
     ///
     /// This is used to update [`LocalChain`](../../bdk_chain/local_chain/struct.LocalChain.html).
-    pub fn chain_tip(mut self, tip: CheckPoint<B>) -> Self {
+    pub fn chain_tip(mut self, tip: CheckPoint<D>) -> Self {
         self.inner.chain_tip = Some(tip);
         self
     }
@@ -443,7 +443,7 @@ impl<K: Ord, B> FullScanRequestBuilder<K, B> {
     }
 
     /// Build the [`FullScanRequest`].
-    pub fn build(self) -> FullScanRequest<K, B> {
+    pub fn build(self) -> FullScanRequest<K, D> {
         self.inner
     }
 }
@@ -456,20 +456,20 @@ impl<K: Ord, B> FullScanRequestBuilder<K, B> {
 /// used scripts is not known. The full scan process also updates the chain from the given
 /// [`chain_tip`](FullScanRequestBuilder::chain_tip) (if provided).
 #[must_use]
-pub struct FullScanRequest<K, B = BlockHash> {
+pub struct FullScanRequest<K, D = BlockHash> {
     start_time: u64,
-    chain_tip: Option<CheckPoint<B>>,
+    chain_tip: Option<CheckPoint<D>>,
     spks_by_keychain: BTreeMap<K, Box<dyn Iterator<Item = Indexed<ScriptBuf>> + Send>>,
     inspect: Box<InspectFullScan<K>>,
 }
 
-impl<K, B> From<FullScanRequestBuilder<K, B>> for FullScanRequest<K, B> {
-    fn from(builder: FullScanRequestBuilder<K, B>) -> Self {
+impl<K, D> From<FullScanRequestBuilder<K, D>> for FullScanRequest<K, D> {
+    fn from(builder: FullScanRequestBuilder<K, D>) -> Self {
         builder.inner
     }
 }
 
-impl<K: Ord + Clone, B> FullScanRequest<K, B> {
+impl<K: Ord + Clone, D> FullScanRequest<K, D> {
     /// Start building a [`FullScanRequest`] with a given `start_time`.
     ///
     /// `start_time` specifies the start time of sync. Chain sources can use this value to set
@@ -478,7 +478,7 @@ impl<K: Ord + Clone, B> FullScanRequest<K, B> {
     ///
     /// Use [`FullScanRequest::builder`] to use the current timestamp as `start_time` (this
     /// requires `feature = "std`).
-    pub fn builder_at(start_time: u64) -> FullScanRequestBuilder<K, B> {
+    pub fn builder_at(start_time: u64) -> FullScanRequestBuilder<K, D> {
         FullScanRequestBuilder {
             inner: Self {
                 start_time,
@@ -495,7 +495,7 @@ impl<K: Ord + Clone, B> FullScanRequest<K, B> {
     /// "std"` is not available.
     #[cfg(feature = "std")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn builder() -> FullScanRequestBuilder<K, B> {
+    pub fn builder() -> FullScanRequestBuilder<K, D> {
         let start_time = std::time::UNIX_EPOCH
             .elapsed()
             .expect("failed to get current timestamp")
@@ -509,7 +509,7 @@ impl<K: Ord + Clone, B> FullScanRequest<K, B> {
     }
 
     /// Get the chain tip [`CheckPoint`] of this request (if any).
-    pub fn chain_tip(&self) -> Option<CheckPoint<B>> {
+    pub fn chain_tip(&self) -> Option<CheckPoint<D>> {
         self.chain_tip.clone()
     }
 
@@ -541,17 +541,17 @@ impl<K: Ord + Clone, B> FullScanRequest<K, B> {
 /// See also [`FullScanRequest`].
 #[must_use]
 #[derive(Debug)]
-pub struct FullScanResponse<K, B = BlockHash, A = ConfirmationBlockTime> {
+pub struct FullScanResponse<K, D = BlockHash, A = ConfirmationBlockTime> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,
     /// Last active indices for the corresponding keychains (`K`). An index is active if it had a
     /// transaction associated with the script pubkey at that index.
     pub last_active_indices: BTreeMap<K, u32>,
     /// Changes to the chain discovered during the scan.
-    pub chain_update: Option<CheckPoint<B>>,
+    pub chain_update: Option<CheckPoint<D>>,
 }
 
-impl<K, B, A> Default for FullScanResponse<K, B, A> {
+impl<K, D, A> Default for FullScanResponse<K, D, A> {
     fn default() -> Self {
         Self {
             tx_update: Default::default(),
@@ -577,13 +577,13 @@ impl<K: Ord + Clone> Iterator for KeychainSpkIter<'_, K> {
     }
 }
 
-struct SyncIter<'r, I, B, Item> {
-    request: &'r mut SyncRequest<I, B>,
+struct SyncIter<'r, I, D, Item> {
+    request: &'r mut SyncRequest<I, D>,
     marker: core::marker::PhantomData<Item>,
 }
 
-impl<'r, I, B, Item> SyncIter<'r, I, B, Item> {
-    fn new(request: &'r mut SyncRequest<I, B>) -> Self {
+impl<'r, I, D, Item> SyncIter<'r, I, D, Item> {
+    fn new(request: &'r mut SyncRequest<I, D>) -> Self {
         Self {
             request,
             marker: core::marker::PhantomData,
@@ -591,12 +591,12 @@ impl<'r, I, B, Item> SyncIter<'r, I, B, Item> {
     }
 }
 
-impl<'r, I, B, Item> ExactSizeIterator for SyncIter<'r, I, B, Item> where
-    SyncIter<'r, I, B, Item>: Iterator
+impl<'r, I, D, Item> ExactSizeIterator for SyncIter<'r, I, D, Item> where
+    SyncIter<'r, I, D, Item>: Iterator
 {
 }
 
-impl<I, B> Iterator for SyncIter<'_, I, B, SpkWithExpectedTxids> {
+impl<I, D> Iterator for SyncIter<'_, I, D, SpkWithExpectedTxids> {
     type Item = SpkWithExpectedTxids;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -609,7 +609,7 @@ impl<I, B> Iterator for SyncIter<'_, I, B, SpkWithExpectedTxids> {
     }
 }
 
-impl<I, B> Iterator for SyncIter<'_, I, B, Txid> {
+impl<I, D> Iterator for SyncIter<'_, I, D, Txid> {
     type Item = Txid;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -622,7 +622,7 @@ impl<I, B> Iterator for SyncIter<'_, I, B, Txid> {
     }
 }
 
-impl<I, B> Iterator for SyncIter<'_, I, B, OutPoint> {
+impl<I, D> Iterator for SyncIter<'_, I, D, OutPoint> {
     type Item = OutPoint;
 
     fn next(&mut self) -> Option<Self::Item> {

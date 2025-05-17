@@ -250,7 +250,7 @@ async fn chain_update<S: Sleeper>(
     let mut tip = point_of_agreement.expect("remote esplora should have same genesis block");
 
     tip = tip
-        .extend_block_ids(conflicts.into_iter().rev())
+        .extend(conflicts.into_iter().rev().map(|b| (b.height, b.hash)))
         .expect("evicted are in order");
 
     for (anchor, _txid) in anchors {
@@ -260,14 +260,14 @@ async fn chain_update<S: Sleeper>(
                 Some(hash) => hash,
                 None => continue,
             };
-            tip = tip.insert_block_id(BlockId { height, hash });
+            tip = tip.insert(height, hash);
         }
     }
 
     // insert the most recent blocks at the tip to make sure we update the tip and make the update
     // robust.
     for (&height, &hash) in latest_blocks.iter() {
-        tip = tip.insert_block_id(BlockId { height, hash });
+        tip = tip.insert(height, hash);
     }
 
     Ok(tip)
@@ -616,7 +616,7 @@ mod test {
 
             // craft initial `local_chain`
             let local_chain = {
-                let (mut chain, _) = LocalChain::from_genesis_hash(env.genesis_hash()?);
+                let (mut chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
                 // force `chain_update_blocking` to add all checkpoints in `t.initial_cps`
                 let anchors = t
                     .initial_cps
