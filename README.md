@@ -26,6 +26,8 @@
 The `bdk` libraries aim to provide well engineered and reviewed components for Bitcoin wallets and other applications.
 They are built upon the excellent [`rust-bitcoin`] and [`rust-miniscript`] crates.
 
+**See also:** [Fee estimation examples and documentation](docs/fee_estimation.md)
+
 ## Architecture
 
 The workspace in this repository contains several crates in the `/crates` directory:
