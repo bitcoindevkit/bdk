@@ -64,6 +64,17 @@ impl<A> Default for TxUpdate<A> {
     }
 }
 
+impl<A> TxUpdate<A> {
+    /// Returns true if the `TxUpdate` contains no elements in any of its fields.
+    pub fn is_empty(&self) -> bool {
+        self.txs.is_empty()
+            && self.txouts.is_empty()
+            && self.anchors.is_empty()
+            && self.seen_ats.is_empty()
+            && self.evicted_ats.is_empty()
+    }
+}
+
 impl<A: Ord> TxUpdate<A> {
     /// Transforms the [`TxUpdate`] to have `anchors` (`A`) of another type (`A2`).
     ///

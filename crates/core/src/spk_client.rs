@@ -403,6 +403,13 @@ impl<A> Default for SyncResponse<A> {
     }
 }
 
+impl<A> SyncResponse<A> {
+    /// Returns true if the `SyncResponse` is empty.
+    pub fn is_empty(&self) -> bool {
+        self.tx_update.is_empty() && self.chain_update.is_none()
+    }
+}
+
 /// Builds a [`FullScanRequest`].
 ///
 /// Construct with [`FullScanRequest::builder`].
@@ -557,6 +564,15 @@ impl<K, A> Default for FullScanResponse<K, A> {
             chain_update: Default::default(),
             last_active_indices: Default::default(),
         }
+    }
+}
+
+impl<K, A> FullScanResponse<K, A> {
+    /// Returns true if the `FullScanResponse` is empty.
+    pub fn is_empty(&self) -> bool {
+        self.tx_update.is_empty()
+            && self.last_active_indices.is_empty()
+            && self.chain_update.is_none()
     }
 }
 
