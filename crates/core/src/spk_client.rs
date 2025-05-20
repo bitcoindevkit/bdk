@@ -137,7 +137,8 @@ impl<I> SyncRequestBuilder<I> {
     /// # Example
     ///
     /// Sync revealed script pubkeys obtained from a
-    /// [`KeychainTxOutIndex`](../../bdk_chain/indexer/keychain_txout/struct.KeychainTxOutIndex.html).
+    /// [`KeychainTxOutIndex`](../../bdk_chain/indexer/keychain_txout/struct.KeychainTxOutIndex.
+    /// html).
     ///
     /// ```rust
     /// # use bdk_chain::spk_client::SyncRequest;

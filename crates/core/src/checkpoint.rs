@@ -112,8 +112,8 @@ impl CheckPoint {
 
     /// Puts another checkpoint onto the linked list representing the blockchain.
     ///
-    /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the one you
-    /// are pushing on to.
+    /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the
+    /// one you are pushing on to.
     pub fn push(self, block: BlockId) -> Result<Self, Self> {
         if self.height() < block.height {
             Ok(Self(Arc::new(CPInner {

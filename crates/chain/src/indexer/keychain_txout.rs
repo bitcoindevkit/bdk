@@ -70,8 +70,8 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 ///
 /// # Change sets
 ///
-/// Methods that can update the last revealed index or add keychains will return [`ChangeSet`] to report
-/// these changes. This should be persisted for future recovery.
+/// Methods that can update the last revealed index or add keychains will return [`ChangeSet`] to
+/// report these changes. This should be persisted for future recovery.
 ///
 /// ## Synopsis
 ///
@@ -569,8 +569,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .map(|((_, i), spk)| (*i, spk))
     }
 
-    /// Get the next derivation index for `keychain`. The next index is the index after the last revealed
-    /// derivation index.
+    /// Get the next derivation index for `keychain`. The next index is the index after the last
+    /// revealed derivation index.
     ///
     /// The second field in the returned tuple represents whether the next derivation index is new.
     /// There are two scenarios where the next derivation index is reused (not new):
@@ -708,8 +708,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// This will derive and reveal a new script pubkey if no more unused script pubkeys exist.
     ///
     /// If the descriptor has no wildcard and already has a used script pubkey or if a descriptor
-    /// has used all scripts up to the derivation bounds, then the last derived script pubkey will be
-    /// returned.
+    /// has used all scripts up to the derivation bounds, then the last derived script pubkey will
+    /// be returned.
     ///
     /// Returns `None` if there are no script pubkeys that have been used and no new script pubkey
     /// could be revealed (see [`reveal_next_spk`] for when this happens).

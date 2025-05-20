@@ -95,7 +95,8 @@ where
 
     /// Apply an `update` directly.
     ///
-    /// `update` is a [`tx_graph::TxUpdate<A>`] and the resultant changes is returned as [`ChangeSet`].
+    /// `update` is a [`tx_graph::TxUpdate<A>`] and the resultant changes is returned as
+    /// [`ChangeSet`].
     pub fn apply_update(&mut self, update: tx_graph::TxUpdate<A>) -> ChangeSet<A, I::ChangeSet> {
         let tx_graph = self.graph.apply_update(update);
         let indexer = self.index_tx_graph_changeset(&tx_graph);
@@ -341,7 +342,9 @@ where
 {
     /// List txids that are expected to exist under the given spks.
     ///
-    /// This is used to fill [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
+    /// This is used to fill
+    /// [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
+    ///
     ///
     /// The spk index range can be contrained with `range`.
     ///
