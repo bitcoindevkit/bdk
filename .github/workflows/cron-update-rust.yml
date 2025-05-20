@@ -1,4 +1,7 @@
 name: Update rust version
+
+permissions: {}
+
 on:
   schedule:
     - cron: "0 0 15 * *" # At 00:00 on day-of-month 15.
