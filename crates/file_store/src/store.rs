@@ -55,8 +55,8 @@ where
     /// # Errors
     ///
     /// If the prefixed bytes of the loaded file do not match the provided `magic`, a
-    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::InvalidMagicBytes`] error variant in
-    /// its error field and changeset field set to [`Option::None`]
+    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::InvalidMagicBytes`] error
+    /// variant in its error field and changeset field set to [`Option::None`]
     ///
     /// If there exist changesets in the file, [`load`] will try to aggregate them in
     /// a single changeset to verify their integrity. If aggregation fails

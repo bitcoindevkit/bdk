@@ -1098,7 +1098,8 @@ fn test_chain_spends() {
     {
         let canonical_positions = build_canonical_positions(&local_chain, &graph);
 
-        // Because this tx conflicts with an already confirmed transaction, chain position should return none.
+        // Because this tx conflicts with an already confirmed transaction, chain position should
+        // return none.
         assert!(canonical_positions
             .get(&tx_1_conflict.compute_txid())
             .is_none());
@@ -1267,8 +1268,8 @@ fn insert_anchor_without_tx() {
 }
 
 #[test]
-/// The `map_anchors` allow a caller to pass a function to reconstruct the [`TxGraph`] with any [`Anchor`],
-/// even though the function is non-deterministic.
+/// The `map_anchors` allow a caller to pass a function to reconstruct the [`TxGraph`] with any
+/// [`Anchor`], even though the function is non-deterministic.
 fn call_map_anchors_with_non_deterministic_anchor() {
     #[derive(Debug, Default, Clone, PartialEq, Eq, Copy, PartialOrd, Ord, core::hash::Hash)]
     /// A non-deterministic anchor

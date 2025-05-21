@@ -126,7 +126,6 @@ jobs:
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features bdk_core/hashbrown,async
 
   fmt:
-    needs: prepare
     name: Rust fmt
     runs-on: ubuntu-latest
     steps:
@@ -137,12 +136,12 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: ${{ needs.prepare.outputs.rust_version }}
+            toolchain: nightly
             override: true
             profile: minimal
             components: rustfmt
       - name: Check fmt
-        run: cargo fmt --all -- --config format_code_in_doc_comments=true --check
+        run: cargo fmt --all --check
 
   clippy_check:
     needs: prepare

@@ -26,8 +26,8 @@ pub struct TxUpdate<A = ()> {
     pub txs: Vec<Arc<Transaction>>,
 
     /// Floating txouts. These are `TxOut`s that exist but the whole transaction wasn't included in
-    /// `txs` since only knowing about the output is important. These are often used to help determine
-    /// the fee of a wallet transaction.
+    /// `txs` since only knowing about the output is important. These are often used to help
+    /// determine the fee of a wallet transaction.
     pub txouts: BTreeMap<OutPoint, TxOut>,
 
     /// Transaction anchors. Anchors tells us a position in the chain where a transaction was

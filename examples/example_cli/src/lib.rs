@@ -375,7 +375,8 @@ where
     // get the selected plan utxos
     let selected: Vec<_> = selector.apply_selection(&plan_utxos).collect();
 
-    // if the selection tells us to use change and the change value is sufficient, we add it as an output
+    // if the selection tells us to use change and the change value is sufficient, we add it as an
+    // output
     let mut change_info = Option::<ChangeInfo>::None;
     let drain = selector.drain(target, change_policy);
     if drain.value > min_drain_value {
@@ -743,9 +744,9 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
 
                             let changeset = graph.insert_tx(tx);
 
-                            // We know the tx is at least unconfirmed now. Note if persisting here fails,
-                            // it's not a big deal since we can always find it again from the
-                            // blockchain.
+                            // We know the tx is at least unconfirmed now. Note if persisting here
+                            // fails, it's not a big deal since we can
+                            // always find it again from the blockchain.
                             db.lock().unwrap().append(&ChangeSet {
                                 tx_graph: changeset.tx_graph,
                                 indexer: changeset.indexer,
@@ -753,7 +754,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                             })?;
                         }
                         Err(e) => {
-                            // We failed to broadcast, so allow our change address to be used in the future
+                            // We failed to broadcast, so allow our change address to be used in the
+                            // future
                             let (change_keychain, _) = graph
                                 .index
                                 .keychains()

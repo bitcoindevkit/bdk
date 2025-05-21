@@ -65,8 +65,8 @@ impl ElectrumCommands {
 
 #[derive(clap::Args, Debug, Clone)]
 pub struct ElectrumArgs {
-    /// The electrum url to use to connect to. If not provided it will use a default electrum server
-    /// for your chosen network.
+    /// The electrum url to use to connect to. If not provided it will use a default electrum
+    /// server for your chosen network.
     electrum_url: Option<String>,
 }
 
@@ -126,7 +126,8 @@ fn main() -> anyhow::Result<()> {
 
     let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(network)?);
 
-    // Tell the electrum client about the txs we've already got locally so it doesn't re-download them
+    // Tell the electrum client about the txs we've already got locally so it doesn't re-download
+    // them
     client.populate_tx_cache(
         graph
             .lock()

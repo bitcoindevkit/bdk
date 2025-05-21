@@ -1,7 +1,8 @@
 //! This crate is used for emitting blockchain data from the `bitcoind` RPC interface. It does not
 //! use the wallet RPC API, so this crate can be used with wallet-disabled Bitcoin Core nodes.
 //!
-//! [`Emitter`] is the main structure which sources blockchain data from [`bitcoincore_rpc::Client`].
+//! [`Emitter`] is the main structure which sources blockchain data from
+//! [`bitcoincore_rpc::Client`].
 //!
 //! To only get block updates (exclude mempool transactions), the caller can use
 //! [`Emitter::next_block`] until it returns `Ok(None)` (which means the chain tip is reached). A
@@ -47,8 +48,8 @@ pub struct Emitter<C> {
     /// A set of txids currently assumed to still be in the mempool.
     ///
     /// This is used to detect mempool evictions by comparing the set against the latest mempool
-    /// snapshot from bitcoind. Any txid in this set that is missing from the snapshot is considered
-    /// evicted.
+    /// snapshot from bitcoind. Any txid in this set that is missing from the snapshot is
+    /// considered evicted.
     ///
     /// When the emitter emits a block, confirmed txids are removed from this set. This prevents
     /// confirmed transactions from being mistakenly marked with an `evicted_at` timestamp.
@@ -124,8 +125,8 @@ where
         // Loop to make sure that the fetched mempool content and the fetched tip are consistent
         // with one another.
         let (raw_mempool, raw_mempool_txids, rpc_height, rpc_block_hash) = loop {
-            // Determine if height and hash matches the best block from the RPC. Evictions are deferred
-            // if we are not at the best block.
+            // Determine if height and hash matches the best block from the RPC. Evictions are
+            // deferred if we are not at the best block.
             let height = client.get_block_count()?;
             let hash = client.get_block_hash(height)?;
 
@@ -232,9 +233,9 @@ pub struct MempoolEvent {
     ///
     /// To understand the second condition, consider a receiver which filters transactions based on
     /// whether it alters the UTXO set of tracked script pubkeys. If an emitted mempool transaction
-    /// spends a tracked UTXO which is confirmed at height `h`, but the receiver has only seen up to
-    /// block of height `h-1`, we want to re-emit this transaction until the receiver has seen the
-    /// block at height `h`.
+    /// spends a tracked UTXO which is confirmed at height `h`, but the receiver has only seen up
+    /// to block of height `h-1`, we want to re-emit this transaction until the receiver has
+    /// seen the block at height `h`.
     pub new_txs: Vec<(Transaction, u64)>,
 
     /// [`Txid`]s of all transactions that have been evicted from mempool.
@@ -263,8 +264,8 @@ pub struct BlockEvent<B> {
     /// The checkpoint of the new block.
     ///
     /// A [`CheckPoint`] is a node of a linked list of [`BlockId`]s. This checkpoint is linked to
-    /// all [`BlockId`]s originally passed in [`Emitter::new`] as well as emitted blocks since then.
-    /// These blocks are guaranteed to be of the same chain.
+    /// all [`BlockId`]s originally passed in [`Emitter::new`] as well as emitted blocks since
+    /// then. These blocks are guaranteed to be of the same chain.
     ///
     /// This is important as BDK structures require block-to-apply to be connected with another
     /// block in the original chain.

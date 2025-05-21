@@ -43,13 +43,13 @@
 //!   anchored in chain of `chain_tip`, then the transaction must be canonical.
 //! * `last_seen` - This is the timestamp of when a transaction is last-seen in the mempool. This
 //!   value is updated by [`insert_seen_at`](TxGraph::insert_seen_at) and
-//!   [`apply_update`](TxGraph::apply_update). Transactions that are seen later have higher
-//!   priority than those that are seen earlier. `last_seen` values are transitive. This means
-//!   that the actual `last_seen` value of a transaction is the max of all the `last_seen` values
-//!   from it's descendants.
+//!   [`apply_update`](TxGraph::apply_update). Transactions that are seen later have higher priority
+//!   than those that are seen earlier. `last_seen` values are transitive. This means that the
+//!   actual `last_seen` value of a transaction is the max of all the `last_seen` values from it's
+//!   descendants.
 //! * `last_evicted` - This is the timestamp of when a transaction last went missing from the
-//!   mempool. If this value is equal to or higher than the transaction's `last_seen` value, then
-//!   it will not be considered canonical.
+//!   mempool. If this value is equal to or higher than the transaction's `last_seen` value, then it
+//!   will not be considered canonical.
 //!
 //! # Graph traversal
 //!
@@ -411,13 +411,13 @@ impl<A> TxGraph<A> {
         })
     }
 
-    /// Calculates the fee of a given transaction. Returns [`Amount::ZERO`] if `tx` is a coinbase transaction.
-    /// Returns `OK(_)` if we have all the [`TxOut`]s being spent by `tx` in the graph (either as
-    /// the full transactions or individual txouts).
+    /// Calculates the fee of a given transaction. Returns [`Amount::ZERO`] if `tx` is a coinbase
+    /// transaction. Returns `OK(_)` if we have all the [`TxOut`]s being spent by `tx` in the
+    /// graph (either as the full transactions or individual txouts).
     ///
     /// To calculate the fee for a [`Transaction`] that depends on foreign [`TxOut`] values you must
-    /// first manually insert the foreign TxOuts into the tx graph using the [`insert_txout`] function.
-    /// Only insert TxOuts you trust the values for!
+    /// first manually insert the foreign TxOuts into the tx graph using the [`insert_txout`]
+    /// function. Only insert TxOuts you trust the values for!
     ///
     /// Note `tx` does not have to be in the graph for this to work.
     ///
@@ -507,8 +507,8 @@ impl<A: Clone + Ord> TxGraph<A> {
     ///
     /// The supplied closure takes in two inputs `(depth, descendant_txid)`:
     ///
-    /// * `depth` is the distance between the starting `txid` and the `descendant_txid`. I.e., if the
-    ///   descendant is spending an output of the starting `txid` then `depth` will be 1.
+    /// * `depth` is the distance between the starting `txid` and the `descendant_txid`. I.e., if
+    ///   the descendant is spending an output of the starting `txid` then `depth` will be 1.
     /// * `descendant_txid` is the descendant's txid which we are considering to walk.
     ///
     /// The supplied closure returns an `Option<T>`, allowing the caller to map each node it visits
@@ -796,8 +796,10 @@ impl<A: Anchor> TxGraph<A> {
     /// Updates the first-seen and last-seen timestamps for a given `txid` in the [`TxGraph`].
     ///
     /// This method records the time a transaction was observed by updating both:
-    /// - the **first-seen** timestamp, which only changes if `seen_at` is earlier than the current value, and
-    /// - the **last-seen** timestamp, which only changes if `seen_at` is later than the current value.
+    /// - the **first-seen** timestamp, which only changes if `seen_at` is earlier than the current
+    ///   value, and
+    /// - the **last-seen** timestamp, which only changes if `seen_at` is later than the current
+    ///   value.
     ///
     /// `seen_at` is a UNIX timestamp in seconds.
     ///
@@ -913,8 +915,8 @@ impl<A: Anchor> TxGraph<A> {
 
     /// Extends this graph with the given `update`.
     ///
-    /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions that
-    /// exist in `update` but not in `self`).
+    /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions
+    /// that exist in `update` but not in `self`).
     pub fn apply_update(&mut self, update: TxUpdate<A>) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         for tx in update.txs {
@@ -1327,7 +1329,9 @@ impl<A: Anchor> TxGraph<A> {
 
     /// List txids that are expected to exist under the given spks.
     ///
-    /// This is used to fill [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
+    /// This is used to fill
+    /// [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
+    ///
     ///
     /// The spk index range can be constrained with `range`.
     ///
