@@ -2,6 +2,7 @@
 //! indexes [`TxOut`]s with them.
 
 use crate::{
+    alloc::boxed::Box,
     collections::*,
     miniscript::{Descriptor, DescriptorPublicKey},
     spk_client::{FullScanRequestBuilder, SyncRequestBuilder},
@@ -10,7 +11,9 @@ use crate::{
     DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
-use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{
+    key::Secp256k1, Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid,
+};
 use core::{
     fmt::Debug,
     ops::{Bound, RangeBounds},
@@ -128,6 +131,8 @@ pub struct KeychainTxOutIndex<K> {
     descriptors: HashMap<DescriptorId, Descriptor<DescriptorPublicKey>>,
     last_revealed: HashMap<DescriptorId, u32>,
     lookahead: u32,
+
+    spk_cache: BTreeMap<DescriptorId, HashMap<u32, ScriptBuf>>,
 }
 
 impl<K> Default for KeychainTxOutIndex<K> {
@@ -155,7 +160,12 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
             if self.last_revealed.get(did) < Some(&index) {
                 self.last_revealed.insert(*did, index);
                 changeset.last_revealed.insert(*did, index);
-                self.replenish_inner_index(*did, &keychain, self.lookahead);
+                self.replenish_inner_index(
+                    *did,
+                    &keychain,
+                    self.lookahead,
+                    changeset.spk_cache.entry(*did).or_default(),
+                );
             }
         }
         changeset
@@ -173,6 +183,16 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
     fn initial_changeset(&self) -> Self::ChangeSet {
         ChangeSet {
             last_revealed: self.last_revealed.clone().into_iter().collect(),
+            spk_cache: self
+                .spk_cache
+                .iter()
+                .map(|(desc, spks)| {
+                    (
+                        *desc,
+                        spks.iter().map(|(i, spk)| (*i, spk.clone())).collect(),
+                    )
+                })
+                .collect(),
         }
     }
 
@@ -204,6 +224,7 @@ impl<K> KeychainTxOutIndex<K> {
             descriptor_id_to_keychain: Default::default(),
             last_revealed: Default::default(),
             lookahead,
+            spk_cache: Default::default(),
         }
     }
 
@@ -365,7 +386,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &mut self,
         keychain: K,
         descriptor: Descriptor<DescriptorPublicKey>,
-    ) -> Result<bool, InsertDescriptorError<K>> {
+    ) -> Result<(bool, ChangeSet), InsertDescriptorError<K>> {
+        let mut changeset = ChangeSet::default();
+
         let did = descriptor.descriptor_id();
         if !self.keychain_to_descriptor_id.contains_key(&keychain)
             && !self.descriptor_id_to_keychain.contains_key(&did)
@@ -373,15 +396,20 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             self.descriptors.insert(did, descriptor.clone());
             self.keychain_to_descriptor_id.insert(keychain.clone(), did);
             self.descriptor_id_to_keychain.insert(did, keychain.clone());
-            self.replenish_inner_index(did, &keychain, self.lookahead);
-            return Ok(true);
+            self.replenish_inner_index(
+                did,
+                &keychain,
+                self.lookahead,
+                changeset.spk_cache.entry(did).or_default(),
+            );
+            return Ok((true, changeset));
         }
 
         if let Some(existing_desc_id) = self.keychain_to_descriptor_id.get(&keychain) {
             let descriptor = self.descriptors.get(existing_desc_id).expect("invariant");
             if *existing_desc_id != did {
                 return Err(InsertDescriptorError::KeychainAlreadyAssigned {
-                    existing_assignment: descriptor.clone(),
+                    existing_assignment: Box::new(descriptor.clone()),
                     keychain,
                 });
             }
@@ -393,12 +421,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             if *existing_keychain != keychain {
                 return Err(InsertDescriptorError::DescriptorAlreadyAssigned {
                     existing_assignment: existing_keychain.clone(),
-                    descriptor,
+                    descriptor: Box::new(descriptor),
                 });
             }
         }
 
-        Ok(false)
+        Ok((false, changeset))
     }
 
     /// Gets the descriptor associated with the keychain. Returns `None` if the keychain doesn't
@@ -420,47 +448,100 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Store lookahead scripts until `target_index` (inclusive).
     ///
     /// This does not change the global `lookahead` setting.
-    pub fn lookahead_to_target(&mut self, keychain: K, target_index: u32) {
+    pub fn lookahead_to_target(
+        &mut self,
+        keychain: K,
+        target_index: u32,
+        derived_spks: &mut impl Extend<Indexed<ScriptBuf>>,
+    ) {
         if let Some((next_index, _)) = self.next_index(keychain.clone()) {
             let temp_lookahead = (target_index + 1)
                 .checked_sub(next_index)
                 .filter(|&index| index > 0);
 
             if let Some(temp_lookahead) = temp_lookahead {
-                self.replenish_inner_index_keychain(keychain, temp_lookahead);
+                self.replenish_inner_index_keychain(keychain, temp_lookahead, derived_spks);
             }
         }
     }
 
-    fn replenish_inner_index_did(&mut self, did: DescriptorId, lookahead: u32) {
+    fn replenish_inner_index_did(
+        &mut self,
+        did: DescriptorId,
+        lookahead: u32,
+        derived_spks: &mut impl Extend<Indexed<ScriptBuf>>,
+    ) {
         if let Some(keychain) = self.descriptor_id_to_keychain.get(&did).cloned() {
-            self.replenish_inner_index(did, &keychain, lookahead);
+            self.replenish_inner_index(did, &keychain, lookahead, derived_spks);
         }
     }
 
-    fn replenish_inner_index_keychain(&mut self, keychain: K, lookahead: u32) {
+    fn replenish_inner_index_keychain(
+        &mut self,
+        keychain: K,
+        lookahead: u32,
+        derived_spks: &mut impl Extend<Indexed<ScriptBuf>>,
+    ) {
         if let Some(did) = self.keychain_to_descriptor_id.get(&keychain) {
-            self.replenish_inner_index(*did, &keychain, lookahead);
+            self.replenish_inner_index(*did, &keychain, lookahead, derived_spks);
         }
     }
 
     /// Syncs the state of the inner spk index after changes to a keychain
-    fn replenish_inner_index(&mut self, did: DescriptorId, keychain: &K, lookahead: u32) {
+    fn replenish_inner_index(
+        &mut self,
+        did: DescriptorId,
+        keychain: &K,
+        lookahead: u32,
+        derived_spks: &mut impl Extend<Indexed<ScriptBuf>>,
+    ) {
         let descriptor = self.descriptors.get(&did).expect("invariant");
-        let next_store_index = self
+
+        let mut next_index = self
             .inner
             .all_spks()
             .range(&(keychain.clone(), u32::MIN)..=&(keychain.clone(), u32::MAX))
             .last()
             .map_or(0, |((_, index), _)| *index + 1);
-        let next_reveal_index = self.last_revealed.get(&did).map_or(0, |v| *v + 1);
-        for (new_index, new_spk) in
-            SpkIterator::new_with_range(descriptor, next_store_index..next_reveal_index + lookahead)
-        {
+
+        // Exclusive: index to stop at.
+        let stop_index = if descriptor.has_wildcard() {
+            let next_reveal_index = self.last_revealed.get(&did).map_or(0, |v| *v + 1);
+            (next_reveal_index + lookahead).min(BIP32_MAX_INDEX)
+        } else {
+            1
+        };
+
+        let cached_spk_iter = core::iter::from_fn({
+            let secp = Secp256k1::verification_only();
+            let _desc = &descriptor;
+            let spk_cache = self.spk_cache.entry(did).or_default();
+            let _i = &mut next_index;
+            move || -> Option<Indexed<ScriptBuf>> {
+                if *_i >= stop_index {
+                    return None;
+                }
+                let spk_i = *_i;
+                *_i = spk_i.saturating_add(1);
+
+                if let Some(spk) = spk_cache.get(_i) {
+                    return Some((spk_i, spk.clone()));
+                }
+                let spk = _desc
+                    .derived_descriptor(&secp, spk_i)
+                    .expect("The descriptor cannot have hardened derivation")
+                    .script_pubkey();
+                derived_spks.extend(core::iter::once((spk_i, spk.clone())));
+                spk_cache.insert(spk_i, spk.clone());
+                Some((spk_i, spk.clone()))
+            }
+        });
+
+        for (new_index, new_spk) in cached_spk_iter {
             let _inserted = self
                 .inner
                 .insert_spk((keychain.clone(), new_index), new_spk);
-            debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_store_index={}, next_reveal_index={}", keychain, lookahead, next_store_index, next_reveal_index);
+            debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_index={}", keychain, lookahead, next_index);
         }
     }
 
@@ -693,7 +774,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             let did = self.keychain_to_descriptor_id.get(&keychain)?;
             self.last_revealed.insert(*did, next_index);
             changeset.last_revealed.insert(*did, next_index);
-            self.replenish_inner_index(*did, &keychain, self.lookahead);
+            self.replenish_inner_index(
+                *did,
+                &keychain,
+                self.lookahead,
+                changeset.spk_cache.entry(*did).or_default(),
+            );
         }
         let script = self
             .inner
@@ -779,10 +865,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Applies the `ChangeSet<K>` to the [`KeychainTxOutIndex<K>`]
     pub fn apply_changeset(&mut self, changeset: ChangeSet) {
-        for (&desc_id, &index) in &changeset.last_revealed {
-            let v = self.last_revealed.entry(desc_id).or_default();
+        for (did, index) in changeset.last_revealed {
+            let v = self.last_revealed.entry(did).or_default();
             *v = index.max(*v);
-            self.replenish_inner_index_did(desc_id, self.lookahead);
+            self.replenish_inner_index_did(did, self.lookahead, &mut Vec::new());
+        }
+        for (did, spks) in changeset.spk_cache {
+            self.spk_cache.entry(did).or_default().extend(spks);
         }
     }
 }
@@ -793,7 +882,7 @@ pub enum InsertDescriptorError<K> {
     /// The descriptor has already been assigned to a keychain so you can't assign it to another
     DescriptorAlreadyAssigned {
         /// The descriptor you have attempted to reassign
-        descriptor: Descriptor<DescriptorPublicKey>,
+        descriptor: Box<Descriptor<DescriptorPublicKey>>,
         /// The keychain that the descriptor is already assigned to
         existing_assignment: K,
     },
@@ -802,7 +891,7 @@ pub enum InsertDescriptorError<K> {
         /// The keychain that you have attempted to reassign
         keychain: K,
         /// The descriptor that the keychain is already assigned to
-        existing_assignment: Descriptor<DescriptorPublicKey>,
+        existing_assignment: Box<Descriptor<DescriptorPublicKey>>,
     },
 }
 
@@ -852,6 +941,10 @@ impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 pub struct ChangeSet {
     /// Contains for each descriptor_id the last revealed index of derivation
     pub last_revealed: BTreeMap<DescriptorId, u32>,
+
+    /// Spk cache.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub spk_cache: BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>>,
 }
 
 impl Merge for ChangeSet {
@@ -872,11 +965,15 @@ impl Merge for ChangeSet {
                 }
             }
         }
+
+        for (did, spks) in other.spk_cache {
+            self.spk_cache.entry(did).or_default().extend(spks);
+        }
     }
 
     /// Returns whether the changeset are empty.
     fn is_empty(&self) -> bool {
-        self.last_revealed.is_empty()
+        self.last_revealed.is_empty() && self.spk_cache.is_empty()
     }
 }
 

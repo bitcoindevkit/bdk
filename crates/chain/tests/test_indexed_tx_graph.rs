@@ -10,6 +10,7 @@ use bdk_chain::{
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
     tx_graph, Balance, CanonicalizationParams, ChainPosition, ConfirmationBlockTime, DescriptorExt,
+    SpkIterator,
 };
 use bdk_testenv::{
     block_id, hash,
@@ -32,14 +33,27 @@ fn insert_relevant_txs() {
         .expect("must be valid");
     let spk_0 = descriptor.at_derivation_index(0).unwrap().script_pubkey();
     let spk_1 = descriptor.at_derivation_index(9).unwrap().script_pubkey();
+    let lookahead = 10;
 
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new(
-        KeychainTxOutIndex::new(10),
+        KeychainTxOutIndex::new(lookahead),
     );
-    let _ = graph
+    let (is_inserted, changeset) = graph
         .index
         .insert_descriptor((), descriptor.clone())
         .unwrap();
+    assert!(is_inserted);
+    assert_eq!(
+        changeset,
+        keychain_txout::ChangeSet {
+            spk_cache: [(
+                descriptor.descriptor_id(),
+                SpkIterator::new_with_range(&descriptor, 0..lookahead).collect()
+            )]
+            .into(),
+            ..Default::default()
+        }
+    );
 
     let tx_a = Transaction {
         output: vec![
@@ -80,6 +94,15 @@ fn insert_relevant_txs() {
         },
         indexer: keychain_txout::ChangeSet {
             last_revealed: [(descriptor.descriptor_id(), 9_u32)].into(),
+            spk_cache: [(descriptor.descriptor_id(), {
+                let index_after_spk_1 = 9 /* index of spk_1 */ + 1;
+                SpkIterator::new_with_range(
+                    &descriptor,
+                    index_after_spk_1..index_after_spk_1 + lookahead,
+                )
+                .collect()
+            })]
+            .into(),
         },
     };
 
@@ -93,6 +116,12 @@ fn insert_relevant_txs() {
         tx_graph: changeset.tx_graph,
         indexer: keychain_txout::ChangeSet {
             last_revealed: changeset.indexer.last_revealed,
+            spk_cache: [(
+                descriptor.descriptor_id(),
+                SpkIterator::new_with_range(&descriptor, 0..=9 /* index of spk_1*/  + lookahead)
+                    .collect(),
+            )]
+            .into(),
         },
     };
 
@@ -144,14 +173,20 @@ fn test_list_owned_txouts() {
         KeychainTxOutIndex::new(10),
     );
 
-    assert!(graph
-        .index
-        .insert_descriptor("keychain_1".into(), desc_1)
-        .unwrap());
-    assert!(graph
-        .index
-        .insert_descriptor("keychain_2".into(), desc_2)
-        .unwrap());
+    assert!(
+        graph
+            .index
+            .insert_descriptor("keychain_1".into(), desc_1)
+            .unwrap()
+            .0
+    );
+    assert!(
+        graph
+            .index
+            .insert_descriptor("keychain_2".into(), desc_2)
+            .unwrap()
+            .0
+    );
 
     // Get trusted and untrusted addresses
 

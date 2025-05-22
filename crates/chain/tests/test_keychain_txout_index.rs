@@ -3,7 +3,7 @@
 use bdk_chain::{
     collections::BTreeMap,
     indexer::keychain_txout::{ChangeSet, KeychainTxOutIndex},
-    DescriptorExt, DescriptorId, Indexer, Merge,
+    DescriptorExt, DescriptorId, Indexer, Merge, SpkIterator,
 };
 use bdk_testenv::{
     hash,
@@ -81,9 +81,11 @@ fn merge_changesets_check_last_revealed() {
 
     let mut lhs = ChangeSet {
         last_revealed: lhs_di,
+        ..Default::default()
     };
     let rhs = ChangeSet {
         last_revealed: rhs_di,
+        ..Default::default()
     };
     lhs.merge(rhs);
 
@@ -99,10 +101,14 @@ fn merge_changesets_check_last_revealed() {
 
 #[test]
 fn test_set_all_derivation_indices() {
+    let lookahead = 0;
     let external_descriptor = parse_descriptor(DESCRIPTORS[0]);
     let internal_descriptor = parse_descriptor(DESCRIPTORS[1]);
-    let mut txout_index =
-        init_txout_index(external_descriptor.clone(), internal_descriptor.clone(), 0);
+    let mut txout_index = init_txout_index(
+        external_descriptor.clone(),
+        internal_descriptor.clone(),
+        lookahead,
+    );
     let derive_to: BTreeMap<_, _> =
         [(TestKeychain::External, 12), (TestKeychain::Internal, 24)].into();
     let last_revealed: BTreeMap<_, _> = [
@@ -110,10 +116,22 @@ fn test_set_all_derivation_indices() {
         (internal_descriptor.descriptor_id(), 24),
     ]
     .into();
+    let spk_cache: BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>> = [
+        (
+            external_descriptor.descriptor_id(),
+            SpkIterator::new_with_range(&external_descriptor, 0..=12).collect(),
+        ),
+        (
+            internal_descriptor.descriptor_id(),
+            SpkIterator::new_with_range(&internal_descriptor, 0..=24).collect(),
+        ),
+    ]
+    .into();
     assert_eq!(
         txout_index.reveal_to_target_multi(&derive_to),
         ChangeSet {
-            last_revealed: last_revealed.clone()
+            last_revealed: last_revealed.clone(),
+            spk_cache: spk_cache.clone(),
         }
     );
     assert_eq!(txout_index.last_revealed_indices(), derive_to);
@@ -589,7 +607,7 @@ fn lookahead_to_target() {
                     }
                     None => target,
                 };
-                index.lookahead_to_target(keychain.clone(), target);
+                index.lookahead_to_target(keychain.clone(), target, &mut Vec::new());
                 let keys: Vec<_> = (0..)
                     .take_while(|&i| index.spk_at_index(keychain.clone(), i).is_some())
                     .collect();
@@ -606,14 +624,16 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
     let changesets: &[ChangeSet] = &[
         ChangeSet {
             last_revealed: [(desc.descriptor_id(), 10)].into(),
+            ..Default::default()
         },
         ChangeSet {
             last_revealed: [(desc.descriptor_id(), 12)].into(),
+            ..Default::default()
         },
     ];
 
     let mut indexer_a = KeychainTxOutIndex::<TestKeychain>::new(0);
-    indexer_a
+    let _ = indexer_a
         .insert_descriptor(TestKeychain::External, desc.clone())
         .expect("must insert keychain");
     for changeset in changesets {
@@ -621,7 +641,7 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
     }
 
     let mut indexer_b = KeychainTxOutIndex::<TestKeychain>::new(0);
-    indexer_b
+    let _ = indexer_b
         .insert_descriptor(TestKeychain::External, desc.clone())
         .expect("must insert keychain");
     let aggregate_changesets = changesets

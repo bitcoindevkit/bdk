@@ -521,6 +521,8 @@ impl keychain_txout::ChangeSet {
     pub const SCHEMA_NAME: &'static str = "bdk_keychaintxout";
     /// Name for table that stores last revealed indices per descriptor id.
     pub const LAST_REVEALED_TABLE_NAME: &'static str = "bdk_descriptor_last_revealed";
+    /// Name for table that stores derived spks.
+    pub const DERIVED_SPKS_TABLE_NAME: &'static str = "bdk_descriptor_derived_spks";
 
     /// Get v0 of sqlite [keychain_txout::ChangeSet] schema
     pub fn schema_v0() -> String {
@@ -533,10 +535,28 @@ impl keychain_txout::ChangeSet {
         )
     }
 
+    /// Get v1 of sqlite [keychain_txout::ChangeSet] schema
+    pub fn schema_v1() -> String {
+        format!(
+            "CREATE TABLE {} ( \
+            descriptor_id TEXT NOT NULL REFERENCES {}, \
+            spk_index INTEGER NOT NULL, \
+            spk BLOB NOT NULL, \
+            PRIMARY KEY (descriptor_id, index) \
+            ) STRICT",
+            Self::DERIVED_SPKS_TABLE_NAME,
+            Self::LAST_REVEALED_TABLE_NAME,
+        )
+    }
+
     /// Initialize sqlite tables for persisting
     /// [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex).
     pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        migrate_schema(db_tx, Self::SCHEMA_NAME, &[&Self::schema_v0()])
+        migrate_schema(
+            db_tx,
+            Self::SCHEMA_NAME,
+            &[&Self::schema_v0(), &Self::schema_v1()],
+        )
     }
 
     /// Construct [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex) from sqlite database
@@ -561,6 +581,26 @@ impl keychain_txout::ChangeSet {
             changeset.last_revealed.insert(descriptor_id, last_revealed);
         }
 
+        let mut statement = db_tx.prepare(&format!(
+            "SELECT descriptor_id, spk_index, spk FROM {}",
+            Self::DERIVED_SPKS_TABLE_NAME
+        ))?;
+        let row_iter = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, Impl<DescriptorId>>("descriptor_id")?,
+                row.get::<_, u32>("spk_index")?,
+                row.get::<_, Impl<bitcoin::ScriptBuf>>("spk")?,
+            ))
+        })?;
+        for row in row_iter {
+            let (Impl(descriptor_id), spk_index, Impl(spk)) = row?;
+            changeset
+                .spk_cache
+                .entry(descriptor_id)
+                .or_default()
+                .insert(spk_index, spk);
+        }
+
         Ok(changeset)
     }
 
@@ -577,6 +617,20 @@ impl keychain_txout::ChangeSet {
                 ":descriptor_id": Impl(descriptor_id),
                 ":last_revealed": last_revealed,
             })?;
+        }
+
+        let mut statement = db_tx.prepare_cached(&format!(
+            "REPLACE INTO {}(descriptor_id, spk_index, spk) VALUES(:descriptor_id, :spk_index, :spk)",
+            Self::DERIVED_SPKS_TABLE_NAME,
+        ))?;
+        for (&descriptor_id, spks) in &self.spk_cache {
+            for (&spk_index, spk) in spks {
+                statement.execute(named_params! {
+                    ":descriptor_id": Impl(descriptor_id),
+                    ":spk_index": spk_index,
+                    ":spk": Impl(spk.clone()),
+                })?;
+            }
         }
 
         Ok(())

@@ -836,10 +836,13 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
                 // insert descriptors and apply loaded changeset
                 let mut index = KeychainTxOutIndex::default();
                 if let Some(desc) = changeset.descriptor {
-                    index.insert_descriptor(Keychain::External, desc)?;
+                    // TODO: We should apply changeset to the graph before inserting descriptors.
+                    // TODO: Then persist the new _changesets returned to db.
+                    let (_, _changeset) = index.insert_descriptor(Keychain::External, desc)?;
                 }
                 if let Some(change_desc) = changeset.change_descriptor {
-                    index.insert_descriptor(Keychain::Internal, change_desc)?;
+                    let (_, _changeset) =
+                        index.insert_descriptor(Keychain::Internal, change_desc)?;
                 }
                 let mut graph = KeychainTxGraph::new(index);
                 graph.apply_changeset(indexed_tx_graph::ChangeSet {
