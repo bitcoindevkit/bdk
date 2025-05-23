@@ -93,7 +93,8 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 ///     }
 /// }
 ///
-/// let mut txout_index = KeychainTxOutIndex::<MyKeychain>::default();
+/// // Construct index with lookahead of 21 and enable spk caching.
+/// let mut txout_index = KeychainTxOutIndex::<MyKeychain>::new(21, true);
 ///
 /// # let secp = bdk_chain::bitcoin::secp256k1::Secp256k1::signing_only();
 /// # let (external_descriptor,_) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "tr([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/0/*)").unwrap();
@@ -132,8 +133,12 @@ pub struct KeychainTxOutIndex<K> {
     last_revealed: HashMap<DescriptorId, u32>,
     lookahead: u32,
 
-    use_spk_cache: bool,
+    /// If `true`, the script pubkeys are persisted across restarts to avoid re-derivation.
+    /// If `false`, `spk_cache` and `spk_cache_stage` will remain empty.
+    persist_spks: bool,
+    /// Cache of derived spks.
     spk_cache: BTreeMap<DescriptorId, HashMap<u32, ScriptBuf>>,
+    /// Staged script pubkeys waiting to be written out in the next ChangeSet.
     spk_cache_stage: BTreeMap<DescriptorId, Vec<(u32, ScriptBuf)>>,
 }
 
@@ -199,19 +204,30 @@ impl<K> KeychainTxOutIndex<K> {
     ///
     /// # Lookahead
     ///
-    /// The `lookahead` is the number of script pubkeys to derive and cache from the internal
-    /// descriptors over and above the last revealed script index. Without a lookahead the index
-    /// will miss outputs you own when processing transactions whose output script pubkeys lie
-    /// beyond the last revealed index. In certain situations, such as when performing an initial
-    /// scan of the blockchain during wallet import, it may be uncertain or unknown what the index
-    /// of the last revealed script pubkey actually is.
+    /// The `lookahead` parameter controls how many script pubkeys to derive *beyond* the highest
+    /// revealed index for each keychain (external/internal). Without any lookahead, the index will
+    /// miss outputs sent to addresses you haven’t explicitly revealed yet. A nonzero `lookahead`
+    /// lets you catch outputs on those “future” addresses automatically.
     ///
     /// Refer to [struct-level docs](KeychainTxOutIndex) for more about `lookahead`.
     ///
-    /// # Script pubkey cache
+    /// # Script pubkey persistence
     ///
-    /// The `use_spk_cache` parameter enables the internal script pubkey cache.
-    pub fn new(lookahead: u32, use_spk_cache: bool) -> Self {
+    /// Derived script pubkeys remain in memory. If `persist_spks` is `true`, they're saved and
+    /// reloaded via the `ChangeSet` on startup, avoiding re-derivation. Otherwise, they must be
+    /// re-derived on init, affecting startup only for very large or complex wallets.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use bdk_chain::keychain_txout::KeychainTxOutIndex;
+    /// // Derive 20 future addresses per chain and persist + reload script pubkeys via ChangeSets:
+    /// let idx = KeychainTxOutIndex::<&'static str>::new(20, true);
+    ///
+    /// // Derive 10 future addresses per chain without persistence:
+    /// let idx = KeychainTxOutIndex::<&'static str>::new(10, false);
+    /// ```
+    pub fn new(lookahead: u32, persist_spks: bool) -> Self {
         Self {
             inner: SpkTxOutIndex::default(),
             keychain_to_descriptor_id: Default::default(),
@@ -219,7 +235,7 @@ impl<K> KeychainTxOutIndex<K> {
             descriptor_id_to_keychain: Default::default(),
             last_revealed: Default::default(),
             lookahead,
-            use_spk_cache,
+            persist_spks,
             spk_cache: Default::default(),
             spk_cache_stage: Default::default(),
         }
@@ -270,7 +286,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 
     fn _empty_stage_into_changeset(&mut self, changeset: &mut ChangeSet) {
-        if !self.use_spk_cache {
+        if !self.persist_spks {
             return;
         }
         for (did, spks) in core::mem::take(&mut self.spk_cache_stage) {
@@ -542,7 +558,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             1
         };
 
-        if self.use_spk_cache {
+        if self.persist_spks {
             let derive_spk = {
                 let secp = Secp256k1::verification_only();
                 let _desc = &descriptor;
@@ -927,7 +943,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             *v = index.max(*v);
             self.replenish_inner_index_did(did, self.lookahead);
         }
-        if self.use_spk_cache {
+        if self.persist_spks {
             for (did, spks) in changeset.spk_cache {
                 self.spk_cache.entry(did).or_default().extend(spks);
             }
@@ -982,14 +998,22 @@ impl<K: core::fmt::Debug> core::fmt::Display for InsertDescriptorError<K> {
 #[cfg(feature = "std")]
 impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 
-/// Represents updates to the derivation index of a [`KeychainTxOutIndex`].
-/// It maps each keychain `K` to a descriptor and its last revealed index.
+/// `ChangeSet` represents persistent updates to a [`KeychainTxOutIndex`].
 ///
-/// It can be applied to [`KeychainTxOutIndex`] with [`apply_changeset`].
+/// It tracks:
+/// 1. `last_revealed`: the highest derivation index revealed per descriptor.
+/// 2. `spks`: the cache of derived script pubkeys to persist across runs.
 ///
-/// The `last_revealed` field is monotone in that [`merge`] will never decrease it.
-/// `keychains_added` is *not* monotone, once it is set any attempt to change it is subject to the
-/// same *one-to-one* keychain <-> descriptor mapping invariant as [`KeychainTxOutIndex`] itself.
+/// You can apply a `ChangeSet` to a `KeychainTxOutIndex` via
+/// [`KeychainTxOutIndex::apply_changeset`], or merge two change sets with [`ChangeSet::merge`].
+///
+/// # Monotonicity
+///
+/// - `last_revealed` is monotonic: merging retains the maximum index for each descriptor and never
+///   decreases.
+/// - `spks` accumulates entries: once a script pubkey is persisted, it remains available for
+///   reload. If the same descriptor and index appear again with a new script pubkey, the latter
+///   value overrides the former.
 ///
 /// [`KeychainTxOutIndex`]: crate::keychain_txout::KeychainTxOutIndex
 /// [`apply_changeset`]: crate::keychain_txout::KeychainTxOutIndex::apply_changeset
@@ -998,10 +1022,11 @@ impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[must_use]
 pub struct ChangeSet {
-    /// Contains for each descriptor_id the last revealed index of derivation
+    /// Maps each `DescriptorId` to its last revealed derivation index.
     pub last_revealed: BTreeMap<DescriptorId, u32>,
 
-    /// Cache of previously derived script pubkeys.
+    /// Cache of derived script pubkeys to persist, keyed by descriptor ID and derivation index
+    /// (`u32`).
     #[cfg_attr(feature = "serde", serde(default))]
     pub spk_cache: BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>>,
 }
