@@ -272,12 +272,25 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
         )
     }
 
+    /// Get v3 of sqlite [tx_graph::ChangeSet] schema
+    pub fn schema_v3() -> String {
+        format!(
+            "ALTER TABLE {} ADD COLUMN first_seen INTEGER",
+            Self::TXS_TABLE_NAME,
+        )
+    }
+
     /// Initialize sqlite tables.
     pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
         migrate_schema(
             db_tx,
             Self::SCHEMA_NAME,
-            &[&Self::schema_v0(), &Self::schema_v1(), &Self::schema_v2()],
+            &[
+                &Self::schema_v0(),
+                &Self::schema_v1(),
+                &Self::schema_v2(),
+                &Self::schema_v3(),
+            ],
         )
     }
 
@@ -288,21 +301,25 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
         let mut changeset = Self::default();
 
         let mut statement = db_tx.prepare(&format!(
-            "SELECT txid, raw_tx, last_seen, last_evicted FROM {}",
+            "SELECT txid, raw_tx, first_seen, last_seen, last_evicted FROM {}",
             Self::TXS_TABLE_NAME,
         ))?;
         let row_iter = statement.query_map([], |row| {
             Ok((
                 row.get::<_, Impl<bitcoin::Txid>>("txid")?,
                 row.get::<_, Option<Impl<bitcoin::Transaction>>>("raw_tx")?,
+                row.get::<_, Option<u64>>("first_seen")?,
                 row.get::<_, Option<u64>>("last_seen")?,
                 row.get::<_, Option<u64>>("last_evicted")?,
             ))
         })?;
         for row in row_iter {
-            let (Impl(txid), tx, last_seen, last_evicted) = row?;
+            let (Impl(txid), tx, first_seen, last_seen, last_evicted) = row?;
             if let Some(Impl(tx)) = tx {
                 changeset.txs.insert(Arc::new(tx));
+            }
+            if let Some(first_seen) = first_seen {
+                changeset.first_seen.insert(txid, first_seen);
             }
             if let Some(last_seen) = last_seen {
                 changeset.last_seen.insert(txid, last_seen);
@@ -373,6 +390,18 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
             statement.execute(named_params! {
                 ":txid": Impl(tx.compute_txid()),
                 ":raw_tx": Impl(tx.as_ref().clone()),
+            })?;
+        }
+
+        let mut statement = db_tx.prepare_cached(&format!(
+            "INSERT INTO {}(txid, first_seen) VALUES(:txid, :first_seen) ON CONFLICT(txid) DO UPDATE SET first_seen=:first_seen",
+            Self::TXS_TABLE_NAME,
+        ))?;
+        for (&txid, &first_seen) in &self.first_seen {
+            let checked_time = first_seen.to_sql()?;
+            statement.execute(named_params! {
+                ":txid": Impl(txid),
+                ":first_seen": Some(checked_time),
             })?;
         }
 
@@ -653,7 +682,7 @@ mod test {
     }
 
     #[test]
-    fn v0_to_v2_schema_migration_is_backward_compatible() -> anyhow::Result<()> {
+    fn v0_to_v3_schema_migration_is_backward_compatible() -> anyhow::Result<()> {
         type ChangeSet = tx_graph::ChangeSet<ConfirmationBlockTime>;
         let mut conn = rusqlite::Connection::open_in_memory()?;
 
@@ -722,7 +751,7 @@ mod test {
             }
         }
 
-        // Apply v1 & v2 sqlite schema to tables with data
+        // Apply v1, v2, v3 sqlite schema to tables with data
         {
             let db_tx = conn.transaction()?;
             migrate_schema(
@@ -732,6 +761,7 @@ mod test {
                     &ChangeSet::schema_v0(),
                     &ChangeSet::schema_v1(),
                     &ChangeSet::schema_v2(),
+                    &ChangeSet::schema_v3(),
                 ],
             )?;
             db_tx.commit()?;
@@ -743,6 +773,45 @@ mod test {
             let changeset = ChangeSet::from_sqlite(&db_tx)?;
             db_tx.commit()?;
             assert!(changeset.anchors.contains(&(anchor, txid)));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn can_persist_first_seen() -> anyhow::Result<()> {
+        use bitcoin::hashes::Hash;
+
+        type ChangeSet = tx_graph::ChangeSet<ConfirmationBlockTime>;
+        let mut conn = rusqlite::Connection::open_in_memory()?;
+
+        // Init tables
+        {
+            let db_tx = conn.transaction()?;
+            ChangeSet::init_sqlite_tables(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        let txid = bitcoin::Txid::all_zeros();
+        let first_seen = 100;
+
+        // Persist `first_seen`
+        {
+            let changeset = ChangeSet {
+                first_seen: [(txid, first_seen)].into(),
+                ..Default::default()
+            };
+            let db_tx = conn.transaction()?;
+            changeset.persist_to_sqlite(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        // Load from sqlite should succeed
+        {
+            let db_tx = conn.transaction()?;
+            let changeset = ChangeSet::from_sqlite(&db_tx)?;
+            db_tx.commit()?;
+            assert_eq!(changeset.first_seen.get(&txid), Some(&first_seen));
         }
 
         Ok(())
