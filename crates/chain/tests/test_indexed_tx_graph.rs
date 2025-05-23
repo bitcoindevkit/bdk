@@ -35,14 +35,12 @@ fn insert_relevant_txs() {
     let spk_1 = descriptor.at_derivation_index(9).unwrap().script_pubkey();
     let lookahead = 10;
 
-    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new(
-        KeychainTxOutIndex::new(lookahead, true),
-    );
-    let is_inserted = graph
-        .index
-        .insert_descriptor((), descriptor.clone())
-        .unwrap();
-    assert!(is_inserted);
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new({
+        let mut indexer = KeychainTxOutIndex::new(lookahead, true);
+        let is_inserted = indexer.insert_descriptor((), descriptor.clone()).unwrap();
+        assert!(is_inserted);
+        indexer
+    });
 
     let tx_a = Transaction {
         output: vec![
@@ -160,18 +158,16 @@ fn test_list_owned_txouts() {
     let (desc_2, _) =
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[3]).unwrap();
 
-    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<String>>::new(
-        KeychainTxOutIndex::new(10, true),
-    );
-
-    assert!(graph
-        .index
-        .insert_descriptor("keychain_1".into(), desc_1)
-        .unwrap());
-    assert!(graph
-        .index
-        .insert_descriptor("keychain_2".into(), desc_2)
-        .unwrap());
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<String>>::new({
+        let mut indexer = KeychainTxOutIndex::new(10, true);
+        assert!(indexer
+            .insert_descriptor("keychain_1".into(), desc_1)
+            .unwrap());
+        assert!(indexer
+            .insert_descriptor("keychain_2".into(), desc_2)
+            .unwrap());
+        indexer
+    });
 
     // Get trusted and untrusted addresses
 

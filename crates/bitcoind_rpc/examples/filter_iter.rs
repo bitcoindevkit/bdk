@@ -31,6 +31,7 @@ fn main() -> anyhow::Result<()> {
     let (descriptor, _) = Descriptor::parse_descriptor(&secp, EXTERNAL)?;
     let (change_descriptor, _) = Descriptor::parse_descriptor(&secp, INTERNAL)?;
     let (mut chain, _) = LocalChain::from_genesis_hash(genesis_block(NETWORK).block_hash());
+
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<&str>>::new({
         let mut index = KeychainTxOutIndex::default();
         index.insert_descriptor("external", descriptor.clone())?;
