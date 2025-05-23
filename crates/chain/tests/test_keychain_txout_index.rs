@@ -542,10 +542,10 @@ fn lookahead_to_target() {
         },
         TestCase {
             lookahead: 13,
-            external_last_revealed: Some(100),
-            internal_last_revealed: Some(21),
-            internal_target: Some(120),
-            external_target: Some(130),
+            external_last_revealed: Some(1100),
+            internal_last_revealed: Some(1200),
+            internal_target: Some(1110),
+            external_target: Some(1120),
         },
     ];
 
