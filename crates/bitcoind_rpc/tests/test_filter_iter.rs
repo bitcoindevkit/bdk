@@ -97,7 +97,12 @@ fn get_tip_and_chain_update() -> anyhow::Result<()> {
     ]
     .into_iter()
     .for_each(|test| {
-        let cp = CheckPoint::from_block_ids(test.chain).unwrap();
+        let cp = CheckPoint::from_blocks(
+            test.chain
+                .iter()
+                .map(|block_id| (block_id.height, block_id.hash)),
+        )
+        .unwrap();
         let mut iter = FilterIter::new_with_checkpoint(env.rpc_client(), cp);
         assert_eq!(iter.get_tip().unwrap(), Some(new_tip));
         let update_cp = iter.chain_update().unwrap();
