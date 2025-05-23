@@ -607,7 +607,7 @@ fn lookahead_to_target() {
                     }
                     None => target,
                 };
-                index.lookahead_to_target(keychain.clone(), target, &mut Vec::new());
+                let _ = index.lookahead_to_target(keychain.clone(), target);
                 let keys: Vec<_> = (0..)
                     .take_while(|&i| index.spk_at_index(keychain.clone(), i).is_some())
                     .collect();

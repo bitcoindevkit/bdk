@@ -448,21 +448,26 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Store lookahead scripts until `target_index` (inclusive).
     ///
     /// This does not change the global `lookahead` setting.
-    pub fn lookahead_to_target(
-        &mut self,
-        keychain: K,
-        target_index: u32,
-        derived_spks: &mut impl Extend<Indexed<ScriptBuf>>,
-    ) {
+    pub fn lookahead_to_target(&mut self, keychain: K, target_index: u32) -> ChangeSet {
+        let mut changeset = ChangeSet::default();
         if let Some((next_index, _)) = self.next_index(keychain.clone()) {
             let temp_lookahead = (target_index + 1)
                 .checked_sub(next_index)
                 .filter(|&index| index > 0);
 
             if let Some(temp_lookahead) = temp_lookahead {
-                self.replenish_inner_index_keychain(keychain, temp_lookahead, derived_spks);
+                let did = self
+                    .keychain_to_descriptor_id
+                    .get(&keychain)
+                    .expect("invariant");
+                self.replenish_inner_index_keychain(
+                    keychain,
+                    temp_lookahead,
+                    changeset.spk_cache.entry(*did).or_default(),
+                );
             }
         }
+        changeset
     }
 
     fn replenish_inner_index_did(
@@ -524,7 +529,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 let spk_i = *_i;
                 *_i = spk_i.saturating_add(1);
 
-                if let Some(spk) = spk_cache.get(_i) {
+                if let Some(spk) = spk_cache.get(&spk_i) {
                     return Some((spk_i, spk.clone()));
                 }
                 let spk = _desc
