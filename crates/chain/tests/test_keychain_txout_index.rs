@@ -29,8 +29,9 @@ fn init_txout_index(
     external_descriptor: Descriptor<DescriptorPublicKey>,
     internal_descriptor: Descriptor<DescriptorPublicKey>,
     lookahead: u32,
+    use_spk_cache: bool,
 ) -> KeychainTxOutIndex<TestKeychain> {
-    let mut txout_index = KeychainTxOutIndex::<TestKeychain>::new(lookahead);
+    let mut txout_index = KeychainTxOutIndex::<TestKeychain>::new(lookahead, use_spk_cache);
 
     let _ = txout_index
         .insert_descriptor(TestKeychain::External, external_descriptor)
@@ -108,6 +109,7 @@ fn test_set_all_derivation_indices() {
         external_descriptor.clone(),
         internal_descriptor.clone(),
         lookahead,
+        true,
     );
     let derive_to: BTreeMap<_, _> =
         [(TestKeychain::External, 12), (TestKeychain::Internal, 24)].into();
@@ -152,6 +154,7 @@ fn test_lookahead() {
         external_descriptor.clone(),
         internal_descriptor.clone(),
         lookahead,
+        true,
     );
 
     // given:
@@ -333,8 +336,12 @@ fn test_lookahead() {
 fn test_scan_with_lookahead() {
     let external_descriptor = parse_descriptor(DESCRIPTORS[0]);
     let internal_descriptor = parse_descriptor(DESCRIPTORS[1]);
-    let mut txout_index =
-        init_txout_index(external_descriptor.clone(), internal_descriptor.clone(), 10);
+    let mut txout_index = init_txout_index(
+        external_descriptor.clone(),
+        internal_descriptor.clone(),
+        10,
+        true,
+    );
 
     let spks: BTreeMap<u32, ScriptBuf> = [0, 10, 20, 30]
         .into_iter()
@@ -390,7 +397,7 @@ fn test_scan_with_lookahead() {
 fn test_wildcard_derivations() {
     let external_descriptor = parse_descriptor(DESCRIPTORS[0]);
     let internal_descriptor = parse_descriptor(DESCRIPTORS[1]);
-    let mut txout_index = init_txout_index(external_descriptor.clone(), internal_descriptor.clone(), 0);
+    let mut txout_index = init_txout_index(external_descriptor.clone(), internal_descriptor.clone(), 0, true);
     let external_spk_0 = external_descriptor.at_derivation_index(0).unwrap().script_pubkey();
     let external_spk_16 = external_descriptor.at_derivation_index(16).unwrap().script_pubkey();
     let external_spk_26 = external_descriptor.at_derivation_index(26).unwrap().script_pubkey();
@@ -448,7 +455,7 @@ fn test_wildcard_derivations() {
 
 #[test]
 fn test_non_wildcard_derivations() {
-    let mut txout_index = KeychainTxOutIndex::<TestKeychain>::new(0);
+    let mut txout_index = KeychainTxOutIndex::<TestKeychain>::new(0, true);
 
     let secp = bitcoin::secp256k1::Secp256k1::signing_only();
     let (no_wildcard_descriptor, _) =
@@ -574,6 +581,7 @@ fn lookahead_to_target() {
             external_descriptor.clone(),
             internal_descriptor.clone(),
             t.lookahead,
+            true,
         );
 
         if let Some(last_revealed) = t.external_last_revealed {
@@ -632,7 +640,7 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
         },
     ];
 
-    let mut indexer_a = KeychainTxOutIndex::<TestKeychain>::new(0);
+    let mut indexer_a = KeychainTxOutIndex::<TestKeychain>::new(0, true);
     let _ = indexer_a
         .insert_descriptor(TestKeychain::External, desc.clone())
         .expect("must insert keychain");
@@ -640,7 +648,7 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
         indexer_a.apply_changeset(changeset.clone());
     }
 
-    let mut indexer_b = KeychainTxOutIndex::<TestKeychain>::new(0);
+    let mut indexer_b = KeychainTxOutIndex::<TestKeychain>::new(0, true);
     let _ = indexer_b
         .insert_descriptor(TestKeychain::External, desc.clone())
         .expect("must insert keychain");
@@ -675,7 +683,7 @@ fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
 #[test]
 fn assigning_same_descriptor_to_multiple_keychains_should_error() {
     let desc = parse_descriptor(DESCRIPTORS[0]);
-    let mut indexer = KeychainTxOutIndex::<TestKeychain>::new(0);
+    let mut indexer = KeychainTxOutIndex::<TestKeychain>::new(0, true);
     let _ = indexer
         .insert_descriptor(TestKeychain::Internal, desc.clone())
         .unwrap();
@@ -688,7 +696,7 @@ fn assigning_same_descriptor_to_multiple_keychains_should_error() {
 fn reassigning_keychain_to_a_new_descriptor_should_error() {
     let desc1 = parse_descriptor(DESCRIPTORS[0]);
     let desc2 = parse_descriptor(DESCRIPTORS[1]);
-    let mut indexer = KeychainTxOutIndex::<TestKeychain>::new(0);
+    let mut indexer = KeychainTxOutIndex::<TestKeychain>::new(0, true);
     let _ = indexer.insert_descriptor(TestKeychain::Internal, desc1);
     assert!(indexer
         .insert_descriptor(TestKeychain::Internal, desc2)
@@ -697,7 +705,7 @@ fn reassigning_keychain_to_a_new_descriptor_should_error() {
 
 #[test]
 fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
-    let mut indexer = KeychainTxOutIndex::<usize>::new(0);
+    let mut indexer = KeychainTxOutIndex::<usize>::new(0, true);
     let mut tx = new_tx(0);
 
     for (i, descriptor) in DESCRIPTORS.iter().enumerate() {

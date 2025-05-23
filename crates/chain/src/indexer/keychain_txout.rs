@@ -132,12 +132,14 @@ pub struct KeychainTxOutIndex<K> {
     last_revealed: HashMap<DescriptorId, u32>,
     lookahead: u32,
 
+    use_spk_cache: bool,
     spk_cache: BTreeMap<DescriptorId, HashMap<u32, ScriptBuf>>,
+    spk_cache_stage: BTreeMap<DescriptorId, Vec<(u32, ScriptBuf)>>,
 }
 
 impl<K> Default for KeychainTxOutIndex<K> {
     fn default() -> Self {
-        Self::new(DEFAULT_LOOKAHEAD)
+        Self::new(DEFAULT_LOOKAHEAD, false)
     }
 }
 
@@ -152,31 +154,18 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 
     fn index_txout(&mut self, outpoint: OutPoint, txout: &TxOut) -> Self::ChangeSet {
         let mut changeset = ChangeSet::default();
-        if let Some((keychain, index)) = self.inner.scan_txout(outpoint, txout).cloned() {
-            let did = self
-                .keychain_to_descriptor_id
-                .get(&keychain)
-                .expect("invariant");
-            if self.last_revealed.get(did) < Some(&index) {
-                self.last_revealed.insert(*did, index);
-                changeset.last_revealed.insert(*did, index);
-                self.replenish_inner_index(
-                    *did,
-                    &keychain,
-                    self.lookahead,
-                    changeset.spk_cache.entry(*did).or_default(),
-                );
-            }
-        }
+        self._index_txout(&mut changeset, outpoint, txout);
+        self._empty_stage_into_changeset(&mut changeset);
         changeset
     }
 
     fn index_tx(&mut self, tx: &bitcoin::Transaction) -> Self::ChangeSet {
         let mut changeset = ChangeSet::default();
         let txid = tx.compute_txid();
-        for (op, txout) in tx.output.iter().enumerate() {
-            changeset.merge(self.index_txout(OutPoint::new(txid, op as u32), txout));
+        for (vout, txout) in tx.output.iter().enumerate() {
+            self._index_txout(&mut changeset, OutPoint::new(txid, vout as u32), txout);
         }
+        self._empty_stage_into_changeset(&mut changeset);
         changeset
     }
 
@@ -206,7 +195,9 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 }
 
 impl<K> KeychainTxOutIndex<K> {
-    /// Construct a [`KeychainTxOutIndex`] with the given `lookahead`.
+    /// Construct a [`KeychainTxOutIndex`] with the given `lookahead` and `use_spk_cache` boolean.
+    ///
+    /// # Lookahead
     ///
     /// The `lookahead` is the number of script pubkeys to derive and cache from the internal
     /// descriptors over and above the last revealed script index. Without a lookahead the index
@@ -216,7 +207,11 @@ impl<K> KeychainTxOutIndex<K> {
     /// of the last revealed script pubkey actually is.
     ///
     /// Refer to [struct-level docs](KeychainTxOutIndex) for more about `lookahead`.
-    pub fn new(lookahead: u32) -> Self {
+    ///
+    /// # Script pubkey cache
+    ///
+    /// The `use_spk_cache` parameter enables the internal script pubkey cache.
+    pub fn new(lookahead: u32, use_spk_cache: bool) -> Self {
         Self {
             inner: SpkTxOutIndex::default(),
             keychain_to_descriptor_id: Default::default(),
@@ -224,7 +219,9 @@ impl<K> KeychainTxOutIndex<K> {
             descriptor_id_to_keychain: Default::default(),
             last_revealed: Default::default(),
             lookahead,
+            use_spk_cache,
             spk_cache: Default::default(),
+            spk_cache_stage: Default::default(),
         }
     }
 
@@ -237,10 +234,61 @@ impl<K> KeychainTxOutIndex<K> {
 /// Methods that are *re-exposed* from the internal [`SpkTxOutIndex`].
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Construct `KeychainTxOutIndex<K>` from the given `changeset`.
-    pub fn from_changeset(changeset: ChangeSet) -> Self {
-        let mut out = Self::default();
+    ///
+    /// Shorthand for called [`new`] and then [`apply_changeset`].
+    ///
+    /// [`new`]: Self::new
+    /// [`apply_changeset`]: Self::apply_changeset
+    pub fn from_changeset(lookahead: u32, use_spk_cache: bool, changeset: ChangeSet) -> Self {
+        let mut out = Self::new(lookahead, use_spk_cache);
         out.apply_changeset(changeset);
         out
+    }
+
+    fn _index_txout(&mut self, changeset: &mut ChangeSet, outpoint: OutPoint, txout: &TxOut) {
+        if let Some((keychain, index)) = self.inner.scan_txout(outpoint, txout).cloned() {
+            let did = self
+                .keychain_to_descriptor_id
+                .get(&keychain)
+                .expect("invariant");
+            let index_updated = match self.last_revealed.entry(*did) {
+                hash_map::Entry::Occupied(mut e) if e.get() < &index => {
+                    e.insert(index);
+                    true
+                }
+                hash_map::Entry::Vacant(e) => {
+                    e.insert(index);
+                    true
+                }
+                _ => false,
+            };
+            if index_updated {
+                changeset.last_revealed.insert(*did, index);
+                self.replenish_inner_index(*did, &keychain, self.lookahead);
+            }
+        }
+    }
+
+    fn _empty_stage_into_changeset(&mut self, changeset: &mut ChangeSet) {
+        if !self.use_spk_cache {
+            return;
+        }
+        for (did, spks) in core::mem::take(&mut self.spk_cache_stage) {
+            debug_assert!(
+                {
+                    let desc = self.descriptors.get(&did).expect("invariant");
+                    spks.iter().all(|(i, spk)| {
+                        let exp_spk = desc
+                            .at_derivation_index(*i)
+                            .expect("must derive")
+                            .script_pubkey();
+                        &exp_spk == spk
+                    })
+                },
+                "all staged spks must be correct"
+            );
+            changeset.spk_cache.entry(did).or_default().extend(spks);
+        }
     }
 
     /// Get the set of indexed outpoints, corresponding to tracked keychains.
@@ -393,9 +441,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &mut self,
         keychain: K,
         descriptor: Descriptor<DescriptorPublicKey>,
-    ) -> Result<(bool, ChangeSet), InsertDescriptorError<K>> {
-        let mut changeset = ChangeSet::default();
-
+    ) -> Result<bool, InsertDescriptorError<K>> {
         let did = descriptor.descriptor_id();
         if !self.keychain_to_descriptor_id.contains_key(&keychain)
             && !self.descriptor_id_to_keychain.contains_key(&did)
@@ -403,13 +449,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             self.descriptors.insert(did, descriptor.clone());
             self.keychain_to_descriptor_id.insert(keychain.clone(), did);
             self.descriptor_id_to_keychain.insert(did, keychain.clone());
-            self.replenish_inner_index(
-                did,
-                &keychain,
-                self.lookahead,
-                changeset.spk_cache.entry(did).or_default(),
-            );
-            return Ok((true, changeset));
+            self.replenish_inner_index(did, &keychain, self.lookahead);
+            return Ok(true);
         }
 
         if let Some(existing_desc_id) = self.keychain_to_descriptor_id.get(&keychain) {
@@ -433,7 +474,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             }
         }
 
-        Ok((false, changeset))
+        Ok(false)
     }
 
     /// Gets the descriptor associated with the keychain. Returns `None` if the keychain doesn't
@@ -463,50 +504,27 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 .filter(|&index| index > 0);
 
             if let Some(temp_lookahead) = temp_lookahead {
-                let did = self
-                    .keychain_to_descriptor_id
-                    .get(&keychain)
-                    .expect("invariant");
-                self.replenish_inner_index_keychain(
-                    keychain,
-                    temp_lookahead,
-                    changeset.spk_cache.entry(*did).or_default(),
-                );
+                self.replenish_inner_index_keychain(keychain, temp_lookahead);
             }
         }
+        self._empty_stage_into_changeset(&mut changeset);
         changeset
     }
 
-    fn replenish_inner_index_did(
-        &mut self,
-        did: DescriptorId,
-        lookahead: u32,
-        derived_spks: &mut impl Extend<Indexed<ScriptBuf>>,
-    ) {
+    fn replenish_inner_index_did(&mut self, did: DescriptorId, lookahead: u32) {
         if let Some(keychain) = self.descriptor_id_to_keychain.get(&did).cloned() {
-            self.replenish_inner_index(did, &keychain, lookahead, derived_spks);
+            self.replenish_inner_index(did, &keychain, lookahead);
         }
     }
 
-    fn replenish_inner_index_keychain(
-        &mut self,
-        keychain: K,
-        lookahead: u32,
-        derived_spks: &mut impl Extend<Indexed<ScriptBuf>>,
-    ) {
+    fn replenish_inner_index_keychain(&mut self, keychain: K, lookahead: u32) {
         if let Some(did) = self.keychain_to_descriptor_id.get(&keychain) {
-            self.replenish_inner_index(*did, &keychain, lookahead, derived_spks);
+            self.replenish_inner_index(*did, &keychain, lookahead);
         }
     }
 
     /// Syncs the state of the inner spk index after changes to a keychain
-    fn replenish_inner_index(
-        &mut self,
-        did: DescriptorId,
-        keychain: &K,
-        lookahead: u32,
-        derived_spks: &mut impl Extend<Indexed<ScriptBuf>>,
-    ) {
+    fn replenish_inner_index(&mut self, did: DescriptorId, keychain: &K, lookahead: u32) {
         let descriptor = self.descriptors.get(&did).expect("invariant");
 
         let mut next_index = self
@@ -524,43 +542,52 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             1
         };
 
-        let derive_spk = {
-            let secp = Secp256k1::verification_only();
-            let _desc = &descriptor;
-            move |spk_i: u32| -> ScriptBuf {
-                _desc
-                    .derived_descriptor(&secp, spk_i)
-                    .expect("The descriptor cannot have hardened derivation")
-                    .script_pubkey()
-            }
-        };
-
-        let cached_spk_iter = core::iter::from_fn({
-            let spk_cache = self.spk_cache.entry(did).or_default();
-            let _i = &mut next_index;
-            move || -> Option<Indexed<ScriptBuf>> {
-                if *_i >= stop_index {
-                    return None;
+        if self.use_spk_cache {
+            let derive_spk = {
+                let secp = Secp256k1::verification_only();
+                let _desc = &descriptor;
+                move |spk_i: u32| -> ScriptBuf {
+                    _desc
+                        .derived_descriptor(&secp, spk_i)
+                        .expect("The descriptor cannot have hardened derivation")
+                        .script_pubkey()
                 }
-                let spk_i = *_i;
-                *_i = spk_i.saturating_add(1);
+            };
+            let cached_spk_iter = core::iter::from_fn({
+                let spk_cache = self.spk_cache.entry(did).or_default();
+                let spk_stage = self.spk_cache_stage.entry(did).or_default();
+                let _i = &mut next_index;
+                move || -> Option<Indexed<ScriptBuf>> {
+                    if *_i >= stop_index {
+                        return None;
+                    }
+                    let spk_i = *_i;
+                    *_i = spk_i.saturating_add(1);
 
-                if let Some(spk) = spk_cache.get(&spk_i) {
-                    debug_assert_eq!(spk, &derive_spk(spk_i), "cached spk must equal derived");
-                    return Some((spk_i, spk.clone()));
+                    if let Some(spk) = spk_cache.get(&spk_i) {
+                        debug_assert_eq!(spk, &derive_spk(spk_i), "cached spk must equal derived");
+                        return Some((spk_i, spk.clone()));
+                    }
+                    let spk = derive_spk(spk_i);
+                    spk_stage.push((spk_i, spk.clone()));
+                    spk_cache.insert(spk_i, spk.clone());
+                    Some((spk_i, spk))
                 }
-                let spk = derive_spk(spk_i);
-                derived_spks.extend(core::iter::once((spk_i, spk.clone())));
-                spk_cache.insert(spk_i, spk.clone());
-                Some((spk_i, spk))
+            });
+            for (new_index, new_spk) in cached_spk_iter {
+                let _inserted = self
+                    .inner
+                    .insert_spk((keychain.clone(), new_index), new_spk);
+                debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_index={}", keychain, lookahead, next_index);
             }
-        });
-
-        for (new_index, new_spk) in cached_spk_iter {
-            let _inserted = self
-                .inner
-                .insert_spk((keychain.clone(), new_index), new_spk);
-            debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_index={}", keychain, lookahead, next_index);
+        } else {
+            let spk_iter = SpkIterator::new_with_range(descriptor, next_index..stop_index);
+            for (new_index, new_spk) in spk_iter {
+                let _inserted = self
+                    .inner
+                    .insert_spk((keychain.clone(), new_index), new_spk);
+                debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_index={}", keychain, lookahead, next_index);
+            }
         }
     }
 
@@ -729,11 +756,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         let mut changeset = ChangeSet::default();
 
         for (keychain, &index) in keychains {
-            if let Some((_, new_changeset)) = self.reveal_to_target(keychain.clone(), index) {
-                changeset.merge(new_changeset);
-            }
+            self._reveal_to_target(&mut changeset, keychain.clone(), index);
         }
 
+        self._empty_stage_into_changeset(&mut changeset);
         changeset
     }
 
@@ -756,21 +782,28 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         target_index: u32,
     ) -> Option<(Vec<Indexed<ScriptBuf>>, ChangeSet)> {
         let mut changeset = ChangeSet::default();
+        let revealed_spks = self._reveal_to_target(&mut changeset, keychain, target_index)?;
+        self._empty_stage_into_changeset(&mut changeset);
+        Some((revealed_spks, changeset))
+    }
+    fn _reveal_to_target(
+        &mut self,
+        changeset: &mut ChangeSet,
+        keychain: K,
+        target_index: u32,
+    ) -> Option<Vec<Indexed<ScriptBuf>>> {
         let mut spks: Vec<Indexed<ScriptBuf>> = vec![];
-        while let Some((i, new)) = self.next_index(keychain.clone()) {
+        loop {
+            let (i, new) = self.next_index(keychain.clone())?;
             if !new || i > target_index {
                 break;
             }
-            match self.reveal_next_spk(keychain.clone()) {
-                Some(((i, spk), change)) => {
-                    spks.push((i, spk));
-                    changeset.merge(change);
-                }
+            match self._reveal_next_spk(changeset, keychain.clone()) {
+                Some(indexed_spk) => spks.push(indexed_spk),
                 None => break,
             }
         }
-
-        Some((spks, changeset))
+        Some(spks)
     }
 
     /// Attempts to reveal the next script pubkey for `keychain`.
@@ -786,25 +819,28 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///  2. The descriptor has already revealed scripts up to the numeric bound.
     ///  3. There is no descriptor associated with the given keychain.
     pub fn reveal_next_spk(&mut self, keychain: K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
-        let (next_index, new) = self.next_index(keychain.clone())?;
         let mut changeset = ChangeSet::default();
-
+        let indexed_spk = self._reveal_next_spk(&mut changeset, keychain)?;
+        self._empty_stage_into_changeset(&mut changeset);
+        Some((indexed_spk, changeset))
+    }
+    fn _reveal_next_spk(
+        &mut self,
+        changeset: &mut ChangeSet,
+        keychain: K,
+    ) -> Option<Indexed<ScriptBuf>> {
+        let (next_index, new) = self.next_index(keychain.clone())?;
         if new {
             let did = self.keychain_to_descriptor_id.get(&keychain)?;
             self.last_revealed.insert(*did, next_index);
             changeset.last_revealed.insert(*did, next_index);
-            self.replenish_inner_index(
-                *did,
-                &keychain,
-                self.lookahead,
-                changeset.spk_cache.entry(*did).or_default(),
-            );
+            self.replenish_inner_index(*did, &keychain, self.lookahead);
         }
         let script = self
             .inner
             .spk_at_index(&(keychain.clone(), next_index))
             .expect("we just inserted it");
-        Some(((next_index, script), changeset))
+        Some((next_index, script))
     }
 
     /// Gets the next unused script pubkey in the keychain. I.e., the script pubkey with the lowest
@@ -821,12 +857,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// [`reveal_next_spk`]: Self::reveal_next_spk
     pub fn next_unused_spk(&mut self, keychain: K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
+        let mut changeset = ChangeSet::default();
         let next_unused = self
             .unused_keychain_spks(keychain.clone())
             .next()
-            .map(|(i, spk)| ((i, spk.to_owned()), ChangeSet::default()));
-
-        next_unused.or_else(|| self.reveal_next_spk(keychain))
+            .map(|(i, spk)| (i, spk.to_owned()));
+        let spk = next_unused.or_else(|| self._reveal_next_spk(&mut changeset, keychain))?;
+        self._empty_stage_into_changeset(&mut changeset);
+        Some((spk, changeset))
     }
 
     /// Iterate over all [`OutPoint`]s that have `TxOut`s with script pubkeys derived from
@@ -887,10 +925,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         for (did, index) in changeset.last_revealed {
             let v = self.last_revealed.entry(did).or_default();
             *v = index.max(*v);
-            self.replenish_inner_index_did(did, self.lookahead, &mut Vec::new());
+            self.replenish_inner_index_did(did, self.lookahead);
         }
-        for (did, spks) in changeset.spk_cache {
-            self.spk_cache.entry(did).or_default().extend(spks);
+        if self.use_spk_cache {
+            for (did, spks) in changeset.spk_cache {
+                self.spk_cache.entry(did).or_default().extend(spks);
+            }
         }
     }
 }

@@ -36,24 +36,13 @@ fn insert_relevant_txs() {
     let lookahead = 10;
 
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new(
-        KeychainTxOutIndex::new(lookahead),
+        KeychainTxOutIndex::new(lookahead, true),
     );
-    let (is_inserted, changeset) = graph
+    let is_inserted = graph
         .index
         .insert_descriptor((), descriptor.clone())
         .unwrap();
     assert!(is_inserted);
-    assert_eq!(
-        changeset,
-        keychain_txout::ChangeSet {
-            spk_cache: [(
-                descriptor.descriptor_id(),
-                SpkIterator::new_with_range(&descriptor, 0..lookahead).collect()
-            )]
-            .into(),
-            ..Default::default()
-        }
-    );
 
     let tx_a = Transaction {
         output: vec![
@@ -98,7 +87,9 @@ fn insert_relevant_txs() {
                 let index_after_spk_1 = 9 /* index of spk_1 */ + 1;
                 SpkIterator::new_with_range(
                     &descriptor,
-                    index_after_spk_1..index_after_spk_1 + lookahead,
+                    // This will also persist the staged spk cache inclusions from prev call to
+                    // `.insert_descriptor`.
+                    0..index_after_spk_1 + lookahead,
                 )
                 .collect()
             })]
@@ -170,23 +161,17 @@ fn test_list_owned_txouts() {
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[3]).unwrap();
 
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<String>>::new(
-        KeychainTxOutIndex::new(10),
+        KeychainTxOutIndex::new(10, true),
     );
 
-    assert!(
-        graph
-            .index
-            .insert_descriptor("keychain_1".into(), desc_1)
-            .unwrap()
-            .0
-    );
-    assert!(
-        graph
-            .index
-            .insert_descriptor("keychain_2".into(), desc_2)
-            .unwrap()
-            .0
-    );
+    assert!(graph
+        .index
+        .insert_descriptor("keychain_1".into(), desc_1)
+        .unwrap());
+    assert!(graph
+        .index
+        .insert_descriptor("keychain_2".into(), desc_2)
+        .unwrap());
 
     // Get trusted and untrusted addresses
 
