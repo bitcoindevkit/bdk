@@ -1,3 +1,4 @@
+use bdk_chain::keychain_txout::DEFAULT_LOOKAHEAD;
 use serde_json::json;
 use std::cmp;
 use std::collections::HashMap;
@@ -22,7 +23,6 @@ use bdk_chain::miniscript::{
 use bdk_chain::CanonicalizationParams;
 use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
-    indexed_tx_graph,
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
     tx_graph, ChainOracle, DescriptorExt, FullTxOut, IndexedTxGraph, Merge,
@@ -818,11 +818,10 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
         Commands::Generate { network } => generate_bip86_helper(network).map(|_| None),
         // try load
         _ => {
-            let (db, changeset) =
+            let (mut db, changeset) =
                 Store::<ChangeSet>::load(db_magic, db_path).context("could not open file store")?;
 
             let changeset = changeset.expect("should not be empty");
-
             let network = changeset.network.expect("changeset network");
 
             let chain = Mutex::new({
@@ -832,23 +831,27 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
                 chain
             });
 
-            let graph = Mutex::new({
-                // insert descriptors and apply loaded changeset
-                let mut index = KeychainTxOutIndex::default();
-                if let Some(desc) = changeset.descriptor {
-                    index.insert_descriptor(Keychain::External, desc)?;
-                }
-                if let Some(change_desc) = changeset.change_descriptor {
-                    index.insert_descriptor(Keychain::Internal, change_desc)?;
-                }
-                let mut graph = KeychainTxGraph::new(index);
-                graph.apply_changeset(indexed_tx_graph::ChangeSet {
-                    tx_graph: changeset.tx_graph,
-                    indexer: changeset.indexer,
-                });
-                graph
-            });
+            let (graph, changeset) = IndexedTxGraph::from_changeset(
+                (changeset.tx_graph, changeset.indexer).into(),
+                |c| -> anyhow::Result<_> {
+                    let mut indexer =
+                        KeychainTxOutIndex::from_changeset(DEFAULT_LOOKAHEAD, true, c);
+                    if let Some(desc) = changeset.descriptor {
+                        indexer.insert_descriptor(Keychain::External, desc)?;
+                    }
+                    if let Some(change_desc) = changeset.change_descriptor {
+                        indexer.insert_descriptor(Keychain::Internal, change_desc)?;
+                    }
+                    Ok(indexer)
+                },
+            )?;
+            db.append(&ChangeSet {
+                indexer: changeset.indexer,
+                tx_graph: changeset.tx_graph,
+                ..Default::default()
+            })?;
 
+            let graph = Mutex::new(graph);
             let db = Mutex::new(db);
 
             Ok(Some(Init {

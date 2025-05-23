@@ -15,12 +15,14 @@ use crate::{
     Anchor, BlockId, ChainOracle, Indexer, Merge, TxPosInBlock,
 };
 
-/// The [`IndexedTxGraph`] combines a [`TxGraph`] and an [`Indexer`] implementation.
+/// A [`TxGraph<A>`] paired with an indexer `I`, enforcing that every insertion into the graph is
+/// simultaneously fed through the indexer.
 ///
-/// It ensures that [`TxGraph`] and [`Indexer`] are updated atomically.
+/// This guarantees that `tx_graph` and `index` remain in sync: any transaction or floating txout
+/// you add to `tx_graph` has already been processed by `index`.
 #[derive(Debug, Clone)]
 pub struct IndexedTxGraph<A, I> {
-    /// Transaction index.
+    /// The indexer used for filtering transactions and floating txouts that we are interested in.
     pub index: I,
     graph: TxGraph<A>,
 }
@@ -35,14 +37,6 @@ impl<A, I: Default> Default for IndexedTxGraph<A, I> {
 }
 
 impl<A, I> IndexedTxGraph<A, I> {
-    /// Construct a new [`IndexedTxGraph`] with a given `index`.
-    pub fn new(index: I) -> Self {
-        Self {
-            index,
-            graph: TxGraph::default(),
-        }
-    }
-
     /// Get a reference of the internal transaction graph.
     pub fn graph(&self) -> &TxGraph<A> {
         &self.graph
@@ -79,6 +73,87 @@ impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
 where
     I::ChangeSet: Default + Merge,
 {
+    /// Create a new, empty [`IndexedTxGraph`].
+    ///
+    /// The underlying `TxGraph` is initialized with `TxGraph::default()`, and the provided
+    /// `index`er is used as‐is (since there are no existing transactions to process).
+    pub fn new(index: I) -> Self {
+        Self {
+            index,
+            graph: TxGraph::default(),
+        }
+    }
+
+    /// Reconstruct an [`IndexedTxGraph`] from persisted graph + indexer state.
+    ///
+    /// 1. Rebuilds the `TxGraph` from `changeset.tx_graph`.
+    /// 2. Calls your `indexer_from_changeset` closure on `changeset.indexer` to restore any state
+    ///    your indexer needs beyond its raw changeset.
+    /// 3. Runs a full `.reindex()`, returning its `ChangeSet` to describe any additional updates
+    ///    applied.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(E)` if `indexer_from_changeset` fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use bdk_chain::IndexedTxGraph;
+    /// # use bdk_chain::indexed_tx_graph::ChangeSet;
+    /// # use bdk_chain::indexer::keychain_txout::{KeychainTxOutIndex, DEFAULT_LOOKAHEAD};
+    /// # use bdk_core::BlockId;
+    /// # use bdk_testenv::anyhow;
+    /// # use miniscript::{Descriptor, DescriptorPublicKey};
+    /// # use std::str::FromStr;
+    /// # let persisted_changeset = ChangeSet::<BlockId, _>::default();
+    /// # let persisted_desc = Some(Descriptor::<DescriptorPublicKey>::from_str("")?);
+    /// # let persisted_change_desc = Some(Descriptor::<DescriptorPublicKey>::from_str("")?);
+    ///
+    /// let (graph, reindex_cs) =
+    ///     IndexedTxGraph::from_changeset(persisted_changeset, move |idx_cs| -> anyhow::Result<_> {
+    ///         // e.g. KeychainTxOutIndex needs descriptors that weren’t in its CS
+    ///         let mut idx = KeychainTxOutIndex::from_changeset(DEFAULT_LOOKAHEAD, true, idx_cs);
+    ///         if let Some(desc) = persisted_desc {
+    ///             idx.insert_descriptor("external", desc)?;
+    ///         }
+    ///         if let Some(desc) = persisted_change_desc {
+    ///             idx.insert_descriptor("internal", desc)?;
+    ///         }
+    ///         Ok(idx)
+    ///     })?;
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    pub fn from_changeset<F, E>(
+        changeset: ChangeSet<A, I::ChangeSet>,
+        indexer_from_changeset: F,
+    ) -> Result<(Self, ChangeSet<A, I::ChangeSet>), E>
+    where
+        F: FnOnce(I::ChangeSet) -> Result<I, E>,
+    {
+        let graph = TxGraph::<A>::from_changeset(changeset.tx_graph);
+        let index = indexer_from_changeset(changeset.indexer)?;
+        let mut out = Self { graph, index };
+        let out_changeset = out.reindex();
+        Ok((out, out_changeset))
+    }
+
+    /// Synchronizes the indexer to reflect every entry in the transaction graph.
+    ///
+    /// Iterates over **all** full transactions and floating outputs in `self.graph`, passing each
+    /// into `self.index`. Any indexer-side changes produced (via `index_tx` or `index_txout`) are
+    /// merged into a fresh `ChangeSet`, which is then returned.
+    pub fn reindex(&mut self) -> ChangeSet<A, I::ChangeSet> {
+        let mut changeset = ChangeSet::<A, I::ChangeSet>::default();
+        for tx in self.graph.full_txs() {
+            changeset.indexer.merge(self.index.index_tx(&tx));
+        }
+        for (op, txout) in self.graph.floating_txouts() {
+            changeset.indexer.merge(self.index.index_txout(op, txout));
+        }
+        changeset
+    }
+
     fn index_tx_graph_changeset(
         &mut self,
         tx_graph_changeset: &tx_graph::ChangeSet<A>,
@@ -440,6 +515,12 @@ impl<A, IA: Default> From<tx_graph::ChangeSet<A>> for ChangeSet<A, IA> {
             tx_graph: graph,
             ..Default::default()
         }
+    }
+}
+
+impl<A, IA> From<(tx_graph::ChangeSet<A>, IA)> for ChangeSet<A, IA> {
+    fn from((tx_graph, indexer): (tx_graph::ChangeSet<A>, IA)) -> Self {
+        Self { tx_graph, indexer }
     }
 }
 
