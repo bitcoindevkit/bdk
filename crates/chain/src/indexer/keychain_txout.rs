@@ -236,6 +236,13 @@ impl<K> KeychainTxOutIndex<K> {
 
 /// Methods that are *re-exposed* from the internal [`SpkTxOutIndex`].
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
+    /// Construct `KeychainTxOutIndex<K>` from the given `changeset`.
+    pub fn from_changeset(changeset: ChangeSet) -> Self {
+        let mut out = Self::default();
+        out.apply_changeset(changeset);
+        out
+    }
+
     /// Get the set of indexed outpoints, corresponding to tracked keychains.
     pub fn outpoints(&self) -> &BTreeSet<KeychainIndexed<K, OutPoint>> {
         self.inner.outpoints()
