@@ -517,9 +517,18 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             1
         };
 
-        let cached_spk_iter = core::iter::from_fn({
+        let derive_spk = {
             let secp = Secp256k1::verification_only();
             let _desc = &descriptor;
+            move |spk_i: u32| -> ScriptBuf {
+                _desc
+                    .derived_descriptor(&secp, spk_i)
+                    .expect("The descriptor cannot have hardened derivation")
+                    .script_pubkey()
+            }
+        };
+
+        let cached_spk_iter = core::iter::from_fn({
             let spk_cache = self.spk_cache.entry(did).or_default();
             let _i = &mut next_index;
             move || -> Option<Indexed<ScriptBuf>> {
@@ -530,15 +539,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 *_i = spk_i.saturating_add(1);
 
                 if let Some(spk) = spk_cache.get(&spk_i) {
+                    debug_assert_eq!(spk, &derive_spk(spk_i), "cached spk must equal derived");
                     return Some((spk_i, spk.clone()));
                 }
-                let spk = _desc
-                    .derived_descriptor(&secp, spk_i)
-                    .expect("The descriptor cannot have hardened derivation")
-                    .script_pubkey();
+                let spk = derive_spk(spk_i);
                 derived_spks.extend(core::iter::once((spk_i, spk.clone())));
                 spk_cache.insert(spk_i, spk.clone());
-                Some((spk_i, spk.clone()))
+                Some((spk_i, spk))
             }
         });
 
@@ -947,7 +954,7 @@ pub struct ChangeSet {
     /// Contains for each descriptor_id the last revealed index of derivation
     pub last_revealed: BTreeMap<DescriptorId, u32>,
 
-    /// Spk cache.
+    /// Cache of previously derived script pubkeys.
     #[cfg_attr(feature = "serde", serde(default))]
     pub spk_cache: BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>>,
 }
@@ -972,7 +979,14 @@ impl Merge for ChangeSet {
         }
 
         for (did, spks) in other.spk_cache {
-            self.spk_cache.entry(did).or_default().extend(spks);
+            let orig_spks = self.spk_cache.entry(did).or_default();
+            debug_assert!(
+                orig_spks
+                    .iter()
+                    .all(|(i, orig_spk)| spks.get(i).map_or(true, |spk| spk == orig_spk)),
+                "spk of the same descriptor-id and derivation index must not be different"
+            );
+            orig_spks.extend(spks);
         }
     }
 
