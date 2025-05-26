@@ -539,13 +539,12 @@ impl keychain_txout::ChangeSet {
     pub fn schema_v1() -> String {
         format!(
             "CREATE TABLE {} ( \
-            descriptor_id TEXT NOT NULL REFERENCES {}, \
+            descriptor_id TEXT NOT NULL, \
             spk_index INTEGER NOT NULL, \
             spk BLOB NOT NULL, \
-            PRIMARY KEY (descriptor_id, index) \
+            PRIMARY KEY (descriptor_id, spk_index) \
             ) STRICT",
             Self::DERIVED_SPKS_TABLE_NAME,
-            Self::LAST_REVEALED_TABLE_NAME,
         )
     }
 
