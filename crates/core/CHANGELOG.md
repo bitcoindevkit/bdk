@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [core-0.6.0]
+
+### Added
+
+- Add `is_empty` methods to `TxUpdate` and `{}_Response` types #1961
+
 ## [core-0.5.0]
 
 ### Added
@@ -36,3 +42,4 @@ This is because requests now have a `start_time`, instead of specifying a `seen_
 
 [core-0.4.1]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.4.1
 [core-0.5.0]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.5.0
+[core-0.6.0]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.0

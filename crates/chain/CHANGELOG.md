@@ -7,6 +7,21 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [chain-0.23.0]
+
+### Added
+
+- feat!(chain): implement `first_seen` tracking #1950
+- fix(chain): persist `first_seen` #1966
+- Persist spks derived from KeychainTxOutIndex #1963
+
+### Changed
+
+- fix(docs): `merge_chains` outdated documentation #1806
+- chore: create and apply rustfmt.toml #1946
+- chore: Update rust-version to 1.86.0 #1955
+- bump bdk_core to 0.6.0
+
 ## [chain-0.22.0]
 
 ### Added
@@ -41,3 +56,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [chain-0.21.1]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.21.1
 [chain-0.22.0]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.22.0
+[chain-0.23.0]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.0
