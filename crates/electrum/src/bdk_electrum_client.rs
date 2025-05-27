@@ -12,9 +12,6 @@ use std::sync::{Arc, Mutex};
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
 
-/// Maximum batch size for proof validation requests
-const MAX_BATCH_SIZE: usize = 100;
-
 /// Wrapper around an [`electrum_client::ElectrumApi`] which includes an internal in-memory
 /// transaction cache to avoid re-fetching already downloaded transactions.
 #[derive(Debug)]
@@ -502,51 +499,57 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             }
         }
 
-        // Fetch missing proofs in batches
-        for chunk in to_fetch.chunks(MAX_BATCH_SIZE) {
-            for &(txid, height, hash) in chunk {
-                // Fetch the raw proof.
-                let proof = self.inner.transaction_get_merkle(&txid, height)?;
+        // Batch all get_merkle calls.
+        let mut batch = electrum_client::Batch::default();
+        for &(txid, height, _) in &to_fetch {
+            batch.raw(
+                "blockchain.transaction.get_merkle".into(),
+                vec![
+                    electrum_client::Param::String(format!("{:x}", txid)),
+                    electrum_client::Param::Usize(height),
+                ],
+            );
+        }
+        let resps = self.inner.batch_call(&batch)?;
 
-                // Validate against header, retrying once on stale header.
-                let mut header = {
-                    let cache = self.block_header_cache.lock().unwrap();
-                    cache[&(height as u32)]
-                };
-                let mut valid = electrum_client::utils::validate_merkle_proof(
+        // Validate each proof, retrying once for each stale header.
+        for ((txid, height, hash), resp) in to_fetch.into_iter().zip(resps.into_iter()) {
+            let proof: electrum_client::GetMerkleRes = serde_json::from_value(resp)?;
+
+            let mut header = {
+                let cache = self.block_header_cache.lock().unwrap();
+                cache[&(height as u32)]
+            };
+            let mut valid =
+                electrum_client::utils::validate_merkle_proof(&txid, &header.merkle_root, &proof);
+            if !valid {
+                let new_header = self.inner.block_header(height)?;
+                self.block_header_cache
+                    .lock()
+                    .unwrap()
+                    .insert(height as u32, new_header);
+                header = new_header;
+                valid = electrum_client::utils::validate_merkle_proof(
                     &txid,
                     &header.merkle_root,
                     &proof,
                 );
-                if !valid {
-                    let new_header = self.inner.block_header(height)?;
-                    self.block_header_cache
-                        .lock()
-                        .unwrap()
-                        .insert(height as u32, new_header);
-                    header = new_header;
-                    valid = electrum_client::utils::validate_merkle_proof(
-                        &txid,
-                        &header.merkle_root,
-                        &proof,
-                    );
-                }
+            }
 
-                // Build and cache the anchor if merkle proof is valid.
-                if valid {
-                    let anchor = ConfirmationBlockTime {
-                        confirmation_time: header.time as u64,
-                        block_id: BlockId {
-                            height: height as u32,
-                            hash: header.block_hash(),
-                        },
-                    };
-                    self.anchor_cache
-                        .lock()
-                        .unwrap()
-                        .insert((txid, hash), anchor);
-                    results.push((txid, anchor));
-                }
+            // Build and cache the anchor if merkle proof is valid.
+            if valid {
+                let anchor = ConfirmationBlockTime {
+                    confirmation_time: header.time as u64,
+                    block_id: BlockId {
+                        height: height as u32,
+                        hash: header.block_hash(),
+                    },
+                };
+                self.anchor_cache
+                    .lock()
+                    .unwrap()
+                    .insert((txid, hash), anchor);
+                results.push((txid, anchor));
             }
         }
 

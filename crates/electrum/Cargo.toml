@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 bdk_core = { path = "../core", version = "0.6.0" }
 electrum-client = { version = "0.23.1", features = [ "proxy" ], default-features = false }
+serde_json = "1.0"
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv" }
