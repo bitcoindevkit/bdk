@@ -82,7 +82,7 @@ fn setup<F: Fn(&mut KeychainTxGraph, &LocalChain)>(f: F) -> (KeychainTxGraph, Lo
 
     let (desc, _) =
         <Descriptor<DescriptorPublicKey>>::parse_descriptor(&Secp256k1::new(), DESC).unwrap();
-    let mut index = KeychainTxOutIndex::new(10);
+    let mut index = KeychainTxOutIndex::new(10, true);
     index.insert_descriptor((), desc).unwrap();
     let mut tx_graph = KeychainTxGraph::new(index);
 
