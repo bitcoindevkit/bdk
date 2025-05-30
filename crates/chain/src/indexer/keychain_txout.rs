@@ -1107,3 +1107,70 @@ impl<K: Clone + Ord + core::fmt::Debug> FullScanRequestBuilderExt<K> for FullSca
         self
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use bdk_testenv::utils::DESCRIPTORS;
+    use bitcoin::secp256k1::Secp256k1;
+    use miniscript::Descriptor;
+
+    // Test that `KeychainTxOutIndex` uses the spk cache.
+    // And the indexed spks are as expected.
+    #[test]
+    fn test_spk_cache() {
+        let lookahead = 10;
+        let use_cache = true;
+        let mut index = KeychainTxOutIndex::new(lookahead, use_cache);
+        let s = DESCRIPTORS[0];
+
+        let desc = Descriptor::parse_descriptor(&Secp256k1::new(), s)
+            .unwrap()
+            .0;
+
+        let did = desc.descriptor_id();
+
+        let reveal_to = 2;
+        let end_index = reveal_to + lookahead;
+
+        let _ = index.insert_descriptor(0i32, desc.clone());
+        assert_eq!(index.spk_cache.get(&did).unwrap().len() as u32, lookahead);
+        assert_eq!(index.next_index(0), Some((0, true)));
+
+        // Now reveal some scripts
+        for _ in 0..=reveal_to {
+            let _ = index.reveal_next_spk(0).unwrap();
+        }
+        assert_eq!(index.last_revealed_index(0), Some(reveal_to));
+
+        let spk_cache = &index.spk_cache;
+        assert!(!spk_cache.is_empty());
+
+        for (&did, cached_spks) in spk_cache {
+            assert_eq!(did, desc.descriptor_id());
+            for (&i, cached_spk) in cached_spks {
+                // Cached spk matches derived
+                let exp_spk = desc.at_derivation_index(i).unwrap().script_pubkey();
+                assert_eq!(&exp_spk, cached_spk);
+                // Also matches the inner index
+                assert_eq!(index.spk_at_index(0, i), Some(cached_spk.clone()));
+            }
+        }
+
+        let init_cs = index.initial_changeset();
+        assert_eq!(
+            init_cs.spk_cache.get(&did).unwrap().len() as u32,
+            end_index + 1
+        );
+
+        // Now test load from changeset
+        let recovered =
+            KeychainTxOutIndex::<&str>::from_changeset(lookahead, use_cache, init_cs.clone());
+        assert_eq!(&recovered.spk_cache, spk_cache);
+
+        // The cache is optional at load time
+        let index = KeychainTxOutIndex::<i32>::from_changeset(lookahead, false, init_cs);
+        assert!(index.spk_cache.is_empty());
+    }
+}
