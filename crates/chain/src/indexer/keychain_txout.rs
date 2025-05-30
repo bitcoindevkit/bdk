@@ -200,7 +200,7 @@ impl<K: Clone + Ord + Debug> Indexer for KeychainTxOutIndex<K> {
 }
 
 impl<K> KeychainTxOutIndex<K> {
-    /// Construct a [`KeychainTxOutIndex`] with the given `lookahead` and `use_spk_cache` boolean.
+    /// Construct a [`KeychainTxOutIndex`] with the given `lookahead` and `persist_spks` boolean.
     ///
     /// # Lookahead
     ///
@@ -221,10 +221,10 @@ impl<K> KeychainTxOutIndex<K> {
     ///
     /// ```rust
     /// # use bdk_chain::keychain_txout::KeychainTxOutIndex;
-    /// // Derive 20 future addresses per chain and persist + reload script pubkeys via ChangeSets:
+    /// // Derive 20 future addresses per keychain and persist + reload script pubkeys via ChangeSets:
     /// let idx = KeychainTxOutIndex::<&'static str>::new(20, true);
     ///
-    /// // Derive 10 future addresses per chain without persistence:
+    /// // Derive 10 future addresses per keychain without persistence:
     /// let idx = KeychainTxOutIndex::<&'static str>::new(10, false);
     /// ```
     pub fn new(lookahead: u32, persist_spks: bool) -> Self {
@@ -251,7 +251,7 @@ impl<K> KeychainTxOutIndex<K> {
 impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Construct `KeychainTxOutIndex<K>` from the given `changeset`.
     ///
-    /// Shorthand for called [`new`] and then [`apply_changeset`].
+    /// Shorthand for calling [`new`] and then [`apply_changeset`].
     ///
     /// [`new`]: Self::new
     /// [`apply_changeset`]: Self::apply_changeset
@@ -1002,7 +1002,7 @@ impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 ///
 /// It tracks:
 /// 1. `last_revealed`: the highest derivation index revealed per descriptor.
-/// 2. `spks`: the cache of derived script pubkeys to persist across runs.
+/// 2. `spk_cache`: the cache of derived script pubkeys to persist across runs.
 ///
 /// You can apply a `ChangeSet` to a `KeychainTxOutIndex` via
 /// [`KeychainTxOutIndex::apply_changeset`], or merge two change sets with [`ChangeSet::merge`].
@@ -1011,7 +1011,7 @@ impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 ///
 /// - `last_revealed` is monotonic: merging retains the maximum index for each descriptor and never
 ///   decreases.
-/// - `spks` accumulates entries: once a script pubkey is persisted, it remains available for
+/// - `spk_cache` accumulates entries: once a script pubkey is persisted, it remains available for
 ///   reload. If the same descriptor and index appear again with a new script pubkey, the latter
 ///   value overrides the former.
 ///
