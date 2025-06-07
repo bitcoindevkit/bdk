@@ -205,9 +205,15 @@ async fn fetch_block<S: Sleeper>(
 
     // We avoid fetching blocks higher than previously fetched `latest_blocks` as the local chain
     // tip is used to signal for the last-synced-up-to-height.
-    if let Some(tip_height) = latest_blocks.keys().last().copied() {
-        if height > tip_height {
+    match latest_blocks.keys().last().copied() {
+        None => {
+            debug_assert!(false, "`latest_blocks` should not be empty");
             return Ok(None);
+        }
+        Some(tip_height) => {
+            if height > tip_height {
+                return Ok(None);
+            }
         }
     }
 
