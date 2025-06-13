@@ -943,6 +943,28 @@ fn test_tx_conflict_handling() {
                 confirmed: Amount::ZERO,
             },
         },
+        Scenario {
+            name: "coinbase tx must not become unconfirmed",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "coinbase",
+                    inputs: &[TxInTemplate::Coinbase],
+                    outputs: &[TxOutTemplate::new(21_000, Some(0))],
+                    // Stale block
+                    anchors: &[block_id!(1, "B-prime")],
+                    ..Default::default()
+                }
+            ],
+            exp_chain_txs: HashSet::from([]),
+            exp_chain_txouts: HashSet::from([]),
+            exp_unspents: HashSet::from([]),
+            exp_balance: Balance {
+                immature: Amount::ZERO,
+                trusted_pending: Amount::ZERO,
+                untrusted_pending: Amount::ZERO,
+                confirmed: Amount::ZERO,
+            }
+        }
     ];
 
     for scenario in scenarios {
