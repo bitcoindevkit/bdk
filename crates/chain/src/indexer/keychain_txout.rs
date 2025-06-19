@@ -1047,6 +1047,7 @@ impl<K: core::fmt::Display + core::fmt::Debug> core::error::Error for InsertDesc
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[must_use]
+#[non_exhaustive]
 pub struct ChangeSet {
     /// Maps each `DescriptorId` to its last revealed derivation index.
     pub last_revealed: BTreeMap<DescriptorId, u32>,
