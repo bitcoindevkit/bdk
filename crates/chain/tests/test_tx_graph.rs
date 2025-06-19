@@ -78,12 +78,11 @@ fn insert_txouts() {
     let mut graph = {
         let mut graph = TxGraph::<BlockId>::default();
         for (outpoint, txout) in &original_ops {
+            let mut expected_changeset = ChangeSet::default();
+            expected_changeset.txouts.insert(*outpoint, txout.clone());
             assert_eq!(
                 graph.insert_txout(*outpoint, txout.clone()),
-                ChangeSet {
-                    txouts: [(*outpoint, txout.clone())].into(),
-                    ..Default::default()
-                }
+                expected_changeset
             );
         }
         graph
@@ -110,18 +109,17 @@ fn insert_txouts() {
 
     // Check the resulting addition.
     let changeset = graph.apply_update(update);
-
-    assert_eq!(
-        changeset,
-        ChangeSet {
-            txs: [Arc::new(update_tx.clone())].into(),
-            txouts: update_ops.clone().into(),
-            anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
-            first_seen: [(hash!("tx2"), 1000000)].into(),
-            last_seen: [(hash!("tx2"), 1000000)].into(),
-            last_evicted: [].into(),
-        }
-    );
+    let mut expected_changeset = ChangeSet::default();
+    expected_changeset.txs.insert(Arc::new(update_tx.clone()));
+    expected_changeset.txouts.extend(update_ops.iter().cloned());
+    expected_changeset
+        .anchors
+        .insert((conf_anchor, update_tx.compute_txid()));
+    expected_changeset
+        .first_seen
+        .insert(hash!("tx2"), 1_000_000);
+    expected_changeset.last_seen.insert(hash!("tx2"), 1_000_000);
+    assert_eq!(changeset, expected_changeset,);
 
     // Apply changeset and check the new graph counts.
     graph.apply_changeset(changeset);
@@ -166,17 +164,20 @@ fn insert_txouts() {
     );
 
     // Check that the initial_changeset is correct
-    assert_eq!(
-        graph.initial_changeset(),
-        ChangeSet {
-            txs: [Arc::new(update_tx.clone())].into(),
-            txouts: update_ops.into_iter().chain(original_ops).collect(),
-            anchors: [(conf_anchor, update_tx.compute_txid()),].into(),
-            first_seen: [(hash!("tx2"), 1000000)].into(),
-            last_seen: [(hash!("tx2"), 1000000)].into(),
-            last_evicted: [].into(),
-        }
-    );
+    let mut expected_changeset = ChangeSet::default();
+    expected_changeset.txs.insert(Arc::new(update_tx.clone()));
+    expected_changeset
+        .txouts
+        .extend(update_ops.into_iter().chain(original_ops));
+    expected_changeset
+        .anchors
+        .insert((conf_anchor, update_tx.compute_txid()));
+    expected_changeset
+        .first_seen
+        .insert(hash!("tx2"), 1_000_000);
+    expected_changeset.last_seen.insert(hash!("tx2"), 1_000_000);
+
+    assert_eq!(graph.initial_changeset(), expected_changeset,);
 }
 
 #[test]
@@ -324,20 +325,12 @@ fn insert_tx_witness_precedence() {
         let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
         let changeset_insert_unsigned = tx_graph.insert_tx(unsigned_tx.clone());
         let changeset_insert_signed = tx_graph.insert_tx(signed_tx.clone());
-        assert_eq!(
-            changeset_insert_unsigned,
-            ChangeSet {
-                txs: [Arc::new(unsigned_tx.clone())].into(),
-                ..Default::default()
-            }
-        );
-        assert_eq!(
-            changeset_insert_signed,
-            ChangeSet {
-                txs: [Arc::new(signed_tx.clone())].into(),
-                ..Default::default()
-            }
-        );
+        let mut expected_changeset = ChangeSet::default();
+        expected_changeset.txs.insert(Arc::new(unsigned_tx.clone()));
+        assert_eq!(changeset_insert_unsigned, expected_changeset,);
+        expected_changeset = ChangeSet::default();
+        expected_changeset.txs.insert(Arc::new(signed_tx.clone()));
+        assert_eq!(changeset_insert_signed, expected_changeset);
     }
 
     // Unsigned tx must not displace signed.
@@ -345,13 +338,9 @@ fn insert_tx_witness_precedence() {
         let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
         let changeset_insert_signed = tx_graph.insert_tx(signed_tx.clone());
         let changeset_insert_unsigned = tx_graph.insert_tx(unsigned_tx.clone());
-        assert_eq!(
-            changeset_insert_signed,
-            ChangeSet {
-                txs: [Arc::new(signed_tx)].into(),
-                ..Default::default()
-            }
-        );
+        let mut expected_changeset = ChangeSet::default();
+        expected_changeset.txs.insert(Arc::new(signed_tx));
+        assert_eq!(changeset_insert_signed, expected_changeset);
         assert!(changeset_insert_unsigned.is_empty());
     }
 
@@ -402,13 +391,9 @@ fn insert_tx_witness_precedence() {
         let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
         let changeset_small = tx_graph.insert_tx(tx_small.clone());
         let changeset_large = tx_graph.insert_tx(tx_large);
-        assert_eq!(
-            changeset_small,
-            ChangeSet {
-                txs: [Arc::new(tx_small.clone())].into(),
-                ..Default::default()
-            }
-        );
+        let mut expected_changeset = ChangeSet::default();
+        expected_changeset.txs.insert(Arc::new(tx_small.clone()));
+        assert_eq!(changeset_small, expected_changeset,);
         assert!(changeset_large.is_empty());
         let tx = tx_graph
             .get_tx(tx_small.compute_txid())
@@ -1164,15 +1149,11 @@ fn test_changeset_last_seen_merge() {
     ];
 
     for (original_ls, update_ls) in test_cases {
-        let mut original = ChangeSet::<()> {
-            last_seen: original_ls.map(|ls| (txid, ls)).into_iter().collect(),
-            ..Default::default()
-        };
+        let mut original = ChangeSet::<()>::default();
+        original.last_seen = original_ls.map(|ls| (txid, ls)).into_iter().collect();
         assert!(!original.is_empty() || original_ls.is_none());
-        let update = ChangeSet::<()> {
-            last_seen: update_ls.map(|ls| (txid, ls)).into_iter().collect(),
-            ..Default::default()
-        };
+        let mut update = ChangeSet::<()>::default();
+        update.last_seen = update_ls.map(|ls| (txid, ls)).into_iter().collect();
         assert!(!update.is_empty() || update_ls.is_none());
 
         original.merge(update);
@@ -1477,39 +1458,27 @@ fn tx_graph_update_conversion() {
 #[test]
 fn test_seen_at_updates() {
     // Update both first_seen and last_seen
-    let seen_at = 1000000_u64;
+    let seen_at = 1_000_000_u64;
     let mut graph = TxGraph::<BlockId>::default();
     let mut changeset = graph.insert_seen_at(hash!("tx1"), seen_at);
-    assert_eq!(
-        changeset,
-        ChangeSet {
-            first_seen: [(hash!("tx1"), 1000000)].into(),
-            last_seen: [(hash!("tx1"), 1000000)].into(),
-            ..Default::default()
-        }
-    );
+    let mut expected_changeset = ChangeSet::default();
+    expected_changeset.first_seen = [(hash!("tx1"), 1_000_000)].into();
+    expected_changeset.last_seen = [(hash!("tx1"), 1_000_000)].into();
+    assert_eq!(changeset, expected_changeset,);
 
     // Update first_seen but not last_seen
     let earlier_seen_at = 999_999_u64;
     changeset = graph.insert_seen_at(hash!("tx1"), earlier_seen_at);
-    assert_eq!(
-        changeset,
-        ChangeSet {
-            first_seen: [(hash!("tx1"), 999999)].into(),
-            ..Default::default()
-        }
-    );
+    let mut expected_changeset = ChangeSet::default();
+    expected_changeset.first_seen = [(hash!("tx1"), 999_999)].into();
+    assert_eq!(changeset, expected_changeset);
 
     // Update last_seen but not first_seen
     let later_seen_at = 1_000_001_u64;
     changeset = graph.insert_seen_at(hash!("tx1"), later_seen_at);
-    assert_eq!(
-        changeset,
-        ChangeSet {
-            last_seen: [(hash!("tx1"), 1000001)].into(),
-            ..Default::default()
-        }
-    );
+    let mut expected_changeset = ChangeSet::default();
+    expected_changeset.last_seen = [(hash!("tx1"), 1000001)].into();
+    assert_eq!(changeset, expected_changeset);
 
     // Should not change anything
     changeset = graph.insert_seen_at(hash!("tx1"), 1000000);

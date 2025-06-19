@@ -482,6 +482,7 @@ impl<A, I> AsRef<TxGraph<A>> for IndexedTxGraph<A, I> {
     ))
 )]
 #[must_use]
+#[non_exhaustive]
 pub struct ChangeSet<A, IA> {
     /// [`TxGraph`] changeset.
     pub tx_graph: tx_graph::ChangeSet<A>,
