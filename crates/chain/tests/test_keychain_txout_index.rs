@@ -80,14 +80,12 @@ fn merge_changesets_check_last_revealed() {
     rhs_di.insert(descriptor_ids[1], 5); // value more than lhs desc 1
     lhs_di.insert(descriptor_ids[3], 4); // key doesn't exist in lhs
 
-    let mut lhs = ChangeSet {
-        last_revealed: lhs_di,
-        ..Default::default()
-    };
-    let rhs = ChangeSet {
-        last_revealed: rhs_di,
-        ..Default::default()
-    };
+    let mut lhs = ChangeSet::default();
+    lhs.last_revealed = lhs_di;
+
+    let mut rhs = ChangeSet::default();
+    rhs.last_revealed = rhs_di;
+
     lhs.merge(rhs);
 
     // Existing index doesn't update if the new index in `other` is lower than `self`.
@@ -129,12 +127,13 @@ fn test_set_all_derivation_indices() {
         ),
     ]
     .into();
+
+    let mut expected_changeset = ChangeSet::default();
+    expected_changeset.last_revealed = last_revealed.clone();
+    expected_changeset.spk_cache = spk_cache.clone();
     assert_eq!(
         txout_index.reveal_to_target_multi(&derive_to),
-        ChangeSet {
-            last_revealed: last_revealed.clone(),
-            spk_cache: spk_cache.clone(),
-        }
+        expected_changeset
     );
     assert_eq!(txout_index.last_revealed_indices(), derive_to);
     assert_eq!(
@@ -629,16 +628,11 @@ fn lookahead_to_target() {
 #[test]
 fn applying_changesets_one_by_one_vs_aggregate_must_have_same_result() {
     let desc = parse_descriptor(DESCRIPTORS[0]);
-    let changesets: &[ChangeSet] = &[
-        ChangeSet {
-            last_revealed: [(desc.descriptor_id(), 10)].into(),
-            ..Default::default()
-        },
-        ChangeSet {
-            last_revealed: [(desc.descriptor_id(), 12)].into(),
-            ..Default::default()
-        },
-    ];
+    let mut changeset_1 = ChangeSet::default();
+    changeset_1.last_revealed = [(desc.descriptor_id(), 10)].into();
+    let mut changeset_2 = ChangeSet::default();
+    changeset_2.last_revealed = [(desc.descriptor_id(), 12)].into();
+    let changesets: &[ChangeSet] = &[changeset_1, changeset_2];
 
     let mut indexer_a = KeychainTxOutIndex::<TestKeychain>::new(0, true);
     let _ = indexer_a
