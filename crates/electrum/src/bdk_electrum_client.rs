@@ -22,6 +22,8 @@ pub struct BdkElectrumClient<E> {
     tx_cache: Mutex<HashMap<Txid, Arc<Transaction>>>,
     /// The header cache
     block_header_cache: Mutex<HashMap<u32, Header>>,
+    /// Cache of transaction anchors
+    anchor_cache: Mutex<HashMap<(Txid, BlockHash), ConfirmationBlockTime>>,
 }
 
 impl<E: ElectrumApi> BdkElectrumClient<E> {
@@ -31,6 +33,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             inner: client,
             tx_cache: Default::default(),
             block_header_cache: Default::default(),
+            anchor_cache: Default::default(),
         }
     }
 
@@ -62,33 +65,6 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         self.tx_cache.lock().unwrap().insert(txid, Arc::clone(&tx));
 
         Ok(tx)
-    }
-
-    /// Fetch block header of given `height`.
-    ///
-    /// If it hits the cache it will return the cached version and avoid making the request.
-    fn fetch_header(&self, height: u32) -> Result<Header, Error> {
-        let block_header_cache = self.block_header_cache.lock().unwrap();
-
-        if let Some(header) = block_header_cache.get(&height) {
-            return Ok(*header);
-        }
-
-        drop(block_header_cache);
-
-        self.update_header(height)
-    }
-
-    /// Update a block header at given `height`. Returns the updated header.
-    fn update_header(&self, height: u32) -> Result<Header, Error> {
-        let header = self.inner.block_header(height as usize)?;
-
-        self.block_header_cache
-            .lock()
-            .unwrap()
-            .insert(height, header);
-
-        Ok(header)
     }
 
     /// Broadcasts a transaction to the network.
@@ -135,13 +111,19 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         let mut last_active_indices = BTreeMap::<K, u32>::default();
+        let mut pending_anchors = Vec::new();
         for keychain in request.keychains() {
             let spks = request
                 .iter_spks(keychain.clone())
                 .map(|(spk_i, spk)| (spk_i, SpkWithExpectedTxids::from(spk)));
-            if let Some(last_active_index) =
-                self.populate_with_spks(start_time, &mut tx_update, spks, stop_gap, batch_size)?
-            {
+            if let Some(last_active_index) = self.populate_with_spks(
+                start_time,
+                &mut tx_update,
+                spks,
+                stop_gap,
+                batch_size,
+                &mut pending_anchors,
+            )? {
                 last_active_indices.insert(keychain, last_active_index);
             }
         }
@@ -149,6 +131,13 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
             self.fetch_prev_txout(&mut tx_update)?;
+        }
+
+        if !pending_anchors.is_empty() {
+            let anchors = self.batch_fetch_anchors(&pending_anchors)?;
+            for (txid, anchor) in anchors {
+                tx_update.anchors.insert((anchor, txid));
+            }
         }
 
         let chain_update = match tip_and_latest_blocks {
@@ -204,6 +193,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         };
 
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
+        let mut pending_anchors = Vec::new();
         self.populate_with_spks(
             start_time,
             &mut tx_update,
@@ -213,13 +203,31 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .map(|(i, spk)| (i as u32, spk)),
             usize::MAX,
             batch_size,
+            &mut pending_anchors,
         )?;
-        self.populate_with_txids(start_time, &mut tx_update, request.iter_txids())?;
-        self.populate_with_outpoints(start_time, &mut tx_update, request.iter_outpoints())?;
+        self.populate_with_txids(
+            start_time,
+            &mut tx_update,
+            request.iter_txids(),
+            &mut pending_anchors,
+        )?;
+        self.populate_with_outpoints(
+            start_time,
+            &mut tx_update,
+            request.iter_outpoints(),
+            &mut pending_anchors,
+        )?;
 
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
             self.fetch_prev_txout(&mut tx_update)?;
+        }
+
+        if !pending_anchors.is_empty() {
+            let anchors = self.batch_fetch_anchors(&pending_anchors)?;
+            for (txid, anchor) in anchors {
+                tx_update.anchors.insert((anchor, txid));
+            }
         }
 
         let chain_update = match tip_and_latest_blocks {
@@ -249,16 +257,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         mut spks_with_expected_txids: impl Iterator<Item = (u32, SpkWithExpectedTxids)>,
         stop_gap: usize,
         batch_size: usize,
+        pending_anchors: &mut Vec<(Txid, usize)>,
     ) -> Result<Option<u32>, Error> {
-        let mut unused_spk_count = 0_usize;
-        let mut last_active_index = Option::<u32>::None;
+        let mut unused_spk_count = 0;
+        let mut last_active_index = None;
 
-        loop {
+        'batch_loop: loop {
             let spks = (0..batch_size)
                 .map_while(|_| spks_with_expected_txids.next())
                 .collect::<Vec<_>>();
             if spks.is_empty() {
-                return Ok(last_active_index);
+                break;
             }
 
             let spk_histories = self
@@ -267,9 +276,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
             for ((spk_index, spk), spk_history) in spks.into_iter().zip(spk_histories) {
                 if spk_history.is_empty() {
-                    unused_spk_count = unused_spk_count.saturating_add(1);
+                    unused_spk_count += 1;
                     if unused_spk_count >= stop_gap {
-                        return Ok(last_active_index);
+                        break 'batch_loop;
                     }
                 } else {
                     last_active_index = Some(spk_index);
@@ -292,7 +301,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     match tx_res.height.try_into() {
                         // Returned heights 0 & -1 are reserved for unconfirmed txs.
                         Ok(height) if height > 0 => {
-                            self.validate_merkle_for_anchor(tx_update, tx_res.tx_hash, height)?;
+                            pending_anchors.push((tx_res.tx_hash, height));
                         }
                         _ => {
                             tx_update.seen_ats.insert((tx_res.tx_hash, start_time));
@@ -300,7 +309,13 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     }
                 }
             }
+
+            if unused_spk_count >= stop_gap {
+                break;
+            }
         }
+
+        Ok(last_active_index)
     }
 
     /// Populate the `tx_update` with associated transactions/anchors of `outpoints`.
@@ -312,32 +327,35 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
+        pending_anchors: &mut Vec<(Txid, usize)>,
     ) -> Result<(), Error> {
-        for outpoint in outpoints {
-            let op_txid = outpoint.txid;
-            let op_tx = self.fetch_tx(op_txid)?;
-            let op_txout = match op_tx.output.get(outpoint.vout as usize) {
-                Some(txout) => txout,
-                None => continue,
-            };
-            debug_assert_eq!(op_tx.compute_txid(), op_txid);
+        let ops_txs = outpoints
+            .into_iter()
+            .filter_map(|op| self.fetch_tx(op.txid).ok().map(|tx| (op, tx)))
+            .collect::<Vec<_>>();
 
-            // attempt to find the following transactions (alongside their chain positions), and
-            // add to our sparsechain `update`:
+        let scripts = ops_txs
+            .iter()
+            .map(|(op, tx)| tx.output[op.vout as usize].script_pubkey.as_script());
+
+        let spk_histories = self.inner.batch_script_get_history(scripts)?;
+
+        for ((outpoint, tx), spk_history) in ops_txs.into_iter().zip(spk_histories) {
             let mut has_residing = false; // tx in which the outpoint resides
             let mut has_spending = false; // tx that spends the outpoint
-            for res in self.inner.script_get_history(&op_txout.script_pubkey)? {
+
+            for res in spk_history {
                 if has_residing && has_spending {
                     break;
                 }
 
-                if !has_residing && res.tx_hash == op_txid {
+                if !has_residing && res.tx_hash == outpoint.txid {
                     has_residing = true;
-                    tx_update.txs.push(Arc::clone(&op_tx));
+                    tx_update.txs.push(Arc::clone(&tx));
                     match res.height.try_into() {
                         // Returned heights 0 & -1 are reserved for unconfirmed txs.
                         Ok(height) if height > 0 => {
-                            self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                            pending_anchors.push((res.tx_hash, height));
                         }
                         _ => {
                             tx_update.seen_ats.insert((res.tx_hash, start_time));
@@ -345,7 +363,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     }
                 }
 
-                if !has_spending && res.tx_hash != op_txid {
+                if !has_spending && res.tx_hash != outpoint.txid {
                     let res_tx = self.fetch_tx(res.tx_hash)?;
                     // we exclude txs/anchors that do not spend our specified outpoint(s)
                     has_spending = res_tx
@@ -359,7 +377,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     match res.height.try_into() {
                         // Returned heights 0 & -1 are reserved for unconfirmed txs.
                         Ok(height) if height > 0 => {
-                            self.validate_merkle_for_anchor(tx_update, res.tx_hash, height)?;
+                            pending_anchors.push((res.tx_hash, height));
                         }
                         _ => {
                             tx_update.seen_ats.insert((res.tx_hash, start_time));
@@ -368,6 +386,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 }
             }
         }
+
         Ok(())
     }
 
@@ -377,86 +396,174 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
+        pending_anchors: &mut Vec<(Txid, usize)>,
     ) -> Result<(), Error> {
+        let mut txs = Vec::<(Txid, Arc<Transaction>)>::new();
+        let mut scripts = Vec::new();
         for txid in txids {
-            let tx = match self.fetch_tx(txid) {
-                Ok(tx) => tx,
-                Err(electrum_client::Error::Protocol(_)) => continue,
-                Err(other_err) => return Err(other_err),
-            };
+            match self.fetch_tx(txid) {
+                Ok(tx) => {
+                    let spk = tx
+                        .output
+                        .first()
+                        .map(|txo| &txo.script_pubkey)
+                        .expect("tx must have an output")
+                        .clone();
+                    txs.push((tx.compute_txid(), tx));
+                    scripts.push(spk);
+                }
+                Err(electrum_client::Error::Protocol(_)) => {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
 
-            let spk = tx
-                .output
-                .first()
-                .map(|txo| &txo.script_pubkey)
-                .expect("tx must have an output");
+        // because of restrictions of the Electrum API, we have to use the `script_get_history`
+        // call to get confirmation status of our transaction
+        let spk_histories = self
+            .inner
+            .batch_script_get_history(scripts.iter().map(|spk| spk.as_script()))?;
 
-            // because of restrictions of the Electrum API, we have to use the `script_get_history`
-            // call to get confirmation status of our transaction
-            if let Some(r) = self
-                .inner
-                .script_get_history(spk)?
-                .into_iter()
-                .find(|r| r.tx_hash == txid)
-            {
-                match r.height.try_into() {
+        for (tx, spk_history) in txs.into_iter().zip(spk_histories) {
+            if let Some(res) = spk_history.into_iter().find(|res| res.tx_hash == tx.0) {
+                match res.height.try_into() {
                     // Returned heights 0 & -1 are reserved for unconfirmed txs.
                     Ok(height) if height > 0 => {
-                        self.validate_merkle_for_anchor(tx_update, txid, height)?;
+                        pending_anchors.push((tx.0, height));
                     }
                     _ => {
-                        tx_update.seen_ats.insert((r.tx_hash, start_time));
+                        tx_update.seen_ats.insert((res.tx_hash, start_time));
                     }
                 }
             }
 
-            tx_update.txs.push(tx);
+            tx_update.txs.push(tx.1);
         }
+
         Ok(())
     }
 
-    // Helper function which checks if a transaction is confirmed by validating the merkle proof.
-    // An anchor is inserted if the transaction is validated to be in a confirmed block.
-    fn validate_merkle_for_anchor(
+    /// Batch validate Merkle proofs, cache each confirmation anchor, and return them.
+    fn batch_fetch_anchors(
+        &self,
+        txs_with_heights: &[(Txid, usize)],
+    ) -> Result<Vec<(Txid, ConfirmationBlockTime)>, Error> {
+        let mut results = Vec::with_capacity(txs_with_heights.len());
+        let mut to_fetch = Vec::new();
+
+        // Figure out which block heights we need headers for.
+        let mut needed_heights: Vec<u32> =
+            txs_with_heights.iter().map(|&(_, h)| h as u32).collect();
+        needed_heights.sort_unstable();
+        needed_heights.dedup();
+
+        let mut height_to_hash = HashMap::with_capacity(needed_heights.len());
+
+        // Collect headers of missing heights, and build `height_to_hash` map.
+        {
+            let mut cache = self.block_header_cache.lock().unwrap();
+
+            let mut missing_heights = Vec::new();
+            for &height in &needed_heights {
+                if let Some(header) = cache.get(&height) {
+                    height_to_hash.insert(height, header.block_hash());
+                } else {
+                    missing_heights.push(height);
+                }
+            }
+
+            if !missing_heights.is_empty() {
+                let headers = self.inner.batch_block_header(missing_heights.clone())?;
+                for (height, header) in missing_heights.into_iter().zip(headers) {
+                    height_to_hash.insert(height, header.block_hash());
+                    cache.insert(height, header);
+                }
+            }
+        }
+
+        // Check our anchor cache and queue up any proofs we still need.
+        {
+            let anchor_cache = self.anchor_cache.lock().unwrap();
+            for &(txid, height) in txs_with_heights {
+                let h = height as u32;
+                let hash = height_to_hash[&h];
+                if let Some(anchor) = anchor_cache.get(&(txid, hash)) {
+                    results.push((txid, *anchor));
+                } else {
+                    to_fetch.push((txid, height, hash));
+                }
+            }
+        }
+
+        // Batch all get_merkle calls.
+        let mut batch = electrum_client::Batch::default();
+        for &(txid, height, _) in &to_fetch {
+            batch.raw(
+                "blockchain.transaction.get_merkle".into(),
+                vec![
+                    electrum_client::Param::String(format!("{:x}", txid)),
+                    electrum_client::Param::Usize(height),
+                ],
+            );
+        }
+        let resps = self.inner.batch_call(&batch)?;
+
+        // Validate each proof, retrying once for each stale header.
+        for ((txid, height, hash), resp) in to_fetch.into_iter().zip(resps.into_iter()) {
+            let proof: electrum_client::GetMerkleRes = serde_json::from_value(resp)?;
+
+            let mut header = {
+                let cache = self.block_header_cache.lock().unwrap();
+                cache[&(height as u32)]
+            };
+            let mut valid =
+                electrum_client::utils::validate_merkle_proof(&txid, &header.merkle_root, &proof);
+            if !valid {
+                let new_header = self.inner.block_header(height)?;
+                self.block_header_cache
+                    .lock()
+                    .unwrap()
+                    .insert(height as u32, new_header);
+                header = new_header;
+                valid = electrum_client::utils::validate_merkle_proof(
+                    &txid,
+                    &header.merkle_root,
+                    &proof,
+                );
+            }
+
+            // Build and cache the anchor if merkle proof is valid.
+            if valid {
+                let anchor = ConfirmationBlockTime {
+                    confirmation_time: header.time as u64,
+                    block_id: BlockId {
+                        height: height as u32,
+                        hash: header.block_hash(),
+                    },
+                };
+                self.anchor_cache
+                    .lock()
+                    .unwrap()
+                    .insert((txid, hash), anchor);
+                results.push((txid, anchor));
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Validate a single transaction’s Merkle proof, cache its confirmation anchor, and update.
+    #[allow(dead_code)]
+    fn validate_anchor_for_update(
         &self,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txid: Txid,
         confirmation_height: usize,
     ) -> Result<(), Error> {
-        if let Ok(merkle_res) = self
-            .inner
-            .transaction_get_merkle(&txid, confirmation_height)
-        {
-            let mut header = self.fetch_header(merkle_res.block_height as u32)?;
-            let mut is_confirmed_tx = electrum_client::utils::validate_merkle_proof(
-                &txid,
-                &header.merkle_root,
-                &merkle_res,
-            );
-
-            // Merkle validation will fail if the header in `block_header_cache` is outdated, so we
-            // want to check if there is a new header and validate against the new one.
-            if !is_confirmed_tx {
-                header = self.update_header(merkle_res.block_height as u32)?;
-                is_confirmed_tx = electrum_client::utils::validate_merkle_proof(
-                    &txid,
-                    &header.merkle_root,
-                    &merkle_res,
-                );
-            }
-
-            if is_confirmed_tx {
-                tx_update.anchors.insert((
-                    ConfirmationBlockTime {
-                        confirmation_time: header.time as u64,
-                        block_id: BlockId {
-                            height: merkle_res.block_height as u32,
-                            hash: header.block_hash(),
-                        },
-                    },
-                    txid,
-                ));
-            }
+        let anchors = self.batch_fetch_anchors(&[(txid, confirmation_height)])?;
+        for (txid, anchor) in anchors {
+            tx_update.anchors.insert((anchor, txid));
         }
         Ok(())
     }
