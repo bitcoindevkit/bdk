@@ -20,7 +20,7 @@ of the PR were done in a specific way -->
 
 * [ ] I've signed all my commits
 * [ ] I followed the [contribution guidelines](https://github.com/bitcoindevkit/bdk/blob/master/CONTRIBUTING.md)
-* [ ] I ran `cargo +nightly fmt` and `cargo clippy` before committing
+* [ ] I ran `just p` before pushing
 
 #### New Features:
 
