@@ -385,11 +385,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 Err(other_err) => return Err(other_err),
             };
 
-            let spk = tx
-                .output
-                .first()
-                .map(|txo| &txo.script_pubkey)
-                .expect("tx must have an output");
+            let Some(spk) = tx.output.first().map(|txo| &txo.script_pubkey) else {
+                continue;
+            };
 
             // because of restrictions of the Electrum API, we have to use the `script_get_history`
             // call to get confirmation status of our transaction
@@ -475,8 +473,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     let outpoint = vin.previous_output;
                     let vout = outpoint.vout;
                     let prev_tx = self.fetch_tx(outpoint.txid)?;
-                    let txout = prev_tx.output[vout as usize].clone();
-                    let _ = tx_update.txouts.insert(outpoint, txout);
+                    // Only insert txout if it exists. This avoids panicking on malformed or
+                    // incomplete transactions.
+                    if let Some(txout) = prev_tx.output.get(vout as usize) {
+                        let _ = tx_update.txouts.insert(outpoint, txout.clone());
+                    }
                 }
             }
         }
@@ -548,11 +549,11 @@ fn fetch_tip_and_latest_blocks(
         })
         .fold(agreement_cp, |prev_cp, block| {
             Some(match prev_cp {
-                Some(cp) => cp.push(block).expect("must extend checkpoint"),
+                Some(cp) => cp.push(block).ok()?,
                 None => CheckPoint::new(block),
             })
         })
-        .expect("must have at least one checkpoint");
+        .ok_or_else(|| Error::Message("failed to construct new checkpoint tip".to_string()))?;
 
     Ok((new_tip, new_blocks))
 }
