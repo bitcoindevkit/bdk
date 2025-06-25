@@ -68,6 +68,12 @@ The following BDK crates maintains a MSRV of 1.63.0. To build these crates with 
 
 The MSRV of the `bdk_electrum` crate is 1.75.0.
 
+## Just
+
+This project has a [`justfile`](/justfile) for easy command running. You must have [`just`](https://github.com/casey/just) installed.
+
+To see a list of available recipes: `just`
+
 ## License
 
 Licensed under either of
