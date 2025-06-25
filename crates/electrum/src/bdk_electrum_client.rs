@@ -579,8 +579,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     let outpoint = vin.previous_output;
                     let vout = outpoint.vout;
                     let prev_tx = self.fetch_tx(outpoint.txid)?;
-                    let txout = prev_tx.output[vout as usize].clone();
-                    let _ = tx_update.txouts.insert(outpoint, txout);
+                    // Ensure server returns the expected txout.
+                    let txout = prev_tx
+                        .output
+                        .get(vout as usize)
+                        .ok_or_else(|| {
+                            electrum_client::Error::Message(format!(
+                                "prevout {outpoint} does not exist"
+                            ))
+                        })?
+                        .clone();
+                    tx_update.txouts.insert(outpoint, txout);
                 }
             }
         }
@@ -652,11 +661,11 @@ fn fetch_tip_and_latest_blocks(
         })
         .fold(agreement_cp, |prev_cp, block| {
             Some(match prev_cp {
-                Some(cp) => cp.push(block).expect("must extend checkpoint"),
+                Some(cp) => cp.push(block).ok()?,
                 None => CheckPoint::new(block),
             })
         })
-        .expect("must have at least one checkpoint");
+        .ok_or_else(|| Error::Message("failed to construct new checkpoint tip".to_string()))?;
 
     Ok((new_tip, new_blocks))
 }
