@@ -15,10 +15,12 @@ workspace = true
 [dependencies]
 bdk_core = { path = "../core", version = "0.6.0" }
 electrum-client = { version = "0.23.1", features = [ "proxy" ], default-features = false }
+serde_json = "1.0"
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv" }
 bdk_chain = { path = "../chain" }
+criterion = { version = "0.2" }
 
 [features]
 default = ["use-rustls"]
@@ -29,3 +31,7 @@ use-openssl = ["electrum-client/use-openssl"]
 [[test]]
 name = "test_electrum"
 required-features = ["use-rustls"]
+
+[[bench]]
+name = "test_sync"
+harness = false
