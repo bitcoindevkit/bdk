@@ -134,6 +134,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use crate::{
         bitcoin::secp256k1::Secp256k1,

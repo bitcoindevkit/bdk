@@ -550,6 +550,7 @@ where
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use std::{collections::BTreeSet, time::Duration};
 

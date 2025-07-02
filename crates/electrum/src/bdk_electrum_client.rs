@@ -685,6 +685,7 @@ fn chain_update(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use crate::{bdk_electrum_client::TxUpdate, BdkElectrumClient};
     use bdk_chain::bitcoin::{OutPoint, Transaction, TxIn};

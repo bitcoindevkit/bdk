@@ -7,6 +7,7 @@
 //! To only get block updates (exclude mempool transactions), the caller can use
 //! [`Emitter::next_block`] until it returns `Ok(None)` (which means the chain tip is reached). A
 //! separate method, [`Emitter::mempool`] can be used to emit the whole mempool.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![warn(missing_docs)]
 
 use bdk_core::{BlockId, CheckPoint};
@@ -444,6 +445,7 @@ impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use crate::{bitcoincore_rpc::RpcApi, Emitter, NO_EXPECTED_MEMPOOL_TXIDS};
     use bdk_chain::local_chain::LocalChain;
