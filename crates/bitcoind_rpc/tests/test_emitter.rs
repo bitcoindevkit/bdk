@@ -11,7 +11,7 @@ use bdk_chain::{
     Balance, BlockId, CanonicalizationParams, IndexedTxGraph, Merge,
 };
 use bdk_testenv::{anyhow, TestEnv};
-use bitcoin::{hashes::Hash, Block, OutPoint, ScriptBuf, WScriptHash};
+use bitcoin::{hashes::Hash, Block, Network, OutPoint, ScriptBuf, WScriptHash};
 use bitcoincore_rpc::RpcApi;
 
 /// Ensure that blocks are emitted in order even after reorg.
@@ -351,7 +351,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         .get_new_address(None, None)?
         .assume_checked();
     let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
-    let addr_to_track = Address::from_script(&spk_to_track, bitcoin::Network::Regtest)?;
+    let addr_to_track = Address::from_script(&spk_to_track, Network::Regtest)?;
 
     // setup receiver
     let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
@@ -864,6 +864,40 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
         .collect::<Vec<_>>();
     // tx1 should no longer be canonical.
     assert!(!canonical_txids.contains(&txid_1));
+
+    Ok(())
+}
+
+#[test]
+fn detect_new_mempool_txs() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    env.mine_blocks(101, None)?;
+
+    let addr = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .require_network(Network::Regtest)?;
+
+    let mut emitter = Emitter::new(
+        env.rpc_client(),
+        CheckPoint::new(BlockId {
+            height: 0,
+            hash: env.rpc_client().get_block_hash(0)?,
+        }),
+        0,
+        NO_EXPECTED_MEMPOOL_TXIDS,
+    );
+
+    while let Some(_) = emitter.next_block()? {}
+
+    for n in 0..5 {
+        let txid = env.send(&addr, Amount::ONE_BTC)?;
+        let new_txs = emitter.mempool()?.new_txs;
+        assert!(
+            new_txs.iter().any(|(tx, _)| tx.compute_txid() == txid),
+            "must detect new tx {n}"
+        );
+    }
 
     Ok(())
 }
