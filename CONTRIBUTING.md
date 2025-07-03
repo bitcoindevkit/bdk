@@ -55,7 +55,7 @@ To facilitate communication with other contributors, the project is making use
 of GitHub's "assignee" field. First check that no one is assigned and then
 comment suggesting that you're working on it. If someone is already assigned,
 don't hesitate to ask if the assigned party or previous commenter are still
-working on it if it has been awhile.
+working on it if it has been a while.
 
 Deprecation policy
 ------------------
@@ -87,7 +87,7 @@ Coding Conventions
 ------------------
 
 This codebase uses spaces, not tabs.
-Use `cargo fmt` with the default settings to format code before committing.
+Run `just check` to check formatting, linting, compilation and commit signing, `just fmt` to format code before commiting, and `just test` to run tests for all crates.
 This is also enforced by the CI.
 All public items must be documented. We adhere to the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/about.html) with respect to documentation.
 
@@ -105,6 +105,10 @@ Note that BDK is currently considered "pre-production" during this time, there
 is no special handling of security issues. Please simply open an issue on
 Github.
 
+BDK requires all commits to be signed using PGP. Refer to
+[this guide](https://git-scm.com/book/en/v2/Git-Tools-Signing-Your-Work)
+if you don't have a PGP key set up with `git` yet.
+
 Testing
 -------
 
@@ -117,16 +121,16 @@ effort.
 First Time Contributors
 -----------------------
 
-If it is your first time contributing to the BDK family of libraries, welcome! We're glad to have you with us. If your 
-first (or few first) PRs are focused on very small fixes to documentation, however, they might not meet our threshold 
+If it is your first time contributing to the BDK family of libraries, welcome! We're glad to have you with us. If your
+first (or few first) PRs are focused on very small fixes to documentation, however, they might not meet our threshold
 for acceptance for first time contributors.
 
-Minor grammar and punctuation fixes aren't a good way to start contributing to a project, and instead we suggest you 
-start with something a little more substantial. It's better to find an issue where you can demonstrate some knowledge 
-of bitcoin or the code base, such as improving the substance of documentation, testing, or fixing some small issue 
+Minor grammar and punctuation fixes aren't a good way to start contributing to a project, and instead we suggest you
+start with something a little more substantial. It's better to find an issue where you can demonstrate some knowledge
+of bitcoin or the code base, such as improving the substance of documentation, testing, or fixing some small issue
 even if it's considered low priority.
 
-This being said we are always looking forward to working with new folks interested in contributing to our libraries. 
+This being said we are always looking forward to working with new folks interested in contributing to our libraries.
 If you are looking for issues to work on, check out the good first issue label and join our Discord server!
 
 Going further
