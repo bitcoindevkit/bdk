@@ -217,7 +217,7 @@ fn main() -> anyhow::Result<()> {
             let graph_changeset = graph
                 .lock()
                 .unwrap()
-                .batch_insert_relevant_unconfirmed(mempool_txs.new_txs);
+                .batch_insert_relevant_unconfirmed(mempool_txs.update);
             {
                 let db = &mut *db.lock().unwrap();
                 db_stage.merge(ChangeSet {
@@ -315,10 +315,9 @@ fn main() -> anyhow::Result<()> {
                     }
                     Emission::Mempool(mempool_txs) => {
                         let mut graph_changeset =
-                            graph.batch_insert_relevant_unconfirmed(mempool_txs.new_txs.clone());
-                        graph_changeset.merge(
-                            graph.batch_insert_relevant_evicted_at(mempool_txs.evicted_ats()),
-                        );
+                            graph.batch_insert_relevant_unconfirmed(mempool_txs.update.clone());
+                        graph_changeset
+                            .merge(graph.batch_insert_relevant_evicted_at(mempool_txs.evicted));
                         (local_chain::ChangeSet::default(), graph_changeset)
                     }
                     Emission::Tip(h) => {

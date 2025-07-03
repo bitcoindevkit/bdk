@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
-    ops::Deref,
-};
+use std::{collections::BTreeSet, ops::Deref};
 
 use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXIDS};
 use bdk_chain::{
@@ -197,7 +194,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         assert!(emitter.next_block()?.is_none());
 
         let mempool_txs = emitter.mempool()?;
-        let indexed_additions = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs.new_txs);
+        let indexed_additions = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs.update);
         assert_eq!(
             indexed_additions
                 .tx_graph
@@ -449,10 +446,28 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
         .map(|_| env.send(&addr, Amount::from_sat(2100)))
         .collect::<Result<BTreeSet<Txid>, _>>()?;
 
-    // the first emission should include all transactions
+    // First two emissions should include all transactions.
+    for _ in 0..2 {
+        let emitted_txids = emitter
+            .mempool()?
+            .update
+            .into_iter()
+            .map(|(tx, _)| tx.compute_txid())
+            .collect::<BTreeSet<Txid>>();
+        assert_eq!(
+            emitted_txids, exp_txids,
+            "all mempool txs should be emitted"
+        );
+    }
+
+    // mine empty blocks + sync up our emitter -> we should still not re-emit
+    for _ in 0..BLOCKS_TO_MINE {
+        env.mine_empty_block()?;
+    }
+    while emitter.next_block()?.is_some() {}
     let emitted_txids = emitter
         .mempool()?
-        .new_txs
+        .update
         .into_iter()
         .map(|(tx, _)| tx.compute_txid())
         .collect::<BTreeSet<Txid>>();
@@ -460,238 +475,6 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
         emitted_txids, exp_txids,
         "all mempool txs should be emitted"
     );
-
-    // second emission should be empty
-    assert!(
-        emitter.mempool()?.new_txs.is_empty(),
-        "second emission should be empty"
-    );
-
-    // mine empty blocks + sync up our emitter -> we should still not re-emit
-    for _ in 0..BLOCKS_TO_MINE {
-        env.mine_empty_block()?;
-    }
-    while emitter.next_block()?.is_some() {}
-    assert!(
-        emitter.mempool()?.new_txs.is_empty(),
-        "third emission, after chain tip is extended, should also be empty"
-    );
-
-    Ok(())
-}
-
-/// Ensure mempool tx is still re-emitted if [`Emitter`] has not reached the tx's introduction
-/// height.
-///
-/// We introduce a mempool tx after each block, where blocks are empty (does not confirm previous
-/// mempool txs). Then we emit blocks from [`Emitter`] (intertwining `mempool` calls). We check
-/// that `mempool` should always re-emit txs that have introduced at a height greater than the last
-/// emitted block height.
-#[test]
-fn mempool_re_emits_if_tx_introduction_height_not_reached() -> anyhow::Result<()> {
-    const PREMINE_COUNT: usize = 101;
-    const MEMPOOL_TX_COUNT: usize = 21;
-
-    let env = TestEnv::new()?;
-    let mut emitter = Emitter::new(
-        env.rpc_client(),
-        CheckPoint::new(BlockId {
-            height: 0,
-            hash: env.rpc_client().get_block_hash(0)?,
-        }),
-        0,
-        NO_EXPECTED_MEMPOOL_TXIDS,
-    );
-
-    // mine blocks to get initial balance, sync emitter up to tip
-    let addr = env
-        .rpc_client()
-        .get_new_address(None, None)?
-        .assume_checked();
-    env.mine_blocks(PREMINE_COUNT, Some(addr.clone()))?;
-    while emitter.next_block()?.is_some() {}
-
-    // mine blocks to introduce txs to mempool at different heights
-    let tx_introductions = (0..MEMPOOL_TX_COUNT)
-        .map(|_| -> anyhow::Result<_> {
-            let (height, _) = env.mine_empty_block()?;
-            let txid = env.send(&addr, Amount::from_sat(2100))?;
-            Ok((height, txid))
-        })
-        .collect::<anyhow::Result<BTreeSet<_>>>()?;
-
-    assert_eq!(
-        emitter
-            .mempool()?
-            .new_txs
-            .into_iter()
-            .map(|(tx, _)| tx.compute_txid())
-            .collect::<BTreeSet<_>>(),
-        tx_introductions.iter().map(|&(_, txid)| txid).collect(),
-        "first mempool emission should include all txs",
-    );
-    assert_eq!(
-        emitter
-            .mempool()?
-            .new_txs
-            .into_iter()
-            .map(|(tx, _)| tx.compute_txid())
-            .collect::<BTreeSet<_>>(),
-        tx_introductions.iter().map(|&(_, txid)| txid).collect(),
-        "second mempool emission should still include all txs",
-    );
-
-    // At this point, the emitter has seen all mempool transactions. It should only re-emit those
-    // that have introduction heights less than the emitter's last-emitted block tip.
-    while let Some(emission) = emitter.next_block()? {
-        let height = emission.block_height();
-        // We call `mempool()` twice.
-        // The second call (at height `h`) should skip the tx introduced at height `h`.
-        for try_index in 0..2 {
-            let exp_txids = tx_introductions
-                .range((height as usize + try_index, Txid::all_zeros())..)
-                .map(|&(_, txid)| txid)
-                .collect::<BTreeSet<_>>();
-            let emitted_txids = emitter
-                .mempool()?
-                .new_txs
-                .into_iter()
-                .map(|(tx, _)| tx.compute_txid())
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                emitted_txids, exp_txids,
-                "\n emission {} (try {}) must only contain txs introduced at that height or lower: \n\t missing: {:?} \n\t extra: {:?}",
-                height,
-                try_index,
-                exp_txids
-                    .difference(&emitted_txids)
-                    .map(|txid| (txid, tx_introductions.iter().find_map(|(h, id)| if id == txid { Some(h) } else { None }).unwrap()))
-                    .collect::<Vec<_>>(),
-                emitted_txids
-                    .difference(&exp_txids)
-                    .map(|txid| (txid, tx_introductions.iter().find_map(|(h, id)| if id == txid { Some(h) } else { None }).unwrap()))
-                    .collect::<Vec<_>>(),
-            );
-        }
-    }
-
-    Ok(())
-}
-
-/// Ensure we force re-emit all mempool txs after reorg.
-#[test]
-fn mempool_during_reorg() -> anyhow::Result<()> {
-    const TIP_DIFF: usize = 10;
-    const PREMINE_COUNT: usize = 101;
-
-    let env = TestEnv::new()?;
-    let mut emitter = Emitter::new(
-        env.rpc_client(),
-        CheckPoint::new(BlockId {
-            height: 0,
-            hash: env.rpc_client().get_block_hash(0)?,
-        }),
-        0,
-        NO_EXPECTED_MEMPOOL_TXIDS,
-    );
-
-    // mine blocks to get initial balance
-    let addr = env
-        .rpc_client()
-        .get_new_address(None, None)?
-        .assume_checked();
-    env.mine_blocks(PREMINE_COUNT, Some(addr.clone()))?;
-
-    // introduce mempool tx at each block extension
-    for _ in 0..TIP_DIFF {
-        env.mine_empty_block()?;
-        env.send(&addr, Amount::from_sat(2100))?;
-    }
-
-    // sync emitter to tip, first mempool emission should include all txs (as we haven't emitted
-    // from the mempool yet)
-    while emitter.next_block()?.is_some() {}
-    assert_eq!(
-        emitter
-            .mempool()?
-            .new_txs
-            .into_iter()
-            .map(|(tx, _)| tx.compute_txid())
-            .collect::<BTreeSet<_>>(),
-        env.rpc_client()
-            .get_raw_mempool()?
-            .into_iter()
-            .collect::<BTreeSet<_>>(),
-        "first mempool emission should include all txs",
-    );
-
-    // perform reorgs at different heights, these reorgs will not confirm transactions in the
-    // mempool
-    for reorg_count in 1..TIP_DIFF {
-        env.reorg_empty_blocks(reorg_count)?;
-
-        // This is a map of mempool txids to tip height where the tx was introduced to the mempool
-        // we recalculate this at every loop as reorgs may evict transactions from mempool. We use
-        // the introduction height to determine whether we expect a tx to appear in a mempool
-        // emission.
-        // TODO: How can have have reorg logic in `TestEnv` NOT blacklast old blocks first?
-        let tx_introductions = dbg!(env
-            .rpc_client()
-            .get_raw_mempool_verbose()?
-            .into_iter()
-            .map(|(txid, entry)| (txid, entry.height as usize))
-            .collect::<BTreeMap<_, _>>());
-
-        // `next_header` emits the replacement block of the reorg
-        if let Some(emission) = emitter.next_block()? {
-            let height = emission.block_height();
-
-            // the mempool emission (that follows the first block emission after reorg) should only
-            // include mempool txs introduced at reorg height or greater
-            let mempool = emitter
-                .mempool()?
-                .new_txs
-                .into_iter()
-                .map(|(tx, _)| tx.compute_txid())
-                .collect::<BTreeSet<_>>();
-            let exp_mempool = tx_introductions
-                .iter()
-                .filter(|(_, &intro_h)| intro_h >= (height as usize))
-                .map(|(&txid, _)| txid)
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                mempool, exp_mempool,
-                "the first mempool emission after reorg should only include mempool txs introduced at reorg height or greater"
-            );
-
-            let mempool = emitter
-                .mempool()?
-                .new_txs
-                .into_iter()
-                .map(|(tx, _)| tx.compute_txid())
-                .collect::<BTreeSet<_>>();
-            let exp_mempool = tx_introductions
-                .iter()
-                .filter(|&(_, &intro_height)| intro_height > (height as usize))
-                .map(|(&txid, _)| txid)
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                mempool, exp_mempool,
-                "following mempool emissions after reorg should exclude mempool introduction heights <= last emitted block height: \n\t missing: {:?} \n\t extra: {:?}",
-                exp_mempool
-                    .difference(&mempool)
-                    .map(|txid| (txid, tx_introductions.get(txid).unwrap()))
-                    .collect::<Vec<_>>(),
-                mempool
-                    .difference(&exp_mempool)
-                    .map(|txid| (txid, tx_introductions.get(txid).unwrap()))
-                    .collect::<Vec<_>>(),
-            );
-        }
-
-        // sync emitter to tip
-        while emitter.next_block()?.is_some() {}
-    }
 
     Ok(())
 }
@@ -803,14 +586,18 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
         &Address::from_script(&spk, Network::Regtest)?,
         Amount::ONE_BTC,
     )?;
+    let tx_1 = env
+        .rpc_client()
+        .get_transaction(&txid_1, None)?
+        .transaction()?;
 
-    let mut emitter = Emitter::new(env.rpc_client(), chain.tip(), 1, HashSet::from([txid_1]));
+    let mut emitter = Emitter::new(env.rpc_client(), chain.tip(), 1, core::iter::once(tx_1));
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
         chain.apply_update(CheckPoint::from_header(&emission.block.header, height))?;
     }
 
-    let changeset = graph.batch_insert_unconfirmed(emitter.mempool()?.new_txs);
+    let changeset = graph.batch_insert_unconfirmed(emitter.mempool()?.update);
     assert!(changeset
         .tx_graph
         .txs
@@ -852,10 +639,13 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
 
     // Check that mempool emission contains evicted txid.
     let mempool_event = emitter.mempool()?;
-    assert!(mempool_event.evicted_txids.contains(&txid_1));
+    assert!(mempool_event
+        .evicted
+        .iter()
+        .any(|(txid, _)| txid == &txid_1));
 
     // Update graph with evicted tx.
-    let _ = graph.batch_insert_relevant_evicted_at(mempool_event.evicted_ats());
+    let _ = graph.batch_insert_relevant_evicted_at(mempool_event.evicted);
 
     let canonical_txids = graph
         .graph()
@@ -888,11 +678,11 @@ fn detect_new_mempool_txs() -> anyhow::Result<()> {
         NO_EXPECTED_MEMPOOL_TXIDS,
     );
 
-    while let Some(_) = emitter.next_block()? {}
+    while emitter.next_block()?.is_some() {}
 
     for n in 0..5 {
         let txid = env.send(&addr, Amount::ONE_BTC)?;
-        let new_txs = emitter.mempool()?.new_txs;
+        let new_txs = emitter.mempool()?.update;
         assert!(
             new_txs.iter().any(|(tx, _)| tx.compute_txid() == txid),
             "must detect new tx {n}"
