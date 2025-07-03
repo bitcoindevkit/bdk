@@ -40,3 +40,7 @@ rusqlite = ["std", "dep:rusqlite", "serde"]
 [[bench]]
 name = "canonicalization"
 harness = false
+
+[[bench]]
+name = "indexer"
+harness = false

@@ -112,7 +112,7 @@ where
     ///
     /// let (graph, reindex_cs) =
     ///     IndexedTxGraph::from_changeset(persisted_changeset, move |idx_cs| -> anyhow::Result<_> {
-    ///         // e.g. KeychainTxOutIndex needs descriptors that weren’t in its CS
+    ///         // e.g. KeychainTxOutIndex needs descriptors that weren’t in its change set.
     ///         let mut idx = KeychainTxOutIndex::from_changeset(DEFAULT_LOOKAHEAD, true, idx_cs);
     ///         if let Some(desc) = persisted_desc {
     ///             idx.insert_descriptor("external", desc)?;
