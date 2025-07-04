@@ -826,7 +826,7 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
 
             let chain = Mutex::new({
                 let (mut chain, _) =
-                    LocalChain::from_genesis_hash(constants::genesis_block(network).block_hash());
+                    LocalChain::from_genesis(constants::genesis_block(network).block_hash());
                 chain.apply_changeset(&changeset.local_chain)?;
                 chain
             });
@@ -896,7 +896,7 @@ where
 
         // create new
         let (_, chain_changeset) =
-            LocalChain::from_genesis_hash(constants::genesis_block(network).block_hash());
+            LocalChain::from_genesis(constants::genesis_block(network).block_hash());
         changeset.network = Some(network);
         changeset.local_chain = chain_changeset;
         let mut db = Store::<ChangeSet>::create(db_magic, db_path)?;
