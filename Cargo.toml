@@ -20,3 +20,7 @@ authors = ["Bitcoin Dev Kit Developers"]
 [workspace.lints.clippy]
 print_stdout = "deny"
 print_stderr = "deny"
+
+# FIXME: should be removed once the new API lands in electrum-client and a new release is done.
+[patch.crates-io]
+electrum-client = { git = "https://github.com/oleonardolima/rust-electrum-client.git", branch = "feat/add-batch-transaction-get-merkle" }
