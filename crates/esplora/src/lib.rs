@@ -19,6 +19,7 @@
 //! Just like how [`EsploraExt`] extends the functionality of an
 //! [`esplora_client::BlockingClient`], [`EsploraAsyncExt`] is the async version which extends
 //! [`esplora_client::AsyncClient`].
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use bdk_core::bitcoin::{Amount, OutPoint, TxOut, Txid};
 use bdk_core::{BlockId, ConfirmationBlockTime, TxUpdate};
