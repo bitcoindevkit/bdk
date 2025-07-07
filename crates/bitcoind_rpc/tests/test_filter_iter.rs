@@ -1,5 +1,6 @@
 use bdk_bitcoind_rpc::bip158::{Event, EventInner, FilterIter};
 use bdk_core::{BlockId, CheckPoint};
+use bdk_testenv::bitcoincore_rpc::bitcoincore_rpc_json::CreateRawTransactionInput;
 use bdk_testenv::{anyhow, bitcoind, block_id, TestEnv};
 use bitcoin::{constants, Address, Amount, Network, ScriptBuf};
 use bitcoincore_rpc::RpcApi;
@@ -198,7 +199,6 @@ fn filter_iter_handles_reorg() -> anyhow::Result<()> {
     // later by a reorg.
     let unspent = client.list_unspent(None, None, None, None, None)?;
     assert!(unspent.len() >= 2);
-    use bdk_testenv::bitcoincore_rpc::bitcoincore_rpc_json::CreateRawTransactionInput;
     let unspent_1 = &unspent[0];
     let unspent_2 = &unspent[1];
     let utxo_1 = CreateRawTransactionInput {
@@ -267,8 +267,12 @@ fn filter_iter_handles_reorg() -> anyhow::Result<()> {
     // 5. Instantiate FilterIter at start height 104
     println!("STEP: Instantiating FilterIter");
     // Start processing from height 104
-    let start_height = 104;
-    let mut iter = FilterIter::new_with_height(client, start_height);
+    let checkpoint = CheckPoint::from_block_ids([BlockId {
+        height: 103,
+        hash: client.get_block_hash(103)?,
+    }])
+    .unwrap();
+    let mut iter = FilterIter::new_with_checkpoint(client, checkpoint);
     iter.add_spk(spk_to_watch.clone());
     let initial_tip = iter.get_tip()?.expect("Should get initial tip");
     assert_eq!(initial_tip.height, 105);
@@ -277,14 +281,13 @@ fn filter_iter_handles_reorg() -> anyhow::Result<()> {
     // 6. Iterate once processing block A
     println!("STEP: Iterating once (original block A)");
     let event_a = iter.next().expect("Iterator should have item A")?;
-    // println!("First event: {:?}", event_a);
     match event_a {
         Event::Block(EventInner { height, block }) => {
             assert_eq!(height, 104);
             assert_eq!(block.block_hash(), hash_104);
             assert!(block.txdata.iter().any(|tx| tx.compute_txid() == txid_a));
         }
-        _ => panic!("Expected relevant tx at block A 102"),
+        _ => panic!("Expected relevant tx at block A 104"),
     }
 
     // 7. Simulate Reorg (Invalidate blocks B and A)
@@ -388,12 +391,166 @@ fn filter_iter_handles_reorg() -> anyhow::Result<()> {
     }
 
     // Check chain update tip
-    // println!("STEP: Checking chain_update");
-    let final_update = iter.chain_update();
-    assert!(
-        final_update.is_none(),
-        "We didn't instantiate FilterIter with a checkpoint"
+    let final_update = iter.chain_update().expect("Should return a checkpoint");
+
+    let block_104 = final_update.get(104).expect("Expected block at height 104");
+    assert_eq!(
+        block_104.hash(),
+        hash_104_prime,
+        "Checkpoint should contain replacement block A′ at height 104"
     );
+
+    let block_105 = final_update.get(105).expect("Expected block at height 105");
+    assert_eq!(
+        block_105.hash(),
+        hash_105_prime,
+        "Checkpoint should contain replacement block B′ at height 105"
+    );
+
+    Ok(())
+}
+
+#[test]
+#[allow(clippy::print_stdout)]
+fn filter_iter_handles_reorg_between_next_calls() -> anyhow::Result<()> {
+    let env = testenv()?;
+    let client = env.rpc_client();
+
+    // 1. Initial setup & mining
+    println!("STEP: Initial mining (target height 102 for maturity)");
+    let expected_initial_height = 102;
+    while env.rpc_client().get_block_count()? < expected_initial_height {
+        let _ = env.mine_blocks(1, None)?;
+    }
+    assert_eq!(
+        client.get_block_count()?,
+        expected_initial_height,
+        "Block count should be {} after initial mine",
+        expected_initial_height
+    );
+
+    // 2. Create watched script
+    println!("STEP: Creating watched script");
+    let spk_to_watch = ScriptBuf::from_hex("0014446906a6560d8ad760db3156706e72e171f3a2aa")?;
+    let address = Address::from_script(&spk_to_watch, Network::Regtest)?;
+    println!("Watching SPK: {}", spk_to_watch.to_hex_string());
+
+    // 3. Create two transactions to be confirmed in consecutive blocks
+    println!("STEP: Creating transactions to send");
+    let unspent = client.list_unspent(None, None, None, None, None)?;
+    assert!(unspent.len() >= 2);
+    let (utxo_1, utxo_2) = (
+        CreateRawTransactionInput {
+            txid: unspent[0].txid,
+            vout: unspent[0].vout,
+            sequence: None,
+        },
+        CreateRawTransactionInput {
+            txid: unspent[1].txid,
+            vout: unspent[1].vout,
+            sequence: None,
+        },
+    );
+
+    let fee = Amount::from_sat(1000);
+    let to_send = Amount::from_sat(50_000);
+    let change_1 = (unspent[0].amount - to_send - fee).to_sat();
+    let change_2 = (unspent[1].amount - to_send - fee).to_sat();
+
+    let make_tx = |utxo, change_amt| {
+        let out = [
+            (address.to_string(), to_send),
+            (
+                client
+                    .get_new_address(None, None)?
+                    .assume_checked()
+                    .to_string(),
+                Amount::from_sat(change_amt),
+            ),
+        ]
+        .into();
+        let tx = client.create_raw_transaction(&[utxo], &out, None, None)?;
+        Ok::<_, anyhow::Error>(
+            client
+                .sign_raw_transaction_with_wallet(&tx, None, None)?
+                .transaction()?,
+        )
+    };
+
+    let tx_1 = make_tx(utxo_1, change_1)?;
+    let tx_2 = make_tx(utxo_2.clone(), change_2)?;
+
+    // 4. Mine up to height 103
+    println!("STEP: Mining to height 103");
+    while env.rpc_client().get_block_count()? < 103 {
+        let _ = env.mine_blocks(1, None)?;
+    }
+
+    // 5. Send tx1 and tx2, mine block A and block B
+    println!("STEP: Sending tx1 for block A");
+    let txid_a = client.send_raw_transaction(&tx_1)?;
+    let hash_104 = env.mine_blocks(1, None)?[0];
+
+    println!("STEP: Sending tx2 for block B");
+    let _txid_b = client.send_raw_transaction(&tx_2)?;
+    let hash_105 = env.mine_blocks(1, None)?[0];
+
+    // 6. Instantiate FilterIter and iterate once
+    println!("STEP: Instantiating FilterIter");
+    let mut iter = FilterIter::new_with_height(client, 104);
+    iter.add_spk(spk_to_watch.clone());
+    iter.get_tip()?;
+
+    println!("STEP: Iterating once (original block A)");
+    let event_a = iter.next().expect("Expected block A")?;
+    match event_a {
+        Event::Block(EventInner { height, block }) => {
+            assert_eq!(height, 104);
+            assert_eq!(block.block_hash(), hash_104);
+            assert!(block.txdata.iter().any(|tx| tx.compute_txid() == txid_a));
+        }
+        _ => panic!("Expected match in block A"),
+    }
+
+    // 7. Simulate reorg at height 105
+    println!("STEP: Invalidating original block B");
+    client.invalidate_block(&hash_105)?;
+
+    let unrelated_addr = client.get_new_address(None, None)?.assume_checked();
+    let input_amt = unspent[1].amount.to_sat();
+    let fee_sat = 2000;
+    let change_sat = input_amt - to_send.to_sat() - fee_sat;
+    assert!(change_sat > 500, "Change would be too small");
+
+    let change_addr = client.get_new_address(None, None)?.assume_checked();
+    let out = [
+        (unrelated_addr.to_string(), to_send),
+        (change_addr.to_string(), Amount::from_sat(change_sat)),
+    ]
+    .into();
+
+    let tx_ds = {
+        let tx = client.create_raw_transaction(&[utxo_2], &out, None, None)?;
+        let res = client.sign_raw_transaction_with_wallet(&tx, None, None)?;
+        res.transaction()?
+    };
+    client.send_raw_transaction(&tx_ds)?;
+
+    println!("STEP: Mining replacement block B'");
+    let _hash_105_prime = env.mine_blocks(1, None)?[0];
+    let new_tip = iter.get_tip()?.expect("Should have tip after reorg");
+    assert_eq!(new_tip.height, 105);
+    assert_ne!(new_tip.hash, hash_105, "BUG: still sees old block B");
+
+    // 8. Iterate again — should detect reorg and yield NoMatch for B'
+    println!("STEP: Iterating again (should detect reorg and yield B')");
+    let event_b_prime = iter.next().expect("Expected B'")?;
+    match event_b_prime {
+        Event::NoMatch(h) => {
+            assert_eq!(h, 105);
+        }
+        Event::Block(_) => panic!("Expected NoMatch for B' (replacement)"),
+    }
 
     Ok(())
 }
@@ -433,6 +590,73 @@ fn repeat_reorgs() -> anyhow::Result<()> {
     // If no reorg, then height should increment normally from here on
     assert_eq!(iter.next().unwrap()?.height(), MINE_TO);
     assert!(iter.next().is_none());
+
+    Ok(())
+}
+
+#[test]
+#[allow(clippy::print_stdout)]
+fn filter_iter_max_reorg_depth() -> anyhow::Result<()> {
+    use bdk_bitcoind_rpc::bip158::{Error, FilterIter};
+    use bdk_chain::{
+        bitcoin::{Address, Amount, Network, ScriptBuf},
+        BlockId, CheckPoint,
+    };
+
+    let env = testenv()?;
+    let client = env.rpc_client();
+
+    const BASE_HEIGHT: u32 = 110;
+    const REORG_LENGTH: u32 = 101;
+    const START_HEIGHT: u32 = BASE_HEIGHT + 1;
+    const FINAL_HEIGHT: u32 = START_HEIGHT + REORG_LENGTH - 1;
+
+    while client.get_block_count()? < BASE_HEIGHT as u64 {
+        env.mine_blocks(1, None)?;
+    }
+
+    let spk = ScriptBuf::from_hex("0014446906a6560d8ad760db3156706e72e171f3a2aa")?;
+    let addr = Address::from_script(&spk, Network::Regtest)?;
+
+    // Mine blocks 111-211, each with a tx.
+    for _ in 0..REORG_LENGTH {
+        env.send(&addr, Amount::from_sat(1000))?;
+        env.mine_blocks(1, None)?;
+    }
+
+    // Create `CheckPoint` and build `FilterIter`.
+    let cp = CheckPoint::from_block_ids([BlockId {
+        height: BASE_HEIGHT,
+        hash: client.get_block_hash(BASE_HEIGHT as u64)?,
+    }])
+    .unwrap();
+    let mut iter = FilterIter::new_with_checkpoint(client, cp);
+    iter.add_spk(spk.clone());
+    iter.get_tip()?;
+
+    // Scan blocks 111–211 so their hashes reside in `self.blocks`.
+    for res in iter.by_ref() {
+        res?;
+    }
+
+    // Invalidate blocks 111-211 and mine replacement blocks.
+    for h in (START_HEIGHT..=FINAL_HEIGHT).rev() {
+        let hash = client.get_block_hash(h as u64)?;
+        client.invalidate_block(&hash)?;
+    }
+
+    // Mine one extra block so the new tip (212) isn’t below `iter.height`.
+    env.mine_blocks((REORG_LENGTH + 1) as usize, None)?;
+
+    iter.get_tip()?;
+    match iter.next() {
+        Some(Err(Error::ReorgDepthExceeded)) => {
+            println!("SUCCESS: Detected ReorgDepthExceeded");
+        }
+        Some(Err(e)) => panic!("Expected ReorgDepthExceeded, got {:?}", e),
+        Some(Ok(ev)) => panic!("Expected error, got event {:?}", ev),
+        None => panic!("Expected error, got None"),
+    }
 
     Ok(())
 }
