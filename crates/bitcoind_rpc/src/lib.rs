@@ -141,12 +141,10 @@ where
             }
         }
 
-        let mut mempool_event = MempoolEvent::default();
-
-        mempool_event.update = rpc_mempool
-            .into_iter()
-            .filter_map({
-                |txid| -> Option<Result<_, bitcoincore_rpc::Error>> {
+        let mut mempool_event = MempoolEvent {
+            update: rpc_mempool
+                .into_iter()
+                .filter_map(|txid| -> Option<Result<_, bitcoincore_rpc::Error>> {
                     let tx = match self.mempool_snapshot.get(&txid) {
                         Some(tx) => tx.clone(),
                         None => match client.get_raw_transaction(&txid, None) {
@@ -160,9 +158,10 @@ where
                         },
                     };
                     Some(Ok((tx, sync_time)))
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            ..Default::default()
+        };
 
         let at_tip =
             rpc_tip_height == self.last_cp.height() as u64 && rpc_tip_hash == self.last_cp.hash();
