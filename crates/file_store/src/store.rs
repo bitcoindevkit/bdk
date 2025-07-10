@@ -246,7 +246,7 @@ where
             .serialize_into(&mut self.db_file, changeset)
             .map_err(|e| match *e {
                 bincode::ErrorKind::Io(error) => error,
-                unexpected_err => panic!("unexpected bincode error: {}", unexpected_err),
+                unexpected_err => panic!("unexpected bincode error: {unexpected_err}"),
             })?;
 
         Ok(())
@@ -323,7 +323,7 @@ mod test {
                 error: StoreError::Io(e),
                 ..
             }) => assert_eq!(e.kind(), std::io::ErrorKind::UnexpectedEof),
-            unexpected => panic!("unexpected result: {:?}", unexpected),
+            unexpected => panic!("unexpected result: {unexpected:?}"),
         };
     }
 
@@ -342,7 +342,7 @@ mod test {
             }) => {
                 assert_eq!(got, invalid_magic_bytes.as_bytes())
             }
-            unexpected => panic!("unexpected result: {:?}", unexpected),
+            unexpected => panic!("unexpected result: {unexpected:?}"),
         };
     }
 
@@ -372,7 +372,7 @@ mod test {
             }) => {
                 assert_eq!(changeset, Some(test_changesets))
             }
-            unexpected_res => panic!("unexpected result: {:?}", unexpected_res),
+            unexpected_res => panic!("unexpected result: {unexpected_res:?}"),
         }
     }
 
@@ -400,7 +400,7 @@ mod test {
             }) => {
                 assert_eq!(changeset, Some(test_changesets))
             }
-            unexpected_res => panic!("unexpected result: {:?}", unexpected_res),
+            unexpected_res => panic!("unexpected result: {unexpected_res:?}"),
         }
     }
 
@@ -476,7 +476,7 @@ mod test {
         let last_changeset_bytes = bincode_options().serialize(&last_changeset).unwrap();
 
         for short_write_len in 1..last_changeset_bytes.len() - 1 {
-            let file_path = temp_dir.path().join(format!("{}.dat", short_write_len));
+            let file_path = temp_dir.path().join(format!("{short_write_len}.dat"));
 
             // simulate creating a file, writing data where the last write is incomplete
             {

@@ -598,7 +598,7 @@ fn test_calculate_fee_on_coinbase() {
 fn test_walk_ancestors() {
     let local_chain = LocalChain::from_blocks(
         (0..=20)
-            .map(|ht| (ht, BlockHash::hash(format!("Block Hash {}", ht).as_bytes())))
+            .map(|ht| (ht, BlockHash::hash(format!("Block Hash {ht}").as_bytes())))
             .collect(),
     )
     .expect("must contain genesis hash");
@@ -935,7 +935,7 @@ fn test_descendants_no_repeat() {
 fn test_chain_spends() {
     let local_chain = LocalChain::from_blocks(
         (0..=100)
-            .map(|ht| (ht, BlockHash::hash(format!("Block Hash {}", ht).as_bytes())))
+            .map(|ht| (ht, BlockHash::hash(format!("Block Hash {ht}").as_bytes())))
             .collect(),
     )
     .expect("must have genesis hash");
@@ -1453,23 +1453,19 @@ fn tx_graph_update_conversion() {
                 .iter()
                 .map(|tx| tx.compute_txid())
                 .collect::<HashSet<Txid>>(),
-            "{}: txs do not match",
-            test_name
+            "{test_name}: txs do not match"
         );
         assert_eq!(
             update.txouts, update_from_tx_graph.txouts,
-            "{}: txouts do not match",
-            test_name
+            "{test_name}: txouts do not match"
         );
         assert_eq!(
             update.anchors, update_from_tx_graph.anchors,
-            "{}: anchors do not match",
-            test_name
+            "{test_name}: anchors do not match"
         );
         assert_eq!(
             update.seen_ats, update_from_tx_graph.seen_ats,
-            "{}: seen_ats do not match",
-            test_name
+            "{test_name}: seen_ats do not match"
         );
     }
 }

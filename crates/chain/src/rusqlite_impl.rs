@@ -22,17 +22,14 @@ pub const SCHEMAS_TABLE_NAME: &str = "bdk_schemas";
 
 /// Initialize the schema table.
 fn init_schemas_table(db_tx: &Transaction) -> rusqlite::Result<()> {
-    let sql = format!("CREATE TABLE IF NOT EXISTS {}( name TEXT PRIMARY KEY NOT NULL, version INTEGER NOT NULL ) STRICT", SCHEMAS_TABLE_NAME);
+    let sql = format!("CREATE TABLE IF NOT EXISTS {SCHEMAS_TABLE_NAME}( name TEXT PRIMARY KEY NOT NULL, version INTEGER NOT NULL ) STRICT");
     db_tx.execute(&sql, ())?;
     Ok(())
 }
 
 /// Get schema version of `schema_name`.
 fn schema_version(db_tx: &Transaction, schema_name: &str) -> rusqlite::Result<Option<u32>> {
-    let sql = format!(
-        "SELECT version FROM {} WHERE name=:name",
-        SCHEMAS_TABLE_NAME
-    );
+    let sql = format!("SELECT version FROM {SCHEMAS_TABLE_NAME} WHERE name=:name");
     db_tx
         .query_row(&sql, named_params! { ":name": schema_name }, |row| {
             row.get::<_, u32>("version")
@@ -46,10 +43,7 @@ fn set_schema_version(
     schema_name: &str,
     schema_version: u32,
 ) -> rusqlite::Result<()> {
-    let sql = format!(
-        "REPLACE INTO {}(name, version) VALUES(:name, :version)",
-        SCHEMAS_TABLE_NAME,
-    );
+    let sql = format!("REPLACE INTO {SCHEMAS_TABLE_NAME}(name, version) VALUES(:name, :version)");
     db_tx.execute(
         &sql,
         named_params! { ":name": schema_name, ":version": schema_version },
@@ -799,7 +793,7 @@ mod test {
                     ":block_hash": Impl(anchor_block.hash),
                 }) {
                     Ok(updated) => assert_eq!(updated, 1),
-                    Err(err) => panic!("update failed: {}", err),
+                    Err(err) => panic!("update failed: {err}"),
                 }
             }
         }

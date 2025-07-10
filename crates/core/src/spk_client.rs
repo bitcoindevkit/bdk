@@ -26,13 +26,13 @@ impl<I: core::fmt::Debug + core::any::Any> core::fmt::Display for SyncItem<'_, I
         match self {
             SyncItem::Spk(i, spk) => {
                 if (i as &dyn core::any::Any).is::<()>() {
-                    write!(f, "script '{}'", spk)
+                    write!(f, "script '{spk}'")
                 } else {
-                    write!(f, "script {:?} '{}'", i, spk)
+                    write!(f, "script {i:?} '{spk}'")
                 }
             }
-            SyncItem::Txid(txid) => write!(f, "txid '{}'", txid),
-            SyncItem::OutPoint(op) => write!(f, "outpoint '{}'", op),
+            SyncItem::Txid(txid) => write!(f, "txid '{txid}'"),
+            SyncItem::OutPoint(op) => write!(f, "outpoint '{op}'"),
         }
     }
 }

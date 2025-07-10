@@ -866,10 +866,10 @@ mod test {
                 .iter()
                 .map(|&h| {
                     let anchor_blockhash: BlockHash = bdk_chain::bitcoin::hashes::Hash::hash(
-                        &format!("hash_at_height_{}", h).into_bytes(),
+                        &format!("hash_at_height_{h}").into_bytes(),
                     );
                     let txid: Txid = bdk_chain::bitcoin::hashes::Hash::hash(
-                        &format!("txid_at_height_{}", h).into_bytes(),
+                        &format!("txid_at_height_{h}").into_bytes(),
                     );
                     let anchor = ConfirmationBlockTime {
                         block_id: BlockId {

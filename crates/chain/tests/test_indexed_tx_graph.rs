@@ -281,7 +281,7 @@ fn test_list_owned_txouts() {
             let chain_tip = local_chain
                 .get(height)
                 .map(|cp| cp.block_id())
-                .unwrap_or_else(|| panic!("block must exist at {}", height));
+                .unwrap_or_else(|| panic!("block must exist at {height}"));
             let txouts = graph
                 .graph()
                 .filter_chain_txouts(
