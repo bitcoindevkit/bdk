@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, ops::Deref};
 
-use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXIDS};
+use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
 use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     local_chain::{CheckPoint, LocalChain},
@@ -26,7 +26,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         env.rpc_client(),
         local_chain.tip(),
         0,
-        NO_EXPECTED_MEMPOOL_TXIDS,
+        NO_EXPECTED_MEMPOOL_TXS,
     );
 
     // Mine some blocks and return the actual block hashes.
@@ -161,7 +161,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         index
     });
 
-    let emitter = &mut Emitter::new(env.rpc_client(), chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXIDS);
+    let emitter = &mut Emitter::new(env.rpc_client(), chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
 
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
@@ -257,7 +257,7 @@ fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         EMITTER_START_HEIGHT as _,
-        NO_EXPECTED_MEMPOOL_TXIDS,
+        NO_EXPECTED_MEMPOOL_TXS,
     );
 
     env.mine_blocks(CHAIN_TIP_HEIGHT, None)?;
@@ -339,7 +339,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
-        NO_EXPECTED_MEMPOOL_TXIDS,
+        NO_EXPECTED_MEMPOOL_TXS,
     );
 
     // setup addresses
@@ -430,7 +430,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
-        NO_EXPECTED_MEMPOOL_TXIDS,
+        NO_EXPECTED_MEMPOOL_TXS,
     );
 
     // mine blocks and sync up emitter
@@ -503,7 +503,7 @@ fn no_agreement_point() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         (PREMINE_COUNT - 2) as u32,
-        NO_EXPECTED_MEMPOOL_TXIDS,
+        NO_EXPECTED_MEMPOOL_TXS,
     );
 
     // mine 101 blocks
@@ -675,7 +675,7 @@ fn detect_new_mempool_txs() -> anyhow::Result<()> {
             hash: env.rpc_client().get_block_hash(0)?,
         }),
         0,
-        NO_EXPECTED_MEMPOOL_TXIDS,
+        NO_EXPECTED_MEMPOOL_TXS,
     );
 
     while emitter.next_block()?.is_some() {}

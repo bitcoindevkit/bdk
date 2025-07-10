@@ -9,14 +9,16 @@
 //! separate method, [`Emitter::mempool`] can be used to emit the whole mempool.
 #![warn(missing_docs)]
 
+#[allow(unused_imports)]
+#[macro_use]
+extern crate alloc;
+
+use alloc::sync::Arc;
+use bdk_core::collections::{HashMap, HashSet};
 use bdk_core::{BlockId, CheckPoint};
 use bitcoin::{Block, BlockHash, Transaction, Txid};
 use bitcoincore_rpc::{bitcoincore_rpc_json, RpcApi};
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Deref,
-    sync::Arc,
-};
+use core::ops::Deref;
 
 pub mod bip158;
 
@@ -53,11 +55,11 @@ pub struct Emitter<C> {
     mempool_snapshot: HashMap<Txid, Arc<Transaction>>,
 }
 
-/// Indicates that there are no initially expected mempool transactions.
+/// Indicates that there are no initially-expected mempool transactions.
 ///
-/// Pass this to the `expected_mempool_txids` field of [`Emitter::new`] when the wallet is known
+/// Use this as the `expected_mempool_txs` field of [`Emitter::new`] when the wallet is known
 /// to start empty (i.e. with no unconfirmed transactions).
-pub const NO_EXPECTED_MEMPOOL_TXIDS: core::iter::Empty<Arc<Transaction>> = core::iter::empty();
+pub const NO_EXPECTED_MEMPOOL_TXS: core::iter::Empty<Arc<Transaction>> = core::iter::empty();
 
 impl<C> Emitter<C>
 where
@@ -74,7 +76,7 @@ where
     ///
     /// `expected_mempool_txs` is the initial set of unconfirmed transactions provided by the
     /// wallet. This allows the [`Emitter`] to inform the wallet about relevant mempool evictions.
-    /// If it is known that the wallet is empty, [`NO_EXPECTED_MEMPOOL_TXIDS`] can be used.
+    /// If it is known that the wallet is empty, [`NO_EXPECTED_MEMPOOL_TXS`] can be used.
     pub fn new(
         client: C,
         last_cp: CheckPoint,
@@ -99,21 +101,26 @@ where
     /// Emit mempool transactions and any evicted [`Txid`]s.
     ///
     /// This method returns a [`MempoolEvent`] containing the full transactions (with their
-    /// first-seen unix timestamps) that were emitted, and [`MempoolEvent::evicted_txids`] which are
+    /// first-seen unix timestamps) that were emitted, and [`MempoolEvent::evicted`] which are
     /// any [`Txid`]s which were previously seen in the mempool and are now missing. Evicted txids
     /// are only reported once the emitter’s checkpoint matches the RPC’s best block in both height
     /// and hash. Until `next_block()` advances the checkpoint to tip, `mempool()` will always
-    /// return an empty `evicted_txids` set.
-    ///
-    /// This method emits each transaction only once, unless we cannot guarantee the transaction's
-    /// ancestors are already emitted.
-    ///
-    /// To understand why, consider a receiver which filters transactions based on whether it
-    /// alters the UTXO set of tracked script pubkeys. If an emitted mempool transaction spends a
-    /// tracked UTXO which is confirmed at height `h`, but the receiver has only seen up to block
-    /// of height `h-1`, we want to re-emit this transaction until the receiver has seen the block
-    /// at height `h`.
+    /// return an empty `evicted` set.
+    #[cfg(feature = "std")]
     pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
+        let sync_time = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("must get current time")
+            .as_secs();
+        self.mempool_at(sync_time)
+    }
+
+    /// Emit mempool transactions and any evicted [`Txid`]s at the given `sync_time`.
+    ///
+    /// `sync_time` is in unix seconds.
+    ///
+    /// This is the no-std version of [`mempool`](Self::mempool).
+    pub fn mempool_at(&mut self, sync_time: u64) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let client = &*self.client;
 
         let mut rpc_tip_height;
@@ -125,8 +132,8 @@ where
         loop {
             rpc_tip_height = client.get_block_count()?;
             rpc_tip_hash = client.get_block_hash(rpc_tip_height)?;
-            rpc_mempool = client.get_raw_mempool_verbose()?;
-            rpc_mempool_txids = rpc_mempool.keys().copied().collect::<HashSet<Txid>>();
+            rpc_mempool = client.get_raw_mempool()?;
+            rpc_mempool_txids = rpc_mempool.iter().copied().collect::<HashSet<Txid>>();
             let is_still_at_tip = rpc_tip_hash == client.get_block_hash(rpc_tip_height)?
                 && rpc_tip_height == client.get_block_count()?;
             if is_still_at_tip {
@@ -135,13 +142,11 @@ where
         }
 
         let mut mempool_event = MempoolEvent::default();
-        let update_time = &mut 0_u64;
 
         mempool_event.update = rpc_mempool
             .into_iter()
             .filter_map({
-                |(txid, tx_entry)| -> Option<Result<_, bitcoincore_rpc::Error>> {
-                    *update_time = u64::max(*update_time, tx_entry.time);
+                |txid| -> Option<Result<_, bitcoincore_rpc::Error>> {
                     let tx = match self.mempool_snapshot.get(&txid) {
                         Some(tx) => tx.clone(),
                         None => match client.get_raw_transaction(&txid, None) {
@@ -154,7 +159,7 @@ where
                             Err(err) => return Some(Err(err)),
                         },
                     };
-                    Some(Ok((tx, tx_entry.time)))
+                    Some(Ok((tx, sync_time)))
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -171,7 +176,7 @@ where
                 .mempool_snapshot
                 .keys()
                 .filter(|&txid| !rpc_mempool_txids.contains(txid))
-                .map(|&txid| (txid, *update_time))
+                .map(|&txid| (txid, sync_time))
                 .collect();
             self.mempool_snapshot = mempool_event
                 .update
@@ -396,7 +401,7 @@ impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
 
 #[cfg(test)]
 mod test {
-    use crate::{bitcoincore_rpc::RpcApi, Emitter, NO_EXPECTED_MEMPOOL_TXIDS};
+    use crate::{bitcoincore_rpc::RpcApi, Emitter, NO_EXPECTED_MEMPOOL_TXS};
     use bdk_chain::local_chain::LocalChain;
     use bdk_testenv::{anyhow, TestEnv};
     use bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash};
@@ -411,7 +416,7 @@ mod test {
             env.rpc_client(),
             chain_tip.clone(),
             1,
-            NO_EXPECTED_MEMPOOL_TXIDS,
+            NO_EXPECTED_MEMPOOL_TXS,
         );
 
         env.mine_blocks(100, None)?;
