@@ -230,6 +230,10 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
             }
 
             if let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
+                debug_assert!(
+                    !tx.is_coinbase(),
+                    "Coinbase txs must not have `last_seen` (in mempool) value"
+                );
                 if !self.is_canonicalized(txid) {
                     let observed_in = ObservedIn::Mempool(last_seen);
                     self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
@@ -238,7 +242,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
             }
 
             if let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
-                if !self.is_canonicalized(txid) {
+                if !self.is_canonicalized(txid) && !tx.is_coinbase() {
                     let observed_in = ObservedIn::Block(height);
                     self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
                 }
