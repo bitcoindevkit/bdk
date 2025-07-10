@@ -8,3 +8,5 @@ Cargo.lock
 # Example persisted files.
 *.db
 *.sqlite*
+
+crates/electrum/target
