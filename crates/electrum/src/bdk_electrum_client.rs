@@ -647,25 +647,19 @@ fn fetch_tip_and_latest_blocks(
             }
         }
         agreement_cp
+            .ok_or_else(|| Error::Message("cannot find agreement block with server".to_string()))?
     };
 
-    let agreement_height = agreement_cp.as_ref().map(CheckPoint::height);
-
-    let new_tip = new_blocks
+    let extension = new_blocks
         .iter()
-        // Prune `new_blocks` to only include blocks that are actually new.
-        .filter(|(height, _)| Some(*<&u32>::clone(height)) > agreement_height)
-        .map(|(height, hash)| BlockId {
-            height: *height,
-            hash: *hash,
+        .filter({
+            let agreement_height = agreement_cp.height();
+            move |(height, _)| **height > agreement_height
         })
-        .fold(agreement_cp, |prev_cp, block| {
-            Some(match prev_cp {
-                Some(cp) => cp.push(block).ok()?,
-                None => CheckPoint::new(block),
-            })
-        })
-        .ok_or_else(|| Error::Message("failed to construct new checkpoint tip".to_string()))?;
+        .map(|(&height, &hash)| BlockId { height, hash });
+    let new_tip = agreement_cp
+        .extend(extension)
+        .expect("extension heights already checked to be greater than agreement height");
 
     Ok((new_tip, new_blocks))
 }
