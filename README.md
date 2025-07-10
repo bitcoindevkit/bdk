@@ -39,7 +39,7 @@ The workspace in this repository contains several crates in the `/crates` direct
 | [`bitcoind_rpc`](./crates/bitcoind_rpc) | Extends [`bitcoincore-rpc`] for emitting blockchain data from the `bitcoind` RPC interface in the form that [`bdk_chain`] and `Wallet` can consume. | ![BitcoinD RPC Crate Info](https://img.shields.io/crates/v/bdk_bitcoind_rpc.svg) ![BitcoinD RPC API Docs](https://img.shields.io/badge/docs.rs-bdk_bitcoind_rpc-green) |
 | [`file_store`](./crates/file_store) | Persistence backend for storing chain data in a single file. Intended for testing and development purposes, not for production. | ![File Store Crate Info](https://img.shields.io/crates/v/bdk_file_store.svg) ![File Store API Docs](https://img.shields.io/badge/docs.rs-bdk_file_store-green) |
 
-The [`bdk_wallet`] repository and crate contains a higher level `Wallet` type that depends on the above lower-level mechanism crates. 
+The [`bdk_wallet`] repository and crate contains a higher level `Wallet` type that depends on the above lower-level mechanism crates.
 
 Fully working examples of how to use these components are in `/examples`:
 
@@ -67,6 +67,12 @@ The following BDK crates maintains a MSRV of 1.63.0. To build these crates with 
 - `bdk_file_store`
 
 The MSRV of the `bdk_electrum` crate is 1.75.0.
+
+## Just
+
+This project has a [`justfile`](/justfile) for easy command running. You must have [`just`](https://github.com/casey/just) installed.
+
+To see a list of available recipes: `just`
 
 ## License
 
