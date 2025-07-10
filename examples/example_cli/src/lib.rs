@@ -488,12 +488,12 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                         ..Default::default()
                     })?;
                     let addr = Address::from_script(spk.as_script(), network)?;
-                    println!("[address @ {}] {}", spk_i, addr);
+                    println!("[address @ {spk_i}] {addr}");
                     Ok(())
                 }
                 AddressCmd::Index => {
                     for (keychain, derivation_index) in index.last_revealed_indices() {
-                        println!("{:?}: {}", keychain, derivation_index);
+                        println!("{keychain:?}: {derivation_index}");
                     }
                     Ok(())
                 }
@@ -523,7 +523,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 title_str: &'a str,
                 items: impl IntoIterator<Item = (&'a str, Amount)>,
             ) {
-                println!("{}:", title_str);
+                println!("{title_str}:");
                 for (name, amount) in items.into_iter() {
                     println!("    {:<10} {:>12} sats", name, amount.to_sat())
                 }
@@ -932,8 +932,8 @@ fn generate_bip86_helper(network: impl Into<NetworkKind>) -> anyhow::Result<()> 
     let (internal_descriptor, internal_keymap) =
         <Descriptor<DescriptorPublicKey>>::parse_descriptor(&secp, internal_desc)?;
     println!("Public");
-    println!("{}", descriptor);
-    println!("{}", internal_descriptor);
+    println!("{descriptor}");
+    println!("{internal_descriptor}");
     println!("\nPrivate");
     println!("{}", descriptor.to_string_with_secret(&keymap));
     println!(

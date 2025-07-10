@@ -594,7 +594,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 let _inserted = self
                     .inner
                     .insert_spk((keychain.clone(), new_index), new_spk);
-                debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_index={}", keychain, lookahead, next_index);
+                debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={keychain:?}, lookahead={lookahead}, next_index={next_index}");
             }
         } else {
             let spk_iter = SpkIterator::new_with_range(descriptor, next_index..stop_index);
@@ -602,7 +602,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                 let _inserted = self
                     .inner
                     .insert_spk((keychain.clone(), new_index), new_spk);
-                debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={:?}, lookahead={}, next_index={}", keychain, lookahead, next_index);
+                debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={keychain:?}, lookahead={lookahead}, next_index={next_index}");
             }
         }
     }

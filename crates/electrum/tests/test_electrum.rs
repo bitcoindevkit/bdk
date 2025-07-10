@@ -723,8 +723,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
                 confirmed: SEND_AMOUNT * (REORG_COUNT - depth) as u64,
                 ..Balance::default()
             },
-            "reorg_count: {}",
-            depth,
+            "reorg_count: {depth}",
         );
     }
 

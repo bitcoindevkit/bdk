@@ -281,8 +281,7 @@ impl fmt::Display for CalculateFeeError {
         match self {
             CalculateFeeError::MissingTxOut(outpoints) => write!(
                 f,
-                "missing `TxOut` for one or more of the inputs of the tx: {:?}",
-                outpoints
+                "missing `TxOut` for one or more of the inputs of the tx: {outpoints:?}",
             ),
             CalculateFeeError::NegativeFee(fee) => write!(
                 f,
@@ -1119,12 +1118,7 @@ impl<A: Anchor> TxGraph<A> {
             if !canonical_tx.tx_node.tx.is_coinbase() {
                 for txin in &canonical_tx.tx_node.tx.input {
                     let _res = canon_spends.insert(txin.previous_output, txid);
-                    assert!(
-                        _res.is_none(),
-                        "tried to replace {:?} with {:?}",
-                        _res,
-                        txid
-                    );
+                    assert!(_res.is_none(), "tried to replace {_res:?} with {txid:?}",);
                 }
             }
             canon_txs.insert(txid, canonical_tx);

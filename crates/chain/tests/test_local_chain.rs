@@ -371,10 +371,9 @@ fn local_chain_insert_block() {
         assert_eq!(
             chain.insert_block(t.insert.into()),
             t.expected_result,
-            "[{}] unexpected result when inserting block",
-            i,
+            "[{i}] unexpected result when inserting block",
         );
-        assert_eq!(chain, t.expected_final, "[{}] unexpected final chain", i,);
+        assert_eq!(chain, t.expected_final, "[{i}] unexpected final chain",);
     }
 }
 

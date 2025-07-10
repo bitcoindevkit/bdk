@@ -512,7 +512,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             batch.raw(
                 "blockchain.transaction.get_merkle".into(),
                 vec![
-                    electrum_client::Param::String(format!("{:x}", txid)),
+                    electrum_client::Param::String(format!("{txid:x}")),
                     electrum_client::Param::Usize(height),
                 ],
             );

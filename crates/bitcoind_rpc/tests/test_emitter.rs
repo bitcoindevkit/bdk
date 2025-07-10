@@ -408,8 +408,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
                 confirmed: SEND_AMOUNT * (ADDITIONAL_COUNT - reorg_count) as u64,
                 ..Balance::default()
             },
-            "reorg_count: {}",
-            reorg_count,
+            "reorg_count: {reorg_count}",
         );
     }
 

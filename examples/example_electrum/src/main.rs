@@ -169,9 +169,9 @@ fn main() -> anyhow::Result<()> {
                         let mut once = BTreeSet::new();
                         move |k, spk_i, _| {
                             if once.insert(k) {
-                                eprint!("\nScanning {}: {} ", k, spk_i);
+                                eprint!("\nScanning {k}: {spk_i} ");
                             } else {
-                                eprint!("{} ", spk_i);
+                                eprint!("{spk_i} ");
                             }
                             io::stdout().flush().expect("must flush");
                         }
@@ -213,7 +213,7 @@ fn main() -> anyhow::Result<()> {
                     .chain_tip(chain_tip.clone())
                     .inspect(|item, progress| {
                         let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
-                        eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
+                        eprintln!("[ SCANNING {pc:03.0}% ] {item}");
                     });
 
             request = request.expected_spk_txids(graph.list_expected_spk_txids(

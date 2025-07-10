@@ -480,8 +480,7 @@ mod test {
             for txid in &mempool_txids {
                 assert!(
                     emitter.expected_mempool_txids.contains(txid),
-                    "Expected txid {:?} missing",
-                    txid
+                    "Expected txid {txid:?} missing"
                 );
             }
         }
@@ -502,15 +501,13 @@ mod test {
             for txid in confirmed_txids {
                 assert!(
                     !emitter.expected_mempool_txids.contains(&txid),
-                    "Expected txid {:?} should have been removed",
-                    txid
+                    "Expected txid {txid:?} should have been removed"
                 );
             }
             for txid in &mempool_txids {
                 assert!(
                     emitter.expected_mempool_txids.contains(txid),
-                    "Expected txid {:?} missing",
-                    txid
+                    "Expected txid {txid:?} missing"
                 );
             }
         }

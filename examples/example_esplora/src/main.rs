@@ -153,9 +153,9 @@ fn main() -> anyhow::Result<()> {
                         let mut once = BTreeSet::<Keychain>::new();
                         move |keychain, spk_i, _| {
                             if once.insert(keychain) {
-                                eprint!("\nscanning {}: ", keychain);
+                                eprint!("\nscanning {keychain}: ");
                             }
-                            eprint!("{} ", spk_i);
+                            eprint!("{spk_i} ");
                             // Flush early to ensure we print at every iteration.
                             let _ = io::stderr().flush();
                         }
@@ -215,7 +215,7 @@ fn main() -> anyhow::Result<()> {
                     .chain_tip(local_tip.clone())
                     .inspect(|item, progress| {
                         let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
-                        eprintln!("[ SCANNING {:03.0}% ] {}", pc, item);
+                        eprintln!("[ SCANNING {pc:03.0}% ] {item}");
                         // Flush early to ensure we print at every iteration.
                         let _ = io::stderr().flush();
                     });
