@@ -690,9 +690,11 @@ fn chain_update(
 #[cfg(test)]
 mod test {
     use crate::{bdk_electrum_client::TxUpdate, BdkElectrumClient};
-    use bdk_chain::bitcoin::{OutPoint, Transaction, TxIn};
-    use bdk_core::collections::BTreeMap;
-    use bdk_testenv::{utils::new_tx, TestEnv};
+    use bdk_chain::bitcoin::{constants, Network, OutPoint, ScriptBuf, Transaction, TxIn};
+    use bdk_chain::{BlockId, CheckPoint};
+    use bdk_core::{collections::BTreeMap, spk_client::SyncRequest};
+    use bdk_testenv::{anyhow, utils::new_tx, TestEnv};
+    use electrum_client::Error as ElectrumError;
     use std::sync::Arc;
 
     #[cfg(feature = "default")]
@@ -724,5 +726,35 @@ mod test {
 
         // Ensure that the txouts are empty.
         assert_eq!(tx_update.txouts, BTreeMap::default());
+    }
+
+    #[cfg(feature = "default")]
+    #[test]
+    fn test_sync_wrong_network_error() -> anyhow::Result<()> {
+        let env = TestEnv::new()?;
+        let client = electrum_client::Client::new(env.electrsd.electrum_url.as_str()).unwrap();
+        let electrum_client = BdkElectrumClient::new(client);
+
+        let _ = env.mine_blocks(1, None).unwrap();
+
+        let bogus_spks: Vec<ScriptBuf> = Vec::new();
+        let bogus_genesis = constants::genesis_block(Network::Testnet).block_hash();
+        let bogus_cp = CheckPoint::new(BlockId {
+            height: 0,
+            hash: bogus_genesis,
+        });
+
+        let req = SyncRequest::builder()
+            .chain_tip(bogus_cp)
+            .spks(bogus_spks)
+            .build();
+        let err = electrum_client.sync(req, 1, false).unwrap_err();
+
+        assert!(
+            matches!(err, ElectrumError::Message(m) if m.contains("cannot find agreement block with server")),
+            "expected missing agreement block error"
+        );
+
+        Ok(())
     }
 }
