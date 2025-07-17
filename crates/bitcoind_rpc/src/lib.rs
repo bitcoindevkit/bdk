@@ -29,7 +29,7 @@ pub struct Emitter<C> {
 
     /// The checkpoint of the last-emitted block that is in the best chain. If it is later found
     /// that the block is no longer in the best chain, it will be popped off from here.
-    last_cp: CheckPoint,
+    last_cp: CheckPoint<BlockHash>,
 
     /// The block result returned from rpc of the last-emitted block. As this result contains the
     /// next block's block hash (which we use to fetch the next block), we set this to `None`
@@ -80,7 +80,7 @@ where
     /// known that the wallet is empty, [`NO_EXPECTED_MEMPOOL_TXIDS`] can be used.
     pub fn new(
         client: C,
-        last_cp: CheckPoint,
+        last_cp: CheckPoint<BlockHash>,
         start_height: u32,
         expected_mempool_txids: impl IntoIterator<Item = impl Into<Txid>>,
     ) -> Self {
@@ -269,7 +269,7 @@ pub struct BlockEvent<B> {
     ///
     /// This is important as BDK structures require block-to-apply to be connected with another
     /// block in the original chain.
-    pub checkpoint: CheckPoint,
+    pub checkpoint: CheckPoint<BlockHash>,
 }
 
 impl<B> BlockEvent<B> {
@@ -303,7 +303,7 @@ enum PollResponse {
     NoMoreBlocks,
     /// Fetched block is not in the best chain.
     BlockNotInBestChain,
-    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint),
+    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint<BlockHash>),
     /// Force the genesis checkpoint down the receiver's throat.
     AgreementPointNotFound(BlockHash),
 }
@@ -365,7 +365,7 @@ where
 fn poll<C, V, F>(
     emitter: &mut Emitter<C>,
     get_item: F,
-) -> Result<Option<(CheckPoint, V)>, bitcoincore_rpc::Error>
+) -> Result<Option<(CheckPoint<BlockHash>, V)>, bitcoincore_rpc::Error>
 where
     C: Deref,
     C::Target: RpcApi,
@@ -381,7 +381,7 @@ where
                 let new_cp = emitter
                     .last_cp
                     .clone()
-                    .push(BlockId { height, hash })
+                    .push(height, hash)
                     .expect("must push");
                 emitter.last_cp = new_cp.clone();
                 emitter.last_block = Some(res);
@@ -412,10 +412,7 @@ where
                 continue;
             }
             PollResponse::AgreementPointNotFound(genesis_hash) => {
-                emitter.last_cp = CheckPoint::new(BlockId {
-                    height: 0,
-                    hash: genesis_hash,
-                });
+                emitter.last_cp = CheckPoint::new(0, genesis_hash);
                 emitter.last_block = None;
                 continue;
             }
@@ -454,7 +451,7 @@ mod test {
     #[test]
     fn test_expected_mempool_txids_accumulate_and_remove() -> anyhow::Result<()> {
         let env = TestEnv::new()?;
-        let chain = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?).0;
+        let chain = LocalChain::from_genesis(env.rpc_client().get_block_hash(0)?).0;
         let chain_tip = chain.tip();
         let mut emitter = Emitter::new(
             env.rpc_client(),

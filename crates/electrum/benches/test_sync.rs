@@ -77,10 +77,7 @@ pub fn test_sync_performance(c: &mut Criterion) {
     );
 
     // Setup receiver.
-    let genesis_cp = CheckPoint::new(bdk_core::BlockId {
-        height: 0,
-        hash: env.bitcoind.client.get_block_hash(0).unwrap(),
-    });
+    let genesis_cp = CheckPoint::new(0, env.bitcoind.client.get_block_hash(0).unwrap());
 
     {
         let electrum_client =
