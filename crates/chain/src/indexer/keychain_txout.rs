@@ -938,15 +938,15 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
     /// Applies the `ChangeSet<K>` to the [`KeychainTxOutIndex<K>`]
     pub fn apply_changeset(&mut self, changeset: ChangeSet) {
-        for (did, index) in changeset.last_revealed {
-            let v = self.last_revealed.entry(did).or_default();
-            *v = index.max(*v);
-            self.replenish_inner_index_did(did, self.lookahead);
-        }
         if self.persist_spks {
             for (did, spks) in changeset.spk_cache {
                 self.spk_cache.entry(did).or_default().extend(spks);
             }
+        }
+        for (did, index) in changeset.last_revealed {
+            let v = self.last_revealed.entry(did).or_default();
+            *v = index.max(*v);
+            self.replenish_inner_index_did(did, self.lookahead);
         }
     }
 }
