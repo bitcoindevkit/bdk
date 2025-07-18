@@ -14,6 +14,9 @@ use bitcoin::{Block, BlockHash, Transaction, Txid};
 use bitcoincore_rpc::{bitcoincore_rpc_json, RpcApi};
 use std::{collections::HashSet, ops::Deref};
 
+#[cfg(feature = "tracing-logs")]
+use tracing::trace;
+
 pub mod bip158;
 
 pub use bitcoincore_rpc;
@@ -115,6 +118,13 @@ where
     pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let client = &*self.client;
 
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            "mempool(): entering, start_height={}, last_mempool_tip={:?}",
+            self.start_height,
+            self.last_mempool_tip
+        );
+
         // This is the emitted tip height during the last mempool emission.
         let prev_mempool_tip = self
             .last_mempool_tip
@@ -125,6 +135,12 @@ where
         // Loop to make sure that the fetched mempool content and the fetched tip are consistent
         // with one another.
         let (raw_mempool, raw_mempool_txids, rpc_height, rpc_block_hash) = loop {
+            #[cfg(feature = "tracing-logs")]
+            trace!(
+                "mempool(): checking consistency loop, prev_mempool_tip={}",
+                prev_mempool_tip
+            );
+
             // Determine if height and hash matches the best block from the RPC. Evictions are
             // deferred if we are not at the best block.
             let height = client.get_block_count()?;
@@ -140,8 +156,24 @@ where
             }
         };
 
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            "mempool(): fetched raw_mempool ({} entries), rpc_height={}, rpc_block_hash={}",
+            raw_mempool.len(),
+            rpc_height,
+            rpc_block_hash
+        );
+
         let at_tip =
             rpc_height == self.last_cp.height() as u64 && rpc_block_hash == self.last_cp.hash();
+
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            "mempool(): at_tip={} (last_cp.height={} vs rpc_height={})",
+            at_tip,
+            self.last_cp.height(),
+            rpc_height
+        );
 
         // If at tip, any expected txid missing from raw mempool is considered evicted;
         // if not at tip, we don't evict anything.
@@ -166,6 +198,14 @@ where
             .filter_map({
                 let latest_time = &mut latest_time;
                 move |(txid, tx_entry)| -> Option<Result<_, bitcoincore_rpc::Error>> {
+                    #[cfg(feature = "tracing-logs")]
+                    trace!(
+                        "mempool(): considering txid={}, time={}, prev_time={}",
+                        txid,
+                        tx_entry.time,
+                        prev_mempool_time
+                    );
+
                     let tx_time = tx_entry.time as usize;
                     if tx_time > *latest_time {
                         *latest_time = tx_time;
@@ -206,6 +246,14 @@ where
                 .extend(new_txs.iter().map(|(tx, _)| tx.compute_txid()));
         }
 
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            "mempool(): emitting {} new_txs, {} evicted_txids, latest_update_time={}",
+            new_txs.len(),
+            evicted_txids.len(),
+            latest_time
+        );
+
         Ok(MempoolEvent {
             new_txs,
             evicted_txids,
@@ -215,11 +263,23 @@ where
 
     /// Emit the next block height and block (if any).
     pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            "next_block(): entering, last_block={:?}",
+            self.last_block.as_ref().map(|r| r.height)
+        );
+
         if let Some((checkpoint, block)) = poll(self, move |hash, client| client.get_block(hash))? {
             // Stop tracking unconfirmed transactions that have been confirmed in this block.
             for tx in &block.txdata {
                 self.expected_mempool_txids.remove(&tx.compute_txid());
             }
+            #[cfg(feature = "tracing-logs")]
+            trace!(
+                "next_block(): emitting block at height={}, txcount={}",
+                checkpoint.height(),
+                block.txdata.len()
+            );
             return Ok(Some(BlockEvent { block, checkpoint }));
         }
         Ok(None)
@@ -313,6 +373,13 @@ where
     C: Deref,
     C::Target: RpcApi,
 {
+    #[cfg(feature = "tracing-logs")]
+    trace!(
+        "poll_once(): last_block={:?}, start_height={}",
+        emitter.last_block.as_ref().map(|r| r.height),
+        emitter.start_height
+    );
+
     let client = &*emitter.client;
 
     if let Some(last_res) = &emitter.last_block {
@@ -321,21 +388,36 @@ where
             let next_hash = client.get_block_hash(emitter.start_height as _)?;
             // make sure last emission is still in best chain
             if client.get_block_hash(last_res.height as _)? != last_res.hash {
+                #[cfg(feature = "tracing-logs")]
+                trace!("poll_once(): returning BlockNotInBestChain");
+
                 return Ok(PollResponse::BlockNotInBestChain);
             }
             next_hash
         } else {
             match last_res.nextblockhash {
-                None => return Ok(PollResponse::NoMoreBlocks),
+                None => {
+                    #[cfg(feature = "tracing-logs")]
+                    trace!("poll_once(): returning NoMoreBlocks");
+                    return Ok(PollResponse::NoMoreBlocks);
+                }
                 Some(next_hash) => next_hash,
             }
         };
 
         let res = client.get_block_info(&next_hash)?;
         if res.confirmations < 0 {
+            #[cfg(feature = "tracing-logs")]
+            trace!("poll_once(): returning BlockNotInBestChain");
             return Ok(PollResponse::BlockNotInBestChain);
         }
 
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            "poll(): PollResponse::Block, height={}, hash={}",
+            res.height,
+            res.hash
+        );
         return Ok(PollResponse::Block(res));
     }
 
@@ -355,6 +437,12 @@ where
         };
 
         // agreement point found
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            "poll(): PollResponse::AgreementFound, height={}, hash={}",
+            res.height,
+            res.hash
+        );
         return Ok(PollResponse::AgreementFound(res, cp));
     }
 
