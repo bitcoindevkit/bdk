@@ -19,6 +19,7 @@ workspace = true
 bitcoin = { version = "0.32.0", default-features = false }
 bitcoincore-rpc = { version = "0.19.0" }
 bdk_core = { path = "../core", version = "0.6.1", default-features = false }
+tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
 bdk_bitcoind_rpc = { path = "." }
@@ -29,6 +30,7 @@ bdk_chain = { path = "../chain" }
 default = ["std"]
 std = ["bitcoin/std", "bdk_core/std"]
 serde = ["bitcoin/serde", "bdk_core/serde"]
+tracing-logs = ["tracing"]
 
 [[example]]
 name = "filter_iter"
