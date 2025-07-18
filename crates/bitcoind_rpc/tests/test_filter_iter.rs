@@ -147,24 +147,6 @@ fn filter_iter_returns_matched_blocks() -> anyhow::Result<()> {
 }
 
 #[test]
-fn filter_iter_error_no_scripts() -> anyhow::Result<()> {
-    use bdk_bitcoind_rpc::bip158::Error;
-    let env = testenv()?;
-    let _ = env.mine_blocks(2, None)?;
-
-    let mut iter = FilterIter::new_with_height(env.rpc_client(), 1);
-    assert_eq!(iter.get_tip()?.unwrap().height, 3);
-
-    // iterator should return three errors
-    for _ in 0..3 {
-        assert!(matches!(iter.next().unwrap(), Err(Error::NoScripts)));
-    }
-    assert!(iter.next().is_none());
-
-    Ok(())
-}
-
-#[test]
 #[allow(clippy::print_stdout)]
 fn filter_iter_handles_reorg() -> anyhow::Result<()> {
     let env = testenv()?;
@@ -590,73 +572,6 @@ fn repeat_reorgs() -> anyhow::Result<()> {
     // If no reorg, then height should increment normally from here on
     assert_eq!(iter.next().unwrap()?.height(), MINE_TO);
     assert!(iter.next().is_none());
-
-    Ok(())
-}
-
-#[test]
-#[allow(clippy::print_stdout)]
-fn filter_iter_max_reorg_depth() -> anyhow::Result<()> {
-    use bdk_bitcoind_rpc::bip158::{Error, FilterIter};
-    use bdk_chain::{
-        bitcoin::{Address, Amount, Network, ScriptBuf},
-        BlockId, CheckPoint,
-    };
-
-    let env = testenv()?;
-    let client = env.rpc_client();
-
-    const BASE_HEIGHT: u32 = 110;
-    const REORG_LENGTH: u32 = 101;
-    const START_HEIGHT: u32 = BASE_HEIGHT + 1;
-    const FINAL_HEIGHT: u32 = START_HEIGHT + REORG_LENGTH - 1;
-
-    while client.get_block_count()? < BASE_HEIGHT as u64 {
-        env.mine_blocks(1, None)?;
-    }
-
-    let spk = ScriptBuf::from_hex("0014446906a6560d8ad760db3156706e72e171f3a2aa")?;
-    let addr = Address::from_script(&spk, Network::Regtest)?;
-
-    // Mine blocks 111-211, each with a tx.
-    for _ in 0..REORG_LENGTH {
-        env.send(&addr, Amount::from_sat(1000))?;
-        env.mine_blocks(1, None)?;
-    }
-
-    // Create `CheckPoint` and build `FilterIter`.
-    let cp = CheckPoint::from_block_ids([BlockId {
-        height: BASE_HEIGHT,
-        hash: client.get_block_hash(BASE_HEIGHT as u64)?,
-    }])
-    .unwrap();
-    let mut iter = FilterIter::new_with_checkpoint(client, cp);
-    iter.add_spk(spk.clone());
-    iter.get_tip()?;
-
-    // Scan blocks 111–211 so their hashes reside in `self.blocks`.
-    for res in iter.by_ref() {
-        res?;
-    }
-
-    // Invalidate blocks 111-211 and mine replacement blocks.
-    for h in (START_HEIGHT..=FINAL_HEIGHT).rev() {
-        let hash = client.get_block_hash(h as u64)?;
-        client.invalidate_block(&hash)?;
-    }
-
-    // Mine one extra block so the new tip (212) isn’t below `iter.height`.
-    env.mine_blocks((REORG_LENGTH + 1) as usize, None)?;
-
-    iter.get_tip()?;
-    match iter.next() {
-        Some(Err(Error::ReorgDepthExceeded)) => {
-            println!("SUCCESS: Detected ReorgDepthExceeded");
-        }
-        Some(Err(e)) => panic!("Expected ReorgDepthExceeded, got {:?}", e),
-        Some(Ok(ev)) => panic!("Expected error, got event {:?}", ev),
-        None => panic!("Expected error, got None"),
-    }
 
     Ok(())
 }

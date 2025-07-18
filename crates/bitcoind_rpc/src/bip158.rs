@@ -15,8 +15,8 @@ use bitcoin::{
     bip158::{self, BlockFilter},
     Block, BlockHash, ScriptBuf,
 };
-use bitcoincore_rpc;
 use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::{self, jsonrpc};
 
 /// Block height
 type Height = u32;
@@ -44,9 +44,6 @@ pub struct FilterIter<'c, C> {
 }
 
 impl<'c, C: RpcApi> FilterIter<'c, C> {
-    /// Hard cap on how far to walk back when a reorg is detected.
-    const MAX_REORG_DEPTH: u32 = 100;
-
     /// Construct [`FilterIter`] from a given `client` and start `height`.
     pub fn new_with_height(client: &'c C, height: u32) -> Self {
         Self {
@@ -148,82 +145,7 @@ impl<C: RpcApi> Iterator for FilterIter<'_, C> {
     type Item = Result<Event, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        (|| -> Result<Option<_>, Error> {
-            if self.height > self.stop {
-                return Ok(None);
-            }
-            // Fetch next header.
-            let mut height = self.height;
-            let mut hash = self.client.get_block_hash(height as _)?;
-            let mut header = self.client.get_block_header(&hash)?;
-
-            // Detect and resolve reorgs: either block at height changed, or its parent changed.
-            let stored_hash = self.blocks.get(&height).copied();
-            let prev_hash = height
-                .checked_sub(1)
-                .and_then(|height| self.blocks.get(&height).copied());
-
-            // If we've seen this height before but the hash has changed, or parent changed, trigger
-            // reorg.
-            let reorg_detected = if let Some(old_hash) = stored_hash {
-                old_hash != hash
-            } else if let Some(expected_prev) = prev_hash {
-                header.prev_blockhash != expected_prev
-            } else {
-                false
-            };
-
-            // Reorg detected, rewind to last known-good ancestor.
-            if reorg_detected {
-                let mut reorg_depth = 0;
-                loop {
-                    if reorg_depth >= Self::MAX_REORG_DEPTH || height == 0 {
-                        return Err(Error::ReorgDepthExceeded);
-                    }
-
-                    height = height.saturating_sub(1);
-                    hash = self.client.get_block_hash(height as _)?;
-                    header = self.client.get_block_header(&hash)?;
-
-                    let prev_height = height.saturating_sub(1);
-                    if let Some(prev_hash) = self.blocks.get(&prev_height) {
-                        if header.prev_blockhash == *prev_hash {
-                            break;
-                        }
-                    }
-
-                    reorg_depth += 1;
-                }
-
-                self.blocks.split_off(&height);
-                self.matched.split_off(&height);
-            }
-
-            let filter_bytes = self.client.get_block_filter(&hash)?.filter;
-            let filter = BlockFilter::new(&filter_bytes);
-
-            // record the scanned block
-            self.blocks.insert(height, hash);
-            // increment best height
-            self.height = height.saturating_add(1);
-
-            // If the filter matches any of our watched SPKs, fetch the full
-            // block, and record the matching block entry.
-            if self.spks.is_empty() {
-                Err(Error::NoScripts)
-            } else if filter
-                .match_any(&hash, self.spks.iter().map(|s| s.as_bytes()))
-                .map_err(Error::Bip158)?
-            {
-                let block = self.client.get_block(&hash)?;
-                self.matched.insert(height);
-                let inner = EventInner { height, block };
-                Ok(Some(Event::Block(inner)))
-            } else {
-                Ok(Some(Event::NoMatch(height)))
-            }
-        })()
-        .transpose()
+        self.next_event().transpose()
     }
 }
 
@@ -274,6 +196,99 @@ impl<C: RpcApi> FilterIter<'_, C> {
             .expect("blocks must be in order"),
         )
     }
+
+    fn next_event(&mut self) -> Result<Option<Event>, Error> {
+        let (height, hash) = match self.find_next_block()? {
+            None => return Ok(None),
+            Some((height, _)) if height > self.stop => return Ok(None),
+            Some(block) => block,
+        };
+
+        // Emit and increment `height` (which should really be `next_height`).
+        let is_match = BlockFilter::new(&self.client.get_block_filter(&hash)?.filter)
+            .match_any(&hash, self.spks.iter().map(ScriptBuf::as_ref))
+            .map_err(Error::Bip158)?;
+
+        let event = if is_match {
+            Event::Block(EventInner {
+                height,
+                block: self.client.get_block(&hash)?,
+            })
+        } else {
+            Event::NoMatch(height)
+        };
+
+        // Mutate internal state at the end, once we are sure there are no more errors.
+        if is_match {
+            self.matched.insert(height);
+        }
+        self.matched.split_off(&height);
+        self.blocks.split_off(&height);
+        self.blocks.insert(height, hash);
+        self.height = height.saturating_add(1);
+        self.cp = self
+            .cp
+            .as_ref()
+            .and_then(|cp| cp.range(..=cp.height()).next());
+
+        Ok(Some(event))
+    }
+
+    /// Non-mutating method that finds the next block which connects with our previously-emitted
+    /// history.
+    fn find_next_block(&self) -> Result<Option<(Height, BlockHash)>, bitcoincore_rpc::Error> {
+        let mut height = self.height;
+
+        // Search blocks backwards until we find a block which connects with something the consumer
+        // has already seen.
+        let hash = loop {
+            let hash = match self.client.get_block_hash(height as _) {
+                Ok(hash) => hash,
+                Err(bitcoincore_rpc::Error::JsonRpc(jsonrpc::Error::Rpc(rpc_err)))
+                    // -8: Out of bounds, -5: Not found
+                    if rpc_err.code == -8 || rpc_err.code == -5 =>
+                {
+                    return Ok(None)
+                }
+                Err(err) => return Err(err),
+            };
+            let header = self.client.get_block_header(&hash)?;
+
+            let prev_height = match height.checked_sub(1) {
+                Some(prev_height) => prev_height,
+                // Always emit the genesis block as it cannot change.
+                None => break hash,
+            };
+
+            let prev_hash_remote = header.prev_blockhash;
+            if let Some(&prev_hash) = self.blocks.get(&prev_height) {
+                if prev_hash == prev_hash_remote {
+                    break hash;
+                }
+                height = prev_height;
+                continue;
+            }
+
+            let maybe_prev_cp = self
+                .cp
+                .as_ref()
+                .and_then(|cp| cp.range(..=prev_height).next());
+            if let Some(prev_cp) = maybe_prev_cp {
+                if prev_cp.height() != prev_height {
+                    // Try again at a height that the consumer can compare against.
+                    height = prev_cp.height();
+                    continue;
+                }
+                if prev_cp.hash() != prev_hash_remote {
+                    height = prev_height;
+                    continue;
+                }
+            }
+            break hash;
+        };
+
+        Ok(Some((height, hash)))
+    }
 }
 
 /// Errors that may occur during a compact filters sync.
@@ -285,8 +300,6 @@ pub enum Error {
     NoScripts,
     /// `bitcoincore_rpc` error
     Rpc(bitcoincore_rpc::Error),
-    /// `MAX_REORG_DEPTH` exceeded
-    ReorgDepthExceeded,
 }
 
 impl From<bitcoincore_rpc::Error> for Error {
@@ -301,7 +314,6 @@ impl fmt::Display for Error {
             Self::Bip158(e) => e.fmt(f),
             Self::NoScripts => write!(f, "no script pubkeys were provided to match with"),
             Self::Rpc(e) => e.fmt(f),
-            Self::ReorgDepthExceeded => write!(f, "maximum reorg depth exceeded"),
         }
     }
 }
