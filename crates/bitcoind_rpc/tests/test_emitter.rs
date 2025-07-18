@@ -102,11 +102,10 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
         assert_eq!(
             local_chain.apply_update(emission.checkpoint,)?,
             if exp_height == exp_hashes.len() - reorged_blocks.len() {
-                bdk_chain::local_chain::ChangeSet {
-                    blocks: core::iter::once((height, Some(hash)))
-                        .chain((height + 1..exp_hashes.len() as u32).map(|h| (h, None)))
-                        .collect(),
-                }
+                bdk_chain::local_chain::ChangeSet::from(
+                    core::iter::once((height, Some(hash)))
+                        .chain((height + 1..exp_hashes.len() as u32).map(|h| (h, None))),
+                )
             } else {
                 [(height, Some(hash))].into()
             },
