@@ -410,6 +410,13 @@ impl<A> TxGraph<A> {
         })
     }
 
+    /// Get the `last_evicted` timestamp of the given `txid`.
+    ///
+    /// Ideally, this would be included in [`TxNode`], but that would be a breaking change.
+    pub fn get_last_evicted(&self, txid: Txid) -> Option<u64> {
+        self.last_evicted.get(&txid).copied()
+    }
+
     /// Calculates the fee of a given transaction. Returns [`Amount::ZERO`] if `tx` is a coinbase
     /// transaction. Returns `OK(_)` if we have all the [`TxOut`]s being spent by `tx` in the
     /// graph (either as the full transactions or individual txouts).
