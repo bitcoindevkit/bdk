@@ -579,8 +579,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     let outpoint = vin.previous_output;
                     let vout = outpoint.vout;
                     let prev_tx = self.fetch_tx(outpoint.txid)?;
-                    let txout = prev_tx.output[vout as usize].clone();
-                    let _ = tx_update.txouts.insert(outpoint, txout);
+                    // Ensure server returns the expected txout.
+                    let txout = prev_tx
+                        .output
+                        .get(vout as usize)
+                        .ok_or_else(|| {
+                            electrum_client::Error::Message(format!(
+                                "prevout {outpoint} does not exist"
+                            ))
+                        })?
+                        .clone();
+                    tx_update.txouts.insert(outpoint, txout);
                 }
             }
         }
@@ -638,25 +647,19 @@ fn fetch_tip_and_latest_blocks(
             }
         }
         agreement_cp
+            .ok_or_else(|| Error::Message("cannot find agreement block with server".to_string()))?
     };
 
-    let agreement_height = agreement_cp.as_ref().map(CheckPoint::height);
-
-    let new_tip = new_blocks
+    let extension = new_blocks
         .iter()
-        // Prune `new_blocks` to only include blocks that are actually new.
-        .filter(|(height, _)| Some(*<&u32>::clone(height)) > agreement_height)
-        .map(|(height, hash)| BlockId {
-            height: *height,
-            hash: *hash,
+        .filter({
+            let agreement_height = agreement_cp.height();
+            move |(height, _)| **height > agreement_height
         })
-        .fold(agreement_cp, |prev_cp, block| {
-            Some(match prev_cp {
-                Some(cp) => cp.push(block).expect("must extend checkpoint"),
-                None => CheckPoint::new(block),
-            })
-        })
-        .expect("must have at least one checkpoint");
+        .map(|(&height, &hash)| BlockId { height, hash });
+    let new_tip = agreement_cp
+        .extend(extension)
+        .expect("extension heights already checked to be greater than agreement height");
 
     Ok((new_tip, new_blocks))
 }
@@ -687,9 +690,11 @@ fn chain_update(
 #[cfg(test)]
 mod test {
     use crate::{bdk_electrum_client::TxUpdate, BdkElectrumClient};
-    use bdk_chain::bitcoin::{OutPoint, Transaction, TxIn};
-    use bdk_core::collections::BTreeMap;
-    use bdk_testenv::{utils::new_tx, TestEnv};
+    use bdk_chain::bitcoin::{constants, Network, OutPoint, ScriptBuf, Transaction, TxIn};
+    use bdk_chain::{BlockId, CheckPoint};
+    use bdk_core::{collections::BTreeMap, spk_client::SyncRequest};
+    use bdk_testenv::{anyhow, utils::new_tx, TestEnv};
+    use electrum_client::Error as ElectrumError;
     use std::sync::Arc;
 
     #[cfg(feature = "default")]
@@ -721,5 +726,35 @@ mod test {
 
         // Ensure that the txouts are empty.
         assert_eq!(tx_update.txouts, BTreeMap::default());
+    }
+
+    #[cfg(feature = "default")]
+    #[test]
+    fn test_sync_wrong_network_error() -> anyhow::Result<()> {
+        let env = TestEnv::new()?;
+        let client = electrum_client::Client::new(env.electrsd.electrum_url.as_str()).unwrap();
+        let electrum_client = BdkElectrumClient::new(client);
+
+        let _ = env.mine_blocks(1, None).unwrap();
+
+        let bogus_spks: Vec<ScriptBuf> = Vec::new();
+        let bogus_genesis = constants::genesis_block(Network::Testnet).block_hash();
+        let bogus_cp = CheckPoint::new(BlockId {
+            height: 0,
+            hash: bogus_genesis,
+        });
+
+        let req = SyncRequest::builder()
+            .chain_tip(bogus_cp)
+            .spks(bogus_spks)
+            .build();
+        let err = electrum_client.sync(req, 1, false).unwrap_err();
+
+        assert!(
+            matches!(err, ElectrumError::Message(m) if m.contains("cannot find agreement block with server")),
+            "expected missing agreement block error"
+        );
+
+        Ok(())
     }
 }
