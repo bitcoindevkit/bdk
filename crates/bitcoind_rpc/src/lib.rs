@@ -21,6 +21,9 @@ use bitcoin::{Block, BlockHash, Transaction, Txid};
 use bitcoincore_rpc::{bitcoincore_rpc_json, RpcApi};
 use core::ops::Deref;
 
+#[cfg(feature = "tracing-logs")]
+use tracing::trace;
+
 pub mod bip158;
 
 pub use bitcoincore_rpc;
@@ -124,6 +127,13 @@ where
     pub fn mempool_at(&mut self, sync_time: u64) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let client = &*self.client;
 
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            start_height = self.start_height,
+            sync_time = sync_time,
+            "enter mempool_at"
+        );
+
         let mut rpc_tip_height;
         let mut rpc_tip_hash;
         let mut rpc_mempool;
@@ -164,6 +174,14 @@ where
             ..Default::default()
         };
 
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            rpc_mempool_count = rpc_mempool_txids.len(),
+            rpc_height = rpc_tip_height,
+            rpc_block_hash = %rpc_tip_hash,
+            "fetched raw mempool"
+        );
+
         let at_tip =
             rpc_tip_height == self.last_cp.height() as u64 && rpc_tip_hash == self.last_cp.hash();
 
@@ -200,11 +218,23 @@ where
 
     /// Emit the next block height and block (if any).
     pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            last_block_height = self.last_block.as_ref().map(|r| r.height),
+            "enter next_block"
+        );
+
         if let Some((checkpoint, block)) = poll(self, move |hash, client| client.get_block(hash))? {
             // Stop tracking unconfirmed transactions that have been confirmed in this block.
             for tx in &block.txdata {
                 self.mempool_snapshot.remove(&tx.compute_txid());
             }
+            #[cfg(feature = "tracing-logs")]
+            trace!(
+                block_height = checkpoint.height(),
+                tx_count = block.txdata.len(),
+                "emit block"
+            );
             return Ok(Some(BlockEvent { block, checkpoint }));
         }
         Ok(None)
@@ -279,6 +309,13 @@ where
     C: Deref,
     C::Target: RpcApi,
 {
+    #[cfg(feature = "tracing-logs")]
+    trace!(
+        last_block_height = emitter.last_block.as_ref().map(|r| r.height),
+        start_height = emitter.start_height,
+        "enter poll_once"
+    );
+
     let client = &*emitter.client;
 
     if let Some(last_res) = &emitter.last_block {
@@ -287,21 +324,35 @@ where
             let next_hash = client.get_block_hash(emitter.start_height as _)?;
             // make sure last emission is still in best chain
             if client.get_block_hash(last_res.height as _)? != last_res.hash {
+                #[cfg(feature = "tracing-logs")]
+                trace!("block not in best chain");
                 return Ok(PollResponse::BlockNotInBestChain);
             }
             next_hash
         } else {
             match last_res.nextblockhash {
-                None => return Ok(PollResponse::NoMoreBlocks),
+                None => {
+                    #[cfg(feature = "tracing-logs")]
+                    trace!("no more blocks");
+                    return Ok(PollResponse::NoMoreBlocks);
+                }
                 Some(next_hash) => next_hash,
             }
         };
 
         let res = client.get_block_info(&next_hash)?;
         if res.confirmations < 0 {
+            #[cfg(feature = "tracing-logs")]
+            trace!("block not in best chain");
             return Ok(PollResponse::BlockNotInBestChain);
         }
 
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            height = res.height,
+            hash   = %res.hash,
+            "agreement found"
+        );
         return Ok(PollResponse::Block(res));
     }
 
@@ -321,6 +372,12 @@ where
         };
 
         // agreement point found
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            "poll(): PollResponse::AgreementFound, height={}, hash={}",
+            res.height,
+            res.hash
+        );
         return Ok(PollResponse::AgreementFound(res, cp));
     }
 
