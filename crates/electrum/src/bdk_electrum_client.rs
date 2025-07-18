@@ -9,6 +9,9 @@ use bdk_core::{
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "tracing-logs")]
+use tracing::{debug, trace};
+
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
 
@@ -55,10 +58,15 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let tx_cache = self.tx_cache.lock().unwrap();
 
         if let Some(tx) = tx_cache.get(&txid) {
+            #[cfg(feature = "tracing-logs")]
+            trace!(%txid, "hit tx cache");
             return Ok(Arc::clone(tx));
         }
 
         drop(tx_cache);
+
+        #[cfg(feature = "tracing-logs")]
+        trace!(%txid, "missed tx cache, fetching from electrum");
 
         let tx = Arc::new(self.inner.transaction_get(&txid)?);
 
@@ -103,6 +111,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ) -> Result<FullScanResponse<K>, Error> {
         let mut request: FullScanRequest<K> = request.into();
         let start_time = request.start_time();
+
+        #[cfg(feature = "tracing-logs")]
+        trace!("starting full_scan");
 
         let tip_and_latest_blocks = match request.chain_tip() {
             Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
@@ -187,6 +198,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut request: SyncRequest<I> = request.into();
         let start_time = request.start_time();
 
+        #[cfg(feature = "tracing-logs")]
+        trace!("starting sync");
+
         let tip_and_latest_blocks = match request.chain_tip() {
             Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
             None => None,
@@ -266,9 +280,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             let spks = (0..batch_size)
                 .map_while(|_| spks_with_expected_txids.next())
                 .collect::<Vec<_>>();
+            #[cfg(feature = "tracing-logs")]
+            trace!(batch_size = spks.len(), "fetching script history batch");
+
             if spks.is_empty() {
+                #[cfg(feature = "tracing-logs")]
+                trace!("no script pubkeys left to scan in batch");
                 return Ok(last_active_index);
             }
+
+            #[cfg(feature = "tracing-logs")]
+            trace!("spk has tx history");
 
             let spk_histories = self
                 .inner
@@ -278,7 +300,15 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 if spk_history.is_empty() {
                     match unused_spk_count.checked_add(1) {
                         Some(i) if i < stop_gap => unused_spk_count = i,
-                        _ => return Ok(last_active_index),
+                        _ => {
+                            #[cfg(feature = "tracing-logs")]
+                            trace!(
+                                unused_spk_count,
+                                stop_gap,
+                                "gap limit reached, stopping scan for keychain"
+                            );
+                            return Ok(last_active_index);
+                        }
                     };
                 } else {
                     last_active_index = Some(spk_index);
@@ -360,10 +390,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
                     if !has_residing && res.tx_hash == outpoint.txid {
                         has_residing = true;
+                        #[cfg(feature = "tracing-logs")]
+                        trace!(%outpoint, "tx resides at outpoint, fetched and processed");
                         tx_update.txs.push(Arc::clone(&tx));
                         match res.height.try_into() {
                             // Returned heights 0 & -1 are reserved for unconfirmed txs.
                             Ok(height) if height > 0 => {
+                                #[cfg(feature = "tracing-logs")]
+                                trace!(%res.tx_hash, height, "added anchor from outpoint resolution");
                                 pending_anchors.push((res.tx_hash, height));
                             }
                             _ => {
@@ -379,13 +413,18 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                             .input
                             .iter()
                             .any(|txin| txin.previous_output == outpoint);
-                        if !has_spending {
+                        if has_spending {
+                            #[cfg(feature = "tracing-logs")]
+                            trace!(%outpoint, spending_txid = %res.tx_hash, "found tx spending from outpoint");
+                        } else {
                             continue;
                         }
                         tx_update.txs.push(Arc::clone(&res_tx));
                         match res.height.try_into() {
                             // Returned heights 0 & -1 are reserved for unconfirmed txs.
                             Ok(height) if height > 0 => {
+                                #[cfg(feature = "tracing-logs")]
+                                trace!(%res.tx_hash, height, "added anchor from outpoint resolution");
                                 pending_anchors.push((res.tx_hash, height));
                             }
                             _ => {
@@ -420,9 +459,13 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         .expect("tx must have an output")
                         .clone();
                     txs.push((txid, tx));
+                    #[cfg(feature = "tracing-logs")]
+                    trace!(%txid, "fetched tx for txid, checking confirmation status");
                     scripts.push(spk);
                 }
                 Err(electrum_client::Error::Protocol(_)) => {
+                    #[cfg(feature = "tracing-logs")]
+                    debug!(%txid, "electrum protocol error, skipping txid");
                     continue;
                 }
                 Err(e) => return Err(e),
@@ -440,6 +483,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 match res.height.try_into() {
                     // Returned heights 0 & -1 are reserved for unconfirmed txs.
                     Ok(height) if height > 0 => {
+                        #[cfg(feature = "tracing-logs")]
+                        trace!(%res.tx_hash, height, "anchor candidate found via txid history");
                         pending_anchors.push((tx.0, height));
                     }
                     _ => {
@@ -499,8 +544,12 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 let h = height as u32;
                 let hash = height_to_hash[&h];
                 if let Some(anchor) = anchor_cache.get(&(txid, hash)) {
+                    #[cfg(feature = "tracing-logs")]
+                    trace!(%txid, height, "anchor cache hit");
                     results.push((txid, *anchor));
                 } else {
+                    #[cfg(feature = "tracing-logs")]
+                    trace!(%txid, height, "anchor cache miss, will fetch merkle proof");
                     to_fetch.push((txid, height, hash));
                 }
             }
@@ -533,6 +582,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             let mut valid =
                 electrum_client::utils::validate_merkle_proof(&txid, &header.merkle_root, &proof);
             if !valid {
+                #[cfg(feature = "tracing-logs")]
+                debug!(%txid, height, "merkle validation failed, refetching header and retrying");
                 header = self.inner.block_header(height)?;
                 self.block_header_cache
                     .lock()
@@ -543,6 +594,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     &header.merkle_root,
                     &proof,
                 );
+                if valid {
+                    #[cfg(feature = "tracing-logs")]
+                    trace!(%txid, height, "merkle proof validated after retry");
+                }
             }
 
             // Build and cache the anchor if merkle proof is valid.
@@ -558,6 +613,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     .lock()
                     .unwrap()
                     .insert((txid, hash), anchor);
+                #[cfg(feature = "tracing-logs")]
+                trace!(%txid, height, %hash, "inserted anchor");
                 results.push((txid, anchor));
             }
         }
