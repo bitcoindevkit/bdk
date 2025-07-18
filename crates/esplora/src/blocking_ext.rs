@@ -11,6 +11,9 @@ use std::thread::JoinHandle;
 
 use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
 
+#[cfg(feature = "tracing-logs")]
+use tracing::trace;
+
 /// [`esplora_client::Error`]
 pub type Error = Box<esplora_client::Error>;
 
@@ -57,6 +60,13 @@ impl EsploraExt for esplora_client::BlockingClient {
     ) -> Result<FullScanResponse<K>, Error> {
         let mut request: FullScanRequest<K> = request.into();
         let start_time = request.start_time();
+
+        #[cfg(feature = "tracing-logs")]
+        trace!(
+            "Entering full_scan: stop_gap={} parallel_requests={}",
+            stop_gap,
+            parallel_requests
+        );
 
         let chain_tip = request.chain_tip();
         let latest_blocks = if chain_tip.is_some() {
@@ -110,6 +120,9 @@ impl EsploraExt for esplora_client::BlockingClient {
     ) -> Result<SyncResponse, Error> {
         let mut request: SyncRequest<I> = request.into();
         let start_time = request.start_time();
+
+        #[cfg(feature = "tracing-logs")]
+        trace!("Entering sync: parallel_requests={}", parallel_requests);
 
         let chain_tip = request.chain_tip();
         let latest_blocks = if chain_tip.is_some() {
@@ -169,6 +182,9 @@ impl EsploraExt for esplora_client::BlockingClient {
 fn fetch_latest_blocks(
     client: &esplora_client::BlockingClient,
 ) -> Result<BTreeMap<u32, BlockHash>, Error> {
+    #[cfg(feature = "tracing-logs")]
+    trace!("fetch_latest_blocks()");
+
     Ok(client
         .get_blocks(None)?
         .into_iter()
@@ -184,6 +200,9 @@ fn fetch_block(
     latest_blocks: &BTreeMap<u32, BlockHash>,
     height: u32,
 ) -> Result<Option<BlockHash>, Error> {
+    #[cfg(feature = "tracing-logs")]
+    trace!(height, "fetch_block()");
+
     if let Some(&hash) = latest_blocks.get(&height) {
         return Ok(Some(hash));
     }
@@ -215,6 +234,9 @@ fn chain_update(
     local_tip: &CheckPoint,
     anchors: &BTreeSet<(ConfirmationBlockTime, Txid)>,
 ) -> Result<CheckPoint, Error> {
+    #[cfg(feature = "tracing-logs")]
+    trace!("chain_update()");
+
     let mut point_of_agreement = None;
     let mut local_cp_hash = local_tip.hash();
     let mut conflicts = vec![];
@@ -279,6 +301,14 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
     stop_gap: usize,
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error> {
+    #[cfg(feature = "tracing-logs")]
+    trace!(
+        "fetch_txs_with_keychain_spks: start_time={} stop_gap={} parallel_requests={}",
+        start_time,
+        stop_gap,
+        parallel_requests
+    );
+
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
@@ -366,6 +396,13 @@ fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
     spks: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
+    #[cfg(feature = "tracing-logs")]
+    trace!(
+        "fetch_txs_with_spks: start_time={} parallel_requests={}",
+        start_time,
+        parallel_requests
+    );
+
     fetch_txs_with_keychain_spks(
         client,
         start_time,
@@ -390,6 +427,13 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
     txids: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
+    #[cfg(feature = "tracing-logs")]
+    trace!(
+        "fetch_txs_with_txids: start_time={} parallel_requests={}",
+        start_time,
+        parallel_requests
+    );
+
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     // Only fetch for non-inserted txs.
     let mut txids = txids
@@ -443,6 +487,13 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     outpoints: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
+    #[cfg(feature = "tracing-logs")]
+    trace!(
+        "fetch_txs_with_outpoints: start_time={} parallel_requests={}",
+        start_time,
+        parallel_requests
+    );
+
     let outpoints = outpoints.into_iter().collect::<Vec<_>>();
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
 
