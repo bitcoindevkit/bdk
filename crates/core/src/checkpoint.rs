@@ -28,21 +28,24 @@ struct CPInner {
 /// https://github.com/bitcoindevkit/bdk/issues/1634
 impl Drop for CPInner {
     fn drop(&mut self) {
-        // Take out `prev` so its `drop` won't be called when this drop is finished
+        // Take out `prev` so its `drop` won't be called when this drop is finished.
         let mut current = self.prev.take();
+        // Collect nodes to drop later so we avoid recursive drop calls while not leaking memory.
         while let Some(arc_node) = current {
-            // Get rid of the Arc around `prev` if we're the only one holding a ref
-            // So the `drop` on it won't be called when the `Arc` is dropped.
+            // Get rid of the `Arc` around `prev` if we're the only one holding a reference so the
+            // `drop` on it won't be called when the `Arc` is dropped.
             //
-            // FIXME: When MSRV > 1.70.0 this should use Arc::into_inner which actually guarantees
-            // that no recursive drop calls can happen even with multiple threads.
-            match Arc::try_unwrap(arc_node).ok() {
-                Some(mut node) => {
-                    // Keep going backwards
-                    current = node.prev.take();
-                    // Don't call `drop` on `CPInner` since that risks it becoming recursive.
-                    core::mem::forget(node);
-                }
+            // Ideally we would only use `Arc::into_inner` which guarantees no memory leaks.
+            // However, this is only available since 1.70, whereas 1.63 is our current MSRV.
+            #[cfg(has_arc_into_inner)]
+            #[allow(clippy::incompatible_msrv)]
+            let arc_inner = Arc::into_inner(arc_node);
+            #[cfg(not(has_arc_into_inner))]
+            let arc_inner = Arc::try_unwrap(arc_node).ok();
+
+            match arc_inner {
+                // Keep going backwards.
+                Some(mut node) => current = node.prev.take(),
                 None => break,
             }
         }
@@ -260,5 +263,79 @@ impl IntoIterator for CheckPoint {
         CheckPointIter {
             current: Some(self.0),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Make sure that dropping checkpoints does not result in recursion and stack overflow.
+    #[test]
+    fn checkpoint_drop_is_not_recursive() {
+        use bitcoin::hashes::Hash;
+
+        let run = || {
+            let mut cp = CheckPoint::new(BlockId {
+                height: 0,
+                hash: Hash::hash(b"genesis"),
+            });
+
+            for height in 1u32..=(1024 * 10) {
+                let hash = Hash::hash(height.to_be_bytes().as_slice());
+                let block = BlockId { height, hash };
+                cp = cp.push(block).unwrap();
+            }
+
+            // `cp` would be dropped here.
+        };
+        std::thread::Builder::new()
+            // Restrict stack size.
+            .stack_size(32 * 1024)
+            .spawn(run)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn checkpoint_does_not_leak() {
+        let mut cp = CheckPoint::new(BlockId {
+            height: 0,
+            hash: bitcoin::hashes::Hash::hash(b"genesis"),
+        });
+
+        for height in 1u32..=1000 {
+            let hash = bitcoin::hashes::Hash::hash(height.to_be_bytes().as_slice());
+            let block = BlockId { height, hash };
+            cp = cp.push(block).unwrap();
+        }
+
+        let genesis = cp.get(0).expect("genesis exists");
+        let weak = Arc::downgrade(&genesis.0);
+
+        // At this point there should be exactly two strong references to the
+        // genesis checkpoint: the variable `genesis` and the chain `cp`.
+        assert_eq!(
+            Arc::strong_count(&genesis.0),
+            2,
+            "`cp` and `genesis` should be the only strong references",
+        );
+
+        // Dropping the chain should remove one strong reference.
+        drop(cp);
+        assert_eq!(
+            Arc::strong_count(&genesis.0),
+            1,
+            "`genesis` should be the last strong reference after `cp` is dropped",
+        );
+
+        // Dropping the final reference should deallocate the node, so the weak
+        // reference cannot be upgraded.
+        drop(genesis);
+        assert!(
+            weak.upgrade().is_none(),
+            "the checkpoint node should be freed when all strong references are dropped",
+        );
     }
 }

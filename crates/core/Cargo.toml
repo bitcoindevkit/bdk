@@ -23,3 +23,9 @@ serde = ["dep:serde", "bitcoin/serde", "hashbrown?/serde"]
 [dev-dependencies]
 bdk_chain = { path = "../chain" }
 bdk_testenv = { path = "../testenv", default-features = false }
+
+[build-dependencies]
+version_check = "0.9"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(has_arc_into_inner)'] }
