@@ -118,7 +118,7 @@ where
     ///             let mut new_store =
     ///                 Store::create(&MAGIC_BYTES, &new_file_path).expect("must create new file");
     ///             if let Some(aggregated_changeset) = changeset {
-    ///                 new_store.append(&aggregated_changeset)?;
+    ///                 new_store.append(aggregated_changeset.as_ref())?;
     ///             }
     ///             // The following will overwrite the original file. You will loose the corrupted
     ///             // portion of the original file forever.
@@ -133,7 +133,7 @@ where
     /// #     changesets[..2].iter().cloned().reduce(|mut acc, cs| {
     /// #         Merge::merge(&mut acc, cs);
     /// #         acc
-    /// #     }),
+    /// #     }).map(Box::new),
     /// #     "should recover all changesets",
     /// # );
     /// #
@@ -142,7 +142,10 @@ where
     /// ```
     /// [`create`]: Store::create
     /// [`load`]: Store::load
-    pub fn load<P>(magic: &[u8], file_path: P) -> Result<(Self, Option<C>), StoreErrorWithDump<C>>
+    pub fn load<P>(
+        magic: &[u8],
+        file_path: P,
+    ) -> Result<(Self, Option<Box<C>>), StoreErrorWithDump<C>>
     where
         P: AsRef<Path>,
     {
@@ -152,7 +155,7 @@ where
         f.read_exact(&mut magic_buf)?;
         if magic_buf != magic {
             return Err(StoreErrorWithDump {
-                changeset: Option::<C>::None,
+                changeset: Option::<Box<C>>::None,
                 error: StoreError::InvalidMagicBytes {
                     got: magic_buf,
                     expected: magic.to_vec(),
@@ -182,14 +185,16 @@ where
     /// far in the changeset field.
     ///
     /// [`dump`]: Store::dump
-    pub fn dump(&mut self) -> Result<Option<C>, StoreErrorWithDump<C>> {
+    pub fn dump(&mut self) -> Result<Option<Box<C>>, StoreErrorWithDump<C>> {
         EntryIter::new(self.magic_len as u64, &mut self.db_file).try_fold(
-            Option::<C>::None,
-            |mut aggregated_changeset: Option<C>, next_changeset| match next_changeset {
+            Option::<Box<C>>::None,
+            |mut aggregated_changeset: Option<Box<C>>, next_changeset| match next_changeset {
                 Ok(next_changeset) => {
                     match &mut aggregated_changeset {
                         Some(aggregated_changeset) => aggregated_changeset.merge(next_changeset),
-                        aggregated_changeset => *aggregated_changeset = Some(next_changeset),
+                        aggregated_changeset => {
+                            *aggregated_changeset = Some(Box::new(next_changeset))
+                        }
                     }
                     Ok(aggregated_changeset)
                 }
@@ -210,7 +215,7 @@ where
     pub fn load_or_create<P>(
         magic: &[u8],
         file_path: P,
-    ) -> Result<(Self, Option<C>), StoreErrorWithDump<C>>
+    ) -> Result<(Self, Option<Box<C>>), StoreErrorWithDump<C>>
     where
         P: AsRef<Path>,
     {
@@ -218,9 +223,9 @@ where
             Self::load(magic, file_path)
         } else {
             Self::create(magic, file_path)
-                .map(|store| (store, Option::<C>::None))
+                .map(|store| (store, Option::<Box<C>>::None))
                 .map_err(|err: StoreError| StoreErrorWithDump {
-                    changeset: Option::<C>::None,
+                    changeset: Option::<Box<C>>::None,
                     error: err,
                 })
         }
@@ -257,7 +262,7 @@ where
 #[derive(Debug)]
 pub struct StoreErrorWithDump<C> {
     /// The partially-aggregated changeset.
-    pub changeset: Option<C>,
+    pub changeset: Option<Box<C>>,
 
     /// The [`StoreError`]
     pub error: StoreError,
@@ -266,7 +271,7 @@ pub struct StoreErrorWithDump<C> {
 impl<C> From<io::Error> for StoreErrorWithDump<C> {
     fn from(value: io::Error) -> Self {
         Self {
-            changeset: Option::<C>::None,
+            changeset: Option::<Box<C>>::None,
             error: StoreError::Io(value),
         }
     }
@@ -370,7 +375,7 @@ mod test {
                 changeset,
                 error: StoreError::Bincode(_),
             }) => {
-                assert_eq!(changeset, Some(test_changesets))
+                assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
             unexpected_res => panic!("unexpected result: {unexpected_res:?}"),
         }
@@ -398,7 +403,7 @@ mod test {
                 changeset,
                 error: StoreError::Bincode(_),
             }) => {
-                assert_eq!(changeset, Some(test_changesets))
+                assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
             unexpected_res => panic!("unexpected result: {unexpected_res:?}"),
         }
@@ -421,7 +426,7 @@ mod test {
             .dump()
             .expect("should aggregate")
             .expect("should not be empty");
-        assert_eq!(not_empty_changeset, aggregated_changeset);
+        assert_eq!(Box::new(not_empty_changeset), aggregated_changeset);
     }
 
     #[test]
@@ -459,7 +464,7 @@ mod test {
             let (_, recovered_changeset) =
                 Store::<TestChangeSet>::load_or_create(&TEST_MAGIC_BYTES, &file_path)
                     .expect("must load");
-            assert_eq!(recovered_changeset, Some(changeset));
+            assert_eq!(recovered_changeset, Some(Box::new(changeset)));
         }
     }
 
@@ -499,10 +504,14 @@ mod test {
                     .expect_err("should fail to aggregate");
                 assert_eq!(
                     err.changeset,
-                    changesets.iter().cloned().reduce(|mut acc, cs| {
-                        Merge::merge(&mut acc, cs);
-                        acc
-                    }),
+                    changesets
+                        .iter()
+                        .cloned()
+                        .reduce(|mut acc, cs| {
+                            Merge::merge(&mut acc, cs);
+                            acc
+                        })
+                        .map(Box::new),
                     "should recover all changesets that are written in full",
                 );
                 // Remove file and start again
@@ -532,7 +541,8 @@ mod test {
                         .reduce(|mut acc, cs| {
                             Merge::merge(&mut acc, cs);
                             acc
-                        }),
+                        })
+                        .map(Box::new),
                     "should recover all changesets",
                 );
             }
@@ -574,8 +584,8 @@ mod test {
             expected_changeset.extend(changeset1);
 
             // Assert that stored_changesets matches expected_changeset but not changeset2
-            assert_eq!(stored_changesets, expected_changeset);
-            assert_ne!(stored_changesets, changeset2);
+            assert_eq!(stored_changesets, Box::new(expected_changeset));
+            assert_ne!(stored_changesets, Box::new(changeset2));
         }
 
         // Open the store again to verify file pointer position at the end of the file
