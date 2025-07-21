@@ -168,7 +168,7 @@ where
 
         if at_tip {
             // We only emit evicted transactions when we have already emitted the RPC tip. This is
-            // because we cannot differenciate between transactions that are confirmed and
+            // because we cannot differentiate between transactions that are confirmed and
             // transactions that are evicted, so we rely on emitted blocks to remove
             // transactions from the `mempool_snapshot`.
             mempool_event.evicted = self
