@@ -1,8 +1,7 @@
-use bitcoin::{constants, Address, Amount, Network, ScriptBuf};
-
-use bdk_bitcoind_rpc::bip158::FilterIter;
+use bdk_bitcoind_rpc::bip158::{Error, Event, EventInner, FilterIter};
 use bdk_core::{BlockId, CheckPoint};
 use bdk_testenv::{anyhow, bitcoind, block_id, TestEnv};
+use bitcoin::{constants, Address, Amount, Network, ScriptBuf};
 use bitcoincore_rpc::RpcApi;
 
 fn testenv() -> anyhow::Result<TestEnv> {
@@ -111,7 +110,6 @@ fn get_tip_and_chain_update() -> anyhow::Result<()> {
 
 #[test]
 fn filter_iter_returns_matched_blocks() -> anyhow::Result<()> {
-    use bdk_bitcoind_rpc::bip158::{Event, EventInner};
     let env = testenv()?;
     let rpc = env.rpc_client();
     while rpc.get_block_count()? < 101 {
@@ -148,7 +146,6 @@ fn filter_iter_returns_matched_blocks() -> anyhow::Result<()> {
 
 #[test]
 fn filter_iter_error_no_scripts() -> anyhow::Result<()> {
-    use bdk_bitcoind_rpc::bip158::Error;
     let env = testenv()?;
     let _ = env.mine_blocks(2, None)?;
 
@@ -160,6 +157,27 @@ fn filter_iter_error_no_scripts() -> anyhow::Result<()> {
         assert!(matches!(iter.next().unwrap(), Err(Error::NoScripts)));
     }
     assert!(iter.next().is_none());
+
+    Ok(())
+}
+
+#[test]
+fn filter_iter_error_wrong_network() -> anyhow::Result<()> {
+    let env = testenv()?;
+    let rpc = env.rpc_client();
+    let _ = env.mine_blocks(10, None)?;
+
+    // Try to initialize FilterIter with a CP on the wrong network
+    let block_id = BlockId {
+        height: 0,
+        hash: bitcoin::hashes::Hash::hash(b"wrong-hash"),
+    };
+    let cp = CheckPoint::new(block_id);
+    let mut iter = FilterIter::new_with_checkpoint(rpc, cp);
+    let err = iter
+        .get_tip()
+        .expect_err("`get_tip` should fail to find PoA");
+    assert!(matches!(err, Error::ReorgDepthExceeded));
 
     Ok(())
 }
