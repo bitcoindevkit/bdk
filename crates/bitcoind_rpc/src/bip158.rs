@@ -204,8 +204,7 @@ impl<C: RpcApi> FilterIter<'_, C> {
             let height = cp.height();
             let fetched_hash = match self.blocks.get(&height) {
                 Some(hash) => *hash,
-                None if height == 0 => cp.hash(),
-                _ => self.client.get_block_hash(height as _)?,
+                None => self.client.get_block_hash(height as u64)?,
             };
             if cp.hash() == fetched_hash {
                 // ensure this block also exists in self
@@ -214,7 +213,7 @@ impl<C: RpcApi> FilterIter<'_, C> {
             }
             // remember conflicts
             self.blocks.insert(height, fetched_hash);
-            cp = cp.prev().expect("must break before genesis");
+            cp = cp.prev().ok_or(Error::ReorgDepthExceeded)?;
         }
     }
 
@@ -245,6 +244,8 @@ pub enum Error {
     NoScripts,
     /// `bitcoincore_rpc` error
     Rpc(bitcoincore_rpc::Error),
+    /// `MAX_REORG_DEPTH` exceeded
+    ReorgDepthExceeded,
 }
 
 impl From<bitcoincore_rpc::Error> for Error {
@@ -259,6 +260,7 @@ impl fmt::Display for Error {
             Self::Bip158(e) => e.fmt(f),
             Self::NoScripts => write!(f, "no script pubkeys were provided to match with"),
             Self::Rpc(e) => e.fmt(f),
+            Self::ReorgDepthExceeded => write!(f, "maximum reorg depth exceeded"),
         }
     }
 }
