@@ -164,6 +164,7 @@ impl<A: Anchor> FullTxOut<A> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use bdk_core::ConfirmationBlockTime;
 

@@ -509,6 +509,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use crate::blocking_ext::{chain_update, fetch_latest_blocks};
     use bdk_chain::bitcoin;

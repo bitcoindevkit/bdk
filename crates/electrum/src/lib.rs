@@ -16,7 +16,7 @@
 //! [`example_electrum`]: https://github.com/bitcoindevkit/bdk/tree/master/examples/example_electrum
 //! [`SyncResponse`]: bdk_core::spk_client::SyncResponse
 //! [`FullScanResponse`]: bdk_core::spk_client::FullScanResponse
-
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![warn(missing_docs)]
 
 mod bdk_electrum_client;
