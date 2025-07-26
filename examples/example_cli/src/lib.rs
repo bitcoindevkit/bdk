@@ -831,6 +831,8 @@ pub fn init_or_load<CS: clap::Subcommand, S: clap::Args>(
                 chain
             });
 
+            let changeset = *changeset;
+
             let (graph, changeset) = IndexedTxGraph::from_changeset(
                 (changeset.tx_graph, changeset.indexer).into(),
                 |c| -> anyhow::Result<_> {
