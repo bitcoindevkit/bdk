@@ -1,8 +1,7 @@
-use bitcoin::{constants, Address, Amount, Network, ScriptBuf};
-
-use bdk_bitcoind_rpc::bip158::FilterIter;
+use bdk_bitcoind_rpc::bip158::{Error, Event, EventInner, FilterIter};
 use bdk_core::{BlockId, CheckPoint};
 use bdk_testenv::{anyhow, bitcoind, block_id, TestEnv};
+use bitcoin::{constants, Address, Amount, Network, ScriptBuf};
 use bitcoincore_rpc::RpcApi;
 
 fn testenv() -> anyhow::Result<TestEnv> {
@@ -100,6 +99,7 @@ fn get_tip_and_chain_update() -> anyhow::Result<()> {
         let cp = CheckPoint::from_block_ids(test.chain).unwrap();
         let mut iter = FilterIter::new_with_checkpoint(env.rpc_client(), cp);
         assert_eq!(iter.get_tip().unwrap(), Some(new_tip));
+        for _res in iter.by_ref() {}
         let update_cp = iter.chain_update().unwrap();
         let mut update_blocks: Vec<_> = update_cp.iter().map(|cp| cp.block_id()).collect();
         update_blocks.reverse();
@@ -111,7 +111,6 @@ fn get_tip_and_chain_update() -> anyhow::Result<()> {
 
 #[test]
 fn filter_iter_returns_matched_blocks() -> anyhow::Result<()> {
-    use bdk_bitcoind_rpc::bip158::{Event, EventInner};
     let env = testenv()?;
     let rpc = env.rpc_client();
     while rpc.get_block_count()? < 101 {
@@ -148,7 +147,6 @@ fn filter_iter_returns_matched_blocks() -> anyhow::Result<()> {
 
 #[test]
 fn filter_iter_error_no_scripts() -> anyhow::Result<()> {
-    use bdk_bitcoind_rpc::bip158::Error;
     let env = testenv()?;
     let _ = env.mine_blocks(2, None)?;
 
@@ -160,6 +158,100 @@ fn filter_iter_error_no_scripts() -> anyhow::Result<()> {
         assert!(matches!(iter.next().unwrap(), Err(Error::NoScripts)));
     }
     assert!(iter.next().is_none());
+
+    Ok(())
+}
+
+// Test that while a reorg is detected we delay incrementing the best height
+#[test]
+fn repeat_reorgs() -> anyhow::Result<()> {
+    const MINE_TO: u32 = 11;
+
+    let env = testenv()?;
+    let rpc = env.rpc_client();
+    while rpc.get_block_count()? < MINE_TO as u64 {
+        let _ = env.mine_blocks(1, None)?;
+    }
+
+    let spk = ScriptBuf::from_hex("0014446906a6560d8ad760db3156706e72e171f3a2aa")?;
+
+    let mut iter = FilterIter::new_with_height(env.rpc_client(), 1);
+    iter.add_spk(spk);
+    assert_eq!(iter.get_tip()?.unwrap().height, MINE_TO);
+
+    // Process events to height (MINE_TO - 1)
+    loop {
+        if iter.next().unwrap()?.height() == MINE_TO - 1 {
+            break;
+        }
+    }
+
+    for _ in 0..3 {
+        // Invalidate 2 blocks and remine to height = MINE_TO
+        let _ = env.reorg(2)?;
+
+        // Call next. If we detect a reorg, we'll see no change in the event height
+        assert_eq!(iter.next().unwrap()?.height(), MINE_TO - 1);
+    }
+
+    // If no reorg, then height should increment normally from here on
+    assert_eq!(iter.next().unwrap()?.height(), MINE_TO);
+    assert!(iter.next().is_none());
+
+    Ok(())
+}
+
+#[test]
+fn filter_iter_error_wrong_network() -> anyhow::Result<()> {
+    let env = testenv()?;
+    let rpc = env.rpc_client();
+    let _ = env.mine_blocks(10, None)?;
+
+    // Try to initialize FilterIter with a CP on the wrong network
+    let block_id = BlockId {
+        height: 0,
+        hash: bitcoin::hashes::Hash::hash(b"wrong-hash"),
+    };
+    let cp = CheckPoint::new(block_id);
+    let mut iter = FilterIter::new_with_checkpoint(rpc, cp);
+    let err = iter
+        .get_tip()
+        .expect_err("`get_tip` should fail to find PoA");
+    assert!(matches!(err, Error::ReorgDepthExceeded));
+
+    Ok(())
+}
+
+#[test]
+fn filter_iter_max_reorg_depth() -> anyhow::Result<()> {
+    use bdk_bitcoind_rpc::bip158::Error;
+
+    let env = testenv()?;
+    let client = env.rpc_client();
+
+    const BASE_HEIGHT: u32 = 10;
+    const REORG_LEN: u32 = 101;
+    const STOP_HEIGHT: u32 = BASE_HEIGHT + REORG_LEN;
+
+    while client.get_block_count()? < STOP_HEIGHT as u64 {
+        env.mine_blocks(1, None)?;
+    }
+
+    let mut iter = FilterIter::new_with_height(client, BASE_HEIGHT);
+    let spk = ScriptBuf::from_hex("0014446906a6560d8ad760db3156706e72e171f3a2aa")?;
+    iter.add_spk(spk.clone());
+    assert_eq!(iter.get_tip()?.unwrap().height, STOP_HEIGHT);
+
+    // Consume events up to final height - 1.
+    loop {
+        if iter.next().unwrap()?.height() == STOP_HEIGHT - 1 {
+            break;
+        }
+    }
+
+    let _ = env.reorg(REORG_LEN as usize)?;
+
+    assert!(matches!(iter.next(), Some(Err(Error::ReorgDepthExceeded))));
 
     Ok(())
 }
