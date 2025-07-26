@@ -18,7 +18,7 @@ jobs:
           persist-credentials: false
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6
+        uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef
 
       - name: Install zizmor
         run: cargo install zizmor --locked --version 1.6.0
