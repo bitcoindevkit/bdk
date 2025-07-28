@@ -50,6 +50,8 @@ pub struct FilterIter<'c, C> {
 impl<'c, C: RpcApi> FilterIter<'c, C> {
     /// Hard cap on how far to walk back when a reorg is detected.
     const MAX_REORG_DEPTH: u32 = 100;
+    /// Number of recent blocks from the tip to be returned in a chain update.
+    const CHAIN_SUFFIX_LEN: u32 = 10;
 
     /// Construct [`FilterIter`] from a given `client` and start `height`.
     pub fn new_with_height(client: &'c C, height: u32) -> Self {
@@ -255,7 +257,7 @@ impl<C: RpcApi> FilterIter<'_, C> {
 
         // We return blocks up to and including the initial height, all of the matching blocks,
         // and blocks in the terminal range.
-        let tail_range = self.stop.saturating_sub(9)..=self.stop;
+        let tail_range = (self.stop + 1).saturating_sub(Self::CHAIN_SUFFIX_LEN)..=self.stop;
         Some(
             CheckPoint::from_block_ids(self.headers.iter().filter_map(|(&height, &(hash, _))| {
                 if height <= self.start
