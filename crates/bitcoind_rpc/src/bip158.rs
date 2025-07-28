@@ -22,26 +22,38 @@ use bitcoincore_rpc::RpcApi;
 /// Block height
 type Height = u32;
 
-/// Block header with associated block hash.
-type HashedHeader = (BlockHash, Header);
-
-/// Type that generates block [`Event`]s by matching a list of script pubkeys against a
-/// [`BlockFilter`].
+/// Type that returns Bitcoin blocks by matching a list of script pubkeys (SPKs) against a
+/// [`bip158::BlockFilter`].
+///
+/// ## Note
+///
+/// - You must add spks to `FilterIter` by using [`add_spks`]. If not you will get an error when
+///   calling `next`. This is because [`match_any`] will be true for every query, which is usually
+///   not what you want.
+/// - Call `next` on the iterator to get the next [`Event`]. It is common to iterate `FilterIter`
+///   [`by_ref`], so that you can continue to call methods on it.
+/// - Use [`get_tip`] to find the tip of the remote node and to set the stop height.
+/// - Iteration stops when filters for all heights have been scanned.
+///
+/// [`add_spks`]: Self::add_spks
+/// [`match_any`]: BlockFilter::match_any
+/// [`get_tip`]: Self::get_tip
+/// [`by_ref`]: Self::by_ref
 #[derive(Debug)]
 pub struct FilterIter<'c, C> {
-    // RPC client
+    /// RPC client
     client: &'c C,
-    // SPK inventory
+    /// SPK inventory
     spks: Vec<ScriptBuf>,
-    // block headers
-    headers: BTreeMap<Height, HashedHeader>,
-    // heights of matching blocks
+    /// Block headers
+    headers: BTreeMap<Height, (BlockHash, Header)>,
+    /// Heights of matching blocks
     matched: BTreeSet<Height>,
-    // best height counter
+    /// Next height
     height: Height,
-    // initial height
+    /// Initial height
     start: Height,
-    // stop height
+    /// Stop height
     stop: Height,
 }
 
@@ -112,7 +124,7 @@ impl<'c, C: RpcApi> FilterIter<'c, C> {
     }
 
     /// Return all of the block headers that were collected during the scan.
-    pub fn block_headers(&self) -> &BTreeMap<Height, (BlockHash, Header)> {
+    pub fn headers(&self) -> &BTreeMap<Height, (BlockHash, Header)> {
         &self.headers
     }
 }
@@ -171,8 +183,10 @@ impl<C: RpcApi> Iterator for FilterIter<'_, C> {
 
                 let header = self.client.get_block_header(&hash)?;
 
-                let prev_height = height.saturating_sub(1);
-                match self.headers.get(&prev_height).copied() {
+                match height
+                    .checked_sub(1)
+                    .and_then(|prev_height| self.headers.get(&prev_height).copied())
+                {
                     // Not enough data.
                     None => break header,
                     // Ok, the chain is consistent.
