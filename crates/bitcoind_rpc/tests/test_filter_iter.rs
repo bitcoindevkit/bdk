@@ -97,7 +97,7 @@ fn get_tip_and_chain_update() -> anyhow::Result<()> {
     .into_iter()
     .for_each(|test| {
         let cp = CheckPoint::from_block_ids(test.chain).unwrap();
-        let mut iter = FilterIter::new_with_checkpoint(env.rpc_client(), cp);
+        let mut iter = FilterIter::new_with_checkpoint(env.rpc_client(), cp).unwrap();
         assert_eq!(iter.get_tip().unwrap(), Some(new_tip));
         for _res in iter.by_ref() {}
         let update_cp = iter.chain_update().unwrap();
@@ -177,11 +177,8 @@ fn filter_iter_error_wrong_network() -> anyhow::Result<()> {
         hash: bitcoin::hashes::Hash::hash(b"wrong-hash"),
     };
     let cp = CheckPoint::new(block_id);
-    let mut iter = FilterIter::new_with_checkpoint(rpc, cp);
-    let err = iter
-        .get_tip()
-        .expect_err("`get_tip` should fail to find PoA");
-    assert!(matches!(err, Error::ReorgDepthExceeded));
+    let res = FilterIter::new_with_checkpoint(rpc, cp);
+    assert!(matches!(res, Err(Error::ReorgDepthExceeded)));
 
     Ok(())
 }

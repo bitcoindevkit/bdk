@@ -33,8 +33,6 @@ pub struct FilterIter<'c, C> {
     client: &'c C,
     // SPK inventory
     spks: Vec<ScriptBuf>,
-    // local cp
-    cp: Option<CheckPoint>,
     // block headers
     headers: BTreeMap<Height, HashedHeader>,
     // heights of matching blocks
@@ -58,7 +56,6 @@ impl<'c, C: RpcApi> FilterIter<'c, C> {
         Self {
             client,
             spks: vec![],
-            cp: None,
             headers: BTreeMap::new(),
             matched: BTreeSet::new(),
             height,
@@ -68,10 +65,19 @@ impl<'c, C: RpcApi> FilterIter<'c, C> {
     }
 
     /// Construct [`FilterIter`] from a given `client` and [`CheckPoint`].
-    pub fn new_with_checkpoint(client: &'c C, cp: CheckPoint) -> Self {
-        let mut filter_iter = Self::new_with_height(client, cp.height());
-        filter_iter.cp = Some(cp);
-        filter_iter
+    ///
+    /// # Errors
+    ///
+    /// If no point of agreement is found between `cp` and the remote node, then
+    /// a [`Error::ReorgDepthExceeded`] error is returned.
+    pub fn new_with_checkpoint(client: &'c C, cp: CheckPoint) -> Result<Self, Error> {
+        let mut iter = Self::new_with_height(client, cp.height());
+
+        // Start scanning from point of agreement + 1.
+        let base = iter.find_base(cp.clone())?;
+        iter.height = base.height.saturating_add(1);
+
+        Ok(iter)
     }
 
     /// Extends `self` with an iterator of spks.
@@ -86,19 +92,15 @@ impl<'c, C: RpcApi> FilterIter<'c, C> {
 
     /// Get the remote tip.
     ///
-    /// Returns `None` if the remote height is less than the height of this [`FilterIter`].
+    /// This will set the stop height to that of the new tip.
+    ///
+    /// Returns `None` if the remote height is not at least the height of this [`FilterIter`].
     pub fn get_tip(&mut self) -> Result<Option<BlockId>, Error> {
         let tip_hash = self.client.get_best_block_hash()?;
         let header = self.client.get_block_header_info(&tip_hash)?;
         let tip_height = header.height as u32;
         if self.height > tip_height {
             return Ok(None);
-        }
-
-        // start scanning from point of agreement + 1
-        if let Some(cp) = self.cp.as_ref() {
-            let base = self.find_base_with(cp.clone())?;
-            self.height = base.height.saturating_add(1);
         }
 
         self.stop = tip_height;
@@ -223,8 +225,14 @@ impl<C: RpcApi> Iterator for FilterIter<'_, C> {
 }
 
 impl<C: RpcApi> FilterIter<'_, C> {
-    /// Returns the point of agreement between `self` and the given `cp`.
-    fn find_base_with(&mut self, mut cp: CheckPoint) -> Result<BlockId, Error> {
+    /// Returns the point of agreement (PoA) between `self` and the given `cp`.
+    ///
+    /// This ensures that the scan may proceed from a block that still exists
+    /// in the best chain.
+    ///
+    /// If no PoA is found between `cp` and the remote node, then a [`Error::ReorgDepthExceeded`]
+    /// error is returned.
+    fn find_base(&mut self, mut cp: CheckPoint) -> Result<BlockId, Error> {
         loop {
             let height = cp.height();
             let (fetched_hash, header) = match self.headers.get(&height).copied() {
@@ -240,24 +248,24 @@ impl<C: RpcApi> FilterIter<'_, C> {
                 self.headers.insert(height, (fetched_hash, header));
                 return Ok(cp.block_id());
             }
-            // Remember conflicts.
-            self.headers.insert(height, (fetched_hash, header));
             cp = cp.prev().ok_or(Error::ReorgDepthExceeded)?;
         }
     }
 
     /// Returns a chain update from the newly scanned blocks.
     ///
-    /// Returns `None` if this [`FilterIter`] was not constructed using a [`CheckPoint`], or
-    /// if not all events have been emitted (by calling `next`).
+    /// This should only be called once all events have been consumed (by calling `next`).
+    ///
+    /// Returns `None` if the height of this `FilterIter` is not yet past the stop height.
     pub fn chain_update(&self) -> Option<CheckPoint> {
-        if self.cp.is_none() || self.headers.is_empty() || self.height <= self.stop {
+        if self.headers.is_empty() || self.height <= self.stop {
             return None;
         }
 
-        // We return blocks up to and including the initial height, all of the matching blocks,
+        // We return blocks up to the initial height, all of the matching blocks,
         // and blocks in the terminal range.
         let tail_range = (self.stop + 1).saturating_sub(Self::CHAIN_SUFFIX_LEN)..=self.stop;
+
         Some(
             CheckPoint::from_block_ids(self.headers.iter().filter_map(|(&height, &(hash, _))| {
                 if height <= self.start
