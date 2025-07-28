@@ -304,3 +304,80 @@ impl fmt::Display for Error {
 
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use bdk_testenv::{anyhow, bitcoind, TestEnv};
+    use bitcoin::{Address, Amount, Network, ScriptBuf};
+    use bitcoincore_rpc::RpcApi;
+
+    fn testenv() -> anyhow::Result<TestEnv> {
+        let mut conf = bitcoind::Conf::default();
+        conf.args.push("-blockfilterindex=1");
+        conf.args.push("-peerblockfilters=1");
+        TestEnv::new_with_config(bdk_testenv::Config {
+            bitcoind: conf,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn filter_iter_matches_blocks() -> anyhow::Result<()> {
+        let env = testenv()?;
+        let addr = env
+            .rpc_client()
+            .get_new_address(None, None)?
+            .assume_checked();
+
+        let _ = env.mine_blocks(100, Some(addr.clone()))?;
+        assert_eq!(env.rpc_client().get_block_count()?, 101);
+
+        // Send tx to external address to confirm at height = 102
+        let _txid = env.send(
+            &Address::from_script(
+                &ScriptBuf::from_hex("0014446906a6560d8ad760db3156706e72e171f3a2aa")?,
+                Network::Regtest,
+            )?,
+            Amount::from_btc(0.42)?,
+        )?;
+        let _ = env.mine_blocks(1, None);
+
+        let mut iter = FilterIter::new_with_height(&env.bitcoind.client, 1);
+        assert_eq!(iter.get_tip()?.unwrap().height, 102);
+
+        // Iterate events with no SPKs, expect none to match.
+        for res in iter.by_ref().take(3) {
+            match res {
+                Err(..) => {}
+                Ok(event) => {
+                    assert!(!event.is_match());
+                }
+            }
+        }
+
+        assert!(iter.matched.is_empty());
+
+        // Now add spks
+        iter.add_spk(addr.script_pubkey());
+
+        for res in iter.by_ref() {
+            let event = res?;
+            match event.height() {
+                h if h <= 101 => {
+                    assert!(event.is_match(), "we mined blocks to `addr`");
+                }
+                102 => {
+                    assert!(!event.is_match(), "_txid is not relevant to `addr`");
+                }
+                _ => unreachable!("we stopped at height 102"),
+            }
+        }
+
+        // Range of matching heights [4, 101]
+        assert_eq!(iter.matched, (4..=101).collect::<BTreeSet<_>>());
+
+        Ok(())
+    }
+}
