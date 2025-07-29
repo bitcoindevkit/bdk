@@ -333,6 +333,7 @@ impl std::error::Error for Error {}
 mod test {
     use super::*;
 
+    use bdk_chain::local_chain::LocalChain;
     use bdk_testenv::{anyhow, bitcoind, TestEnv};
     use bitcoin::{Address, Amount, Network, ScriptBuf};
     use bitcoincore_rpc::RpcApi;
@@ -345,6 +346,67 @@ mod test {
             bitcoind: conf,
             ..Default::default()
         })
+    }
+
+    #[test]
+    fn chain_update_must_connect_with_reorg_after_constructing_iter() -> anyhow::Result<()> {
+        let env = testenv()?;
+        let _ = env.mine_blocks(100, None);
+
+        // Initialize `chain` to have 3 blocks: genesis, some-middle-block and the original tip.
+        let (mut chain, _) = LocalChain::from_genesis_hash(env.genesis_hash()?);
+        {
+            let tip_height = env.rpc_client().get_block_count()?;
+            let tip_hash = env.rpc_client().get_block_hash(tip_height)?;
+            let mid_height = tip_height / 2;
+            let mid_hash = env.rpc_client().get_block_hash(mid_height)?;
+            chain.insert_block(BlockId {
+                height: tip_height as _,
+                hash: tip_hash,
+            })?;
+            chain.insert_block(BlockId {
+                height: mid_height as _,
+                hash: mid_hash,
+            })?;
+        }
+
+        // Advance remote chain.
+        let _ = env.mine_blocks(1, None);
+
+        // Initialize `iter` with the `chain`'s view.
+        let mut iter = FilterIter::new_with_checkpoint(env.rpc_client(), chain.tip())?;
+        iter.add_spk(
+            env.rpc_client()
+                .get_new_address(None, None)?
+                .assume_checked()
+                .script_pubkey(),
+        );
+
+        // Reorg happends after initializing `iter`.
+        env.reorg(2)?;
+
+        // Exhaust `iter`.
+        let _ = iter.get_tip()?.expect("must get target");
+        while let Some(r) = iter.next() {
+            r?;
+        }
+
+        // Try contruct chain update and apply it.
+        let update = iter.chain_update().expect("must get update");
+        print_cp("update", &update);
+        print_cp("chain", &chain.tip());
+        chain.apply_update(update).expect("must apply update");
+
+        Ok(())
+    }
+
+    fn print_cp(label: &str, cp: &CheckPoint) {
+        println!("Printing heights of '{label}': ");
+        for b in cp.iter() {
+            let height = b.height();
+            let hash = b.hash();
+            println!("\t{height:3} : {hash}");
+        }
     }
 
     #[test]
