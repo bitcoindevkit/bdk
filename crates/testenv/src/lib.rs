@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 pub mod utils;
 
 use bdk_chain::{
@@ -311,6 +313,7 @@ impl TestEnv {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use crate::TestEnv;
     use core::time::Duration;

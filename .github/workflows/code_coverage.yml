@@ -8,11 +8,6 @@ jobs:
   Codecov:
     name: Code Coverage
     runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: "-Cinstrument-coverage"
-      RUSTDOCFLAGS: "-Cinstrument-coverage"
-      LLVM_PROFILE_FILE: "./target/coverage/%p-%m.profraw"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,20 +18,18 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
-            toolchain: stable
+            toolchain: nightly
             override: true
             profile: minimal
             components: llvm-tools-preview
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2.7.8
-      - name: Install grcov
-        run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
-      - name: Test
-        run: cargo test --all-features
+      - name: Install cargo-llvm-cov
+        run: if [[ ! -e ~/.cargo/bin/cargo-llvm-cov ]]; then cargo install cargo-llvm-cov; fi
       - name: Make coverage directory
         run: mkdir coverage
-      - name: Run grcov
-        run: grcov . --binary-path ./target/debug/ -s . -t lcov --branch --ignore-not-existing --keep-only '**/crates/**' --ignore '**/tests/**' --ignore '**/examples/**' -o ./coverage/lcov.info
+      - name: Test and report coverage
+        run: cargo +nightly llvm-cov -q --doctests --branch --all --ignore-filename-regex "(example*|crates/testenv/*)" --all-features --lcov --output-path ./coverage/lcov.info
       - name: Generate HTML coverage report
         run: genhtml -o coverage-report.html --ignore-errors unmapped ./coverage/lcov.info
       - name: Coveralls upload

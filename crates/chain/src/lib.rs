@@ -25,6 +25,7 @@
 )]
 #![no_std]
 #![warn(missing_docs)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub use bitcoin;
 mod balance;
