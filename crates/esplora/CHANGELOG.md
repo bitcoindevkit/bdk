@@ -7,6 +7,18 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [esplora-0.22.1]
+
+### Added
+- Introduce usage of `cfg_attr(coverage_nightly)` in order to not consider tests under coverage. #1986
+
+### Changed
+- deps: bump `esplora-client` to 0.12.1
+- deps: bump `bdk_core` to 0.6.1
+
+### Fixed
+- Esplora `chain_update` returns early with `esplora_client::Error::HeaderHashNotFound` if no point of agreement is found in the local checkpoint #1971
+
 ## [esplora-0.22.0]
 
 ### Changed
@@ -32,3 +44,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [esplora-0.20.1]: https://github.com/bitcoindevkit/bdk/releases/tag/esplora-0.20.1
 [esplora-0.21.0]: https://github.com/bitcoindevkit/bdk/releases/tag/esplora-0.21.0
 [esplora-0.22.0]: https://github.com/bitcoindevkit/bdk/releases/tag/esplora-0.22.0
+[esplora-0.22.1]: https://github.com/bitcoindevkit/bdk/releases/tag/esplora-0.22.1
