@@ -7,6 +7,21 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [bitcoind_rpc-0.21.0]
+
+### Added
+
+- Introduce usage of `cfg_attr(coverage_nightly)` in order to not consider tests under coverage. #1986
+
+### Changed
+
+- deps: bump bdk_core to 0.6.1
+
+### Fixed
+
+- Some mempool transactions not being emitted at all, it was fixed by simplifying the emitter, and replaced the avoid-re-emission-logic with a new one that emits all mempool transactions. #1988
+- Use the `getrawmempool` without verbose, as a more performant method. `Emitter::mempool` method now requires the `std` feature. A non-std version of this is added: `Emitter::mempool_at` #1988
+
 ## [bitcoind_rpc-0.20.0]
 
 ### Changed
@@ -38,3 +53,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [bitcoind_rpc-0.18.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.18.0
 [bitcoind_rpc-0.19.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.19.0
 [bitcoind_rpc-0.20.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.20.0
+[bitcoind_rpc-0.21.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.21.0

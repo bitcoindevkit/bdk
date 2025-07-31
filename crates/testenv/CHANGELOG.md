@@ -7,6 +7,13 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [testenv-0.13.1]
+
+### Changed
+
+- Introduce usage of `cfg_attr(coverage_nightly)` in order to not consider tests under coverage. #1986
+- deps: bump `bdk_chain` to 0.23.1
+
 ## [testenv-0.13.0]
 
 ### Changed
@@ -28,3 +35,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [testenv-0.11.1]: https://github.com/bitcoindevkit/bdk/releases/tag/testenv-0.11.1
 [testenv-0.12.0]: https://github.com/bitcoindevkit/bdk/releases/tag/testenv-0.12.0
 [testenv-0.13.0]: https://github.com/bitcoindevkit/bdk/releases/tag/testenv-0.13.0
+[testenv-0.13.1]: https://github.com/bitcoindevkit/bdk/releases/tag/testenv-0.13.1
