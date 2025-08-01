@@ -659,10 +659,10 @@ impl<A: Anchor> TxGraph<A> {
     /// # Example
     ///
     /// ```
-    /// use bdk_chain::tx_graph::TxGraph;
+    /// use bdk_chain::{tx_graph::TxGraph, BlockId};
     /// use bitcoin::Transaction;
     ///
-    /// let mut graph = TxGraph::<()>::default();
+    /// let mut graph = TxGraph::<BlockId>::default();
     /// let tx = Transaction {
     ///     version: bitcoin::transaction::Version::ONE,
     ///     lock_time: bitcoin::locktime::absolute::LockTime::ZERO,
@@ -1275,12 +1275,12 @@ impl<A: Anchor> TxGraph<A> {
     ///
     /// let mut graph = TxGraph::<BlockId>::default();
     /// let chain = LocalChain::from_blocks([
-    ///     (0, BlockId { height: 0, hash: bitcoin::constants::genesis_block(bitcoin::Network::Bitcoin).block_hash() })
-    /// ].into_iter().collect());
+    ///     (0, bitcoin::constants::genesis_block(bitcoin::Network::Bitcoin).block_hash())
+    /// ].into_iter().collect()).unwrap();
     ///
     /// // Get unspent outputs
     /// let outpoints = vec![(0, OutPoint::default())];
-    /// let utxos: Vec<_> = graph.filter_chain_unspents(&chain, chain.tip(), CanonicalizationParams::default(), outpoints).collect();
+    /// let utxos: Vec<_> = graph.filter_chain_unspents(&chain, chain.tip().block_id(), CanonicalizationParams::default(), outpoints).collect();
     /// ```
     ///
     /// [`try_filter_chain_unspents`]: Self::try_filter_chain_unspents
@@ -1360,11 +1360,11 @@ impl<A: Anchor> TxGraph<A> {
     ///
     /// let graph = TxGraph::<BlockId>::default();
     /// let chain = LocalChain::from_blocks([
-    ///     (0, BlockId { height: 0, hash: bitcoin::constants::genesis_block(bitcoin::Network::Bitcoin).block_hash() })
-    /// ].into_iter().collect());
-    /// 
+    ///     (0, bitcoin::constants::genesis_block(bitcoin::Network::Bitcoin).block_hash())
+    /// ].into_iter().collect()).unwrap();
+    ///
     /// let outpoints = vec![(0, OutPoint::default())];
-    /// let balance = graph.balance(&chain, chain.tip(), CanonicalizationParams::default(), outpoints, |_, _| true);
+    /// let balance = graph.balance(&chain, chain.tip().block_id(), CanonicalizationParams::default(), outpoints, |_, _| true);
     /// ```
     ///
     /// [`try_balance`]: Self::try_balance

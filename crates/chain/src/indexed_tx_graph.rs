@@ -81,10 +81,10 @@ where
     /// # Example
     ///
     /// ```
-    /// use bdk_chain::{IndexedTxGraph, keychain_txout::KeychainTxOutIndex};
+    /// use bdk_chain::{IndexedTxGraph, keychain_txout::KeychainTxOutIndex, BlockId};
     ///
-    /// let index = KeychainTxOutIndex::<&str>::new(10);
-    /// let graph = IndexedTxGraph::new(index);
+    /// let index = KeychainTxOutIndex::<&str>::new(10, true);
+    /// let graph = IndexedTxGraph::<BlockId, _>::new(index);
     /// ```
     pub fn new(index: I) -> Self {
         Self {
@@ -367,9 +367,9 @@ where
     /// use bdk_chain::{IndexedTxGraph, keychain_txout::KeychainTxOutIndex, BlockId};
     /// use bitcoin::Block;
     ///
-    /// let mut graph = IndexedTxGraph::<BlockId, _>::new(KeychainTxOutIndex::<&str>::new(10));
+    /// let mut graph = IndexedTxGraph::<BlockId, _>::new(KeychainTxOutIndex::<&str>::new(10, true));
     /// # let block = Block { header: bitcoin::block::Header::from(bitcoin::constants::genesis_block(bitcoin::Network::Bitcoin).header), txdata: vec![] };
-    /// 
+    ///
     /// let changeset = graph.apply_block_relevant(&block, 100);
     /// ```
     pub fn apply_block_relevant(

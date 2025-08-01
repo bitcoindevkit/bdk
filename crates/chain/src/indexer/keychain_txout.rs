@@ -461,11 +461,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// use bdk_chain::miniscript::{Descriptor, DescriptorPublicKey};
     /// # use std::str::FromStr;
     ///
-    /// let mut index = KeychainTxOutIndex::<&str>::new(10);
+    /// let mut index = KeychainTxOutIndex::<&str>::new(10, true);
     /// let desc = Descriptor::<DescriptorPublicKey>::from_str(
     ///     "wpkh([d34db33f/84h/0h/0h]xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*)"
     /// )?;
-    /// 
+    ///
     /// index.insert_descriptor("external", desc)?;
     /// # Ok::<_, Box<dyn std::error::Error>>(())
     /// ```
@@ -855,10 +855,16 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// ```
     /// use bdk_chain::keychain_txout::KeychainTxOutIndex;
+    /// use bdk_chain::miniscript::{Descriptor, DescriptorPublicKey};
+    /// # use std::str::FromStr;
     ///
-    /// let mut index = KeychainTxOutIndex::<&str>::new(10);
-    /// let (idx, spk, changeset) = index.reveal_next_spk("external").unwrap();
-    /// assert_eq!(idx.0, 0);
+    /// let mut index = KeychainTxOutIndex::<&str>::new(10, true);
+    /// let desc = Descriptor::<DescriptorPublicKey>::from_str(
+    ///     "wpkh([d34db33f/84h/0h/0h]xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*)"
+    /// ).unwrap();
+    /// index.insert_descriptor("external", desc).unwrap();
+    /// let (spk, changeset) = index.reveal_next_spk("external").unwrap();
+    /// assert_eq!(spk.0, 0);
     /// ```
     pub fn reveal_next_spk(&mut self, keychain: K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
         let mut changeset = ChangeSet::default();
