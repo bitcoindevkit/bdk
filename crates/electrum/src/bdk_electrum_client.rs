@@ -7,6 +7,7 @@ use bdk_core::{
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
+use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
@@ -34,6 +35,20 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             tx_cache: Default::default(),
             block_header_cache: Default::default(),
             anchor_cache: Default::default(),
+        }
+    }
+
+    /// Insert anchors into the anchor cache so that they don’t have to be fetched again from
+    /// Electrum. Typically used to pre-populate the cache from an existing `TxGraph`.
+    pub fn populate_anchor_cache(
+        &self,
+        tx_anchors: impl IntoIterator<Item = (Txid, impl IntoIterator<Item = ConfirmationBlockTime>)>,
+    ) {
+        let mut cache = self.anchor_cache.lock().unwrap();
+        for (txid, anchors) in tx_anchors {
+            for anchor in anchors {
+                cache.insert((txid, anchor.block_id.hash), anchor);
+            }
         }
     }
 
