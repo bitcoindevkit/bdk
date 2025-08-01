@@ -12,17 +12,35 @@ type CanonicalMap<A> = HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>;
 type NotCanonicalSet = HashSet<Txid>;
 
 /// Modifies the canonicalization algorithm.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct CanonicalizationParams {
     /// Transactions that will supercede all other transactions.
     ///
     /// In case of conflicting transactions within `assume_canonical`, transactions that appear
     /// later in the list (have higher index) have precedence.
     pub assume_canonical: Vec<Txid>,
+
+    /// Minimum confirmations for a transaction to count as confirmed.
+    ///
+    /// A value of `Some(6)` means only transactions with 6+ confirmations will be included in the
+    /// `ChainPosition::Confirmed` bucket of the `Balance`. `None` means default to 1-confirmation
+    /// behavior.
+    pub min_confirmations: Option<u32>,
+}
+
+impl Default for CanonicalizationParams {
+    fn default() -> Self {
+        Self {
+            assume_canonical: vec![],
+            min_confirmations: Some(1),
+        }
+    }
 }
 
 /// Iterates over canonical txs.
 pub struct CanonicalIter<'g, A, C> {
+    params: CanonicalizationParams,
+
     tx_graph: &'g TxGraph<A>,
     chain: &'g C,
     chain_tip: BlockId,
@@ -50,6 +68,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
         let anchors = tx_graph.all_anchors();
         let unprocessed_assumed_txs = Box::new(
             params
+                .clone()
                 .assume_canonical
                 .into_iter()
                 .rev()
@@ -66,6 +85,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 .filter_map(|(last_seen, txid)| Some((txid, tx_graph.get_tx(txid)?, last_seen))),
         );
         Self {
+            params,
             tx_graph,
             chain,
             chain_tip,
@@ -96,6 +116,16 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 .chain
                 .is_block_in_chain(anchor.anchor_block(), self.chain_tip)?;
             if in_chain_opt == Some(true) {
+                if let Some(min_conf) = self.params.min_confirmations {
+                    let confirmed_depth = self
+                        .chain_tip
+                        .height
+                        .saturating_sub(anchor.anchor_block().height)
+                        + 1;
+                    if confirmed_depth < min_conf {
+                        return Ok(());
+                    }
+                }
                 self.mark_canonical(txid, tx, CanonicalReason::from_anchor(anchor.clone()));
                 return Ok(());
             }
