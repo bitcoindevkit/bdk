@@ -126,6 +126,16 @@ fn main() -> anyhow::Result<()> {
 
     let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(network)?);
 
+    // This avoids re-fetching known anchor confirmations from Electrum.
+    // Hold the lock for the entire anchor extraction
+    let graph_guard = graph.lock().unwrap();
+    // Collect anchors to release the lock quickly
+    let mut anchors = Vec::new();
+    for (txid, anchor) in graph_guard.graph().anchors() {
+        anchors.push((txid, *anchor)); // Dereference instead of clone for Copy types
+    }
+    client.populate_anchor_cache(anchors);
+
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download
     // them
     client.populate_tx_cache(

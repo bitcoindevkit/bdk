@@ -298,6 +298,13 @@ impl std::error::Error for CalculateFeeError {}
 impl<A> TxGraph<A> {
     /// Iterate over all tx outputs known by [`TxGraph`].
     ///
+    /// This returns an iterator over all anchors in the graph as (txid, anchor) pairs
+    pub fn anchors(&self) -> impl Iterator<Item = (Txid, &A)> + '_ {
+        self.anchors
+            .iter()
+            .flat_map(|(txid, anchors)| anchors.iter().map(move |a| (*txid, a)))
+    }
+
     /// This includes txouts of both full transactions as well as floating transactions.
     pub fn all_txouts(&self) -> impl Iterator<Item = (OutPoint, &TxOut)> {
         self.txs.iter().flat_map(|(txid, tx)| match tx {
