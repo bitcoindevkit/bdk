@@ -1284,13 +1284,23 @@ impl<A: Anchor> TxGraph<A> {
         let mut untrusted_pending = Amount::ZERO;
         let mut confirmed = Amount::ZERO;
 
-        for (spk_i, txout) in self.try_filter_chain_unspents(chain, chain_tip, params, outpoints)? {
+        for (spk_i, txout) in
+            self.try_filter_chain_unspents(chain, chain_tip, params.clone(), outpoints)?
+        {
             match &txout.chain_position {
-                ChainPosition::Confirmed { .. } => {
-                    if txout.is_confirmed_and_spendable(chain_tip.height) {
-                        confirmed += txout.txout.value;
-                    } else if !txout.is_mature(chain_tip.height) {
-                        immature += txout.txout.value;
+                ChainPosition::Confirmed { anchor, .. } => {
+                    let min_confs = params.min_confirmations.unwrap_or(1);
+                    let confirmed_depth = chain_tip
+                        .height
+                        .saturating_sub(anchor.anchor_block().height)
+                        + 1;
+
+                    if confirmed_depth >= min_confs {
+                        if txout.is_confirmed_and_spendable(chain_tip.height) {
+                            confirmed += txout.txout.value;
+                        } else if !txout.is_mature(chain_tip.height) {
+                            immature += txout.txout.value;
+                        }
                     }
                 }
                 ChainPosition::Unconfirmed { .. } => {

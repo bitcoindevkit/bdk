@@ -1540,3 +1540,94 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+#[test]
+fn test_min_confirmations() {
+    // Create LocalChain with height 100.
+    let local_chain = LocalChain::from_blocks(
+        (0..=100)
+            .map(|ht| (ht, BlockHash::hash(format!("Block Hash {ht}").as_bytes())))
+            .collect(),
+    )
+    .expect("must have genesis hash");
+    let tip = local_chain.tip();
+
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+
+    // Create tx with six confirmations at height 95.
+    let tx_6conf = Transaction {
+        input: vec![],
+        output: vec![TxOut {
+            value: Amount::from_sat(10_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(0)
+    };
+    let txid_6conf = tx_6conf.compute_txid();
+    let _ = graph.insert_tx(tx_6conf.clone());
+    let _ = graph.insert_anchor(
+        txid_6conf,
+        ConfirmationBlockTime {
+            block_id: tip.get(95).unwrap().block_id(),
+            confirmation_time: 123456,
+        },
+    );
+
+    // Create tx with two confirmations at height 99.
+    let tx_2conf = Transaction {
+        input: vec![],
+        output: vec![TxOut {
+            value: Amount::from_sat(20_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let txid_2conf = tx_2conf.compute_txid();
+    let _ = graph.insert_tx(tx_2conf.clone());
+    let _ = graph.insert_anchor(
+        txid_2conf,
+        ConfirmationBlockTime {
+            block_id: tip.get(99).unwrap().block_id(),
+            confirmation_time: 123457,
+        },
+    );
+
+    let build_confirmed_txouts = |min_conf: Option<u32>| -> HashMap<OutPoint, Amount> {
+        graph
+            .filter_chain_txouts(
+                &local_chain,
+                tip.block_id(),
+                CanonicalizationParams {
+                    min_confirmations: min_conf,
+                    ..Default::default()
+                },
+                graph.all_txouts().map(|(op, _)| ((), op)),
+            )
+            .filter_map(|(_, full)| {
+                if full.spent_by.is_none() {
+                    Some((full.outpoint, full.txout.value))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+
+    // Test case 1: require the default 1 confirmation.
+    let all = build_confirmed_txouts(None);
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[&OutPoint::new(txid_6conf, 0)], Amount::from_sat(10_000));
+    assert_eq!(all[&OutPoint::new(txid_2conf, 0)], Amount::from_sat(20_000));
+
+    // Test case 2: require 3 confirmations, with only tx_6conf surviving.
+    let filtered = build_confirmed_txouts(Some(3));
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(
+        filtered[&OutPoint::new(txid_6conf, 0)],
+        Amount::from_sat(10_000)
+    );
+
+    // Test case 3: require 7 confirmations, with no tx surviving.
+    let none = build_confirmed_txouts(Some(7));
+    assert!(none.is_empty());
+}

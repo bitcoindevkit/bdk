@@ -705,3 +705,93 @@ fn test_get_chain_position() {
     .into_iter()
     .for_each(|t| run(&chain, &mut graph, t));
 }
+
+#[test]
+fn test_balance_min_confirmations() {
+    use bdk_chain::spk_txout::SpkTxOutIndex;
+
+    let spk = ScriptBuf::from_hex("0014c692ecf13534982a9a2834565cbd37add8027140").unwrap();
+    let mut graph = IndexedTxGraph::new({
+        let mut index = SpkTxOutIndex::default();
+        let _ = index.insert_spk(0u32, spk.clone());
+        index
+    });
+
+    let chain =
+        LocalChain::from_blocks((0..=15).map(|i| (i as u32, hash!("h"))).collect()).unwrap();
+
+    let coinbase_tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::null(),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(70000),
+            script_pubkey: spk.clone(),
+        }],
+        ..new_tx(0)
+    };
+
+    // Create a confirmed transaction with 6 confirmations.
+    let tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(coinbase_tx.compute_txid(), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(42_000),
+            script_pubkey: spk.clone(),
+        }],
+        ..new_tx(1)
+    };
+    let txid = tx.compute_txid();
+
+    let _ = graph.insert_tx(tx.clone());
+    let _ = graph.insert_anchor(
+        txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(10).unwrap().block_id(),
+            confirmation_time: 123456,
+        },
+    );
+
+    let tip = chain.get(15).unwrap().block_id();
+    let trust_predicate = |_: &(), s: ScriptBuf| s == spk;
+
+    let balance_at_1 = graph.graph().balance(
+        &chain,
+        tip,
+        CanonicalizationParams {
+            min_confirmations: Some(1),
+            ..Default::default()
+        },
+        std::iter::once(((), OutPoint::new(txid, 0))),
+        trust_predicate,
+    );
+
+    let balance_at_6 = graph.graph().balance(
+        &chain,
+        tip,
+        CanonicalizationParams {
+            min_confirmations: Some(6),
+            ..Default::default()
+        },
+        std::iter::once(((), OutPoint::new(txid, 0))),
+        trust_predicate,
+    );
+
+    let balance_at_7 = graph.graph().balance(
+        &chain,
+        tip,
+        CanonicalizationParams {
+            min_confirmations: Some(7),
+            ..Default::default()
+        },
+        std::iter::once(((), OutPoint::new(txid, 0))),
+        trust_predicate,
+    );
+
+    assert_eq!(balance_at_1.confirmed, Amount::from_sat(42_000));
+    assert_eq!(balance_at_6.confirmed, Amount::from_sat(42_000));
+    assert_eq!(balance_at_7.confirmed, Amount::from_sat(0));
+}
