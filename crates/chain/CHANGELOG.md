@@ -7,6 +7,23 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [chain-0.23.1]
+
+### Added
+
+- Add new tests covering excluded bounds and the `SpkTxOutIndex::outputs_in_range` #1897
+- Add new `reindex_tx_graph` benchmark, and unit test to cover `spk_cache` behavior #1968
+- Add new `TxGraph::get_last_evicted` method #1977
+
+### Changed
+
+- Improve API docs, fixed parameter names to match the function or struct definition, and correct some spelling mistakes. #1968
+- `KeychainTxOutIndex::apply_changeset` restores spk_cache before last revealed #1993
+- deps: bump bdk_core to 0.6.1
+
+### Fixed
+- During canonicalization, exclude coinbase transactions when considering txs that are anchored in stale blocks #1976
+
 ## [chain-0.23.0]
 
 ### Added
@@ -57,3 +74,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [chain-0.21.1]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.21.1
 [chain-0.22.0]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.22.0
 [chain-0.23.0]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.0
+[chain-0.23.1]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.1
