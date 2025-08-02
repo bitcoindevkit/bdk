@@ -3,21 +3,197 @@
 #[macro_use]
 mod common;
 
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
     indexer::keychain_txout::KeychainTxOutIndex,
     local_chain::LocalChain,
+    spk_txout::SpkTxOutIndex,
     tx_graph, Balance, CanonicalizationParams, ChainPosition, ConfirmationBlockTime, DescriptorExt,
     SpkIterator,
 };
 use bdk_testenv::{
+    anyhow::{self},
+    bitcoincore_rpc::{json::CreateRawTransactionInput, RpcApi},
     block_id, hash,
     utils::{new_tx, DESCRIPTORS},
+    TestEnv,
 };
-use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{
+    secp256k1::Secp256k1, Address, Amount, Network, OutPoint, ScriptBuf, Transaction, TxIn, TxOut,
+    Txid,
+};
 use miniscript::Descriptor;
+
+fn gen_spk() -> ScriptBuf {
+    use bitcoin::secp256k1::{Secp256k1, SecretKey};
+
+    let secp = Secp256k1::new();
+    let (x_only_pk, _) = SecretKey::new(&mut rand::thread_rng())
+        .public_key(&secp)
+        .x_only_public_key();
+    ScriptBuf::new_p2tr(&secp, x_only_pk, None)
+}
+
+/// Conflicts of relevant transactions must also be considered relevant.
+///
+/// This allows the receiving structures to determine the reason why a given transaction is not part
+/// of the best history. I.e. Is this transaction evicted from the mempool because of insufficient
+/// fee, or because a conflict is confirmed?
+///
+/// This tests the behavior of the "relevant-conflicts" logic.
+#[test]
+fn relevant_conflicts() -> anyhow::Result<()> {
+    type SpkTxGraph = IndexedTxGraph<ConfirmationBlockTime, SpkTxOutIndex<()>>;
+
+    /// This environment contains a sender and receiver.
+    ///
+    /// The sender sends a transaction to the receiver and attempts to cancel it later.
+    struct ScenarioEnv {
+        env: TestEnv,
+        graph: SpkTxGraph,
+        tx_send: Transaction,
+        tx_cancel: Transaction,
+    }
+
+    impl ScenarioEnv {
+        fn new() -> anyhow::Result<Self> {
+            let env = TestEnv::new()?;
+            let client = env.rpc_client();
+
+            let sender_addr = client
+                .get_new_address(None, None)?
+                .require_network(Network::Regtest)?;
+
+            let recv_spk = gen_spk();
+            let recv_addr = Address::from_script(&recv_spk, &bitcoin::params::REGTEST)?;
+
+            let mut graph = SpkTxGraph::default();
+            assert!(graph.index.insert_spk((), recv_spk));
+
+            env.mine_blocks(1, Some(sender_addr.clone()))?;
+            env.mine_blocks(101, None)?;
+
+            let tx_input = client
+                .list_unspent(None, None, None, None, None)?
+                .into_iter()
+                .take(1)
+                .map(|r| CreateRawTransactionInput {
+                    txid: r.txid,
+                    vout: r.vout,
+                    sequence: None,
+                })
+                .collect::<Vec<_>>();
+            let tx_send = {
+                let outputs =
+                    HashMap::from([(recv_addr.to_string(), Amount::from_btc(49.999_99)?)]);
+                let tx = client.create_raw_transaction(&tx_input, &outputs, None, Some(true))?;
+                client
+                    .sign_raw_transaction_with_wallet(&tx, None, None)?
+                    .transaction()?
+            };
+            let tx_cancel = {
+                let outputs =
+                    HashMap::from([(sender_addr.to_string(), Amount::from_btc(49.999_98)?)]);
+                let tx = client.create_raw_transaction(&tx_input, &outputs, None, Some(true))?;
+                client
+                    .sign_raw_transaction_with_wallet(&tx, None, None)?
+                    .transaction()?
+            };
+
+            Ok(Self {
+                env,
+                graph,
+                tx_send,
+                tx_cancel,
+            })
+        }
+
+        /// Rudimentary sync implementation.
+        ///
+        /// Scans through all transactions in the blockchain + mempool.
+        fn sync(&mut self) -> anyhow::Result<()> {
+            let client = self.env.rpc_client();
+            for height in 0..=client.get_block_count()? {
+                let hash = client.get_block_hash(height)?;
+                let block = client.get_block(&hash)?;
+                let _ = self.graph.apply_block_relevant(&block, height as _);
+            }
+            let _ = self.graph.batch_insert_relevant_unconfirmed(
+                client
+                    .get_raw_mempool()?
+                    .into_iter()
+                    .map(|txid| client.get_raw_transaction(&txid, None).map(|tx| (tx, 0)))
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+            Ok(())
+        }
+
+        /// Broadcast the original sending transcation.
+        fn broadcast_send(&self) -> anyhow::Result<Txid> {
+            let client = self.env.rpc_client();
+            Ok(client.send_raw_transaction(&self.tx_send)?)
+        }
+
+        /// Broadcast the cancellation transaction.
+        fn broadcast_cancel(&self) -> anyhow::Result<Txid> {
+            let client = self.env.rpc_client();
+            Ok(client.send_raw_transaction(&self.tx_cancel)?)
+        }
+    }
+
+    // Broadcast `tx_send`.
+    // Sync.
+    // Broadcast `tx_cancel`.
+    // `tx_cancel` gets confirmed.
+    // Sync.
+    // Expect: Both `tx_send` and `tx_cancel` appears in `recv_graph`.
+    {
+        let mut env = ScenarioEnv::new()?;
+        let send_txid = env.broadcast_send()?;
+        env.sync()?;
+        let cancel_txid = env.broadcast_cancel()?;
+        env.env.mine_blocks(6, None)?;
+        env.sync()?;
+
+        assert_eq!(env.graph.graph().full_txs().count(), 2);
+        assert!(env.graph.graph().get_tx(send_txid).is_some());
+        assert!(env.graph.graph().get_tx(cancel_txid).is_some());
+    }
+
+    // Broadcast `tx_send`.
+    // Sync.
+    // Broadcast `tx_cancel`.
+    // Sync.
+    // Expect: Both `tx_send` and `tx_cancel` appears in `recv_graph`.
+    {
+        let mut env = ScenarioEnv::new()?;
+        let send_txid = env.broadcast_send()?;
+        env.sync()?;
+        let cancel_txid = env.broadcast_cancel()?;
+        env.sync()?;
+
+        assert_eq!(env.graph.graph().full_txs().count(), 2);
+        assert!(env.graph.graph().get_tx(send_txid).is_some());
+        assert!(env.graph.graph().get_tx(cancel_txid).is_some());
+    }
+
+    // If we don't see `tx_send` in the first place, `tx_cancel` should not be relevant.
+    {
+        let mut env = ScenarioEnv::new()?;
+        let _ = env.broadcast_send()?;
+        let _ = env.broadcast_cancel()?;
+        env.sync()?;
+
+        assert_eq!(env.graph.graph().full_txs().count(), 0);
+    }
+
+    Ok(())
+}
 
 /// Ensure [`IndexedTxGraph::insert_relevant_txs`] can successfully index transactions NOT presented
 /// in topological order.
