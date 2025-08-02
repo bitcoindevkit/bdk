@@ -8,6 +8,8 @@ use bdk_core::{
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::sync::{Arc, Mutex};
+use std::convert::TryInto;
+
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
@@ -591,6 +593,60 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         .clone();
                     tx_update.txouts.insert(outpoint, txout);
                 }
+            }
+        }
+        Ok(())
+    }
+    
+     /// Pre-fetch and cache all anchors (confirmation BlockTime) for transactions currently in tx_cache.
+    ///
+    /// This will fetch block headers and Merkle proofs for cached txids,
+    /// batching the operations and storing them in `anchor_cache`.
+    pub fn populate_anchor_cache(&self) -> Result<(), Error> {
+        // Collect all txids in cache
+        let txids: Vec<Txid> = {
+            let tx_cache = self.tx_cache.lock().unwrap();
+            tx_cache.keys().cloned().collect()
+        };
+
+        if txids.is_empty() {
+            return Ok(());
+        }
+
+        // For each txid, find its height via history
+        let mut pending = Vec::new();
+        let mut scripts = Vec::new();
+
+        for txid in &txids {
+            // fetch the tx
+            let tx = self.fetch_tx(*txid)?;
+            // derive a script to query history (e.g. first output)
+            let spk = tx.output.first()
+                .expect("tx has at least one outpoint")
+                .script_pubkey.clone();
+            scripts.push(spk);
+        }
+        // batch fetch history
+        let histories = self
+            .inner
+            .batch_script_get_history(scripts.iter().map(|s| s.as_script()))?;
+
+        for (txid, history) in txids.into_iter().zip(histories.into_iter()) {
+            if let Some(item) = history.into_iter().find(|item| item.tx_hash == txid) {
+                if let Ok(h) = TryInto::<usize>::try_into(item.height) {
+                    if h > 0 {
+                        pending.push((txid, h as usize));
+                    }
+                }
+            }
+        }
+        if !pending.is_empty() {
+            let anchors = self.batch_fetch_anchors(&pending)?;
+            // we simply pre-populate anchor_cache; no need to push to tx_update
+            let mut cache = self.anchor_cache.lock().unwrap();
+            for (txid, anchor) in anchors {
+                let key = (txid, anchor.block_id.hash);
+                cache.insert(key, anchor);
             }
         }
         Ok(())
