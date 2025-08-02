@@ -55,7 +55,7 @@ fn main() -> anyhow::Result<()> {
     // Initialize block emitter
     let cp = chain.tip();
     let start_height = cp.height();
-    let mut emitter = FilterIter::new_with_checkpoint(&rpc_client, cp);
+    let mut emitter = FilterIter::new_with_checkpoint(&rpc_client, cp)?;
     for (_, desc) in graph.index.keychains() {
         let spks = SpkIterator::new_with_range(desc, 0..SPK_COUNT).map(|(_, spk)| spk);
         emitter.add_spks(spks);
