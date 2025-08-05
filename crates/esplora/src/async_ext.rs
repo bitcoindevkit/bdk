@@ -12,9 +12,6 @@ use futures::{stream::FuturesOrdered, TryStreamExt};
 
 use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
 
-#[cfg(feature = "tracing-logs")]
-use tracing::trace;
-
 /// [`esplora_client::Error`]
 type Error = Box<esplora_client::Error>;
 
@@ -71,8 +68,7 @@ where
         let start_time = request.start_time();
         let keychains = request.keychains();
 
-        #[cfg(feature = "tracing-logs")]
-        trace!(stop_gap, parallel_requests, "enter full_scan");
+        log_trace!(stop_gap, parallel_requests, "enter full_scan");
 
         let chain_tip = request.chain_tip();
         let latest_blocks = if chain_tip.is_some() {
@@ -125,8 +121,7 @@ where
         let mut request: SyncRequest<I> = request.into();
         let start_time = request.start_time();
 
-        #[cfg(feature = "tracing-logs")]
-        trace!(parallel_requests, "enter sync");
+        log_trace!(parallel_requests, "enter sync");
 
         let chain_tip = request.chain_tip();
         let latest_blocks = if chain_tip.is_some() {
@@ -192,8 +187,7 @@ where
 async fn fetch_latest_blocks<S: Sleeper>(
     client: &esplora_client::AsyncClient<S>,
 ) -> Result<BTreeMap<u32, BlockHash>, Error> {
-    #[cfg(feature = "tracing-logs")]
-    trace!("fetch_latest_blocks()");
+    log_trace!("fetch_latest_blocks()");
 
     Ok(client
         .get_blocks(None)
@@ -211,8 +205,7 @@ async fn fetch_block<S: Sleeper>(
     latest_blocks: &BTreeMap<u32, BlockHash>,
     height: u32,
 ) -> Result<Option<BlockHash>, Error> {
-    #[cfg(feature = "tracing-logs")]
-    trace!(height, "fetch_block()");
+    log_trace!(height, "fetch_block()");
 
     if let Some(&hash) = latest_blocks.get(&height) {
         return Ok(Some(hash));
@@ -245,8 +238,7 @@ async fn chain_update<S: Sleeper>(
     local_tip: &CheckPoint,
     anchors: &BTreeSet<(ConfirmationBlockTime, Txid)>,
 ) -> Result<CheckPoint, Error> {
-    #[cfg(feature = "tracing-logs")]
-    trace!("chain_update()");
+    log_trace!("chain_update()");
 
     let mut point_of_agreement = None;
     let mut local_cp_hash = local_tip.hash();
@@ -329,8 +321,7 @@ where
     I: Iterator<Item = Indexed<SpkWithExpectedTxids>> + Send,
     S: Sleeper + Clone + Send + Sync,
 {
-    #[cfg(feature = "tracing-logs")]
-    trace!(
+    log_trace!(
         start_time,
         stop_gap,
         parallel_requests,
@@ -428,8 +419,7 @@ where
     I::IntoIter: Send,
     S: Sleeper + Clone + Send + Sync,
 {
-    #[cfg(feature = "tracing-logs")]
-    trace!(start_time, parallel_requests, "fetch_txs_with_spks");
+    log_trace!(start_time, parallel_requests, "fetch_txs_with_spks");
 
     fetch_txs_with_keychain_spks(
         client,
@@ -461,8 +451,7 @@ where
     I::IntoIter: Send,
     S: Sleeper + Clone + Send + Sync,
 {
-    #[cfg(feature = "tracing-logs")]
-    trace!(start_time, parallel_requests, "fetch_txs_with_txids");
+    log_trace!(start_time, parallel_requests, "fetch_txs_with_txids");
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     // Only fetch for non-inserted txs.
@@ -516,8 +505,7 @@ where
     I::IntoIter: Send,
     S: Sleeper + Clone + Send + Sync,
 {
-    #[cfg(feature = "tracing-logs")]
-    trace!(start_time, parallel_requests, "fetch_txs_with_outpoints");
+    log_trace!(start_time, parallel_requests, "fetch_txs_with_outpoints");
 
     let outpoints = outpoints.into_iter().collect::<Vec<_>>();
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();

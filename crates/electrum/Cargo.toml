@@ -14,8 +14,8 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.6.1" }
+bdk_common = { path = "../common" }
 electrum-client = { version = "0.24.0", features = [ "proxy" ], default-features = false }
-tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv" }
@@ -27,7 +27,7 @@ default = ["use-rustls"]
 use-rustls = ["electrum-client/use-rustls"]
 use-rustls-ring = ["electrum-client/use-rustls-ring"]
 use-openssl = ["electrum-client/use-openssl"]
-tracing-logs = ["tracing"]
+log = ["bdk_common/log"]
 
 [[test]]
 name = "test_electrum"

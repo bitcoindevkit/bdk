@@ -33,6 +33,7 @@ test:
    @just _test-esplora
    @just _test-file_store
    @just _test-testenv
+   @just _test-common
 
 _test-bitcoind_rpc:
     cargo test -p bdk_bitcoind_rpc --all-features
@@ -54,6 +55,9 @@ _test-file_store:
 
 _test-testenv:
     cargo test -p bdk_testenv --all-features
+
+_test-common:
+    cargo test -p bdk_common --all-features
 
 # Run pre-push suite: format, check, and test
 pre-push: fmt check test
