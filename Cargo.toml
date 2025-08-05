@@ -8,6 +8,7 @@ members = [
     "crates/esplora",
     "crates/bitcoind_rpc",
     "crates/testenv",
+    "crates/common",
     "examples/example_cli",
     "examples/example_electrum",
     "examples/example_esplora",
