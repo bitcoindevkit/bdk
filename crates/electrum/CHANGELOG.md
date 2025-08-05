@@ -7,6 +7,22 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [electrum-0.23.1]
+
+### Added
+- Introduce usage of `cfg_attr(coverage_nightly)` in order to not consider tests under coverage. #1986
+
+### Changed
+
+- Add transaction anchor cache to prevent redundant network calls. #1957
+- Batch Merkle Proof, script history, and header requests. #1957
+- Fix `clippy` warnings on electrum-client batch call #1990
+- deps: bump bdk_core to 0.6.1
+- deps: bump electrum-client to 0.24.0
+
+### Fixed
+- Removed all `unwrap()`s and `expect()`s from `bdk_electrum_client.rs` #1981
+
 ## [electrum-0.23.0]
 
 ### Changed
@@ -44,3 +60,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [electrum-0.21.0]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.21.0
 [electrum-0.22.0]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.22.0
 [electrum-0.23.0]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.0
+[electrum-0.23.1]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.1
