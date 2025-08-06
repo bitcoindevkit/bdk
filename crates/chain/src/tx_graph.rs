@@ -655,6 +655,24 @@ impl<A: Anchor> TxGraph<A> {
     /// * A smaller witness has precedence over a larger witness.
     /// * If the witness sizes are the same, we prioritize the two witnesses with lexicographical
     ///   order.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bdk_chain::{tx_graph::TxGraph, BlockId};
+    /// use bitcoin::Transaction;
+    ///
+    /// let mut graph = TxGraph::<BlockId>::default();
+    /// let tx = Transaction {
+    ///     version: bitcoin::transaction::Version::ONE,
+    ///     lock_time: bitcoin::locktime::absolute::LockTime::ZERO,
+    ///     input: vec![],
+    ///     output: vec![],
+    /// };
+    ///
+    /// let changeset = graph.insert_tx(tx.clone());
+    /// assert_eq!(changeset.txs.len(), 1);
+    /// ```
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A> {
         // This returns `Some` only if the merged tx is different to the `original_tx`.
         fn _merge_tx_witnesses(
@@ -1247,6 +1265,37 @@ impl<A: Anchor> TxGraph<A> {
     ///
     /// This is the infallible version of [`try_filter_chain_unspents`].
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use bdk_chain::local_chain::LocalChain;
+    /// use bdk_chain::{tx_graph::TxGraph, BlockId, CanonicalizationParams};
+    /// use bitcoin::{Amount, OutPoint, TxOut};
+    /// use std::sync::Arc;
+    ///
+    /// let mut graph = TxGraph::<BlockId>::default();
+    /// let chain = LocalChain::from_blocks(
+    ///     [(
+    ///         0,
+    ///         bitcoin::constants::genesis_block(bitcoin::Network::Bitcoin).block_hash(),
+    ///     )]
+    ///     .into_iter()
+    ///     .collect(),
+    /// )
+    /// .unwrap();
+    ///
+    /// // Get unspent outputs
+    /// let outpoints = vec![(0, OutPoint::default())];
+    /// let utxos: Vec<_> = graph
+    ///     .filter_chain_unspents(
+    ///         &chain,
+    ///         chain.tip().block_id(),
+    ///         CanonicalizationParams::default(),
+    ///         outpoints,
+    ///     )
+    ///     .collect();
+    /// ```
+    ///
     /// [`try_filter_chain_unspents`]: Self::try_filter_chain_unspents
     pub fn filter_chain_unspents<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
         &'a self,
@@ -1314,6 +1363,34 @@ impl<A: Anchor> TxGraph<A> {
     /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
     ///
     /// This is the infallible version of [`try_balance`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bdk_chain::local_chain::LocalChain;
+    /// use bdk_chain::{tx_graph::TxGraph, Balance, BlockId, CanonicalizationParams};
+    /// use bitcoin::OutPoint;
+    ///
+    /// let graph = TxGraph::<BlockId>::default();
+    /// let chain = LocalChain::from_blocks(
+    ///     [(
+    ///         0,
+    ///         bitcoin::constants::genesis_block(bitcoin::Network::Bitcoin).block_hash(),
+    ///     )]
+    ///     .into_iter()
+    ///     .collect(),
+    /// )
+    /// .unwrap();
+    ///
+    /// let outpoints = vec![(0, OutPoint::default())];
+    /// let balance = graph.balance(
+    ///     &chain,
+    ///     chain.tip().block_id(),
+    ///     CanonicalizationParams::default(),
+    ///     outpoints,
+    ///     |_, _| true,
+    /// );
+    /// ```
     ///
     /// [`try_balance`]: Self::try_balance
     pub fn balance<C: ChainOracle<Error = Infallible>, OI: Clone>(
