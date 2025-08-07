@@ -1021,6 +1021,7 @@ impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 #[derive(Clone, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[must_use]
+#[non_exhaustive]
 pub struct ChangeSet {
     /// Maps each `DescriptorId` to its last revealed derivation index.
     pub last_revealed: BTreeMap<DescriptorId, u32>,

@@ -173,6 +173,7 @@ impl<A: Anchor> From<TxUpdate<A>> for TxGraph<A> {
 ///
 /// [module-level documentation]: crate::tx_graph
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct TxGraph<A = ConfirmationBlockTime> {
     txs: HashMap<Txid, TxNodeInternal>,
     spends: BTreeMap<OutPoint, HashSet<Txid>>,
@@ -1416,6 +1417,7 @@ impl<A: Anchor> TxGraph<A> {
     ))
 )]
 #[must_use]
+#[non_exhaustive]
 pub struct ChangeSet<A = ()> {
     /// Added transactions.
     pub txs: BTreeSet<Arc<Transaction>>,
