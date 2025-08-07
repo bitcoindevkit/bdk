@@ -67,6 +67,16 @@ impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I> {
             indexer,
         }
     }
+
+    // If `tx` replaces a relevant tx, it should also be considered relevant.
+    fn is_tx_or_conflict_relevant(&self, tx: &Transaction) -> bool {
+        self.index.is_tx_relevant(tx)
+            || self
+                .graph
+                .direct_conflicts(tx)
+                .filter_map(|(_, txid)| self.graph.get_tx(txid))
+                .any(|tx| self.index.is_tx_relevant(&tx))
+    }
 }
 
 impl<A: Anchor, I: Indexer> IndexedTxGraph<A, I>
@@ -239,8 +249,11 @@ where
 
     /// Batch insert transactions, filtering out those that are irrelevant.
     ///
-    /// Relevancy is determined by the [`Indexer::is_tx_relevant`] implementation of `I`. Irrelevant
-    /// transactions in `txs` will be ignored. `txs` do not need to be in topological order.
+    /// `txs` do not need to be in topological order.
+    ///
+    /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
+    /// A transaction that conflicts with a relevant transaction is also considered relevant.
+    /// Irrelevant transactions in `txs` will be ignored.
     pub fn batch_insert_relevant<T: Into<Arc<Transaction>>>(
         &mut self,
         txs: impl IntoIterator<Item = (T, impl IntoIterator<Item = A>)>,
@@ -263,7 +276,7 @@ where
 
         let mut tx_graph = tx_graph::ChangeSet::default();
         for (tx, anchors) in txs {
-            if self.index.is_tx_relevant(&tx) {
+            if self.is_tx_or_conflict_relevant(&tx) {
                 let txid = tx.compute_txid();
                 tx_graph.merge(self.graph.insert_tx(tx.clone()));
                 for anchor in anchors {
@@ -278,7 +291,8 @@ where
     /// Batch insert unconfirmed transactions, filtering out those that are irrelevant.
     ///
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
-    /// Irrelevant transactions in `txs` will be ignored.
+    /// A transaction that conflicts with a relevant transaction is also considered relevant.
+    /// Irrelevant transactions in `unconfirmed_txs` will be ignored.
     ///
     /// Items of `txs` are tuples containing the transaction and a *last seen* timestamp. The
     /// *last seen* communicates when the transaction is last seen in the mempool which is used for
@@ -305,8 +319,9 @@ where
 
         let graph = self.graph.batch_insert_unconfirmed(
             txs.into_iter()
-                .filter(|(tx, _)| self.index.is_tx_relevant(tx))
-                .map(|(tx, seen_at)| (tx.clone(), seen_at)),
+                .filter(|(tx, _)| self.is_tx_or_conflict_relevant(tx))
+                .map(|(tx, seen_at)| (tx.clone(), seen_at))
+                .collect::<Vec<_>>(),
         );
 
         ChangeSet {
@@ -350,7 +365,8 @@ where
     /// Each inserted transaction's anchor will be constructed using [`TxPosInBlock`].
     ///
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
-    /// Irrelevant transactions in `txs` will be ignored.
+    /// A transaction that conflicts with a relevant transaction is also considered relevant.
+    /// Irrelevant transactions in `block` will be ignored.
     pub fn apply_block_relevant(
         &mut self,
         block: &Block,
@@ -363,7 +379,7 @@ where
         let mut changeset = ChangeSet::<A, I::ChangeSet>::default();
         for (tx_pos, tx) in block.txdata.iter().enumerate() {
             changeset.indexer.merge(self.index.index_tx(tx));
-            if self.index.is_tx_relevant(tx) {
+            if self.is_tx_or_conflict_relevant(tx) {
                 let txid = tx.compute_txid();
                 let anchor = TxPosInBlock {
                     block,
