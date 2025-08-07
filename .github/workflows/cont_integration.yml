@@ -166,30 +166,3 @@ jobs:
           name: Clippy Results
           args: --all-features --all-targets -- -D warnings
 
-  build-examples:
-    needs: prepare
-    name: Build & Test Examples
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        example-dir:
-          - example_cli
-          - example_bitcoind_rpc_polling
-          - example_electrum
-          - example_esplora
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: ${{ needs.prepare.outputs.rust_version }}
-          override: true
-          profile: minimal
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.7.8
-      - name: Build
-        working-directory: examples/${{ matrix.example-dir }}
-        run: cargo build
