@@ -1,9 +1,10 @@
 use std::io::{self, Write};
 
 use bdk_chain::{
-    bitcoin::Network,
+    bitcoin::{Network,Txid, BlockHash},
     collections::BTreeSet,
     indexed_tx_graph,
+    TxGraph,
     spk_client::{FullScanRequest, SyncRequest},
     CanonicalizationParams, ConfirmationBlockTime, Merge,
 };
@@ -94,6 +95,28 @@ pub struct ScanOptions {
     pub batch_size: usize,
 }
 
+/// Extension trait to expose anchors in a public-friendly way
+trait TxGraphExt {
+    fn iter_anchors_ext(
+        &self,
+    ) -> Box<dyn Iterator<Item = ((Txid, BlockHash), ConfirmationBlockTime)> + '_>;
+}
+
+impl TxGraphExt for TxGraph<ConfirmationBlockTime> {
+    fn iter_anchors_ext(
+        &self,
+    ) -> Box<dyn Iterator<Item = ((Txid, BlockHash), ConfirmationBlockTime)> + '_> {
+        Box::new(
+            self.full_txs().flat_map(move |tx_node| {
+                tx_node.anchors.iter().map(move |anchor| {
+                    let block_id = anchor.block_id;
+                    ((tx_node.txid, block_id.hash), anchor.clone())
+                })
+            }),
+        )
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let example_cli::Init {
         args,
@@ -125,6 +148,13 @@ fn main() -> anyhow::Result<()> {
     };
 
     let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(network)?);
+    
+    // Lock the graph so we can safely borrow data from it,
+    // and extract all anchor data in a public-friendly format using the extension trait.
+    // This avoids re-fetching known anchor confirmations from Electrum.
+    let g = graph.lock().unwrap();
+    let anchors = g.graph().iter_anchors_ext();
+    client.populate_anchor_cache(anchors);
 
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download
     // them
