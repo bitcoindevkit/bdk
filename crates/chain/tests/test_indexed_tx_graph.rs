@@ -133,7 +133,7 @@ fn relevant_conflicts() -> anyhow::Result<()> {
             Ok(())
         }
 
-        /// Broadcast the original sending transcation.
+        /// Broadcast the original sending transaction.
         fn broadcast_send(&self) -> anyhow::Result<Txid> {
             let client = self.env.rpc_client();
             Ok(client.send_raw_transaction(&self.tx_send)?)
