@@ -118,7 +118,7 @@ where
     ///             let mut new_store =
     ///                 Store::create(&MAGIC_BYTES, &new_file_path).expect("must create new file");
     ///             if let Some(aggregated_changeset) = changeset {
-    ///                 new_store.append(&aggregated_changeset)?;
+    ///                 new_store.append(aggregated_changeset.as_ref())?;
     ///             }
     ///             // The following will overwrite the original file. You will loose the corrupted
     ///             // portion of the original file forever.
@@ -152,7 +152,7 @@ where
         f.read_exact(&mut magic_buf)?;
         if magic_buf != magic {
             return Err(StoreErrorWithDump {
-                changeset: Option::<C>::None,
+                changeset: Option::<Box<C>>::None,
                 error: StoreError::InvalidMagicBytes {
                     got: magic_buf,
                     expected: magic.to_vec(),
@@ -194,7 +194,7 @@ where
                     Ok(aggregated_changeset)
                 }
                 Err(iter_error) => Err(StoreErrorWithDump {
-                    changeset: aggregated_changeset,
+                    changeset: aggregated_changeset.map(Box::new),
                     error: iter_error,
                 }),
             },
@@ -220,7 +220,7 @@ where
             Self::create(magic, file_path)
                 .map(|store| (store, Option::<C>::None))
                 .map_err(|err: StoreError| StoreErrorWithDump {
-                    changeset: Option::<C>::None,
+                    changeset: Option::<Box<C>>::None,
                     error: err,
                 })
         }
@@ -257,7 +257,7 @@ where
 #[derive(Debug)]
 pub struct StoreErrorWithDump<C> {
     /// The partially-aggregated changeset.
-    pub changeset: Option<C>,
+    pub changeset: Option<Box<C>>,
 
     /// The [`StoreError`]
     pub error: StoreError,
@@ -266,7 +266,7 @@ pub struct StoreErrorWithDump<C> {
 impl<C> From<io::Error> for StoreErrorWithDump<C> {
     fn from(value: io::Error) -> Self {
         Self {
-            changeset: Option::<C>::None,
+            changeset: Option::<Box<C>>::None,
             error: StoreError::Io(value),
         }
     }
@@ -371,7 +371,7 @@ mod test {
                 changeset,
                 error: StoreError::Bincode(_),
             }) => {
-                assert_eq!(changeset, Some(test_changesets))
+                assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
             unexpected_res => panic!("unexpected result: {unexpected_res:?}"),
         }
@@ -399,7 +399,7 @@ mod test {
                 changeset,
                 error: StoreError::Bincode(_),
             }) => {
-                assert_eq!(changeset, Some(test_changesets))
+                assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
             unexpected_res => panic!("unexpected result: {unexpected_res:?}"),
         }
@@ -500,10 +500,14 @@ mod test {
                     .expect_err("should fail to aggregate");
                 assert_eq!(
                     err.changeset,
-                    changesets.iter().cloned().reduce(|mut acc, cs| {
-                        Merge::merge(&mut acc, cs);
-                        acc
-                    }),
+                    changesets
+                        .iter()
+                        .cloned()
+                        .reduce(|mut acc, cs| {
+                            Merge::merge(&mut acc, cs);
+                            acc
+                        })
+                        .map(Box::new),
                     "should recover all changesets that are written in full",
                 );
                 // Remove file and start again
