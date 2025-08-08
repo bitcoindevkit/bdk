@@ -93,7 +93,7 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     let client = BdkElectrumClient::new(electrum_client);
 
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new(SpkTxOutIndex::<()>::default());
-    let (chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+    let (chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
 
     // Get receiving address.
     let receiver_spk = get_test_spk();
@@ -512,7 +512,7 @@ fn test_sync() -> anyhow::Result<()> {
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.
-    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
     let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -655,7 +655,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.
-    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
     let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -741,7 +741,7 @@ fn test_sync_with_coinbase() -> anyhow::Result<()> {
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.
-    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
     let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -776,7 +776,7 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.
-    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
     let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
