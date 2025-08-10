@@ -27,6 +27,10 @@ use esplora_client::TxStatus;
 
 pub use esplora_client;
 
+#[allow(unused_imports)]
+#[macro_use]
+extern crate bdk_common;
+
 #[cfg(feature = "blocking")]
 mod blocking_ext;
 #[cfg(feature = "blocking")]

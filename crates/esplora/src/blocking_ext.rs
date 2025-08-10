@@ -58,6 +58,8 @@ impl EsploraExt for esplora_client::BlockingClient {
         let mut request: FullScanRequest<K> = request.into();
         let start_time = request.start_time();
 
+        log_trace!(stop_gap, parallel_requests, "enter full_scan");
+
         let chain_tip = request.chain_tip();
         let latest_blocks = if chain_tip.is_some() {
             Some(fetch_latest_blocks(self)?)
@@ -110,6 +112,8 @@ impl EsploraExt for esplora_client::BlockingClient {
     ) -> Result<SyncResponse, Error> {
         let mut request: SyncRequest<I> = request.into();
         let start_time = request.start_time();
+
+        log_trace!(parallel_requests, "enter sync");
 
         let chain_tip = request.chain_tip();
         let latest_blocks = if chain_tip.is_some() {
@@ -169,6 +173,8 @@ impl EsploraExt for esplora_client::BlockingClient {
 fn fetch_latest_blocks(
     client: &esplora_client::BlockingClient,
 ) -> Result<BTreeMap<u32, BlockHash>, Error> {
+    log_trace!("fetch_latest_blocks()");
+
     Ok(client
         .get_blocks(None)?
         .into_iter()
@@ -184,6 +190,8 @@ fn fetch_block(
     latest_blocks: &BTreeMap<u32, BlockHash>,
     height: u32,
 ) -> Result<Option<BlockHash>, Error> {
+    log_trace!(height, "fetch_block()");
+
     if let Some(&hash) = latest_blocks.get(&height) {
         return Ok(Some(hash));
     }
@@ -215,6 +223,8 @@ fn chain_update(
     local_tip: &CheckPoint,
     anchors: &BTreeSet<(ConfirmationBlockTime, Txid)>,
 ) -> Result<CheckPoint, Error> {
+    log_trace!("chain_update()");
+
     let mut point_of_agreement = None;
     let mut local_cp_hash = local_tip.hash();
     let mut conflicts = vec![];
@@ -279,6 +289,13 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
     stop_gap: usize,
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error> {
+    log_trace!(
+        start_time,
+        stop_gap,
+        parallel_requests,
+        "fetch_txs_with_keychain_spks"
+    );
+
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
@@ -366,6 +383,8 @@ fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
     spks: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
+    log_trace!(start_time, parallel_requests, "fetch_txs_with_spks");
+
     fetch_txs_with_keychain_spks(
         client,
         start_time,
@@ -390,6 +409,8 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
     txids: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
+    log_trace!(start_time, parallel_requests, "fetch_txs_with_txids");
+
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     // Only fetch for non-inserted txs.
     let mut txids = txids
@@ -443,6 +464,8 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     outpoints: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
+    log_trace!(start_time, parallel_requests, "fetch_txs_with_outpoints");
+
     let outpoints = outpoints.into_iter().collect::<Vec<_>>();
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
 
