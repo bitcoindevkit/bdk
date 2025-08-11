@@ -61,20 +61,12 @@ fn main() -> anyhow::Result<()> {
     let start = Instant::now();
 
     for res in iter {
-        let event = res?;
-        match event {
-            Event::NoMatch { .. } => {}
-            Event::Block { cp, ref block } => {
-                // Apply relevant tx data
-                let height = cp.height();
-                let _ = graph.apply_block_relevant(block, height);
-                // Update chain tip
-                let _ = chain.apply_update(cp)?;
-                println!("Matched block {height}");
-            }
-            Event::Tip { cp } => {
-                let _ = chain.apply_update(cp)?;
-            }
+        let Event { cp, block } = res?;
+        let height = cp.height();
+        let _ = chain.apply_update(cp)?;
+        if let Some(block) = block {
+            let _ = graph.apply_block_relevant(&block, height);
+            println!("Matched block {height}");
         }
     }
 

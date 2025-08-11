@@ -41,59 +41,40 @@ impl<'a> FilterIter<'a> {
         }
     }
 
-    /// Find the agreement height with the remote node and return the corresponding
-    /// header info.
+    /// Return the agreement header with the remote node.
     ///
-    /// Error if no agreement height is found.
+    /// Error if no agreement header is found.
     fn find_base(&self) -> Result<GetBlockHeaderResult, Error> {
         for cp in self.cp.iter() {
-            let height = cp.height();
-
-            let fetched_hash = self.client.get_block_hash(height as u64)?;
-
-            if fetched_hash == cp.hash() {
-                return Ok(self.client.get_block_header_info(&fetched_hash)?);
+            match self.client.get_block_header_info(&cp.hash()) {
+                Err(e) if is_not_found(&e) => continue,
+                Ok(header) if header.confirmations <= 0 => continue,
+                Ok(header) => return Ok(header),
+                Err(e) => return Err(Error::Rpc(e)),
             }
         }
-
         Err(Error::ReorgDepthExceeded)
     }
 }
 
-/// Kind of event produced by `FilterIter`.
+/// Event returned by [`FilterIter`].
 #[derive(Debug, Clone)]
-pub enum Event {
-    /// Block
-    Block {
-        /// checkpoint
-        cp: CheckPoint,
-        /// block
-        block: Block,
-    },
-    /// No match
-    NoMatch {
-        /// block id
-        id: BlockId,
-    },
-    /// Tip
-    Tip {
-        /// checkpoint
-        cp: CheckPoint,
-    },
+pub struct Event {
+    /// Checkpoint
+    pub cp: CheckPoint,
+    /// Block, will be `Some(..)` for matching blocks
+    pub block: Option<Block>,
 }
 
 impl Event {
     /// Whether this event contains a matching block.
     pub fn is_match(&self) -> bool {
-        matches!(self, Event::Block { .. })
+        self.block.is_some()
     }
 
     /// Return the height of the event.
     pub fn height(&self) -> u32 {
-        match self {
-            Self::Block { cp, .. } | Self::Tip { cp } => cp.height(),
-            Self::NoMatch { id } => id.height,
-        }
+        self.cp.height()
     }
 }
 
@@ -106,15 +87,9 @@ impl Iterator for FilterIter<'_> {
 
             let header = match self.header.take() {
                 Some(header) => header,
-                None => {
-                    // If no header is cached we need to locate a base of the local
-                    // checkpoint from which the scan may proceed.
-                    let header = self.find_base()?;
-                    let height: u32 = header.height.try_into()?;
-                    cp = cp.range(..=height).next().expect("we found a base");
-
-                    header
-                }
+                // If no header is cached we need to locate a base of the local
+                // checkpoint from which the scan may proceed.
+                None => self.find_base()?,
             };
 
             let mut next_hash = match header.next_block_hash {
@@ -126,58 +101,38 @@ impl Iterator for FilterIter<'_> {
 
             // In case of a reorg, rewind by fetching headers of previous hashes until we find
             // one with enough confirmations.
-            let mut reorg_ct: i32 = 0;
             while next_header.confirmations < 0 {
                 let prev_hash = next_header
                     .previous_block_hash
                     .ok_or(Error::ReorgDepthExceeded)?;
                 let prev_header = self.client.get_block_header_info(&prev_hash)?;
                 next_header = prev_header;
-                reorg_ct += 1;
             }
 
             next_hash = next_header.hash;
             let next_height: u32 = next_header.height.try_into()?;
 
-            // Purge any no longer valid checkpoints.
-            if reorg_ct.is_positive() {
-                cp = cp
-                    .range(..=next_height)
-                    .next()
-                    .ok_or(Error::ReorgDepthExceeded)?;
-            }
-            let block_id = BlockId {
+            cp = cp.insert(BlockId {
                 height: next_height,
                 hash: next_hash,
-            };
-            let filter_bytes = self.client.get_block_filter(&next_hash)?.filter;
-            let filter = BlockFilter::new(&filter_bytes);
+            });
 
-            let next_event = if filter
+            let mut block = None;
+            let filter =
+                BlockFilter::new(self.client.get_block_filter(&next_hash)?.filter.as_slice());
+            if filter
                 .match_any(&next_hash, self.spks.iter().map(ScriptBuf::as_ref))
                 .map_err(Error::Bip158)?
             {
-                let block = self.client.get_block(&next_hash)?;
-                cp = cp.insert(block_id);
-
-                Ok(Some(Event::Block {
-                    cp: cp.clone(),
-                    block,
-                }))
-            } else if next_header.next_block_hash.is_none() {
-                cp = cp.insert(block_id);
-
-                Ok(Some(Event::Tip { cp: cp.clone() }))
-            } else {
-                Ok(Some(Event::NoMatch { id: block_id }))
-            };
+                block = Some(self.client.get_block(&next_hash)?);
+            }
 
             // Store the next header
             self.header = Some(next_header);
             // Update self.cp
-            self.cp = cp;
+            self.cp = cp.clone();
 
-            next_event
+            Ok(Some(Event { cp, block }))
         })()
         .transpose()
     }
@@ -220,4 +175,13 @@ impl From<core::num::TryFromIntError> for Error {
     fn from(e: core::num::TryFromIntError) -> Self {
         Self::TryFromInt(e)
     }
+}
+
+/// Whether the RPC error is a "not found" error (code: `-5`).
+fn is_not_found(e: &bitcoincore_rpc::Error) -> bool {
+    matches!(
+        e,
+        bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(e))
+        if e.code == -5
+    )
 }

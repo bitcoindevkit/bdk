@@ -112,3 +112,44 @@ fn filter_iter_detects_reorgs() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn event_checkpoint_connects_to_local_chain() -> anyhow::Result<()> {
+    use bitcoin::BlockHash;
+    use std::collections::BTreeMap;
+    let env = testenv()?;
+    let _ = env.mine_blocks(15, None)?;
+
+    let cp = env.make_checkpoint_tip();
+    let mut chain = bdk_chain::local_chain::LocalChain::from_tip(cp.clone())?;
+    assert_eq!(chain.tip().height(), 16);
+    let old_hashes: Vec<BlockHash> = [14, 15, 16]
+        .into_iter()
+        .map(|height| chain.get(height).unwrap().hash())
+        .collect();
+
+    // Construct iter
+    let mut iter = FilterIter::new(&env.bitcoind.client, cp, vec![ScriptBuf::new()]);
+
+    // Now reorg 3 blocks (14, 15, 16)
+    let new_hashes: BTreeMap<u32, BlockHash> = (14..=16).zip(env.reorg(3)?).collect();
+
+    // Expect events from height 14 on...
+    while let Some(event) = iter.next().transpose()? {
+        let _ = chain
+            .apply_update(event.cp)
+            .expect("chain update should connect");
+    }
+
+    for height in 14..=16 {
+        let hash = chain.get(height).unwrap().hash();
+        assert!(!old_hashes.contains(&hash), "Old hashes were reorged out");
+        assert_eq!(
+            new_hashes.get(&height),
+            Some(&hash),
+            "Chain must include new hashes"
+        );
+    }
+
+    Ok(())
+}
