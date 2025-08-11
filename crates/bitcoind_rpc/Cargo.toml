@@ -17,12 +17,14 @@ workspace = true
 
 [dependencies]
 bitcoin = { version = "0.32.0", default-features = false }
+# FIXME: (@leonardo) update the code to use corepc-node, and corepc-client instead and then remove this.
 bitcoincore-rpc = { version = "0.19.0" }
 bdk_core = { path = "../core", version = "0.6.1", default-features = false }
 
 [dev-dependencies]
 bdk_bitcoind_rpc = { path = "." }
-bdk_testenv = { path = "../testenv" }
+# FIXME: (@leonardo) update the code to use corepc-node, and corepc-client instead and then remove this.
+bdk_testenv = { version = "0.13.1" }
 bdk_chain = { path = "../chain" }
 
 [features]
