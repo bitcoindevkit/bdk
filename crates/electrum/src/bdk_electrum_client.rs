@@ -501,17 +501,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 if let Some(anchor) = anchor_cache.get(&(txid, hash)) {
                     results.push((txid, *anchor));
                 } else {
-                    to_fetch.push((txid, height, hash));
+                    to_fetch.push((txid, height));
                 }
             }
         }
 
         // Fetch merkle proofs.
-        let txids_and_heights = to_fetch.iter().map(|&(txid, height, _)| (txid, height));
-        let proofs = self.inner.batch_transaction_get_merkle(txids_and_heights)?;
+        let proofs = self.inner.batch_transaction_get_merkle(to_fetch.iter())?;
 
         // Validate each proof, retrying once for each stale header.
-        for ((txid, height, hash), proof) in to_fetch.into_iter().zip(proofs.into_iter()) {
+        for ((txid, height), proof) in to_fetch.into_iter().zip(proofs.into_iter()) {
             let mut header = {
                 let cache = self.block_header_cache.lock().unwrap();
                 cache
@@ -536,6 +535,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
             // Build and cache the anchor if merkle proof is valid.
             if valid {
+                let hash = header.block_hash();
                 let anchor = ConfirmationBlockTime {
                     confirmation_time: header.time as u64,
                     block_id: BlockId {
