@@ -118,6 +118,92 @@
 //! assert!(changeset.is_empty());
 //! ```
 //! [`insert_txout`]: TxGraph::insert_txout
+//!
+//! # Minimum confirmations
+//!
+//! You can simulate a “minimum confirmations” filter by adjusting the `chain_tip` height passed to
+//! [`TxGraph::balance`].
+//!
+//! By using an earlier checkpoint as the tip, you ensure that only transactions with the required
+//! number of confirmations are counted as confirmed in the returned [`Balance`].
+//!
+//! ```
+//! # use bdk_chain::tx_graph::TxGraph;
+//! # use bdk_chain::{local_chain::LocalChain, CanonicalizationParams, ConfirmationBlockTime};
+//! # use bdk_testenv::{hash, utils::new_tx};
+//! # use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+//!
+//! # let spk = ScriptBuf::from_hex("0014c692ecf13534982a9a2834565cbd37add8027140").unwrap();
+//! # let chain =
+//! #     LocalChain::from_blocks((0..=15).map(|i| (i as u32, hash!("h"))).collect()).unwrap();
+//! # let tip = chain.tip();
+//! # let mut graph: TxGraph = TxGraph::default();
+//! # let coinbase_tx = Transaction {
+//! #     input: vec![TxIn {
+//! #         previous_output: OutPoint::null(),
+//! #         ..Default::default()
+//! #     }],
+//! #     output: vec![TxOut {
+//! #         value: Amount::from_sat(70000),
+//! #         script_pubkey: spk.clone(),
+//! #     }],
+//! #     ..new_tx(0)
+//! # };
+//!
+//! // Create a confirmed transaction with 6 confirmations.
+//! let tx = Transaction {
+//!     input: vec![TxIn {
+//!         previous_output: OutPoint::new(coinbase_tx.compute_txid(), 0),
+//!         ..Default::default()
+//!     }],
+//!     output: vec![TxOut {
+//!         value: Amount::from_sat(42_000),
+//!         script_pubkey: spk.clone(),
+//!     }],
+//!     ..new_tx(1)
+//! };
+//! let txid = tx.compute_txid();
+//! let _ = graph.insert_tx(tx.clone());
+//! let _ = graph.insert_anchor(
+//!     txid,
+//!     ConfirmationBlockTime {
+//!         block_id: chain.get(10).unwrap().block_id(),
+//!         confirmation_time: 123456,
+//!     },
+//! );
+//!
+//! // With a confirmation threshold of 6, our transaction should show in the balance.
+//! let confirmation_threshold = 6;
+//! let target_height = tip.height().saturating_sub(confirmation_threshold - 1);
+//! let target_tip = chain
+//!     .range(..=target_height)
+//!     .next()
+//!     .expect("checkpoint from local chain must have genesis");
+//! let balance = graph.balance(
+//!     &chain,
+//!     target_tip.block_id(),
+//!     CanonicalizationParams::default(),
+//!     std::iter::once(((), OutPoint::new(txid, 0))),
+//!     |_: &(), _| true,
+//! );
+//! assert_eq!(balance.confirmed, Amount::from_sat(42_000));
+//!
+//! // With a confirmation threshold of 7, our transaction should not show in the balance.
+//! let confirmation_threshold = 7;
+//! let target_height = tip.height().saturating_sub(confirmation_threshold - 1);
+//! let target_tip = chain
+//!     .range(..=target_height)
+//!     .next()
+//!     .expect("checkpoint from local chain must have genesis");
+//! let balance = graph.balance(
+//!     &chain,
+//!     target_tip.block_id(),
+//!     CanonicalizationParams::default(),
+//!     std::iter::once(((), OutPoint::new(txid, 0))),
+//!     |_: &(), _| true,
+//! );
+//! assert_eq!(balance.confirmed, Amount::from_sat(0));
+//! ```
 
 use crate::collections::*;
 use crate::spk_txout::SpkTxOutIndex;
