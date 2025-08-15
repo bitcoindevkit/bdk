@@ -6,246 +6,164 @@
 //! [0]: https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki
 //! [1]: https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki
 
-use bdk_core::collections::BTreeMap;
-use core::fmt;
-
 use bdk_core::bitcoin;
 use bdk_core::{BlockId, CheckPoint};
-use bitcoin::{
-    bip158::{self, BlockFilter},
-    Block, BlockHash, ScriptBuf,
-};
+use bitcoin::{bip158::BlockFilter, Block, ScriptBuf};
 use bitcoincore_rpc;
-use bitcoincore_rpc::RpcApi;
+use bitcoincore_rpc::{json::GetBlockHeaderResult, RpcApi};
 
-/// Block height
-type Height = u32;
-
-/// Type that generates block [`Event`]s by matching a list of script pubkeys against a
-/// [`BlockFilter`].
+/// Type that returns Bitcoin blocks by matching a list of script pubkeys (SPKs) against a
+/// [`bip158::BlockFilter`].
 #[derive(Debug)]
-pub struct FilterIter<'c, C> {
-    // RPC client
-    client: &'c C,
-    // SPK inventory
+pub struct FilterIter<'a> {
+    /// RPC client
+    client: &'a bitcoincore_rpc::Client,
+    /// SPK inventory
     spks: Vec<ScriptBuf>,
-    // local cp
-    cp: Option<CheckPoint>,
-    // blocks map
-    blocks: BTreeMap<Height, BlockHash>,
-    // best height counter
-    height: Height,
-    // stop height
-    stop: Height,
+    /// checkpoint
+    cp: CheckPoint,
+    /// Header info, contains the prev and next hashes for each header.
+    header: Option<GetBlockHeaderResult>,
 }
 
-impl<'c, C: RpcApi> FilterIter<'c, C> {
-    /// Construct [`FilterIter`] from a given `client` and start `height`.
-    pub fn new_with_height(client: &'c C, height: u32) -> Self {
+impl<'a> FilterIter<'a> {
+    /// Construct [`FilterIter`] with checkpoint, RPC client and SPKs.
+    pub fn new(
+        client: &'a bitcoincore_rpc::Client,
+        cp: CheckPoint,
+        spks: impl IntoIterator<Item = ScriptBuf>,
+    ) -> Self {
         Self {
             client,
-            spks: vec![],
-            cp: None,
-            blocks: BTreeMap::new(),
-            height,
-            stop: 0,
+            spks: spks.into_iter().collect(),
+            cp,
+            header: None,
         }
     }
 
-    /// Construct [`FilterIter`] from a given `client` and [`CheckPoint`].
-    pub fn new_with_checkpoint(client: &'c C, cp: CheckPoint) -> Self {
-        let mut filter_iter = Self::new_with_height(client, cp.height());
-        filter_iter.cp = Some(cp);
-        filter_iter
-    }
-
-    /// Extends `self` with an iterator of spks.
-    pub fn add_spks(&mut self, spks: impl IntoIterator<Item = ScriptBuf>) {
-        self.spks.extend(spks)
-    }
-
-    /// Add spk to the list of spks to scan with.
-    pub fn add_spk(&mut self, spk: ScriptBuf) {
-        self.spks.push(spk);
-    }
-
-    /// Get the next filter and increment the current best height.
+    /// Return the agreement header with the remote node.
     ///
-    /// Returns `Ok(None)` when the stop height is exceeded.
-    fn next_filter(&mut self) -> Result<Option<NextFilter>, Error> {
-        if self.height > self.stop {
-            return Ok(None);
-        }
-        let height = self.height;
-        let hash = match self.blocks.get(&height) {
-            Some(h) => *h,
-            None => self.client.get_block_hash(height as u64)?,
-        };
-        let filter_bytes = self.client.get_block_filter(&hash)?.filter;
-        let filter = BlockFilter::new(&filter_bytes);
-        self.height += 1;
-        Ok(Some((BlockId { height, hash }, filter)))
-    }
-
-    /// Get the remote tip.
-    ///
-    /// Returns `None` if the remote height is not strictly greater than the height of this
-    /// [`FilterIter`].
-    pub fn get_tip(&mut self) -> Result<Option<BlockId>, Error> {
-        let tip_hash = self.client.get_best_block_hash()?;
-        let mut header = self.client.get_block_header_info(&tip_hash)?;
-        let tip_height = header.height as u32;
-        if self.height >= tip_height {
-            // nothing to do
-            return Ok(None);
-        }
-        self.blocks.insert(tip_height, tip_hash);
-
-        // if we have a checkpoint we use a lookback of ten blocks
-        // to ensure consistency of the local chain
-        if let Some(cp) = self.cp.as_ref() {
-            // adjust start height to point of agreement + 1
-            let base = self.find_base_with(cp.clone())?;
-            self.height = base.height + 1;
-
-            for _ in 0..9 {
-                let hash = match header.previous_block_hash {
-                    Some(hash) => hash,
-                    None => break,
-                };
-                header = self.client.get_block_header_info(&hash)?;
-                let height = header.height as u32;
-                if height < self.height {
-                    break;
-                }
-                self.blocks.insert(height, hash);
+    /// Error if no agreement header is found.
+    fn find_base(&self) -> Result<GetBlockHeaderResult, Error> {
+        for cp in self.cp.iter() {
+            match self.client.get_block_header_info(&cp.hash()) {
+                Err(e) if is_not_found(&e) => continue,
+                Ok(header) if header.confirmations <= 0 => continue,
+                Ok(header) => return Ok(header),
+                Err(e) => return Err(Error::Rpc(e)),
             }
         }
-
-        self.stop = tip_height;
-
-        Ok(Some(BlockId {
-            height: tip_height,
-            hash: tip_hash,
-        }))
+        Err(Error::ReorgDepthExceeded)
     }
 }
 
-/// Alias for a compact filter and associated block id.
-type NextFilter = (BlockId, BlockFilter);
-
-/// Event inner type
+/// Event returned by [`FilterIter`].
 #[derive(Debug, Clone)]
-pub struct EventInner {
-    /// Height
-    pub height: Height,
-    /// Block
-    pub block: Block,
-}
-
-/// Kind of event produced by [`FilterIter`].
-#[derive(Debug, Clone)]
-pub enum Event {
-    /// Block
-    Block(EventInner),
-    /// No match
-    NoMatch(Height),
+pub struct Event {
+    /// Checkpoint
+    pub cp: CheckPoint,
+    /// Block, will be `Some(..)` for matching blocks
+    pub block: Option<Block>,
 }
 
 impl Event {
     /// Whether this event contains a matching block.
     pub fn is_match(&self) -> bool {
-        matches!(self, Event::Block(_))
+        self.block.is_some()
     }
 
-    /// Get the height of this event.
-    pub fn height(&self) -> Height {
-        match self {
-            Self::Block(EventInner { height, .. }) => *height,
-            Self::NoMatch(h) => *h,
-        }
+    /// Return the height of the event.
+    pub fn height(&self) -> u32 {
+        self.cp.height()
     }
 }
 
-impl<C: RpcApi> Iterator for FilterIter<'_, C> {
+impl Iterator for FilterIter<'_> {
     type Item = Result<Event, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        (|| -> Result<_, Error> {
-            // if the next filter matches any of our watched spks, get the block
-            // and return it, inserting relevant block ids along the way
-            self.next_filter()?.map_or(Ok(None), |(block, filter)| {
-                let height = block.height;
-                let hash = block.hash;
+        (|| -> Result<Option<_>, Error> {
+            let mut cp = self.cp.clone();
 
-                if self.spks.is_empty() {
-                    Err(Error::NoScripts)
-                } else if filter
-                    .match_any(&hash, self.spks.iter().map(|script| script.as_bytes()))
-                    .map_err(Error::Bip158)?
-                {
-                    let block = self.client.get_block(&hash)?;
-                    self.blocks.insert(height, hash);
-                    let inner = EventInner { height, block };
-                    Ok(Some(Event::Block(inner)))
-                } else {
-                    Ok(Some(Event::NoMatch(height)))
-                }
-            })
+            let header = match self.header.take() {
+                Some(header) => header,
+                // If no header is cached we need to locate a base of the local
+                // checkpoint from which the scan may proceed.
+                None => self.find_base()?,
+            };
+
+            let mut next_hash = match header.next_block_hash {
+                Some(hash) => hash,
+                None => return Ok(None),
+            };
+
+            let mut next_header = self.client.get_block_header_info(&next_hash)?;
+
+            // In case of a reorg, rewind by fetching headers of previous hashes until we find
+            // one with enough confirmations.
+            while next_header.confirmations < 0 {
+                let prev_hash = next_header
+                    .previous_block_hash
+                    .ok_or(Error::ReorgDepthExceeded)?;
+                let prev_header = self.client.get_block_header_info(&prev_hash)?;
+                next_header = prev_header;
+            }
+
+            next_hash = next_header.hash;
+            let next_height: u32 = next_header.height.try_into()?;
+
+            cp = cp.insert(BlockId {
+                height: next_height,
+                hash: next_hash,
+            });
+
+            let mut block = None;
+            let filter =
+                BlockFilter::new(self.client.get_block_filter(&next_hash)?.filter.as_slice());
+            if filter
+                .match_any(&next_hash, self.spks.iter().map(ScriptBuf::as_ref))
+                .map_err(Error::Bip158)?
+            {
+                block = Some(self.client.get_block(&next_hash)?);
+            }
+
+            // Store the next header
+            self.header = Some(next_header);
+            // Update self.cp
+            self.cp = cp.clone();
+
+            Ok(Some(Event { cp, block }))
         })()
         .transpose()
     }
 }
 
-impl<C: RpcApi> FilterIter<'_, C> {
-    /// Returns the point of agreement between `self` and the given `cp`.
-    fn find_base_with(&mut self, mut cp: CheckPoint) -> Result<BlockId, Error> {
-        loop {
-            let height = cp.height();
-            let fetched_hash = match self.blocks.get(&height) {
-                Some(hash) => *hash,
-                None if height == 0 => cp.hash(),
-                _ => self.client.get_block_hash(height as _)?,
-            };
-            if cp.hash() == fetched_hash {
-                // ensure this block also exists in self
-                self.blocks.insert(height, cp.hash());
-                return Ok(cp.block_id());
-            }
-            // remember conflicts
-            self.blocks.insert(height, fetched_hash);
-            cp = cp.prev().expect("must break before genesis");
-        }
-    }
-
-    /// Returns a chain update from the newly scanned blocks.
-    ///
-    /// Returns `None` if this [`FilterIter`] was not constructed using a [`CheckPoint`], or
-    /// if no blocks have been fetched for example by using [`get_tip`](Self::get_tip).
-    pub fn chain_update(&mut self) -> Option<CheckPoint> {
-        if self.cp.is_none() || self.blocks.is_empty() {
-            return None;
-        }
-
-        // note: to connect with the local chain we must guarantee that `self.blocks.first()`
-        // is also the point of agreement with `self.cp`.
-        Some(
-            CheckPoint::from_block_ids(self.blocks.iter().map(BlockId::from))
-                .expect("blocks must be in order"),
-        )
-    }
-}
-
-/// Errors that may occur during a compact filters sync.
+/// Error that may be thrown by [`FilterIter`].
 #[derive(Debug)]
 pub enum Error {
-    /// bitcoin bip158 error
-    Bip158(bip158::Error),
-    /// attempted to scan blocks without any script pubkeys
-    NoScripts,
-    /// `bitcoincore_rpc` error
+    /// RPC error
     Rpc(bitcoincore_rpc::Error),
+    /// `bitcoin::bip158` error
+    Bip158(bitcoin::bip158::Error),
+    /// Max reorg depth exceeded.
+    ReorgDepthExceeded,
+    /// Error converting an integer
+    TryFromInt(core::num::TryFromIntError),
 }
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rpc(e) => write!(f, "{e}"),
+            Self::Bip158(e) => write!(f, "{e}"),
+            Self::ReorgDepthExceeded => write!(f, "maximum reorg depth exceeded"),
+            Self::TryFromInt(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 impl From<bitcoincore_rpc::Error> for Error {
     fn from(e: bitcoincore_rpc::Error) -> Self {
@@ -253,15 +171,17 @@ impl From<bitcoincore_rpc::Error> for Error {
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Bip158(e) => e.fmt(f),
-            Self::NoScripts => write!(f, "no script pubkeys were provided to match with"),
-            Self::Rpc(e) => e.fmt(f),
-        }
+impl From<core::num::TryFromIntError> for Error {
+    fn from(e: core::num::TryFromIntError) -> Self {
+        Self::TryFromInt(e)
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for Error {}
+/// Whether the RPC error is a "not found" error (code: `-5`).
+fn is_not_found(e: &bitcoincore_rpc::Error) -> bool {
+    matches!(
+        e,
+        bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(e))
+        if e.code == -5
+    )
+}
