@@ -1,3 +1,4 @@
+//! This module provides utility functions for testing custom persistence backends.
 use crate::block_id;
 use crate::hash;
 use bdk_chain::bitcoin;
@@ -40,6 +41,14 @@ fn spk_at_index(descriptor: &Descriptor<DescriptorPublicKey>, index: u32) -> Scr
         .script_pubkey()
 }
 
+/// tests if [`TxGraph`] is being persisted correctly
+///
+/// [`TxGraph`]: <https://docs.rs/bdk_chain/latest/bdk_chain/tx_graph/struct.TxGraph.html>
+/// [`tx_graph::ChangeSet`]: <https://docs.rs/bdk_chain/latest/bdk_chain/tx_graph/struct.ChangeSet.html>
+///
+/// We create a dummy [`tx_graph::ChangeSet`], persist it and check if loaded `ChangeSet` matches
+/// the persisted one. We then create another such dummy `ChangeSet`, persist it and load it to
+/// check if merged `ChangeSet` is returned.
 pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -51,13 +60,16 @@ pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &tx_graph::ChangeSet<ConfirmationBlockTime>) -> anyhow::Result<()>,
 {
     use tx_graph::ChangeSet;
+    // create the store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset = initialize(&mut store).expect("should load empty changeset");
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
+    // create changeset
     let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BTC"), 30_000));
 
     let conf_anchor: ConfirmationBlockTime = ConfirmationBlockTime {
@@ -100,11 +112,13 @@ pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
         last_evicted: [(tx1.compute_txid(), 1755416660)].into(),
     };
 
+    // persist and load
     persist(&mut store, &tx_graph_changeset1).expect("should persist changeset");
 
     let changeset = initialize(&mut store).expect("should load persisted changeset");
     assert_eq!(changeset, tx_graph_changeset1);
 
+    // create another changeset
     let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
 
     let conf_anchor: ConfirmationBlockTime = ConfirmationBlockTime {
@@ -131,6 +145,7 @@ pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
         last_evicted: [(tx2.compute_txid(), 1755416760)].into(),
     };
 
+    // persist, load and check if same as merged
     persist(&mut store, &tx_graph_changeset2).expect("should persist changeset");
 
     let changeset = initialize(&mut store).expect("should load persisted changeset");
@@ -147,6 +162,15 @@ fn parse_descriptor(descriptor: &str) -> Descriptor<DescriptorPublicKey> {
         .0
 }
 
+/// tests if [`KeychainTxOutIndex`] is being persisted correctly
+///
+/// [`KeychainTxOutIndex`]: <https://docs.rs/bdk_chain/latest/bdk_chain/indexer/keychain_txout/struct.KeychainTxOutIndex.html>
+///
+/// [`keychain_txout::ChangeSet`]: <https://docs.rs/bdk_chain/latest/bdk_chain/indexer/keychain_txout/struct.ChangeSet.html>
+///
+/// We create a dummy [`keychain_txout::ChangeSet`], persist it and check if loaded `ChangeSet`
+/// matches the persisted one. We then create another such dummy `ChangeSet`, persist it and load it
+/// to check if merged `ChangeSet` is returned.
 pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -160,13 +184,16 @@ pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
     use crate::utils::DESCRIPTORS;
     use keychain_txout::ChangeSet;
 
+    // create the store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset = initialize(&mut store).expect("should load empty changeset");
     assert_eq!(changeset, ChangeSet::default());
 
+    // create changeset
     let descriptor_ids = DESCRIPTORS.map(|d| parse_descriptor(d).descriptor_id());
     let descs = DESCRIPTORS.map(parse_descriptor);
 
@@ -185,12 +212,14 @@ pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
         .into(),
     };
 
+    // persist and load
     persist(&mut store, &changeset).expect("should persist keychain_txout");
 
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
 
     assert_eq!(changeset_read, changeset);
 
+    // create another changeset
     let changeset_new = ChangeSet {
         last_revealed: [(descriptor_ids[0], 2)].into(),
         spk_cache: [(
@@ -200,6 +229,7 @@ pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
         .into(),
     };
 
+    // persist, load and check if same as merged
     persist(&mut store, &changeset_new).expect("should persist second changeset");
 
     let changeset_read_new = initialize(&mut store).expect("should load merged changesets");
@@ -208,6 +238,14 @@ pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset_read_new, changeset);
 }
 
+/// tests if [`LocalChain`] is being persisted correctly
+///
+/// [`LocalChain`]: <https://docs.rs/bdk_chain/latest/bdk_chain/local_chain/struct.LocalChain.html>
+/// [`local_chain::ChangeSet`]: <https://docs.rs/bdk_chain/latest/bdk_chain/local_chain/struct.ChangeSet.html>
+///
+/// We create a dummy [`local_chain::ChangeSet`], persist it and check if loaded `ChangeSet` matches
+/// the persisted one. We then create another such dummy `ChangeSet`, persist it and load it to
+/// check if merged `ChangeSet` is returned.
 pub fn persist_local_chain_changeset<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -219,27 +257,32 @@ pub fn persist_local_chain_changeset<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &local_chain::ChangeSet) -> anyhow::Result<()>,
 {
     use local_chain::ChangeSet;
+    // create the store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset = initialize(&mut store).expect("should load empty changeset");
     assert_eq!(changeset, ChangeSet::default());
 
+    // create changeset
     let changeset = ChangeSet {
         blocks: [(910425, Some(hash!("B"))), (910426, Some(hash!("D")))].into(),
     };
 
+    // persist and load
     persist(&mut store, &changeset).expect("should persist changeset");
 
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
     assert_eq!(changeset_read, changeset);
 
-    // create another local_chain_changeset, persist that and read it
+    // create another changeset
     let changeset_new = ChangeSet {
         blocks: [(910427, Some(hash!("K")))].into(),
     };
 
+    // persist, load and check if same as merged
     persist(&mut store, &changeset_new).expect("should persist changeset");
 
     let changeset_read_new = initialize(&mut store).expect("should load persisted changeset");
@@ -256,6 +299,12 @@ pub fn persist_local_chain_changeset<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, changeset_read_new);
 }
 
+/// tests if `last_seen` field of [`tx_graph::ChangeSet`] is being persisted correctly
+///
+/// We create a dummy [`tx_graph::ChangeSet`] with only `last_seen` and `txs` fields populated,
+/// persist it and check if loaded `ChangeSet` matches the persisted one. We then create
+/// another such dummy `ChangeSet`, persist it and load it to check if merged `ChangeSet` is
+/// returned.
 pub fn persist_last_seen<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -267,19 +316,21 @@ pub fn persist_last_seen<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &tx_graph::ChangeSet<ConfirmationBlockTime>) -> anyhow::Result<()>,
 {
     use tx_graph::ChangeSet;
+    // create store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset =
         initialize(&mut store).expect("store should initialize and we should get empty changeset");
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
+    // create changeset
     let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BTC"), 30_000));
     let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
     let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
 
-    // try persisting and reading last_seen
     let txs: BTreeSet<Arc<Transaction>> = [tx1.clone(), tx2.clone()].into();
     let mut last_seen: BTreeMap<Txid, u64> = [
         (tx1.compute_txid(), 1755416700),
@@ -292,11 +343,12 @@ pub fn persist_last_seen<Store, CreateStore, Initialize, Persist>(
         last_seen: last_seen.clone(),
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
+    // persist and load
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
     assert_eq!(changeset_read.last_seen, last_seen);
 
-    // persist another last_seen and see if what is read is same as merged one
+    // create another changeset
     let txs_new: BTreeSet<Arc<Transaction>> = [tx3.clone()].into();
     let last_seen_new: BTreeMap<Txid, u64> = [(tx3.compute_txid(), 1755417800)].into();
 
@@ -305,6 +357,7 @@ pub fn persist_last_seen<Store, CreateStore, Initialize, Persist>(
         last_seen: last_seen_new.clone(),
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
+    // persist, load and check if same as merged
     persist(&mut store, &changeset).expect("should persist changeset");
 
     let changeset_read_new = initialize(&mut store).expect("should load persisted changeset");
@@ -312,6 +365,12 @@ pub fn persist_last_seen<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset_read_new.last_seen, last_seen);
 }
 
+/// tests if `last_evicted` field of [`tx_graph::ChangeSet`] is being persisted correctly
+///
+/// We create a dummy [`tx_graph::ChangeSet`] with only `last_evicted` and `txs` fields populated,
+/// persist it and check if loaded `ChangeSet` matches the persisted one. We then create
+/// another such dummy `ChangeSet`, persist it and load it to check if merged `ChangeSet` is
+/// returned.
 pub fn persist_last_evicted<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -323,14 +382,17 @@ pub fn persist_last_evicted<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &tx_graph::ChangeSet<ConfirmationBlockTime>) -> anyhow::Result<()>,
 {
     use tx_graph::ChangeSet;
+    // create store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset =
         initialize(&mut store).expect("store should initialize and we should get empty changeset");
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
+    // create changeset
     let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BDK"), 30_000));
     let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
     let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
@@ -346,17 +408,20 @@ pub fn persist_last_evicted<Store, CreateStore, Initialize, Persist>(
         last_evicted: last_evicted.clone(),
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
+    // persist and load
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
     assert_eq!(changeset_read.last_evicted, last_evicted);
 
-    // persist another last_evicted and see if what is read is same as merged one
+    // create another changeset
     let last_evicted_new: BTreeMap<Txid, u64> = [(tx3.compute_txid(), 1755416700)].into();
 
     let changeset = ChangeSet::<ConfirmationBlockTime> {
         last_evicted: last_evicted_new.clone(),
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
+
+    // persist, load and check if same as merged
     persist(&mut store, &changeset).expect("should persist changeset");
 
     let changeset_read_new = initialize(&mut store).expect("should load persisted changeset");
@@ -364,6 +429,12 @@ pub fn persist_last_evicted<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset_read_new.last_evicted, last_evicted);
 }
 
+/// tests if `first_seen` field of [`tx_graph::ChangeSet`] is being persisted correctly
+///
+/// We create a dummy [`tx_graph::ChangeSet`] with only `first_seen` and `txs` fields populated,
+/// persist it and check if loaded `ChangeSet` matches the persisted one. We then create
+/// another such dummy `ChangeSet`, persist it and load it to check if merged `ChangeSet` is
+/// returned.
 pub fn persist_first_seen<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -375,19 +446,21 @@ pub fn persist_first_seen<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &tx_graph::ChangeSet<ConfirmationBlockTime>) -> anyhow::Result<()>,
 {
     use tx_graph::ChangeSet;
+    // create store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset =
         initialize(&mut store).expect("store should initialize and we should get empty changeset");
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
+    // create changeset
     let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BTC"), 30_000));
     let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
     let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
 
-    // try persisting and reading first_seen
     let txs: BTreeSet<Arc<Transaction>> = [tx1.clone(), tx2.clone()].into();
     let mut first_seen: BTreeMap<Txid, u64> = [
         (tx1.compute_txid(), 1755416600),
@@ -400,11 +473,12 @@ pub fn persist_first_seen<Store, CreateStore, Initialize, Persist>(
         first_seen: first_seen.clone(),
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
+    // persist and load
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
     assert_eq!(changeset_read.first_seen, first_seen);
 
-    // persist another first_seen and see if what is read is same as merged one
+    // create another changeset
     let txs_new: BTreeSet<Arc<Transaction>> = [tx3.clone()].into();
     let first_seen_new: BTreeMap<Txid, u64> = [(tx3.compute_txid(), 1755416700)].into();
 
@@ -413,6 +487,7 @@ pub fn persist_first_seen<Store, CreateStore, Initialize, Persist>(
         first_seen: first_seen_new.clone(),
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
+    // persist, load and check if same as merged
     persist(&mut store, &changeset).expect("should persist changeset");
 
     let changeset_read_new = initialize(&mut store).expect("should load persisted changeset");
@@ -420,6 +495,11 @@ pub fn persist_first_seen<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset_read_new.first_seen, first_seen);
 }
 
+/// tests if `txouts` field of [`tx_graph::ChangeSet`] is being persisted correctly
+///
+/// We create a dummy [`tx_graph::ChangeSet`] with only `txouts` field populated, persist it and
+/// check if loaded `ChangeSet` matches the persisted one. We then create another such dummy
+/// `ChangeSet`, persist it and load it to check if merged `ChangeSet` is returned.
 pub fn persist_txouts<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -431,10 +511,12 @@ pub fn persist_txouts<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &tx_graph::ChangeSet<ConfirmationBlockTime>) -> anyhow::Result<()>,
 {
     use tx_graph::ChangeSet;
+    // initialize store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // create changeset
     let changeset = initialize(&mut store).expect("should initialize and load empty changeset");
     assert_eq!(changeset, ChangeSet::default());
 
@@ -467,11 +549,13 @@ pub fn persist_txouts<Store, CreateStore, Initialize, Persist>(
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
 
+    // persist and load
     persist(&mut store, &changeset).expect("should persist changeset");
 
     let changeset_read = initialize(&mut store).expect("should load changeset");
     assert_eq!(changeset_read.txouts, txouts);
 
+    // create another changeset
     let txouts_new: BTreeMap<OutPoint, TxOut> = [(
         OutPoint::new(hash!("K"), 0),
         TxOut {
@@ -489,6 +573,7 @@ pub fn persist_txouts<Store, CreateStore, Initialize, Persist>(
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
 
+    // persist, load and check if same as merged
     persist(&mut store, &changeset).expect("should persist changeset");
 
     let changeset_read_new = initialize(&mut store).expect("should load changeset");
@@ -496,6 +581,11 @@ pub fn persist_txouts<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset_read_new.txouts, txouts);
 }
 
+/// tests if `txs` field of [`tx_graph::ChangeSet`] is being persisted correctly
+///
+/// We create a dummy [`tx_graph::ChangeSet`] with only `txs` field populated, persist it and check
+/// if loaded `ChangeSet` matches the persisted one. We then create another such dummy `ChangeSet`,
+/// persist it and load it to check if merged `ChangeSet` is returned.
 pub fn persist_txs<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -507,13 +597,16 @@ pub fn persist_txs<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &tx_graph::ChangeSet<ConfirmationBlockTime>) -> anyhow::Result<()>,
 {
     use tx_graph::ChangeSet;
+    // create store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset = initialize(&mut store).expect("should initialize and load empty changeset");
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
+    // create changeset
     let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BTC"), 30_000));
     let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
     let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
@@ -525,23 +618,31 @@ pub fn persist_txs<Store, CreateStore, Initialize, Persist>(
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
 
+    // persist and load
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
     assert_eq!(changeset_read.txs, txs);
 
     let txs_new: BTreeSet<Arc<Transaction>> = [tx3].into();
 
+    // create another changeset
     let changeset = ChangeSet::<ConfirmationBlockTime> {
         txs: txs_new.clone(),
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
 
+    // persist, load and check if same as merged
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read_new = initialize(&mut store).expect("should load persisted changeset");
     txs.merge(txs_new);
     assert_eq!(changeset_read_new.txs, txs);
 }
 
+/// tests if `anchors` field of [`tx_graph::ChangeSet`] is being persisted correctly
+///
+/// We create a dummy [`tx_graph::ChangeSet`] with only `anchors` and `txs` fields populated,
+/// persist it and check if loaded `ChangeSet` matches the persisted one. We then create another
+/// such dummy `ChangeSet`, persist it and load it to check if merged `ChangeSet` is returned.
 pub fn persist_anchors<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -553,13 +654,16 @@ pub fn persist_anchors<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &tx_graph::ChangeSet<ConfirmationBlockTime>) -> anyhow::Result<()>,
 {
     use tx_graph::ChangeSet;
+    // create store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset = initialize(&mut store).expect("should initialize and load empty changeset");
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
+    // create changeset
     let tx1 = Arc::new(create_one_inp_one_out_tx(hash!(""), 30_000));
     let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
     let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
@@ -584,10 +688,12 @@ pub fn persist_anchors<Store, CreateStore, Initialize, Persist>(
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
 
+    // persist and load
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
     assert_eq!(changeset_read.anchors, anchors);
 
+    // create another changeset
     let txs_new: BTreeSet<Arc<Transaction>> = [tx3.clone()].into();
     let anchors_new: BTreeSet<(ConfirmationBlockTime, Txid)> =
         [(anchor2, tx3.compute_txid())].into();
@@ -598,6 +704,7 @@ pub fn persist_anchors<Store, CreateStore, Initialize, Persist>(
         ..ChangeSet::<ConfirmationBlockTime>::default()
     };
 
+    // persist, load and check if same as merged
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
 
@@ -605,7 +712,11 @@ pub fn persist_anchors<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset_read.anchors, anchors);
 }
 
-// check the merge by changing asserts
+/// tests if `last_revealed` field of [`keychain_txout::ChangeSet`] is being persisted correctly
+///
+/// We create a dummy [`keychain_txout::ChangeSet`] with only `last_revealed` field populated,
+/// persist it and check if loaded `ChangeSet` matches the persisted one. We then create another
+/// such dummy `ChangeSet`, persist it and load it to check if merged `ChangeSet` is returned.
 pub fn persist_last_revealed<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -617,13 +728,16 @@ pub fn persist_last_revealed<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &keychain_txout::ChangeSet) -> anyhow::Result<()>,
 {
     use keychain_txout::ChangeSet;
+    // create store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset = initialize(&mut store).expect("should initialize and load empty changeset");
     assert_eq!(changeset, ChangeSet::default());
 
+    // create changeset
     let descriptor_ids = crate::utils::DESCRIPTORS.map(|d| parse_descriptor(d).descriptor_id());
 
     let mut last_revealed: BTreeMap<DescriptorId, u32> =
@@ -634,10 +748,12 @@ pub fn persist_last_revealed<Store, CreateStore, Initialize, Persist>(
         ..ChangeSet::default()
     };
 
+    // persist and load
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
     assert_eq!(changeset_read.last_revealed, last_revealed);
 
+    // create another changeset
     let last_revealed_new: BTreeMap<DescriptorId, u32> = [(descriptor_ids[0], 2)].into();
 
     let changeset = ChangeSet {
@@ -645,12 +761,18 @@ pub fn persist_last_revealed<Store, CreateStore, Initialize, Persist>(
         ..ChangeSet::default()
     };
 
+    // persist, load and check if same as merged
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read_new = initialize(&mut store).expect("should load persisted changeset");
     last_revealed.merge(last_revealed_new);
     assert_eq!(changeset_read_new.last_revealed, last_revealed);
 }
 
+/// tests if `spk_cache` field of [`keychain_txout::ChangeSet`] is being persisted correctly
+///
+/// We create a dummy [`keychain_txout::ChangeSet`] with only `spk_cache` field populated, persist
+/// it and check if loaded `ChangeSet` matches the persisted one. We then create another such dummy
+/// `ChangeSet`, persist it and load it to check if merged `ChangeSet` is returned.
 pub fn persist_spk_cache<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -662,13 +784,16 @@ pub fn persist_spk_cache<Store, CreateStore, Initialize, Persist>(
     Persist: Fn(&mut Store, &keychain_txout::ChangeSet) -> anyhow::Result<()>,
 {
     use keychain_txout::ChangeSet;
+    // create store
     let temp_dir = tempfile::tempdir().expect("must create tempdir");
     let file_path = temp_dir.path().join(file_name);
     let mut store = create_store(&file_path).expect("store should get created");
 
+    // initialize store
     let changeset = initialize(&mut store).expect("should initialize and load empty changeset");
     assert_eq!(changeset, ChangeSet::default());
 
+    // create changeset
     let descriptor_ids = crate::utils::DESCRIPTORS.map(|d| parse_descriptor(d).descriptor_id());
     let descs = crate::utils::DESCRIPTORS.map(parse_descriptor);
 
@@ -689,10 +814,12 @@ pub fn persist_spk_cache<Store, CreateStore, Initialize, Persist>(
         ..ChangeSet::default()
     };
 
+    // persist and load
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read = initialize(&mut store).expect("should load persisted changeset");
     assert_eq!(changeset_read.spk_cache, spk_cache);
 
+    // create another changeset
     let spk_cache_new: BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>> = [(
         descriptor_ids[0],
         SpkIterator::new_with_range(&descs[0], 126..=150).collect(),
@@ -704,6 +831,7 @@ pub fn persist_spk_cache<Store, CreateStore, Initialize, Persist>(
         ..ChangeSet::default()
     };
 
+    // persist, load and check if same as merged
     persist(&mut store, &changeset).expect("should persist changeset");
     let changeset_read_new = initialize(&mut store).expect("should load persisted changeset");
     let spk_cache: BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>> = [
