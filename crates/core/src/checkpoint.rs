@@ -2,7 +2,7 @@ use core::fmt;
 use core::ops::RangeBounds;
 
 use alloc::sync::Arc;
-use bitcoin::{block::Header, Block, BlockHash};
+use bitcoin::{block::Header, BlockHash};
 
 use crate::BlockId;
 
@@ -60,8 +60,11 @@ impl<D> Drop for CPInner<D> {
 
 /// Trait that converts [`CheckPoint`] `data` to [`BlockHash`].
 ///
-/// Implementations of [`ToBlockHash`] must consist exclusively of the data to be hashed — do not
-/// include any extraneous fields.
+/// Implementations of [`ToBlockHash`] must always return the block’s consensus-defined hash. If
+/// your type contains extra fields (timestamps, metadata, etc.), these must be ignored. For
+/// example, [`BlockHash`] trivially returns itself, [`Header`] calls its `block_hash()`, and a
+/// wrapper type around a [`Header`] should delegate to the header’s hash rather than derive one
+/// from other fields.
 pub trait ToBlockHash {
     /// Returns the [`BlockHash`] for the associated [`CheckPoint`] `data` type.
     fn to_blockhash(&self) -> BlockHash;
@@ -74,12 +77,6 @@ impl ToBlockHash for BlockHash {
 }
 
 impl ToBlockHash for Header {
-    fn to_blockhash(&self) -> BlockHash {
-        self.block_hash()
-    }
-}
-
-impl ToBlockHash for Block {
     fn to_blockhash(&self) -> BlockHash {
         self.block_hash()
     }
@@ -239,11 +236,11 @@ where
 
     /// Inserts `data` at its `height` within the chain.
     ///
-    /// The effect of `insert` depends on whether a height already exists. If it doesn't the
-    /// `block_id` we inserted and all pre-existing blocks higher than it will be re-inserted after
-    /// it. If the height already existed and has a conflicting block hash then it will be purged
-    /// along with all block following it. The returned chain will have a tip of the `block_id`
-    /// passed in. Of course, if the `block_id` was already present then this just returns `self`.
+    /// The effect of `insert` depends on whether a height already exists. If it doesn't, the data
+    /// we inserted and all pre-existing entries higher than it will be re-inserted after it. If the
+    /// height already existed and has a conflicting block hash then it will be purged along with
+    /// all entries following it. The returned chain will have a tip of the data passed in. Of
+    /// course, if the data was already present then this just returns `self`.
     ///
     /// # Panics
     ///
@@ -258,7 +255,7 @@ where
                     return self;
                 }
                 assert_ne!(cp.height(), 0, "cannot replace genesis block");
-                // if we have a conflict we just return the inserted block because the tail is by
+                // If we have a conflict we just return the inserted data because the tail is by
                 // implication invalid.
                 tail = vec![];
                 break cp.prev().expect("can't be called on genesis block");
