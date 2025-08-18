@@ -164,8 +164,8 @@ impl<I, D> SyncRequestBuilder<I, D> {
     ///     .build();
     ///
     /// // Sync all revealed spks in the indexer. This time, spks may be derived from different
-    /// // keychains. Each spk will be indexed with `(&'static str, u32)` where `&'static str` is
-    /// // the keychain identifier and `u32` is the derivation index.
+    /// // keychains. Each spk will be indexed with `(&str, u32)` where `&str` is the keychain
+    /// // identifier and `u32` is the derivation index.
     /// let all_revealed_spks = indexer.revealed_spks(..);
     /// let _request: SyncRequest<(&str, u32), BlockHash> = SyncRequest::builder()
     ///     .spks_with_indexes(all_revealed_spks)
