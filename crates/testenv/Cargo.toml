@@ -16,8 +16,10 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.23.1", default-features = false }
+bdk_chain = { path = "../chain", version = "0.23.1", default-features = false, features = ["miniscript"]}
 electrsd = { version = "0.28.0", features = [ "legacy" ], default-features = false }
+anyhow = "1.0.98"
+tempfile = "3.20.0"
 
 [dev-dependencies]
 bdk_testenv = { path = "." }
@@ -27,6 +29,5 @@ default = ["std", "download"]
 download = ["electrsd/bitcoind_25_0", "electrsd/esplora_a33e97e1"]
 std = ["bdk_chain/std"]
 serde = ["bdk_chain/serde"]
-
 [package.metadata.docs.rs]
 no-default-features = true
