@@ -305,19 +305,30 @@ where
         return Ok(PollResponse::Block(res));
     }
 
-    for cp in emitter.last_cp.iter() {
-        let res = match client.get_block_info(&cp.hash()) {
+    for cp_entry in emitter.last_cp.iter() {
+        let res = match client.get_block_info(&cp_entry.hash()) {
             // block not in best chain
             Ok(res) if res.confirmations < 0 => continue,
             Ok(res) => res,
             Err(e) if e.is_not_found_error() => {
-                if cp.height() > 0 {
+                if cp_entry.height() > 0 {
                     continue;
                 }
                 // if we can't find genesis block, we can't create an update that connects
                 break;
             }
             Err(e) => return Err(e),
+        };
+
+        // NOTE: Calls to `CheckPoint::<BlockHash>` should alreadys return `Some` as there is no
+        // prev_blockhash. The handling of the `None` branch here is to avoid oversight when
+        // changing this to handle `CheckPoint<Header>`.
+        let cp = match cp_entry.floor_checkpoint() {
+            Some(cp) => cp,
+            None => {
+                let BlockId { height, hash } = cp_entry.block_id();
+                CheckPoint::new(height, hash)
+            }
         };
 
         // agreement point found
