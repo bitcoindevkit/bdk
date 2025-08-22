@@ -31,7 +31,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ///
     /// # Example
     ///
-    /// ```no_run
+    #[cfg_attr(not(any(feature = "use-rustls", feature = "use-rustls-ring", feature = "use-openssl")), doc = "```ignore")]
+    #[cfg_attr(any(feature = "use-rustls", feature = "use-rustls-ring", feature = "use-openssl"), doc = "```no_run")]
     /// use bdk_electrum::{electrum_client, BdkElectrumClient};
     ///
     /// let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002")?;
@@ -102,7 +103,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ///
     /// # Example
     ///
-    /// ```no_run
+    #[cfg_attr(not(any(feature = "use-rustls", feature = "use-rustls-ring", feature = "use-openssl")), doc = "```ignore")]
+    #[cfg_attr(any(feature = "use-rustls", feature = "use-rustls-ring", feature = "use-openssl"), doc = "```no_run")]
     /// use bdk_core::{spk_client::FullScanRequest, BlockId, CheckPoint};
     /// use bdk_electrum::BdkElectrumClient;
     /// # use bdk_electrum::electrum_client;
@@ -206,7 +208,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ///
     /// # Example
     ///
-    /// ```no_run
+    #[cfg_attr(not(any(feature = "use-rustls", feature = "use-rustls-ring", feature = "use-openssl")), doc = "```ignore")]
+    #[cfg_attr(any(feature = "use-rustls", feature = "use-rustls-ring", feature = "use-openssl"), doc = "```no_run")]
     /// use bdk_core::bitcoin::ScriptBuf;
     /// use bdk_core::spk_client::SyncRequest;
     /// use bdk_electrum::BdkElectrumClient;
