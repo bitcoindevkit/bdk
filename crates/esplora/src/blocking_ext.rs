@@ -219,7 +219,7 @@ fn chain_update(
     let mut local_cp_hash = local_tip.hash();
     let mut conflicts = vec![];
 
-    for local_cp in local_tip.iter() {
+    for local_cp in local_tip.iter().filter_map(|entry| entry.checkpoint()) {
         let remote_hash = match fetch_block(client, latest_blocks, local_cp.height())? {
             Some(hash) => hash,
             None => continue,

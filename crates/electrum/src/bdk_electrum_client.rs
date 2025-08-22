@@ -4,7 +4,7 @@ use bdk_core::{
     spk_client::{
         FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
     },
-    BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
+    BlockId, CheckPoint, CheckPointEntry, ConfirmationBlockTime, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::convert::TryInto;
@@ -631,10 +631,10 @@ fn fetch_tip_and_latest_blocks(
     };
 
     // Find the "point of agreement" (if any).
-    let agreement_cp = {
-        let mut agreement_cp = Option::<CheckPoint<BlockHash>>::None;
-        for cp in prev_tip.iter() {
-            let cp_block = cp.block_id();
+    let agreement_cp_entry = {
+        let mut agreement_cp = Option::<CheckPointEntry<BlockHash>>::None;
+        for cp_entry in prev_tip.iter() {
+            let cp_block = cp_entry.block_id();
             let hash = match new_blocks.get(&cp_block.height) {
                 Some(&hash) => hash,
                 None => {
@@ -648,7 +648,7 @@ fn fetch_tip_and_latest_blocks(
                 }
             };
             if hash == cp_block.hash {
-                agreement_cp = Some(cp);
+                agreement_cp = Some(cp_entry);
                 break;
             }
         }
@@ -659,13 +659,18 @@ fn fetch_tip_and_latest_blocks(
     let extension = new_blocks
         .iter()
         .filter({
-            let agreement_height = agreement_cp.height();
+            let agreement_height = agreement_cp_entry.height();
             move |(height, _)| **height > agreement_height
         })
         .map(|(&height, &hash)| (height, hash));
-    let new_tip = agreement_cp
-        .extend(extension)
-        .expect("extension heights already checked to be greater than agreement height");
+    let new_tip = match agreement_cp_entry.floor_checkpoint() {
+        Some(agreement_cp) => agreement_cp
+            .extend(extension)
+            .expect("extension heights already checked to be greater than agreement height"),
+        None => CheckPoint::from_blocks(extension)
+            // TODO: Is this true? Can this happen?
+            .expect("must not happen"),
+    };
 
     Ok((new_tip, new_blocks))
 }

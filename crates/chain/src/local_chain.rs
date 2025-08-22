@@ -6,8 +6,8 @@ use core::ops::RangeBounds;
 
 use crate::collections::BTreeMap;
 use crate::{BlockId, ChainOracle, Merge};
-use bdk_core::ToBlockHash;
 pub use bdk_core::{CheckPoint, CheckPointIter};
+use bdk_core::{CheckPointEntry, ToBlockHash};
 use bitcoin::block::Header;
 use bitcoin::BlockHash;
 
@@ -25,7 +25,7 @@ where
         // point of agreement
         let mut base: Option<CheckPoint<D>> = None;
 
-        for cp in init_cp.iter() {
+        for cp in init_cp.iter().filter_map(|item| item.checkpoint()) {
             if cp.height() >= start_height {
                 extension.insert(cp.height(), cp.data());
             } else {
@@ -63,13 +63,13 @@ pub struct LocalChain<D = BlockHash> {
     tip: CheckPoint<D>,
 }
 
-impl<D> PartialEq for LocalChain<D> {
+impl<D: ToBlockHash> PartialEq for LocalChain<D> {
     fn eq(&self, other: &Self) -> bool {
         self.tip == other.tip
     }
 }
 
-impl<D> ChainOracle for LocalChain<D> {
+impl<D: ToBlockHash> ChainOracle for LocalChain<D> {
     type Error = Infallible;
 
     fn is_block_in_chain(
@@ -77,16 +77,28 @@ impl<D> ChainOracle for LocalChain<D> {
         block: BlockId,
         chain_tip: BlockId,
     ) -> Result<Option<bool>, Self::Error> {
-        let chain_tip_cp = match self.tip.get(chain_tip.height) {
-            // we can only determine whether `block` is in chain of `chain_tip` if `chain_tip` can
-            // be identified in chain
-            Some(cp) if cp.hash() == chain_tip.hash => cp,
-            _ => return Ok(None),
-        };
-        match chain_tip_cp.get(block.height) {
-            Some(cp) => Ok(Some(cp.hash() == block.hash)),
-            None => Ok(None),
-        }
+        Ok(|| -> Option<bool> {
+            let mut cp_iter = self.tip.iter();
+            let mut cp_item = cp_iter.next()?;
+            loop {
+                if cp_item.height() < chain_tip.height {
+                    return None;
+                }
+                if cp_item.block_id() == chain_tip {
+                    break;
+                }
+                cp_item = cp_iter.next()?;
+            }
+            loop {
+                if cp_item.height() < block.height {
+                    return None;
+                }
+                if cp_item.height() == block.height {
+                    return Some(cp_item.hash() == block.hash);
+                }
+                cp_item = cp_iter.next()?;
+            }
+        }())
     }
 
     fn get_chain_tip(&self) -> Result<BlockId, Self::Error> {
@@ -195,7 +207,9 @@ impl<D> LocalChain<D> {
     pub fn tip(&self) -> CheckPoint<D> {
         self.tip.clone()
     }
+}
 
+impl<D: ToBlockHash> LocalChain<D> {
     /// Get the genesis hash.
     pub fn genesis_hash(&self) -> BlockHash {
         self.tip.get(0).expect("genesis must exist").block_id().hash
@@ -211,8 +225,8 @@ impl<D> LocalChain<D> {
     /// This is a shorthand for calling [`CheckPoint::get`] on the [`tip`].
     ///
     /// [`tip`]: LocalChain::tip
-    pub fn get(&self, height: u32) -> Option<CheckPoint<D>> {
-        self.tip.get(height)
+    pub fn get(&self, height: u32) -> Option<CheckPointEntry<D>> {
+        self.tip.entry(height)
     }
 
     /// Iterate checkpoints over a height range.
@@ -223,7 +237,7 @@ impl<D> LocalChain<D> {
     /// This is a shorthand for calling [`CheckPoint::range`] on the [`tip`].
     ///
     /// [`tip`]: LocalChain::tip
-    pub fn range<R>(&self, range: R) -> impl Iterator<Item = CheckPoint<D>>
+    pub fn range<R>(&self, range: R) -> impl Iterator<Item = CheckPointEntry<D>>
     where
         R: RangeBounds<u32>,
     {
@@ -325,6 +339,7 @@ where
             blocks: self
                 .tip
                 .iter()
+                .filter_map(|entry| entry.checkpoint())
                 .map(|cp| (cp.height(), Some(cp.data())))
                 .collect(),
         }
@@ -383,14 +398,20 @@ where
     ) -> Result<ChangeSet<D>, MissingGenesisError> {
         let mut remove_from = Option::<CheckPoint<D>>::None;
         let mut changeset = ChangeSet::default();
-        for cp in self.tip().iter() {
-            let cp_id = cp.block_id();
+        for cp_entry in self.tip().iter() {
+            let cp_id = cp_entry.block_id();
             if cp_id.height < block_id.height {
                 break;
             }
             changeset.blocks.insert(cp_id.height, None);
             if cp_id == block_id {
-                remove_from = Some(cp);
+                // TODO: This is wrong. What am I doing?
+                remove_from = match cp_entry.floor_checkpoint() {
+                    Some(floor_cp) if floor_cp.height() < cp_entry.height() => Some(floor_cp),
+                    Some(floor_cp) => floor_cp.prev(),
+                    None => None,
+                };
+                break;
             }
         }
         self.tip = match remove_from.map(|cp| cp.prev()) {
@@ -604,8 +625,8 @@ where
     let mut curr_orig = None;
     let mut curr_update = None;
 
-    let mut prev_orig: Option<CheckPoint<D>> = None;
-    let mut prev_update: Option<CheckPoint<D>> = None;
+    let mut prev_orig: Option<CheckPointEntry<D>> = None;
+    let mut prev_update: Option<CheckPointEntry<D>> = None;
 
     let mut point_of_agreement_found = false;
 
@@ -634,7 +655,9 @@ where
         match (curr_orig.as_ref(), curr_update.as_ref()) {
             // Update block that doesn't exist in the original chain
             (o, Some(u)) if Some(u.height()) > o.map(|o| o.height()) => {
-                changeset.blocks.insert(u.height(), Some(u.data()));
+                if let Some(data) = u.data() {
+                    changeset.blocks.insert(u.height(), Some(data));
+                }
                 prev_update = curr_update.take();
             }
             // Original block that isn't in the update
@@ -671,7 +694,12 @@ where
                     prev_orig_was_invalidated = false;
                     // OPTIMIZATION 2 -- if we have the same underlying pointer at this point, we
                     // can guarantee that no older blocks are introduced.
-                    if o.eq_ptr(u) {
+                    // TODO: Is this correct?
+                    let is_eq_ptr = match (o.floor_checkpoint(), u.floor_checkpoint()) {
+                        (Some(o_cp), Some(u_cp)) => o_cp.eq_ptr(&u_cp),
+                        _ => false,
+                    };
+                    if is_eq_ptr {
                         if is_update_height_superset_of_original {
                             return Ok((update_tip, changeset));
                         } else {
@@ -685,7 +713,9 @@ where
                 } else {
                     // We have an invalidation height so we set the height to the updated hash and
                     // also purge all the original chain block hashes above this block.
-                    changeset.blocks.insert(u.height(), Some(u.data()));
+                    if let Some(u_data) = u.data() {
+                        changeset.blocks.insert(u.height(), Some(u_data));
+                    }
                     for invalidated_height in potentially_invalidated_heights.drain(..) {
                         changeset.blocks.insert(invalidated_height, None);
                     }
