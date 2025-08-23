@@ -125,7 +125,12 @@ fn main() -> anyhow::Result<()> {
     };
 
     let client = BdkElectrumClient::new(electrum_cmd.electrum_args().client(network)?);
-
+    {
+        // Lock graph mutex - released automatically at scope end
+        // Cache all anchors while holding the lock
+        let graph = graph.lock().unwrap();
+        client.populate_anchor_cache(graph.graph().all_anchors().clone());
+    }
     // Tell the electrum client about the txs we've already got locally so it doesn't re-download
     // them
     client.populate_tx_cache(
