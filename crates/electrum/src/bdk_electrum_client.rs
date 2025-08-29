@@ -7,6 +7,7 @@ use bdk_core::{
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
+use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
@@ -37,8 +38,24 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
     }
 
-    /// Inserts transactions into the transaction cache so that the client will not fetch these
-    /// transactions.
+    /// Insert anchors into the anchor cache so that the client will not re-fetch them.
+    ///
+    /// Typically used to pre-populate the cache from an existing `TxGraph`.
+    pub fn populate_anchor_cache(
+        &self,
+        tx_anchors: impl IntoIterator<Item = (Txid, impl IntoIterator<Item = ConfirmationBlockTime>)>,
+    ) {
+        let mut cache = self.anchor_cache.lock().unwrap();
+        for (txid, anchors) in tx_anchors {
+            for anchor in anchors {
+                cache.insert((txid, anchor.block_id.hash), anchor);
+            }
+        }
+    }
+
+    /// Insert transactions into the transaction cache so that the client will not re-fetch them.
+    ///
+    /// Typically used to pre-populate the cache from an existing `TxGraph`.
     pub fn populate_tx_cache(&self, txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>) {
         let mut tx_cache = self.tx_cache.lock().unwrap();
         for tx in txs {
