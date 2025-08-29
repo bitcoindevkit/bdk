@@ -29,6 +29,15 @@ pub struct BdkElectrumClient<E> {
 
 impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Creates a new bdk client from a [`electrum_client::ElectrumApi`]
+    ///
+    /// # Example
+    /// ```ignore
+    /// use bdk_electrum::{electrum_client, BdkElectrumClient};
+    ///
+    /// let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002")?;
+    /// let bdk_client = BdkElectrumClient::new(client);
+    /// # Ok::<_, electrum_client::Error>(())
+    /// ```
     pub fn new(client: E) -> Self {
         Self {
             inner: client,
@@ -106,6 +115,26 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ///   [`Wallet.calculate_fee`] and [`Wallet.calculate_fee_rate`] will return a
     ///   [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not present in the
     ///   transaction graph.
+    ///
+    /// # Example
+    /// ```ignore
+    /// use bdk_core::{spk_client::FullScanRequest, CheckPoint};
+    /// use bdk_electrum::BdkElectrumClient;
+    /// # use bdk_electrum::electrum_client;
+    /// # use electrum_client::bitcoin::{constants, Network};
+    ///
+    /// # let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002")?;
+    /// # let bdk_client = BdkElectrumClient::new(client);
+    /// let request = FullScanRequest::<&str>::builder()
+    ///     .chain_tip(CheckPoint::new(
+    ///         0,
+    ///         constants::genesis_block(Network::Bitcoin).block_hash(),
+    ///     ))
+    ///     .build();
+    ///
+    /// let response = bdk_client.full_scan(request, 10, 50, false)?;
+    /// # Ok::<_, electrum_client::Error>(())
+    /// ```
     ///
     /// [`bdk_chain`]: ../bdk_chain/index.html
     /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
@@ -189,6 +218,23 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ///
     /// If the scripts to sync are unknown, such as when restoring or importing a keychain that
     /// may include scripts that have been used, use [`full_scan`] with the keychain.
+    ///
+    /// # Example
+    /// ```ignore
+    /// use bdk_core::bitcoin::ScriptBuf;
+    /// use bdk_core::spk_client::SyncRequest;
+    /// use bdk_electrum::BdkElectrumClient;
+    /// # use bdk_electrum::electrum_client;
+    ///
+    /// # let client = electrum_client::Client::new("ssl://electrum.blockstream.info:50002")?;
+    /// # let bdk_client = BdkElectrumClient::new(client);
+    /// let request = SyncRequest::builder()
+    ///     .spks([ScriptBuf::new_op_return(&[0x00; 20])])
+    ///     .build();
+    ///
+    /// let response = bdk_client.sync(request, 50, false)?;
+    /// # Ok::<_, electrum_client::Error>(())
+    /// ```
     ///
     /// [`full_scan`]: Self::full_scan
     /// [`bdk_chain`]: ../bdk_chain/index.html

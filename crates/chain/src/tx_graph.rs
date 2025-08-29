@@ -645,6 +645,24 @@ impl<A: Anchor> TxGraph<A> {
     /// * A smaller witness has precedence over a larger witness.
     /// * If the witness sizes are the same, we prioritize the two witnesses with lexicographical
     ///   order.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bdk_chain::{tx_graph::TxGraph, BlockId};
+    /// use bitcoin::Transaction;
+    ///
+    /// let mut graph = TxGraph::<BlockId>::default();
+    /// let tx = Transaction {
+    ///     version: bitcoin::transaction::Version::ONE,
+    ///     lock_time: bitcoin::locktime::absolute::LockTime::ZERO,
+    ///     input: vec![],
+    ///     output: vec![],
+    /// };
+    ///
+    /// let changeset = graph.insert_tx(tx.clone());
+    /// assert_eq!(changeset.txs.len(), 1);
+    /// ```
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A> {
         // This returns `Some` only if the merged tx is different to the `original_tx`.
         fn _merge_tx_witnesses(
