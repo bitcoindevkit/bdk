@@ -478,6 +478,22 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// (one keychain just becomes the defacto owner of that spk arbitrarily) but this may have
     /// subtle implications up the application stack like one UTXO being missing from one keychain
     /// because it has been assigned to another which produces the same script pubkey.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bdk_chain::keychain_txout::KeychainTxOutIndex;
+    /// use bdk_chain::miniscript::{Descriptor, DescriptorPublicKey};
+    /// # use std::str::FromStr;
+    ///
+    /// let mut index = KeychainTxOutIndex::<&str>::new(10, true);
+    /// let desc = Descriptor::<DescriptorPublicKey>::from_str(
+    ///     "wpkh([d34db33f/84h/0h/0h]xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*)"
+    /// )?;
+    ///
+    /// index.insert_descriptor("external", desc)?;
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
+    /// ```
     pub fn insert_descriptor(
         &mut self,
         keychain: K,
@@ -859,6 +875,22 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///  1. The descriptor has no wildcard and already has one script revealed.
     ///  2. The descriptor has already revealed scripts up to the numeric bound.
     ///  3. There is no descriptor associated with the given keychain.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bdk_chain::keychain_txout::KeychainTxOutIndex;
+    /// use bdk_chain::miniscript::{Descriptor, DescriptorPublicKey};
+    /// # use std::str::FromStr;
+    ///
+    /// let mut index = KeychainTxOutIndex::<&str>::new(10, true);
+    /// let desc = Descriptor::<DescriptorPublicKey>::from_str(
+    ///     "wpkh([d34db33f/84h/0h/0h]xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL/0/*)"
+    /// ).unwrap();
+    /// index.insert_descriptor("external", desc).unwrap();
+    /// let (spk, changeset) = index.reveal_next_spk("external").unwrap();
+    /// assert_eq!(spk.0, 0);
+    /// ```
     pub fn reveal_next_spk(&mut self, keychain: K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
         let mut changeset = ChangeSet::default();
         let indexed_spk = self._reveal_next_spk(&mut changeset, keychain)?;

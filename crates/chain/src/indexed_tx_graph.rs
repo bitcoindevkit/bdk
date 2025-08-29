@@ -83,6 +83,15 @@ where
     ///
     /// The underlying `TxGraph` is initialized with `TxGraph::default()`, and the provided
     /// `index`er is used as‐is (since there are no existing transactions to process).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use bdk_chain::{keychain_txout::KeychainTxOutIndex, BlockId, IndexedTxGraph};
+    ///
+    /// let index = KeychainTxOutIndex::<&str>::new(10, true);
+    /// let graph = IndexedTxGraph::<BlockId, _>::new(index);
+    /// ```
     pub fn new(index: I) -> Self {
         Self {
             index,
@@ -363,6 +372,18 @@ where
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
     /// A transaction that conflicts with a relevant transaction is also considered relevant.
     /// Irrelevant transactions in `block` will be ignored.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bdk_chain::{IndexedTxGraph, keychain_txout::KeychainTxOutIndex, BlockId};
+    /// use bitcoin::Block;
+    ///
+    /// let mut graph = IndexedTxGraph::<BlockId, _>::new(KeychainTxOutIndex::<&str>::new(10, true));
+    /// # let block = Block { header: bitcoin::block::Header::from(bitcoin::constants::genesis_block(bitcoin::Network::Bitcoin).header), txdata: vec![] };
+    ///
+    /// let changeset = graph.apply_block_relevant(&block, 100);
+    /// ```
     pub fn apply_block_relevant(
         &mut self,
         block: &Block,
