@@ -4,7 +4,7 @@ use bdk_core::{
     spk_client::{
         FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
     },
-    BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
+    BlockId, CheckPoint, CheckPointEntry, ConfirmationBlockTime, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::convert::TryInto;
@@ -607,8 +607,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 /// fetched to construct checkpoint updates with the proper [`BlockHash`] in case of re-org.
 fn fetch_tip_and_latest_blocks(
     client: &impl ElectrumApi,
-    prev_tip: CheckPoint,
-) -> Result<(CheckPoint, BTreeMap<u32, BlockHash>), Error> {
+    prev_tip: CheckPoint<BlockHash>,
+) -> Result<(CheckPoint<BlockHash>, BTreeMap<u32, BlockHash>), Error> {
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
     let new_tip_height = height as u32;
 
@@ -631,10 +631,10 @@ fn fetch_tip_and_latest_blocks(
     };
 
     // Find the "point of agreement" (if any).
-    let agreement_cp = {
-        let mut agreement_cp = Option::<CheckPoint>::None;
-        for cp in prev_tip.iter() {
-            let cp_block = cp.block_id();
+    let agreement_cp_entry = {
+        let mut agreement_cp = Option::<CheckPointEntry<BlockHash>>::None;
+        for cp_entry in prev_tip.iter() {
+            let cp_block = cp_entry.block_id();
             let hash = match new_blocks.get(&cp_block.height) {
                 Some(&hash) => hash,
                 None => {
@@ -648,7 +648,7 @@ fn fetch_tip_and_latest_blocks(
                 }
             };
             if hash == cp_block.hash {
-                agreement_cp = Some(cp);
+                agreement_cp = Some(cp_entry);
                 break;
             }
         }
@@ -659,13 +659,18 @@ fn fetch_tip_and_latest_blocks(
     let extension = new_blocks
         .iter()
         .filter({
-            let agreement_height = agreement_cp.height();
+            let agreement_height = agreement_cp_entry.height();
             move |(height, _)| **height > agreement_height
         })
-        .map(|(&height, &hash)| BlockId { height, hash });
-    let new_tip = agreement_cp
-        .extend(extension)
-        .expect("extension heights already checked to be greater than agreement height");
+        .map(|(&height, &hash)| (height, hash));
+    let new_tip = match agreement_cp_entry.floor_checkpoint() {
+        Some(agreement_cp) => agreement_cp
+            .extend(extension)
+            .expect("extension heights already checked to be greater than agreement height"),
+        None => CheckPoint::from_blocks(extension)
+            // TODO: Is this true? Can this happen?
+            .expect("must not happen"),
+    };
 
     Ok((new_tip, new_blocks))
 }
@@ -673,10 +678,10 @@ fn fetch_tip_and_latest_blocks(
 // Add a corresponding checkpoint per anchor height if it does not yet exist. Checkpoints should not
 // surpass `latest_blocks`.
 fn chain_update(
-    mut tip: CheckPoint,
+    mut tip: CheckPoint<BlockHash>,
     latest_blocks: &BTreeMap<u32, BlockHash>,
     anchors: impl Iterator<Item = (ConfirmationBlockTime, Txid)>,
-) -> Result<CheckPoint, Error> {
+) -> Result<CheckPoint<BlockHash>, Error> {
     for (anchor, _txid) in anchors {
         let height = anchor.block_id.height;
 
@@ -687,7 +692,7 @@ fn chain_update(
                 Some(&hash) => hash,
                 None => anchor.block_id.hash,
             };
-            tip = tip.insert(BlockId { hash, height });
+            tip = tip.insert(height, hash);
         }
     }
     Ok(tip)
@@ -699,7 +704,7 @@ mod test {
     use crate::{bdk_electrum_client::TxUpdate, electrum_client::ElectrumApi, BdkElectrumClient};
     use bdk_chain::bitcoin::Amount;
     use bdk_chain::bitcoin::{constants, Network, OutPoint, ScriptBuf, Transaction, TxIn};
-    use bdk_chain::{BlockId, CheckPoint};
+    use bdk_chain::CheckPoint;
     use bdk_core::{collections::BTreeMap, spk_client::SyncRequest};
     use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, utils::new_tx, TestEnv};
     use core::time::Duration;
@@ -748,10 +753,7 @@ mod test {
 
         let bogus_spks: Vec<ScriptBuf> = Vec::new();
         let bogus_genesis = constants::genesis_block(Network::Testnet).block_hash();
-        let bogus_cp = CheckPoint::new(BlockId {
-            height: 0,
-            hash: bogus_genesis,
-        });
+        let bogus_cp = CheckPoint::new(0, bogus_genesis);
 
         let req = SyncRequest::builder()
             .chain_tip(bogus_cp)
