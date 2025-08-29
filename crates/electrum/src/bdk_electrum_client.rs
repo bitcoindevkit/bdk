@@ -518,17 +518,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 if let Some(anchor) = anchor_cache.get(&(txid, hash)) {
                     results.push((txid, *anchor));
                 } else {
-                    to_fetch.push((txid, height, hash));
+                    to_fetch.push((txid, height));
                 }
             }
         }
 
         // Fetch merkle proofs.
-        let txids_and_heights = to_fetch.iter().map(|&(txid, height, _)| (txid, height));
-        let proofs = self.inner.batch_transaction_get_merkle(txids_and_heights)?;
+        let proofs = self.inner.batch_transaction_get_merkle(to_fetch.iter())?;
 
         // Validate each proof, retrying once for each stale header.
-        for ((txid, height, hash), proof) in to_fetch.into_iter().zip(proofs.into_iter()) {
+        for ((txid, height), proof) in to_fetch.into_iter().zip(proofs.into_iter()) {
             let mut header = {
                 let cache = self.block_header_cache.lock().unwrap();
                 cache
@@ -553,6 +552,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
             // Build and cache the anchor if merkle proof is valid.
             if valid {
+                let hash = header.block_hash();
                 let anchor = ConfirmationBlockTime {
                     confirmation_time: header.time as u64,
                     block_id: BlockId {
@@ -696,11 +696,13 @@ fn chain_update(
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use crate::{bdk_electrum_client::TxUpdate, BdkElectrumClient};
+    use crate::{bdk_electrum_client::TxUpdate, electrum_client::ElectrumApi, BdkElectrumClient};
+    use bdk_chain::bitcoin::Amount;
     use bdk_chain::bitcoin::{constants, Network, OutPoint, ScriptBuf, Transaction, TxIn};
     use bdk_chain::{BlockId, CheckPoint};
     use bdk_core::{collections::BTreeMap, spk_client::SyncRequest};
-    use bdk_testenv::{anyhow, utils::new_tx, TestEnv};
+    use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, utils::new_tx, TestEnv};
+    use core::time::Duration;
     use electrum_client::Error as ElectrumError;
     use std::sync::Arc;
 
@@ -761,6 +763,68 @@ mod test {
             matches!(err, ElectrumError::Message(m) if m.contains("cannot find agreement block with server")),
             "expected missing agreement block error"
         );
+
+        Ok(())
+    }
+
+    /// This test checks that when a transaction is reorged into a different block
+    /// at the same height, `batch_fetch_anchors()` updates its anchor correctly:
+    ///
+    /// 1. A transaction is confirmed in a block, and that block header is cached.
+    /// 2. A reorg happens, replacing that block with a new one at the same height.
+    /// 3. When we call `batch_fetch_anchors()`, it should fetch the new block header and recreate
+    ///    the transaction’s anchor using the new block hash.
+    ///
+    /// Reorgs should cause the anchor to point to the new block instead of the stale one.
+    #[cfg(feature = "default")]
+    #[test]
+    fn test_batch_fetch_anchors_reorg_uses_new_hash() -> anyhow::Result<()> {
+        let env = TestEnv::new()?;
+        let client = electrum_client::Client::new(env.electrsd.electrum_url.as_str()).unwrap();
+        let electrum_client = BdkElectrumClient::new(client);
+
+        env.mine_blocks(101, None)?;
+
+        let addr = env
+            .rpc_client()
+            .get_new_address(None, None)?
+            .assume_checked();
+        let txid = env.send(&addr, Amount::from_sat(50_000))?;
+
+        // Mine block that confirms transaction.
+        env.mine_blocks(1, None)?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        let height: u32 = env.rpc_client().get_block_count()? as u32;
+
+        // Add the pre-reorg block that the tx is confirmed in to the header cache.
+        let header = electrum_client.inner.block_header(height as usize)?;
+        {
+            electrum_client
+                .block_header_cache
+                .lock()
+                .unwrap()
+                .insert(height, header);
+        }
+
+        // Reorg to create a new header and hash.
+        env.reorg(1)?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+        // Calling `batch_fetch_anchors` should fetch new header, replacing the pre-reorg header.
+        let anchors = electrum_client.batch_fetch_anchors(&[(txid, height as usize)])?;
+        assert_eq!(anchors.len(), 1);
+
+        let new_header = electrum_client.inner.block_header(height as usize)?;
+        let new_hash = new_header.block_hash();
+
+        // Anchor should contain new hash.
+        let (_, anchor) = anchors[0];
+        assert_eq!(anchor.block_id.height, height);
+        assert_eq!(anchor.block_id.hash, new_hash);
+
+        // Anchor cache should also contain new hash.
+        let cache = electrum_client.anchor_cache.lock().unwrap();
+        assert!(cache.get(&(txid, new_hash)).is_some());
 
         Ok(())
     }
