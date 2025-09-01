@@ -56,6 +56,7 @@ jobs:
           cargo update -p minreq --precise "2.13.2"
           cargo update -p rayon --precise "1.10.0"
           cargo update -p rayon-core --precise "1.12.1"
+          cargo update -p time --precise "0.3.41"
       - name: Pin dependencies for MSRV
         if: matrix.rust.version == '1.63.0'
         run: ./ci/pin-msrv.sh
