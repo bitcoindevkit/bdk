@@ -13,7 +13,20 @@ use bitcoincore_rpc;
 use bitcoincore_rpc::{json::GetBlockHeaderResult, RpcApi};
 
 /// Type that returns Bitcoin blocks by matching a list of script pubkeys (SPKs) against a
-/// [`bip158::BlockFilter`].
+/// [`bip158::BlockFilter`](bitcoin::bip158::BlockFilter).
+///
+/// * `FilterIter` talks to bitcoind via JSON-RPC interface, which is handled by the
+///   [`bitcoincore_rpc::Client`].
+/// * Collect the script pubkeys (SPKs) you want to watch. These will usually correspond to wallet
+///   addresses that have been handed out for receiving payments.
+/// * Construct `FilterIter` with the RPC client, SPKs, and [`CheckPoint`]. The checkpoint tip
+///   informs `FilterIter` of the height to begin scanning from. An error is thrown if `FilterIter`
+///   is unable to find a common ancestor with the remote node.
+/// * Scan blocks by calling `next` in a loop and processing the [`Event`]s. If a filter matched any
+///   of the watched scripts, then the relevant [`Block`] is returned. Note that false positives may
+///   occur. `FilterIter` will continue to yield events until it reaches the latest chain tip.
+///   Events contain the updated checkpoint `cp` which may be incorporated into the local chain
+///   state to stay in sync with the tip.
 #[derive(Debug)]
 pub struct FilterIter<'a> {
     /// RPC client
