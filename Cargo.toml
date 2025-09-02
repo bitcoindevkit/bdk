@@ -12,6 +12,7 @@ members = [
     "examples/example_cli",
     "examples/example_electrum",
     "examples/example_esplora",
+    "examples/example_waterfalls",
     "examples/example_bitcoind_rpc_polling",
 ]
 
