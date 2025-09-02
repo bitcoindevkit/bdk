@@ -27,6 +27,7 @@ waterfalls = { version = "0.9", default-features = false, features = [
 bdk_chain = { path = "../chain" }
 bdk_testenv = { path = "../testenv" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+env_logger = "0.11.8"
 
 [features]
 default = ["std", "async-https", "blocking-https"]

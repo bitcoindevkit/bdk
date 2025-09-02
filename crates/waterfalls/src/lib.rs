@@ -5,11 +5,11 @@ use bdk_core::{
     spk_client::{FullScanRequest, FullScanResponse},
     TxUpdate,
 };
-use waterfalls_client::{BlockingClient, Builder};
+use waterfalls_client::{api::WaterfallResponse, BlockingClient, Builder};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
-struct Client {
+pub struct Client {
     client: BlockingClient,
     network: Network,
 }
@@ -22,7 +22,7 @@ impl Client {
         })
     }
 
-    fn full_scan<K: Ord + Clone, R: Into<FullScanRequest<K>>>(
+    pub fn full_scan<K: Ord + Clone, R: Into<FullScanRequest<K>>>(
         &self,
         request: R,
         _stop_gap: usize,
@@ -33,16 +33,18 @@ impl Client {
         let keychain_addresses =
             get_addesses_from_request(&mut request, self.network).map_err(|e| Box::new(e))?;
 
-        let chain_update = None;
+        let chain_update = None; // TODO handle chain update
         let tx_update = TxUpdate::default();
-        let last_active_indices = BTreeMap::new();
+        let mut last_active_indices = BTreeMap::new();
 
-        for (_keychain, addresses) in keychain_addresses {
+        for (keychain, addresses) in keychain_addresses {
             // TODO: we can do a single call for multiple keychains
-            let _result = self
+            let result = self
                 .client
                 .waterfalls_addresses(&addresses)
                 .map_err(|e| Box::new(e))?;
+            let index = get_last_active_index(&result);
+            last_active_indices.insert(keychain, index);
         }
 
         Ok(FullScanResponse {
@@ -70,6 +72,20 @@ fn get_addesses_from_request<K: Ord + Clone>(
     Ok(result)
 }
 
+/// Find the index of the last non-empty element in the addresses array from waterfalls response
+fn get_last_active_index(response: &WaterfallResponse) -> u32 {
+    if let Some(addresses) = response.txs_seen.get("addresses") {
+        // Find the last index that has non-empty transactions
+        for (index, txs) in addresses.iter().enumerate().rev() {
+            if !txs.is_empty() {
+                return index as u32;
+            }
+        }
+    }
+    // If no addresses with transactions found, return 0
+    0
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
@@ -84,6 +100,7 @@ mod test {
 
     #[test]
     pub fn test_full_scan() -> anyhow::Result<()> {
+        let _ = env_logger::try_init();
         // Initialize a waterfalls TestEnv
         let rt = tokio::runtime::Runtime::new().unwrap();
         let test_env = rt.block_on(async {
@@ -117,14 +134,20 @@ mod test {
             .map(|(i, addr)| (i as u32, addr.script_pubkey()))
             .collect();
 
-        // Then send coins on one of the addresses.
+        // Send coins to one of the addresses from the bitcoin node.
+        // Convert the first address to waterfalls format and send coins to it
+        let waterfalls_address = waterfalls::be::Address::Bitcoin(addresses[3].clone());
+        let _txid = test_env.send_to(&waterfalls_address, 10000);
+        rt.block_on(test_env.node_generate(1));
 
-        let _full_scan_update = {
+        let full_scan_update = {
             let request = FullScanRequest::builder().spks_for_keychain(0, spks.clone());
             client
                 .full_scan(request, 0, 0)
                 .map_err(|e| anyhow::anyhow!("{}", e))?
         };
+
+        assert_eq!(full_scan_update.last_active_indices.get(&0).unwrap(), &3u32);
 
         rt.block_on(test_env.shutdown());
 
