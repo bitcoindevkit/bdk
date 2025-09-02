@@ -3,9 +3,11 @@ use std::collections::{BTreeMap, HashSet};
 use bdk_core::{
     bitcoin::{self, address::FromScriptError, Address, Network},
     spk_client::{FullScanRequest, FullScanResponse},
-    BlockId, ConfirmationBlockTime, TxUpdate,
+    BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
 use waterfalls_client::{api::WaterfallResponse, BlockingClient, Builder, TxStatus};
+
+pub use waterfalls_client;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -14,12 +16,22 @@ pub struct Client {
     network: Network,
 }
 
+// Open points:
+// How to handle unbounded keychains?
+// How to handle evicted txs?
+// How to handle custom gap limit?
+
 impl Client {
     pub fn new(network: Network, base_url: &str) -> Result<Self, Error> {
         Ok(Self {
             client: Builder::new(base_url).build_blocking(),
             network,
         })
+    }
+
+    pub fn broadcast(&self, tx: &bdk_core::bitcoin::Transaction) -> Result<(), Error> {
+        self.client.broadcast(tx).map_err(|e| Box::new(e))?;
+        Ok(())
     }
 
     pub fn full_scan<K: Ord + Clone, R: Into<FullScanRequest<K>>>(
@@ -33,7 +45,7 @@ impl Client {
         let keychain_addresses =
             get_addesses_from_request(&mut request, self.network).map_err(|e| Box::new(e))?;
 
-        let chain_update = None; // TODO handle chain update
+        let mut chain_update = None;
         let mut tx_update = TxUpdate::default();
         let mut last_active_indices = BTreeMap::new();
 
@@ -44,8 +56,29 @@ impl Client {
                 .client
                 .waterfalls_addresses(&addresses)
                 .map_err(|e| Box::new(e))?;
+            log::info!("result: {:?}", result);
             let index = get_last_active_index(&result);
+            log::info!("last_active_index: {:?}", index);
             last_active_indices.insert(keychain, index);
+
+            for tx_seens in result.txs_seen.get("addresses").unwrap().iter() {
+                for tx_seen in tx_seens.iter() {
+                    insert_anchor_or_seen_at_from_status(
+                        &mut tx_update,
+                        request.start_time(),
+                        tx_seen.txid,
+                        tx_status(tx_seen),
+                    );
+                }
+            }
+
+            if let Some(block_hash) = &result.tip {
+                chain_update = Some(CheckPoint::new(BlockId {
+                    height: 1000 as u32, // TODO: get height
+                    hash: *block_hash,
+                }));
+            }
+
             waterfalls_responses.push(result);
         }
         let txids: HashSet<_> = waterfalls_responses
@@ -107,8 +140,13 @@ fn get_addesses_from_request<K: Ord + Clone>(
     for (i, keychain) in request.keychains().iter().enumerate() {
         let mut addresses = Vec::new();
         let keychain_spks = request.iter_spks(keychain.clone());
-        for (_, spk) in keychain_spks {
+        for (j, spk) in keychain_spks {
             addresses.push(Address::from_script(&spk, network)?);
+
+            if addresses.len() == 50 {
+                // TODO hanlde unbounded keychains
+                break;
+            }
         }
         log::info!("keychain_{}: addresses: {:?}", i, addresses);
         result.push((keychain.clone(), addresses));
@@ -130,12 +168,47 @@ fn get_last_active_index(response: &WaterfallResponse) -> u32 {
     0
 }
 
+fn tx_status(tx_seen: &waterfalls_client::api::TxSeen) -> TxStatus {
+    TxStatus {
+        block_height: (tx_seen.height != 0).then_some(tx_seen.height),
+        block_hash: tx_seen.block_hash,
+        block_time: tx_seen.block_timestamp.map(|t| t as u64),
+        confirmed: tx_seen.height != 0,
+    }
+}
+
+// copied from esplora/src/lib.rs
+#[allow(dead_code)]
+fn insert_anchor_or_seen_at_from_status(
+    update: &mut TxUpdate<ConfirmationBlockTime>,
+    start_time: u64,
+    txid: bitcoin::Txid,
+    status: TxStatus,
+) {
+    if let TxStatus {
+        block_height: Some(height),
+        block_hash: Some(hash),
+        block_time: Some(time),
+        ..
+    } = status
+    {
+        let anchor = ConfirmationBlockTime {
+            block_id: BlockId { height, hash },
+            confirmation_time: time,
+        };
+        update.anchors.insert((anchor, txid));
+    } else {
+        update.seen_ats.insert((txid, start_time));
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::str::FromStr;
 
+    use bdk_chain::{miniscript::Descriptor, SpkIterator};
     use bdk_core::{
-        bitcoin::{Address, Network},
+        bitcoin::{key::Secp256k1, Address, Network},
         spk_client::FullScanRequest,
     };
     use bdk_testenv::anyhow;
@@ -196,5 +269,30 @@ mod test {
         rt.block_on(test_env.shutdown());
 
         Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires prod server and internet"]
+    pub fn test_signet() {
+        let _ = env_logger::try_init();
+        let base_url = "https://waterfalls.liquidwebwallet.org/bitcoinsignet/api";
+        let client = Client::new(Network::Signet, base_url).unwrap();
+
+        let waterfalls_client = waterfalls_client::Builder::new(base_url).build_blocking();
+        let external = "tr(tpubDDh1wUM29wsoJnHomNYrEwhGainWHUSzErfNrsZKiCjQWWUjFLwhtAqWvGUKc4oESXqcGKdbPDv7fBDsPHPYitNuGNrJ9BKrW1GPxUyiUUb/0/*)";
+        let internal = "tr(tpubDDh1wUM29wsoJnHomNYrEwhGainWHUSzErfNrsZKiCjQWWUjFLwhtAqWvGUKc4oESXqcGKdbPDv7fBDsPHPYitNuGNrJ9BKrW1GPxUyiUUb/1/*)";
+
+        let resp = waterfalls_client.waterfalls(&external).unwrap();
+        log::info!("resp: {:?}", resp);
+        let resp2 = waterfalls_client.waterfalls(&internal).unwrap();
+        log::info!("resp2: {:?}", resp2);
+
+        let secp = Secp256k1::new();
+        let (external_descriptor, _) = Descriptor::parse_descriptor(&secp, external).unwrap();
+        let (internal_descriptor, _) = Descriptor::parse_descriptor(&secp, internal).unwrap();
+        let request = FullScanRequest::builder()
+            .spks_for_keychain(0, SpkIterator::new_with_range(external_descriptor, 0..100))
+            .spks_for_keychain(1, SpkIterator::new_with_range(internal_descriptor, 0..100));
+        let full_scan_update = client.full_scan(request, 0, 4).unwrap();
     }
 }
