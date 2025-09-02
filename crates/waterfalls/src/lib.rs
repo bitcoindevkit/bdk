@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use bdk_core::{
-    bitcoin::{address::FromScriptError, Address, Network},
+    bitcoin::{self, address::FromScriptError, Address, Network},
     spk_client::{FullScanRequest, FullScanResponse},
-    TxUpdate,
+    BlockId, ConfirmationBlockTime, TxUpdate,
 };
-use waterfalls_client::{api::WaterfallResponse, BlockingClient, Builder};
+use waterfalls_client::{api::WaterfallResponse, BlockingClient, Builder, TxStatus};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -26,7 +26,7 @@ impl Client {
         &self,
         request: R,
         _stop_gap: usize,
-        _parallel_requests: usize,
+        parallel_requests: usize,
     ) -> Result<FullScanResponse<K>, Error> {
         let mut request: FullScanRequest<K> = request.into();
 
@@ -34,9 +34,10 @@ impl Client {
             get_addesses_from_request(&mut request, self.network).map_err(|e| Box::new(e))?;
 
         let chain_update = None; // TODO handle chain update
-        let tx_update = TxUpdate::default();
+        let mut tx_update = TxUpdate::default();
         let mut last_active_indices = BTreeMap::new();
 
+        let mut waterfalls_responses = Vec::new();
         for (keychain, addresses) in keychain_addresses {
             // TODO: we can do a single call for multiple keychains
             let result = self
@@ -45,6 +46,49 @@ impl Client {
                 .map_err(|e| Box::new(e))?;
             let index = get_last_active_index(&result);
             last_active_indices.insert(keychain, index);
+            waterfalls_responses.push(result);
+        }
+        let txids: HashSet<_> = waterfalls_responses
+            .iter()
+            .flat_map(|response| {
+                response
+                    .txs_seen
+                    .get("addresses")
+                    .unwrap()
+                    .iter()
+                    .flat_map(|txs| txs.iter().map(|tx| tx.txid))
+            })
+            .collect();
+
+        log::info!("txids: {:?}", txids);
+
+        // Fetch transactions in parallel using parallel_requests parameter
+        let mut txids_iter = txids.into_iter();
+        loop {
+            let handles = txids_iter
+                .by_ref()
+                .take(parallel_requests.max(1)) // Ensure at least 1 request
+                .map(|txid| {
+                    let client = self.client.clone();
+                    std::thread::spawn(move || {
+                        client
+                            .get_tx(&txid)
+                            .map_err(|e| Box::new(e) as Error)
+                            .map(|tx_opt| (txid, tx_opt))
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            if handles.is_empty() {
+                break;
+            }
+
+            for handle in handles {
+                let (_txid, tx_opt) = handle.join().expect("thread must not panic")?;
+                if let Some(tx) = tx_opt {
+                    tx_update.txs.push(std::sync::Arc::new(tx));
+                }
+            }
         }
 
         Ok(FullScanResponse {
@@ -66,7 +110,7 @@ fn get_addesses_from_request<K: Ord + Clone>(
         for (_, spk) in keychain_spks {
             addresses.push(Address::from_script(&spk, network)?);
         }
-        println!("keychain_{}: addresses: {:?}", i, addresses);
+        log::info!("keychain_{}: addresses: {:?}", i, addresses);
         result.push((keychain.clone(), addresses));
     }
     Ok(result)
@@ -143,7 +187,7 @@ mod test {
         let full_scan_update = {
             let request = FullScanRequest::builder().spks_for_keychain(0, spks.clone());
             client
-                .full_scan(request, 0, 0)
+                .full_scan(request, 0, 4)
                 .map_err(|e| anyhow::anyhow!("{}", e))?
         };
 
