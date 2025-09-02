@@ -28,7 +28,7 @@
           };
 
           nativeBuildInputs = with pkgs; [ rustToolchain pkg-config ];
-          buildInputs = with pkgs; [ openssl ];
+          buildInputs = with pkgs; [ openssl bitcoind ];
 
         in
         {
@@ -36,6 +36,9 @@
             inherit buildInputs nativeBuildInputs;
 
             RUST_VERSION = rustVersion;
+
+            # Environment variables for integration tests
+            BITCOIND_EXEC = "${pkgs.bitcoind}/bin/bitcoind";
           };
         }
       );

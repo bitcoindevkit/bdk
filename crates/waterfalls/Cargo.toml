@@ -21,6 +21,9 @@ futures = { version = "0.3.26", optional = true }
 
 [dev-dependencies]
 waterfalls-client = { version = "0.1.0" }
+waterfalls = { version = "0.9", default-features = false, features = [
+    "test_env",
+] }
 bdk_chain = { path = "../chain" }
 bdk_testenv = { path = "../testenv" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
