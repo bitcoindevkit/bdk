@@ -140,7 +140,7 @@ fn get_addesses_from_request<K: Ord + Clone>(
     for (i, keychain) in request.keychains().iter().enumerate() {
         let mut addresses = Vec::new();
         let keychain_spks = request.iter_spks(keychain.clone());
-        for (j, spk) in keychain_spks {
+        for (_, spk) in keychain_spks {
             addresses.push(Address::from_script(&spk, network)?);
 
             if addresses.len() == 50 {

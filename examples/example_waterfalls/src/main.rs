@@ -1,18 +1,13 @@
-use core::f32;
 use std::{
     collections::BTreeSet,
     io::{self, Write},
 };
 
 use bdk_chain::{
-    bitcoin::Network,
-    keychain_txout::FullScanRequestBuilderExt,
-    spk_client::{FullScanRequest, SyncRequest},
-    CanonicalizationParams, Merge,
+    bitcoin::Network, keychain_txout::FullScanRequestBuilderExt, spk_client::FullScanRequest, Merge,
 };
-use bdk_waterfalls::waterfalls_client;
 use example_cli::{
-    anyhow::{self, Context},
+    anyhow::{self},
     clap::{self, Parser, Subcommand},
     ChangeSet, Keychain,
 };
