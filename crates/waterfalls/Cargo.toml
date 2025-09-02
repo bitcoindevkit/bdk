@@ -1,0 +1,39 @@
+[package]
+name = "bdk_waterfalls"
+version = "0.1.0"
+edition = "2021"
+authors = ["Riccardo Casatta <riccardo@casatta.it>"]
+homepage = "https://bitcoindevkit.org"
+repository = "https://github.com/bitcoindevkit/bdk"
+documentation = "https://docs.rs/bdk_waterfalls"
+description = "Fetch data from waterfalls in the form that bdk accepts"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+bdk_core = { path = "../core", version = "0.6.1", default-features = false }
+waterfalls-client = { version = "0.1.0", default-features = false }
+async-trait = { version = "0.1.66", optional = true }
+futures = { version = "0.3.26", optional = true }
+
+[dev-dependencies]
+waterfalls-client = { version = "0.1.0" }
+bdk_chain = { path = "../chain" }
+bdk_testenv = { path = "../testenv" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+
+[features]
+default = ["std", "async-https", "blocking-https"]
+std = ["bdk_core/std"]
+tokio = ["waterfalls-client/tokio"]
+async = ["async-trait", "futures", "waterfalls-client/async"]
+async-https = ["async", "waterfalls-client/async-https"]
+async-https-rustls = ["async", "waterfalls-client/async-https-rustls"]
+async-https-native = ["async", "waterfalls-client/async-https-native"]
+blocking = ["waterfalls-client/blocking"]
+blocking-https = ["blocking", "waterfalls-client/blocking-https"]
+blocking-https-rustls = ["blocking", "waterfalls-client/blocking-https-rustls"]
+blocking-https-native = ["blocking", "waterfalls-client/blocking-https-native"]
