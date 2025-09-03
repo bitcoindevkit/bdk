@@ -42,6 +42,9 @@ impl Client {
     ) -> Result<FullScanResponse<K>, Error> {
         let mut request: FullScanRequest<K> = request.into();
 
+        let chain_tip = request.chain_tip();
+        let mut latest_blocks = BTreeMap::new();
+
         let keychain_addresses =
             get_addesses_from_request(&mut request, self.network).map_err(|e| Box::new(e))?;
 
@@ -50,6 +53,8 @@ impl Client {
         let mut last_active_indices = BTreeMap::new();
 
         let mut waterfalls_responses = Vec::new();
+        let mut tip_meta_from_server = None;
+
         for (keychain, addresses) in keychain_addresses {
             // TODO: we can do a single call for multiple keychains
             let result = self
@@ -69,17 +74,42 @@ impl Client {
                         tx_seen.txid,
                         tx_status(tx_seen),
                     );
+                    if let Some(block_hash) = tx_seen.block_hash {
+                        latest_blocks.insert(tx_seen.height, block_hash);
+                    }
                 }
             }
 
-            if let Some(block_hash) = &result.tip {
-                chain_update = Some(CheckPoint::new(BlockId {
-                    height: 1000 as u32, // TODO: get height
-                    hash: *block_hash,
-                }));
+            // Store the tip_meta from server for later use
+            if let Some(tip_meta) = &result.tip_meta {
+                tip_meta_from_server = Some(tip_meta.clone());
             }
 
             waterfalls_responses.push(result);
+        }
+
+        // Handle chain update after the loop using the stored tip_meta
+        if let Some(tip_meta) = tip_meta_from_server {
+            if let Some(existing_tip) = chain_tip {
+                // Extend the existing chain tip to the new tip height if needed
+                let new_tip_block_id = BlockId {
+                    height: tip_meta.h,
+                    hash: tip_meta.b,
+                };
+
+                // If the new tip is higher than our existing tip, extend the chain
+                if tip_meta.h > existing_tip.height() {
+                    chain_update = Some(existing_tip.extend([new_tip_block_id]).map_err(|e| {
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Chain extension failed: {:?}", e),
+                        )) as Error
+                    })?);
+                } else {
+                    // If new tip is not higher, keep the existing tip
+                    chain_update = Some(existing_tip);
+                }
+            }
         }
         let txids: HashSet<_> = waterfalls_responses
             .iter()
@@ -123,6 +153,15 @@ impl Client {
                 }
             }
         }
+        let chain_update = if let Some(chain_update) = chain_update {
+            Some(chain_update_with_anchors(
+                chain_update,
+                &latest_blocks,
+                tx_update.anchors.iter().cloned(),
+            )?)
+        } else {
+            None
+        };
 
         Ok(FullScanResponse {
             chain_update,
@@ -200,6 +239,30 @@ fn insert_anchor_or_seen_at_from_status(
     } else {
         update.seen_ats.insert((txid, start_time));
     }
+}
+
+// copied from electrum/src/lib.rs
+// Add a corresponding checkpoint per anchor height if it does not yet exist. Checkpoints should not
+// surpass `latest_blocks`.
+fn chain_update_with_anchors(
+    mut tip: CheckPoint,
+    latest_blocks: &BTreeMap<u32, bitcoin::BlockHash>,
+    anchors: impl Iterator<Item = (ConfirmationBlockTime, bitcoin::Txid)>,
+) -> Result<CheckPoint, Error> {
+    for (anchor, _txid) in anchors {
+        let height = anchor.block_id.height;
+
+        // Checkpoint uses the `BlockHash` from `latest_blocks` so that the hash will be consistent
+        // in case of a re-org.
+        if tip.get(height).is_none() && height <= tip.height() {
+            let hash = match latest_blocks.get(&height) {
+                Some(&hash) => hash,
+                None => anchor.block_id.hash,
+            };
+            tip = tip.insert(BlockId { hash, height });
+        }
+    }
+    Ok(tip)
 }
 
 #[cfg(test)]

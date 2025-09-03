@@ -15,14 +15,14 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.6.1", default-features = false }
-waterfalls-client = { version = "0.1.0", default-features = false }
+waterfalls-client = { version = "0.2.0", default-features = false }
 async-trait = { version = "0.1.66", optional = true }
 futures = { version = "0.3.26", optional = true }
 log = "0.4.20"
 
 [dev-dependencies]
-waterfalls-client = { version = "0.1.0" }
-waterfalls = { version = "0.9", default-features = false, features = [
+waterfalls-client = { version = "0.2.0" }
+waterfalls = { version = "0.9.6", default-features = false, features = [
     "test_env",
 ] }
 bdk_chain = { path = "../chain" }
