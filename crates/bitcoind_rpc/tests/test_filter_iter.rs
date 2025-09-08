@@ -112,6 +112,16 @@ fn filter_iter_detects_reorgs() -> anyhow::Result<()> {
     assert_eq!(iter.next().unwrap()?.height(), MINE_TO);
     assert!(iter.next().is_none());
 
+    // Try 6-block-reorg
+    {
+        const REORG_COUNT: usize = 6;
+        let _ = env.reorg(REORG_COUNT)?;
+        for c in (0..REORG_COUNT).rev() {
+            assert_eq!(iter.next().unwrap()?.height(), MINE_TO - (c as u32));
+        }
+        assert!(iter.next().is_none());
+    }
+
     Ok(())
 }
 
