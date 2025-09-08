@@ -1315,6 +1315,69 @@ impl<A: Anchor> TxGraph<A> {
     ///
     /// This is the infallible version of [`try_balance`].
     ///
+    /// ### Minimum confirmations
+    ///
+    /// To filter for transactions with at least `N` confirmations, pass a `chain_tip` that is
+    /// `N - 1` blocks below the actual tip. This ensures that only transactions with at least `N`
+    /// confirmations are counted as confirmed in the returned [`Balance`].
+    ///
+    /// ```
+    /// # use bdk_chain::tx_graph::TxGraph;
+    /// # use bdk_chain::{local_chain::LocalChain, CanonicalizationParams, ConfirmationBlockTime};
+    /// # use bdk_testenv::{hash, utils::new_tx};
+    /// # use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+    ///
+    /// # let spk = ScriptBuf::from_hex("0014c692ecf13534982a9a2834565cbd37add8027140").unwrap();
+    /// # let chain =
+    /// #     LocalChain::from_blocks((0..=15).map(|i| (i as u32, hash!("h"))).collect()).unwrap();
+    /// # let mut graph: TxGraph = TxGraph::default();
+    /// # let coinbase_tx = Transaction {
+    /// #     input: vec![TxIn {
+    /// #         previous_output: OutPoint::null(),
+    /// #         ..Default::default()
+    /// #     }],
+    /// #     output: vec![TxOut {
+    /// #         value: Amount::from_sat(70000),
+    /// #         script_pubkey: spk.clone(),
+    /// #     }],
+    /// #     ..new_tx(0)
+    /// # };
+    /// # let tx = Transaction {
+    /// #     input: vec![TxIn {
+    /// #         previous_output: OutPoint::new(coinbase_tx.compute_txid(), 0),
+    /// #         ..Default::default()
+    /// #     }],
+    /// #     output: vec![TxOut {
+    /// #         value: Amount::from_sat(42_000),
+    /// #         script_pubkey: spk.clone(),
+    /// #     }],
+    /// #     ..new_tx(1)
+    /// # };
+    /// # let txid = tx.compute_txid();
+    /// # let _ = graph.insert_tx(tx.clone());
+    /// # let _ = graph.insert_anchor(
+    /// #     txid,
+    /// #     ConfirmationBlockTime {
+    /// #         block_id: chain.get(10).unwrap().block_id(),
+    /// #         confirmation_time: 123456,
+    /// #     },
+    /// # );
+    ///
+    /// let minimum_confirmations = 6;
+    /// let target_tip = chain
+    ///     .tip()
+    ///     .floor_below(minimum_confirmations - 1)
+    ///     .expect("checkpoint from local chain must have genesis");
+    /// let balance = graph.balance(
+    ///     &chain,
+    ///     target_tip.block_id(),
+    ///     CanonicalizationParams::default(),
+    ///     std::iter::once(((), OutPoint::new(txid, 0))),
+    ///     |_: &(), _| true,
+    /// );
+    /// assert_eq!(balance.confirmed, Amount::from_sat(42_000));
+    /// ```
+    ///
     /// [`try_balance`]: Self::try_balance
     pub fn balance<C: ChainOracle<Error = Infallible>, OI: Clone>(
         &self,

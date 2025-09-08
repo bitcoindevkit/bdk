@@ -192,6 +192,30 @@ impl CheckPoint {
             })
     }
 
+    /// Returns the checkpoint at `height` if one exists, otherwise the nearest checkpoint at a
+    /// lower height.
+    ///
+    /// This is equivalent to taking the "floor" of `height` over this checkpoint chain.
+    ///
+    /// Returns `None` if no checkpoint exists at or below the given height.
+    pub fn floor_at(&self, height: u32) -> Option<Self> {
+        self.range(..=height).next()
+    }
+
+    /// Returns the checkpoint located a number of heights below this one.
+    ///
+    /// This is a convenience wrapper for [`CheckPoint::floor_at`], subtracting `to_subtract` from
+    /// the current height.
+    ///
+    /// - If a checkpoint exists exactly `offset` heights below, it is returned.
+    /// - Otherwise, the nearest checkpoint *below that target height* is returned.
+    ///
+    /// Returns `None` if `to_subtract` is greater than the current height, or if there is no
+    /// checkpoint at or below the target height.
+    pub fn floor_below(&self, offset: u32) -> Option<Self> {
+        self.floor_at(self.height().checked_sub(offset)?)
+    }
+
     /// Inserts `block_id` at its height within the chain.
     ///
     /// The effect of `insert` depends on whether a height already exists. If it doesn't the
