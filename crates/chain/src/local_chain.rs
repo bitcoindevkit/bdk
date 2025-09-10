@@ -26,13 +26,14 @@ where
         let mut base: Option<CheckPoint<D>> = None;
 
         for cp in init_cp.iter() {
-            if cp.height() >= start_height {
-                if let Some(data) = cp.data() {
+            // Base tip should always have data.
+            if let Some(data) = cp.data() {
+                if cp.height() >= start_height {
                     extension.insert(cp.height(), data);
+                } else {
+                    base = Some(cp);
+                    break;
                 }
-            } else {
-                base = Some(cp);
-                break;
             }
         }
 
@@ -47,18 +48,12 @@ where
             };
         }
 
-        let mut new_tip = match base {
+        let new_tip = match base {
             Some(base) => base
                 .extend(extension)
                 .expect("extension is strictly greater than base"),
             None => LocalChain::from_blocks(extension)?.tip(),
         };
-
-        if new_tip.data_ref().is_none() {
-            new_tip = new_tip
-                .find_data(new_tip.height())
-                .expect("genesis checkpoint should have data");
-        }
 
         init_cp = new_tip;
     }
@@ -702,6 +697,11 @@ where
                             })?;
                             return Ok((new_tip, changeset));
                         }
+                    }
+                    // Even if the hashes are the same, the update may contain data which the
+                    // original does not have.
+                    if let (None, Some(u_data)) = (o.data_ref(), u.data()) {
+                        changeset.blocks.insert(u.height(), Some(u_data));
                     }
                 } else {
                     // We have an invalidation height so we set the height to the updated hash and
