@@ -27,7 +27,9 @@ where
 
         for cp in init_cp.iter() {
             if cp.height() >= start_height {
-                extension.insert(cp.height(), cp.data());
+                if let Some(data) = cp.data() {
+                    extension.insert(cp.height(), data);
+                }
             } else {
                 base = Some(cp);
                 break;
@@ -45,12 +47,19 @@ where
             };
         }
 
-        let new_tip = match base {
+        let mut new_tip = match base {
             Some(base) => base
                 .extend(extension)
                 .expect("extension is strictly greater than base"),
             None => LocalChain::from_blocks(extension)?.tip(),
         };
+
+        if new_tip.data_ref().is_none() {
+            new_tip = new_tip
+                .find_data(new_tip.height())
+                .expect("genesis checkpoint should have data");
+        }
+
         init_cp = new_tip;
     }
 
@@ -322,11 +331,7 @@ where
     /// recover the current chain.
     pub fn initial_changeset(&self) -> ChangeSet<D> {
         ChangeSet {
-            blocks: self
-                .tip
-                .iter()
-                .map(|cp| (cp.height(), Some(cp.data())))
-                .collect(),
+            blocks: self.tip.iter().map(|cp| (cp.height(), cp.data())).collect(),
         }
     }
 
@@ -349,6 +354,20 @@ where
                     update_hash: Some(data.to_blockhash()),
                 });
             }
+
+            // If this `CheckPoint` is an empty placeholder, append the `data` to it.
+            if original_cp.data_ref().is_none() {
+                let mut changeset = ChangeSet::<D>::default();
+                changeset.blocks.insert(height, Some(data));
+                self.apply_changeset(&changeset)
+                    .map_err(|_| AlterCheckPointError {
+                        height: 0,
+                        original_hash: self.genesis_hash(),
+                        update_hash: None,
+                    })?;
+                return Ok(changeset);
+            }
+
             return Ok(ChangeSet::default());
         }
 
@@ -634,7 +653,9 @@ where
         match (curr_orig.as_ref(), curr_update.as_ref()) {
             // Update block that doesn't exist in the original chain
             (o, Some(u)) if Some(u.height()) > o.map(|o| o.height()) => {
-                changeset.blocks.insert(u.height(), Some(u.data()));
+                if let Some(data) = u.data() {
+                    changeset.blocks.insert(u.height(), Some(data));
+                }
                 prev_update = curr_update.take();
             }
             // Original block that isn't in the update
@@ -685,7 +706,7 @@ where
                 } else {
                     // We have an invalidation height so we set the height to the updated hash and
                     // also purge all the original chain block hashes above this block.
-                    changeset.blocks.insert(u.height(), Some(u.data()));
+                    changeset.blocks.insert(u.height(), u.data());
                     for invalidated_height in potentially_invalidated_heights.drain(..) {
                         changeset.blocks.insert(invalidated_height, None);
                     }
