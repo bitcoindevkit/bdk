@@ -7,6 +7,27 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [bitcoind_rpc-0.22.0]
+
+### Fixed
+- `FilterIter` now handles reorgs to ensure consistency of the header chain. #2000
+
+### Changed
+- `Event` is now a struct instead of enum #2000
+
+### Added
+- `FilterIter::new` constructor that takes as input a reference to the RPC client, checkpoint, and a list of SPKs. #2000
+- `Error::ReorgDepthExceeded` variant. #2000
+- `Error::TryFromInt` variant. #2000
+
+### Removed
+- `FilterIter::new_with_height` method #2000
+- `FilterIter::new_with_checkpoint` method #2000
+- `EventInner` type #2000
+- `FilterIter::get_tip` method #2000
+- `FilterIter::chain_update` method #2000
+- `Error::NoScripts` variant #2000
+
 ## [bitcoind_rpc-0.21.0]
 
 ### Added
@@ -54,3 +75,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [bitcoind_rpc-0.19.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.19.0
 [bitcoind_rpc-0.20.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.20.0
 [bitcoind_rpc-0.21.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.21.0
+[bitcoind_rpc-0.22.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.22.0

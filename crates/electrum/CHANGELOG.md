@@ -7,6 +7,20 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [electrum-0.23.2]
+
+### Added
+
+- Add a new `populate_anchor_cache` method. #2005
+
+### Changed
+
+- Update the `populate_tx_cache` method documentation. #2005
+
+### Fixed
+
+- Update the `batch_fetch_anchors` to no longer uses a potentially stale hash as the anchor. #2011
+
 ## [electrum-0.23.1]
 
 ### Added
@@ -61,3 +75,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [electrum-0.22.0]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.22.0
 [electrum-0.23.0]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.0
 [electrum-0.23.1]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.1
+[electrum-0.23.2]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.2

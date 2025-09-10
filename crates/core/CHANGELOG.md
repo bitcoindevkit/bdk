@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [core-0.6.2]
+
+### Added
+
+- Added two new convenience methods: `floor_at` and `floor_below` for getting the checkpoint at a floored height or by an offset from the tip. #2007
+
 ## [core-0.6.1]
 
 ### Changed
@@ -50,3 +56,4 @@ This is because requests now have a `start_time`, instead of specifying a `seen_
 [core-0.5.0]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.5.0
 [core-0.6.0]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.0
 [core-0.6.1]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.1
+[core-0.6.2]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.2

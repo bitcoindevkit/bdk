@@ -1,6 +1,6 @@
 [package]
 name = "bdk_electrum"
-version = "0.23.1"
+version = "0.23.2"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
