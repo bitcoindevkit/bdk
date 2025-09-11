@@ -202,9 +202,11 @@ fn main() -> anyhow::Result<()> {
                                 synced_to.block_id(),
                                 CanonicalizationParams::default(),
                             )
-                            .balance(graph.index.outpoints().iter().cloned(), |(k, _), _| {
-                                k == &Keychain::Internal
-                            })
+                            .balance(
+                                graph.index.outpoints().iter().cloned(),
+                                |(k, _), _| k == &Keychain::Internal,
+                                1,
+                            )
                     };
                     println!(
                         "[{:>10}s] synced to {} @ {} | total: {}",
@@ -360,9 +362,11 @@ fn main() -> anyhow::Result<()> {
                                 synced_to.block_id(),
                                 CanonicalizationParams::default(),
                             )
-                            .balance(graph.index.outpoints().iter().cloned(), |(k, _), _| {
-                                k == &Keychain::Internal
-                            })
+                            .balance(
+                                graph.index.outpoints().iter().cloned(),
+                                |(k, _), _| k == &Keychain::Internal,
+                                1,
+                            )
                     };
                     println!(
                         "[{:>10}s] synced to {} @ {} / {} | total: {}",

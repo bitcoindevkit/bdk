@@ -530,9 +530,11 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     chain.get_chain_tip()?,
                     CanonicalizationParams::default(),
                 )?
-                .balance(graph.index.outpoints().iter().cloned(), |(k, _), _| {
-                    k == &Keychain::Internal
-                });
+                .balance(
+                    graph.index.outpoints().iter().cloned(),
+                    |(k, _), _| k == &Keychain::Internal,
+                    1,
+                );
 
             let confirmed_total = balance.confirmed + balance.immature;
             let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;

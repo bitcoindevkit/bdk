@@ -209,10 +209,25 @@ impl<A: Anchor> CanonicalView<A> {
     /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
     /// (`O`) for convenience. If `O` is not necessary, the caller can use `()`, or
     /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
+    ///
+    /// ### Minimum confirmations
+    ///
+    /// `min_confirmations` specifies the minimum number of confirmations required for a transaction
+    /// to be counted as confirmed in the returned [`Balance`]. Transactions with fewer than
+    /// `min_confirmations` will be treated as trusted pending (assuming the `trust_predicate`
+    /// returns `true`).
+    ///
+    /// - `min_confirmations = 0`: Include all confirmed transactions (same as `1`)
+    /// - `min_confirmations = 1`: Standard behavior - require at least 1 confirmation
+    /// - `min_confirmations = 6`: High security - require at least 6 confirmations
+    ///
+    /// Note: `0` and `1` behave identically since confirmed transactions always have ≥1
+    /// confirmation.
     pub fn balance<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
         mut trust_predicate: impl FnMut(&O, ScriptBuf) -> bool,
+        min_confirmations: u32,
     ) -> Balance {
         let mut immature = Amount::ZERO;
         let mut trusted_pending = Amount::ZERO;
@@ -221,8 +236,23 @@ impl<A: Anchor> CanonicalView<A> {
 
         for (spk_i, txout) in self.filter_unspent_outpoints(outpoints) {
             match &txout.chain_position {
-                ChainPosition::Confirmed { .. } => {
-                    if txout.is_confirmed_and_spendable(self.tip.height) {
+                ChainPosition::Confirmed { anchor, .. } => {
+                    let confirmation_height = anchor.confirmation_height_upper_bound();
+                    let confirmations = self
+                        .tip
+                        .height
+                        .saturating_sub(confirmation_height)
+                        .saturating_add(1);
+                    let min_confirmations = min_confirmations.max(1); // 0 and 1 behave identically
+
+                    if confirmations < min_confirmations {
+                        // Not enough confirmations, treat as trusted/untrusted pending
+                        if trust_predicate(&spk_i, txout.txout.script_pubkey) {
+                            trusted_pending += txout.txout.value;
+                        } else {
+                            untrusted_pending += txout.txout.value;
+                        }
+                    } else if txout.is_confirmed_and_spendable(self.tip.height) {
                         confirmed += txout.txout.value;
                     } else if !txout.is_mature(self.tip.height) {
                         immature += txout.txout.value;

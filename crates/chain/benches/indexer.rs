@@ -86,7 +86,7 @@ fn do_bench(indexed_tx_graph: &KeychainTxGraph, chain: &LocalChain) {
     let op = graph.index.outpoints().clone();
     let bal = graph
         .canonical_view(chain, chain_tip, CanonicalizationParams::default())
-        .balance(op, |_, _| false);
+        .balance(op, |_, _| false, 1);
     assert_eq!(bal.total(), AMOUNT * TX_CT as u64);
 }
 
