@@ -42,7 +42,7 @@ fn get_balance(
     let outpoints = recv_graph.index.outpoints().clone();
     let balance = recv_graph
         .canonical_view(recv_chain, chain_tip, CanonicalizationParams::default())
-        .balance(outpoints, |_, _| true);
+        .balance(outpoints, |_, _| true, 1);
     Ok(balance)
 }
 

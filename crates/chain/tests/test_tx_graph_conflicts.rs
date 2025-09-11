@@ -1033,6 +1033,7 @@ fn test_tx_conflict_handling() {
             .balance(
                 env.indexer.outpoints().iter().cloned(),
                 |_, spk: ScriptBuf| env.indexer.index_of_spk(spk).is_some(),
+                1,
             );
         assert_eq!(
             balance, scenario.exp_balance,
