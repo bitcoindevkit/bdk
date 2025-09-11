@@ -124,7 +124,7 @@ use crate::BlockId;
 use crate::CanonicalIter;
 use crate::CanonicalView;
 use crate::CanonicalizationParams;
-use crate::{Anchor, ChainOracle, ChainPosition, Merge};
+use crate::{Anchor, ChainOracle, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -242,27 +242,6 @@ enum TxNodeInternal {
 impl Default for TxNodeInternal {
     fn default() -> Self {
         Self::Partial(BTreeMap::new())
-    }
-}
-
-/// A transaction that is deemed to be part of the canonical history.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CanonicalTx<'a, T, A> {
-    /// How the transaction is observed in the canonical chain (confirmed or unconfirmed).
-    pub chain_position: ChainPosition<A>,
-    /// The transaction node (as part of the graph).
-    pub tx_node: TxNode<'a, T, A>,
-}
-
-impl<'a, T, A> From<CanonicalTx<'a, T, A>> for Txid {
-    fn from(tx: CanonicalTx<'a, T, A>) -> Self {
-        tx.tx_node.txid
-    }
-}
-
-impl<'a, A> From<CanonicalTx<'a, Arc<Transaction>, A>> for Arc<Transaction> {
-    fn from(tx: CanonicalTx<'a, Arc<Transaction>, A>) -> Self {
-        tx.tx_node.tx
     }
 }
 
