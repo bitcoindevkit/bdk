@@ -69,13 +69,8 @@ fn main() -> anyhow::Result<()> {
     println!("\ntook: {}s", start.elapsed().as_secs());
     println!("Local tip: {}", chain.tip().height());
     let unspent: Vec<_> = graph
-        .graph()
-        .filter_chain_unspents(
-            &chain,
-            chain.tip().block_id(),
-            Default::default(),
-            graph.index.outpoints().clone(),
-        )
+        .canonical_view(&chain, chain.tip().block_id(), Default::default())
+        .filter_unspent_outpoints(graph.index.outpoints().clone())
         .collect();
     if !unspent.is_empty() {
         println!("\nUnspent");
@@ -85,16 +80,16 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    for canon_tx in graph.graph().list_canonical_txs(
-        &chain,
-        chain.tip().block_id(),
-        bdk_chain::CanonicalizationParams::default(),
-    ) {
-        if !canon_tx.chain_position.is_confirmed() {
-            eprintln!(
-                "ERROR: canonical tx should be confirmed {}",
-                canon_tx.tx_node.txid
-            );
+    for canon_tx in graph
+        .canonical_view(
+            &chain,
+            chain.tip().block_id(),
+            bdk_chain::CanonicalizationParams::default(),
+        )
+        .txs()
+    {
+        if !canon_tx.pos.is_confirmed() {
+            eprintln!("ERROR: canonical tx should be confirmed {}", canon_tx.txid);
         }
     }
 

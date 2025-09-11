@@ -432,13 +432,8 @@ pub fn planned_utxos<O: ChainOracle>(
     let chain_tip = chain.get_chain_tip()?;
     let outpoints = graph.index.outpoints();
     graph
-        .graph()
-        .try_filter_chain_unspents(
-            chain,
-            chain_tip,
-            CanonicalizationParams::default(),
-            outpoints.iter().cloned(),
-        )?
+        .try_canonical_view(chain, chain_tip, CanonicalizationParams::default())?
+        .filter_unspent_outpoints(outpoints.iter().cloned())
         .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
             let desc = graph
                 .index
@@ -529,13 +524,15 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 }
             }
 
-            let balance = graph.graph().try_balance(
-                chain,
-                chain.get_chain_tip()?,
-                CanonicalizationParams::default(),
-                graph.index.outpoints().iter().cloned(),
-                |(k, _), _| k == &Keychain::Internal,
-            )?;
+            let balance = graph
+                .try_canonical_view(
+                    chain,
+                    chain.get_chain_tip()?,
+                    CanonicalizationParams::default(),
+                )?
+                .balance(graph.index.outpoints().iter().cloned(), |(k, _), _| {
+                    k == &Keychain::Internal
+                });
 
             let confirmed_total = balance.confirmed + balance.immature;
             let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;
@@ -573,13 +570,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     unconfirmed,
                 } => {
                     let txouts = graph
-                        .graph()
-                        .try_filter_chain_txouts(
-                            chain,
-                            chain_tip,
-                            CanonicalizationParams::default(),
-                            outpoints.iter().cloned(),
-                        )?
+                        .try_canonical_view(chain, chain_tip, CanonicalizationParams::default())?
+                        .filter_outpoints(outpoints.iter().cloned())
                         .filter(|(_, full_txo)| match (spent, unspent) {
                             (true, false) => full_txo.spent_by.is_some(),
                             (false, true) => full_txo.spent_by.is_none(),

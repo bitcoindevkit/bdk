@@ -972,8 +972,9 @@ fn test_tx_conflict_handling() {
 
         let txs = env
             .tx_graph
-            .list_canonical_txs(&local_chain, chain_tip, env.canonicalization_params.clone())
-            .map(|tx| tx.tx_node.txid)
+            .canonical_view(&local_chain, chain_tip, env.canonicalization_params.clone())
+            .txs()
+            .map(|tx| tx.txid)
             .collect::<BTreeSet<_>>();
         let exp_txs = scenario
             .exp_chain_txs
@@ -988,12 +989,8 @@ fn test_tx_conflict_handling() {
 
         let txouts = env
             .tx_graph
-            .filter_chain_txouts(
-                &local_chain,
-                chain_tip,
-                env.canonicalization_params.clone(),
-                env.indexer.outpoints().iter().cloned(),
-            )
+            .canonical_view(&local_chain, chain_tip, env.canonicalization_params.clone())
+            .filter_outpoints(env.indexer.outpoints().iter().cloned())
             .map(|(_, full_txout)| full_txout.outpoint)
             .collect::<BTreeSet<_>>();
         let exp_txouts = scenario
@@ -1012,12 +1009,8 @@ fn test_tx_conflict_handling() {
 
         let utxos = env
             .tx_graph
-            .filter_chain_unspents(
-                &local_chain,
-                chain_tip,
-                env.canonicalization_params.clone(),
-                env.indexer.outpoints().iter().cloned(),
-            )
+            .canonical_view(&local_chain, chain_tip, env.canonicalization_params.clone())
+            .filter_unspent_outpoints(env.indexer.outpoints().iter().cloned())
             .map(|(_, full_txout)| full_txout.outpoint)
             .collect::<BTreeSet<_>>();
         let exp_utxos = scenario
@@ -1034,13 +1027,13 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
 
-        let balance = env.tx_graph.balance(
-            &local_chain,
-            chain_tip,
-            env.canonicalization_params.clone(),
-            env.indexer.outpoints().iter().cloned(),
-            |_, spk: ScriptBuf| env.indexer.index_of_spk(spk).is_some(),
-        );
+        let balance = env
+            .tx_graph
+            .canonical_view(&local_chain, chain_tip, env.canonicalization_params.clone())
+            .balance(
+                env.indexer.outpoints().iter().cloned(),
+                |_, spk: ScriptBuf| env.indexer.index_of_spk(spk).is_some(),
+            );
         assert_eq!(
             balance, scenario.exp_balance,
             "\n[{}] 'balance' failed",

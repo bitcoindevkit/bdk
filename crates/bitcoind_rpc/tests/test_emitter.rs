@@ -310,13 +310,9 @@ fn get_balance(
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
-    let balance = recv_graph.graph().balance(
-        recv_chain,
-        chain_tip,
-        CanonicalizationParams::default(),
-        outpoints,
-        |_, _| true,
-    );
+    let balance = recv_graph
+        .canonical_view(recv_chain, chain_tip, CanonicalizationParams::default())
+        .balance(outpoints, |_, _| true);
     Ok(balance)
 }
 
@@ -621,7 +617,8 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
 
     // Retrieve the expected unconfirmed txids and spks from the graph.
     let exp_spk_txids = graph
-        .list_expected_spk_txids(&chain, chain_tip, ..)
+        .canonical_view(&chain, chain_tip, Default::default())
+        .list_expected_spk_txids(&graph.index, ..)
         .collect::<Vec<_>>();
     assert_eq!(exp_spk_txids, vec![(spk, txid_1)]);
 
@@ -636,9 +633,9 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     let _ = graph.batch_insert_relevant_evicted_at(mempool_event.evicted);
 
     let canonical_txids = graph
-        .graph()
-        .list_canonical_txs(&chain, chain_tip, CanonicalizationParams::default())
-        .map(|tx| tx.tx_node.compute_txid())
+        .canonical_view(&chain, chain_tip, CanonicalizationParams::default())
+        .txs()
+        .map(|tx| tx.txid)
         .collect::<Vec<_>>();
     // tx1 should no longer be canonical.
     assert!(!canonical_txids.contains(&txid_1));
