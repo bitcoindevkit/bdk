@@ -21,15 +21,14 @@
 //! Conflicting transactions are allowed to coexist within a [`TxGraph`]. A process called
 //! canonicalization is required to get a conflict-free view of transactions.
 //!
-//! * [`list_canonical_txs`](TxGraph::list_canonical_txs) lists canonical transactions.
-//! * [`filter_chain_txouts`](TxGraph::filter_chain_txouts) filters out canonical outputs from a
-//!   list of outpoints.
-//! * [`filter_chain_unspents`](TxGraph::filter_chain_unspents) filters out canonical unspent
-//!   outputs from a list of outpoints.
-//! * [`balance`](TxGraph::balance) gets the total sum of unspent outputs filtered from a list of
-//!   outpoints.
-//! * [`canonical_iter`](TxGraph::canonical_iter) returns the [`CanonicalIter`] which contains all
-//!   of the canonicalization logic.
+//! * [`canonical_iter`](TxGraph::canonical_iter) returns a [`CanonicalIter`] which performs
+//!   incremental canonicalization. This is useful when you only need to check specific transactions
+//!   (e.g., verifying whether a few unconfirmed transactions are canonical) without computing the
+//!   entire canonical view.
+//! * [`canonical_view`](TxGraph::canonical_view) returns a [`CanonicalView`] which provides a
+//!   complete canonical view of the graph. This is required for typical wallet operations like
+//!   querying balances, listing outputs, transactions, and UTXOs. You must construct this first
+//!   before performing these operations.
 //!
 //! All these methods require a `chain` and `chain_tip` argument. The `chain` must be a
 //! [`ChainOracle`] implementation (such as [`LocalChain`](crate::local_chain::LocalChain)) which
