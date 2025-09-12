@@ -225,11 +225,14 @@ fn main() -> anyhow::Result<()> {
             {
                 let graph = graph.lock().unwrap();
                 let chain = chain.lock().unwrap();
-                request = request.expected_spk_txids(graph.list_expected_spk_txids(
+                let canonical_view = graph.canonical_view(
                     &*chain,
                     local_tip.block_id(),
-                    ..,
-                ));
+                    CanonicalizationParams::default(),
+                );
+
+                request = request
+                    .expected_spk_txids(canonical_view.list_expected_spk_txids(&graph.index, ..));
                 if *all_spks {
                     request = request.spks_with_indexes(graph.index.revealed_spks(..));
                 }
@@ -242,14 +245,8 @@ fn main() -> anyhow::Result<()> {
                     // `EsploraExt::update_tx_graph_without_keychain`.
                     let init_outpoints = graph.index.outpoints();
                     request = request.outpoints(
-                        graph
-                            .graph()
-                            .filter_chain_unspents(
-                                &*chain,
-                                local_tip.block_id(),
-                                CanonicalizationParams::default(),
-                                init_outpoints.iter().cloned(),
-                            )
+                        canonical_view
+                            .filter_unspent_outpoints(init_outpoints.iter().cloned())
                             .map(|(_, utxo)| utxo.outpoint),
                     );
                 };
@@ -258,15 +255,10 @@ fn main() -> anyhow::Result<()> {
                     // We provide the unconfirmed txids to
                     // `EsploraExt::update_tx_graph_without_keychain`.
                     request = request.txids(
-                        graph
-                            .graph()
-                            .list_canonical_txs(
-                                &*chain,
-                                local_tip.block_id(),
-                                CanonicalizationParams::default(),
-                            )
-                            .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
-                            .map(|canonical_tx| canonical_tx.tx_node.txid),
+                        canonical_view
+                            .txs()
+                            .filter(|canonical_tx| !canonical_tx.pos.is_confirmed())
+                            .map(|canonical_tx| canonical_tx.txid),
                     );
                 }
             }
