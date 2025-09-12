@@ -4,6 +4,7 @@ alias f := fmt
 alias t := test
 alias p := pre-push
 alias vs := verify-standalone
+alias vsa := verify-standalone-all
 
 _default:
   @just --list
@@ -98,3 +99,36 @@ verify-standalone crate *args="":
     cargo build --locked
     
     echo "✅ {{crate}} builds successfully in isolation!"
+
+# Verify all publishable crates can be built standalone
+verify-standalone-all *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    
+    # Get all workspace crates (excluding examples)
+    CRATES=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.source == null and (.name | startswith("example_") | not)) | .name' | sort)
+    
+    echo "Verifying all publishable crates can build standalone..."
+    echo "Crates to verify:"
+    echo "$CRATES" | sed 's/^/  - /'
+    echo
+    
+    for crate in $CRATES; do
+        echo "========================================="
+        echo "Verifying $crate..."
+        echo "========================================="
+        
+        if ! just verify-standalone "$crate" {{args}}; then
+            echo "❌ $crate: FAILED"
+            echo "========================================="
+            echo "❌ VERIFICATION FAILED for: $crate"
+            echo "========================================="
+            exit 1
+        fi
+        echo "✅ $crate: SUCCESS"
+        echo
+    done
+    
+    echo "========================================="
+    echo "✅ All crates build successfully in isolation!"
+    echo "========================================="
