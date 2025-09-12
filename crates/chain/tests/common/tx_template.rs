@@ -56,7 +56,7 @@ impl TxOutTemplate {
 pub struct TxTemplateEnv<'a, A> {
     pub tx_graph: TxGraph<A>,
     pub indexer: SpkTxOutIndex<u32>,
-    pub txid_to_name: HashMap<&'a str, Txid>,
+    pub tx_name_to_txid: HashMap<&'a str, Txid>,
     pub canonicalization_params: CanonicalizationParams,
 }
 
@@ -77,7 +77,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
                 .script_pubkey(),
         );
     });
-    let mut txid_to_name = HashMap::<&'a str, Txid>::new();
+    let mut tx_name_to_txid = HashMap::<&'a str, Txid>::new();
 
     let mut canonicalization_params = CanonicalizationParams::default();
     for (bogus_txin_vout, tx_tmp) in tx_templates.into_iter().enumerate() {
@@ -108,7 +108,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
                         witness: Witness::new(),
                     },
                     TxInTemplate::PrevTx(prev_name, prev_vout) => {
-                        let prev_txid = txid_to_name.get(prev_name).expect(
+                        let prev_txid = tx_name_to_txid.get(prev_name).expect(
                             "txin template must spend from tx of template that comes before",
                         );
                         TxIn {
@@ -140,7 +140,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
         if tx_tmp.assume_canonical {
             canonicalization_params.assume_canonical.push(txid);
         }
-        txid_to_name.insert(tx_tmp.tx_name, txid);
+        tx_name_to_txid.insert(tx_tmp.tx_name, txid);
         indexer.scan(&tx);
         let _ = tx_graph.insert_tx(tx.clone());
         for anchor in tx_tmp.anchors.iter() {
@@ -153,7 +153,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
     TxTemplateEnv {
         tx_graph,
         indexer,
-        txid_to_name,
+        tx_name_to_txid,
         canonicalization_params,
     }
 }
