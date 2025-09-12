@@ -220,6 +220,8 @@ pub struct TxNode<'a, T, A> {
     pub first_seen: Option<u64>,
     /// The last-seen unix timestamp of the transaction as unconfirmed.
     pub last_seen: Option<u64>,
+    /// The last-evicted-from-mempool unix timestamp of the transaction.
+    pub last_evicted: Option<u64>,
 }
 
 impl<T, A> Deref for TxNode<'_, T, A> {
@@ -342,6 +344,7 @@ impl<A> TxGraph<A> {
                 anchors: self.anchors.get(&txid).unwrap_or(&self.empty_anchors),
                 first_seen: self.first_seen.get(&txid).copied(),
                 last_seen: self.last_seen.get(&txid).copied(),
+                last_evicted: self.last_evicted.get(&txid).copied(),
             }),
             TxNodeInternal::Partial(_) => None,
         })
@@ -378,6 +381,7 @@ impl<A> TxGraph<A> {
                 anchors: self.anchors.get(&txid).unwrap_or(&self.empty_anchors),
                 first_seen: self.first_seen.get(&txid).copied(),
                 last_seen: self.last_seen.get(&txid).copied(),
+                last_evicted: self.last_evicted.get(&txid).copied(),
             }),
             _ => None,
         }
@@ -408,13 +412,6 @@ impl<A> TxGraph<A> {
                 .map(|(vout, txout)| (*vout, txout))
                 .collect::<BTreeMap<_, _>>(),
         })
-    }
-
-    /// Get the `last_evicted` timestamp of the given `txid`.
-    ///
-    /// Ideally, this would be included in [`TxNode`], but that would be a breaking change.
-    pub fn get_last_evicted(&self, txid: Txid) -> Option<u64> {
-        self.last_evicted.get(&txid).copied()
     }
 
     /// Calculates the fee of a given transaction. Returns [`Amount::ZERO`] if `tx` is a coinbase
