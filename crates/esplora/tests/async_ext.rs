@@ -30,7 +30,7 @@ pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     let client = Builder::new(base_url.as_str()).build_async()?;
 
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new(SpkTxOutIndex::<()>::default());
-    let (chain, _) = LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+    let (chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
 
     // Get receiving address.
     let receiver_spk = common::get_test_spk();
