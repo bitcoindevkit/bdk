@@ -14,7 +14,7 @@ type NotCanonicalSet = HashSet<Txid>;
 /// Modifies the canonicalization algorithm.
 #[derive(Debug, Default, Clone)]
 pub struct CanonicalizationParams {
-    /// Transactions that will supercede all other transactions.
+    /// Transactions that will supersede all other transactions.
     ///
     /// In case of conflicting transactions within `assume_canonical`, transactions that appear
     /// later in the list (have higher index) have precedence.
@@ -312,7 +312,7 @@ impl<A: Clone> CanonicalReason<A> {
         }
     }
 
-    /// Contruct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
+    /// Construct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
     ///
     /// This signals that either the [`ObservedIn`] or [`Anchor`] value belongs to the transaction's
     /// descendant, but is transitively relevant.
