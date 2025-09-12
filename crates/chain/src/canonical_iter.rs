@@ -14,7 +14,7 @@ type NotCanonicalSet = HashSet<Txid>;
 /// Modifies the canonicalization algorithm.
 #[derive(Debug, Default, Clone)]
 pub struct CanonicalizationParams {
-    /// Transactions that will supercede all other transactions.
+    /// Transactions that will supersede all other transactions.
     ///
     /// In case of conflicting transactions within `assume_canonical`, transactions that appear
     /// later in the list (have higher index) have precedence.
@@ -108,7 +108,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 .iter()
                 .last()
                 .expect(
-                    "tx taken from `unprocessed_txs_with_anchors` so it must atleast have an anchor",
+                    "tx taken from `unprocessed_txs_with_anchors` so it must at least have an anchor",
                 )
                 .confirmation_height_upper_bound(),
         ));
@@ -266,7 +266,7 @@ pub enum ObservedIn {
 /// The reason why a transaction is canonical.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalReason<A> {
-    /// This transaction is explicitly assumed to be canonical by the caller, superceding all other
+    /// This transaction is explicitly assumed to be canonical by the caller, superseding all other
     /// canonicalization rules.
     Assumed {
         /// Whether it is a descendant that is assumed to be canonical.
@@ -290,7 +290,7 @@ pub enum CanonicalReason<A> {
 }
 
 impl<A: Clone> CanonicalReason<A> {
-    /// Constructs a [`CanonicalReason`] for a transaction that is assumed to supercede all other
+    /// Constructs a [`CanonicalReason`] for a transaction that is assumed to supersede all other
     /// transactions.
     pub fn assumed() -> Self {
         Self::Assumed { descendant: None }
@@ -312,7 +312,7 @@ impl<A: Clone> CanonicalReason<A> {
         }
     }
 
-    /// Contruct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
+    /// Construct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
     ///
     /// This signals that either the [`ObservedIn`] or [`Anchor`] value belongs to the transaction's
     /// descendant, but is transitively relevant.
