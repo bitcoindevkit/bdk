@@ -41,7 +41,7 @@ use crate::{
 /// conflicted). It includes the transaction itself along with its position in the chain (confirmed
 /// or unconfirmed).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CanonicalViewTx<A> {
+pub struct CanonicalTx<A> {
     /// The position of this transaction in the chain.
     ///
     /// This indicates whether the transaction is confirmed (and at what height) or
@@ -228,11 +228,11 @@ impl<A: Anchor> CanonicalView<A> {
     ///     println!("Found tx {} at position {:?}", canonical_tx.txid, canonical_tx.pos);
     /// }
     /// ```
-    pub fn tx(&self, txid: Txid) -> Option<CanonicalViewTx<A>> {
+    pub fn tx(&self, txid: Txid) -> Option<CanonicalTx<A>> {
         self.txs
             .get(&txid)
             .cloned()
-            .map(|(tx, pos)| CanonicalViewTx { pos, txid, tx })
+            .map(|(tx, pos)| CanonicalTx { pos, txid, tx })
     }
 
     /// Get a single canonical transaction output.
@@ -302,12 +302,10 @@ impl<A: Anchor> CanonicalView<A> {
     /// // Get the total number of canonical transactions
     /// println!("Total canonical transactions: {}", view.txs().len());
     /// ```
-    pub fn txs(
-        &self,
-    ) -> impl ExactSizeIterator<Item = CanonicalViewTx<A>> + DoubleEndedIterator + '_ {
+    pub fn txs(&self) -> impl ExactSizeIterator<Item = CanonicalTx<A>> + DoubleEndedIterator + '_ {
         self.order.iter().map(|&txid| {
             let (tx, pos) = self.txs[&txid].clone();
-            CanonicalViewTx { pos, txid, tx }
+            CanonicalTx { pos, txid, tx }
         })
     }
 
