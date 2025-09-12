@@ -1,4 +1,25 @@
-//! Canonical view.
+//! Canonical view of transactions and unspent outputs.
+//!
+//! This module provides [`CanonicalView`], a utility for obtaining a canonical (ordered and
+//! conflict-resolved) view of transactions from a [`TxGraph`].
+//!
+//! ## Example
+//!
+//! ```
+//! # use bdk_chain::{CanonicalView, TxGraph, CanonicalizationParams, local_chain::LocalChain};
+//! # use bdk_core::BlockId;
+//! # use bitcoin::hashes::Hash;
+//! # let tx_graph = TxGraph::<BlockId>::default();
+//! # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+//! # let chain_tip = chain.tip().block_id();
+//! let params = CanonicalizationParams::default();
+//! let view = CanonicalView::new(&tx_graph, &chain, chain_tip, params).unwrap();
+//!
+//! // Iterate over canonical transactions
+//! for tx in view.txs() {
+//!     println!("Transaction {}: {:?}", tx.txid, tx.pos);
+//! }
+//! ```
 
 use crate::collections::HashMap;
 use alloc::sync::Arc;
@@ -14,28 +35,77 @@ use crate::{
     CanonicalizationParams, ChainOracle, ChainPosition, FullTxOut, ObservedIn, TxGraph,
 };
 
-/// A single canonical transaction.
+/// A single canonical transaction with its chain position.
+///
+/// This struct represents a transaction that has been determined to be canonical (not
+/// conflicted). It includes the transaction itself along with its position in the chain (confirmed
+/// or unconfirmed).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CanonicalViewTx<A> {
-    /// Chain position.
+    /// The position of this transaction in the chain.
+    ///
+    /// This indicates whether the transaction is confirmed (and at what height) or
+    /// unconfirmed (most likely pending in the mempool).
     pub pos: ChainPosition<A>,
-    /// Transaction ID.
+    /// The transaction ID (hash) of this transaction.
     pub txid: Txid,
-    /// The actual transaction.
+    /// The full transaction.
     pub tx: Arc<Transaction>,
 }
 
-/// A view of canonical transactions.
+/// A view of canonical transactions from a [`TxGraph`].
+///
+/// `CanonicalView` provides an ordered, conflict-resolved view of transactions. It determines
+/// which transactions are canonical (non-conflicted) based on the current chain state and
+/// provides methods to query transaction data, unspent outputs, and balances.
+///
+/// The view maintains:
+/// - An ordered list of canonical transactions (WIP)
+/// - A mapping of outpoints to the transactions that spend them
+/// - The chain tip used for canonicalization
 #[derive(Debug)]
 pub struct CanonicalView<A> {
+    /// Ordered list of transaction IDs in canonical order.
     order: Vec<Txid>,
+    /// Map of transaction IDs to their transaction data and chain position.
     txs: HashMap<Txid, (Arc<Transaction>, ChainPosition<A>)>,
+    /// Map of outpoints to the transaction ID that spends them.
     spends: HashMap<OutPoint, Txid>,
+    /// The chain tip at the time this view was created.
     tip: BlockId,
 }
 
 impl<A: Anchor> CanonicalView<A> {
-    /// Create a canonical view.
+    /// Create a new canonical view from a transaction graph.
+    ///
+    /// This constructor analyzes the given [`TxGraph`] and creates a canonical view of all
+    /// transactions, resolving conflicts and ordering them according to their chain position.
+    ///
+    /// # Arguments
+    ///
+    /// * `tx_graph` - The transaction graph containing all known transactions
+    /// * `chain` - A chain oracle for determining block inclusion
+    /// * `chain_tip` - The current chain tip to use for canonicalization
+    /// * `params` - Parameters controlling the canonicalization process
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(CanonicalView)` on success, or an error if the chain oracle fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalView, TxGraph, CanonicalizationParams, local_chain::LocalChain};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// let chain_tip = chain.tip().block_id();
+    /// let params = CanonicalizationParams::default();
+    ///
+    /// let view = CanonicalView::new(&tx_graph, &chain, chain_tip, params)?;
+    /// # Ok::<_, Box<dyn std::error::Error>>(())
+    /// ```
     pub fn new<'g, C>(
         tx_graph: &'g TxGraph<A>,
         chain: &'g C,
@@ -139,7 +209,25 @@ impl<A: Anchor> CanonicalView<A> {
         Ok(view)
     }
 
-    /// Get a single canonical transaction.
+    /// Get a single canonical transaction by its transaction ID.
+    ///
+    /// Returns `Some(CanonicalViewTx)` if the transaction exists in the canonical view,
+    /// or `None` if the transaction doesn't exist or was excluded due to conflicts.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let txid = bitcoin::Txid::all_zeros();
+    /// if let Some(canonical_tx) = view.tx(txid) {
+    ///     println!("Found tx {} at position {:?}", canonical_tx.txid, canonical_tx.pos);
+    /// }
+    /// ```
     pub fn tx(&self, txid: Txid) -> Option<CanonicalViewTx<A>> {
         self.txs
             .get(&txid)
@@ -147,7 +235,34 @@ impl<A: Anchor> CanonicalView<A> {
             .map(|(tx, pos)| CanonicalViewTx { pos, txid, tx })
     }
 
-    /// Get a single canonical txout.
+    /// Get a single canonical transaction output.
+    ///
+    /// Returns detailed information about a transaction output, including whether it has been
+    /// spent and by which transaction.
+    ///
+    /// Returns `None` if:
+    /// - The transaction doesn't exist in the canonical view
+    /// - The output index is out of bounds
+    /// - The transaction was excluded due to conflicts
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::{OutPoint, hashes::Hash};
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let outpoint = OutPoint::default();
+    /// if let Some(txout) = view.txout(outpoint) {
+    ///     if txout.spent_by.is_some() {
+    ///         println!("Output is spent");
+    ///     } else {
+    ///         println!("Output is unspent with value: {}", txout.txout.value);
+    ///     }
+    /// }
+    /// ```
     pub fn txout(&self, op: OutPoint) -> Option<FullTxOut<A>> {
         let (tx, pos) = self.txs.get(&op.txid)?;
         let vout: usize = op.vout.try_into().ok()?;
@@ -165,7 +280,28 @@ impl<A: Anchor> CanonicalView<A> {
         })
     }
 
-    /// Ordered transactions.
+    /// Get an iterator over all canonical transactions in order.
+    ///
+    /// Transactions are returned in canonical order, with confirmed transactions ordered by
+    /// block height and position, followed by unconfirmed transactions.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// // Iterate over all canonical transactions
+    /// for tx in view.txs() {
+    ///     println!("TX {}: {:?}", tx.txid, tx.pos);
+    /// }
+    ///
+    /// // Get the total number of canonical transactions
+    /// println!("Total canonical transactions: {}", view.txs().len());
+    /// ```
     pub fn txs(
         &self,
     ) -> impl ExactSizeIterator<Item = CanonicalViewTx<A>> + DoubleEndedIterator + '_ {
@@ -175,11 +311,34 @@ impl<A: Anchor> CanonicalView<A> {
         })
     }
 
-    /// Get a filtered list of outputs from the given `outpoints`.
+    /// Get a filtered list of outputs from the given outpoints.
     ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
-    /// (`O`) for convenience. If `O` is not necessary, the caller can use `()`, or
-    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
+    /// This method takes an iterator of `(identifier, outpoint)` pairs and returns an iterator
+    /// of `(identifier, full_txout)` pairs for outpoints that exist in the canonical view.
+    /// Non-existent outpoints are silently filtered out.
+    ///
+    /// The identifier type `O` can be any cloneable type and is passed through unchanged.
+    /// This is useful for tracking which outpoints correspond to which addresses or keys.
+    ///
+    /// # Arguments
+    ///
+    /// * `outpoints` - An iterator of `(identifier, outpoint)` pairs to look up
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let indexer = KeychainTxOutIndex::<&str>::default();
+    /// // Get all outputs from an indexer
+    /// for (keychain, txout) in view.filter_outpoints(indexer.outpoints().into_iter().map(|(k, op)| (k.clone(), *op))) {
+    ///     println!("{}: {} sats", keychain.0, txout.txout.value);
+    /// }
+    /// ```
     pub fn filter_outpoints<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
@@ -189,11 +348,30 @@ impl<A: Anchor> CanonicalView<A> {
             .filter_map(|(op_i, op)| Some((op_i, self.txout(op)?)))
     }
 
-    /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints`
+    /// Get a filtered list of unspent outputs (UTXOs) from the given outpoints.
     ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
-    /// (`O`) for convenience. If `O` is not necessary, the caller can use `()`, or
-    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
+    /// Similar to [`filter_outpoints`](Self::filter_outpoints), but only returns outputs that
+    /// have not been spent. This is useful for finding available UTXOs for spending.
+    ///
+    /// # Arguments
+    ///
+    /// * `outpoints` - An iterator of `(identifier, outpoint)` pairs to look up
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let indexer = KeychainTxOutIndex::<&str>::default();
+    /// // Get unspent outputs (UTXOs) from an indexer
+    /// for (keychain, utxo) in view.filter_unspent_outpoints(indexer.outpoints().into_iter().map(|(k, op)| (k.clone(), *op))) {
+    ///     println!("{} UTXO: {} sats", keychain.0, utxo.txout.value);
+    /// }
+    /// ```
     pub fn filter_unspent_outpoints<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
@@ -202,27 +380,66 @@ impl<A: Anchor> CanonicalView<A> {
             .filter(|(_, txo)| txo.spent_by.is_none())
     }
 
-    /// Get the total balance of `outpoints`.
+    /// Calculate the total balance of the given outpoints.
     ///
-    /// The output of `trust_predicate` should return `true` for scripts that we trust.
+    /// This method computes a detailed balance breakdown for a set of outpoints, categorizing
+    /// outputs as confirmed, pending (trusted/untrusted), or immature based on their chain
+    /// position and the provided trust predicate.
     ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
-    /// (`O`) for convenience. If `O` is not necessary, the caller can use `()`, or
-    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
+    /// # Arguments
     ///
-    /// ### Minimum confirmations
+    /// * `outpoints` - Iterator of `(identifier, outpoint)` pairs to calculate balance for
+    /// * `trust_predicate` - Function that returns `true` for trusted scripts. Trusted outputs
+    ///   count toward `trusted_pending` balance, while untrusted ones count toward
+    ///   `untrusted_pending`
+    /// * `min_confirmations` - Minimum confirmations required for an output to be considered
+    ///   confirmed. Outputs with fewer confirmations are treated as pending.
     ///
-    /// `min_confirmations` specifies the minimum number of confirmations required for a transaction
-    /// to be counted as confirmed in the returned [`Balance`]. Transactions with fewer than
-    /// `min_confirmations` will be treated as trusted pending (assuming the `trust_predicate`
-    /// returns `true`).
+    /// # Minimum Confirmations
     ///
-    /// - `min_confirmations = 0`: Include all confirmed transactions (same as `1`)
-    /// - `min_confirmations = 1`: Standard behavior - require at least 1 confirmation
-    /// - `min_confirmations = 6`: High security - require at least 6 confirmations
+    /// The `min_confirmations` parameter controls when outputs are considered confirmed:
     ///
-    /// Note: `0` and `1` behave identically since confirmed transactions always have ≥1
-    /// confirmation.
+    /// - `0` or `1`: Standard behavior - require at least 1 confirmation
+    /// - `6`: Conservative - require 6 confirmations (often used for high-value transactions)
+    /// - `100+`: May be used for coinbase outputs which require 100 confirmations
+    ///
+    /// Outputs with fewer than `min_confirmations` are categorized as pending (trusted or
+    /// untrusted based on the trust predicate).
+    ///
+    /// # Balance Categories
+    ///
+    /// The returned [`Balance`] contains four categories:
+    ///
+    /// - `confirmed`: Outputs with ≥ `min_confirmations` and spendable
+    /// - `trusted_pending`: Unconfirmed or insufficiently confirmed outputs from trusted scripts
+    /// - `untrusted_pending`: Unconfirmed or insufficiently confirmed outputs from untrusted
+    ///   scripts
+    /// - `immature`: Coinbase outputs that haven't reached maturity (100 confirmations)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let indexer = KeychainTxOutIndex::<&str>::default();
+    /// // Calculate balance with 6 confirmations, trusting all outputs
+    /// let balance = view.balance(
+    ///     indexer.outpoints().into_iter().map(|(k, op)| (k.clone(), *op)),
+    ///     |_keychain, _script| true,  // Trust all outputs
+    ///     6,  // Require 6 confirmations
+    /// );
+    ///
+    /// // Or calculate balance trusting no outputs
+    /// let untrusted_balance = view.balance(
+    ///     indexer.outpoints().into_iter().map(|(k, op)| (k.clone(), *op)),
+    ///     |_keychain, _script| false,  // Trust no outputs
+    ///     1,
+    /// );
+    /// ```
     pub fn balance<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
@@ -276,13 +493,46 @@ impl<A: Anchor> CanonicalView<A> {
         }
     }
 
-    /// List txids that are expected to exist under the given spks.
+    /// List transaction IDs that are expected to exist for the given script pubkeys.
     ///
-    /// This is used to fill
-    /// [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
+    /// This method is primarily used for synchronization with external sources, helping to
+    /// identify which transactions are expected to exist for a set of script pubkeys. It's
+    /// commonly used with
+    /// [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids)
+    /// to inform sync operations about known transactions.
     ///
+    /// # Arguments
     ///
-    /// The spk index range can be constrained with `range`.
+    /// * `indexer` - A script pubkey indexer (e.g., `KeychainTxOutIndex`) that tracks which scripts
+    ///   are relevant
+    /// * `spk_index_range` - A range bound to constrain which script indices to include. Use `..`
+    ///   for all indices.
+    ///
+    /// # Returns
+    ///
+    /// An iterator of `(script_pubkey, txid)` pairs for all canonical transactions that involve
+    /// the specified scripts.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain, spk_txout::SpkTxOutIndex};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let indexer = SpkTxOutIndex::<u32>::default();
+    /// // List all expected transactions for script indices 0-100
+    /// for (script, txid) in view.list_expected_spk_txids(&indexer, 0..100) {
+    ///     println!("Script {:?} appears in transaction {}", script, txid);
+    /// }
+    ///
+    /// // List all expected transactions (no range constraint)
+    /// for (script, txid) in view.list_expected_spk_txids(&indexer, ..) {
+    ///     println!("Found transaction {} for script", txid);
+    /// }
+    /// ```
     pub fn list_expected_spk_txids<'v, I>(
         &'v self,
         indexer: &'v impl AsRef<SpkTxOutIndex<I>>,
