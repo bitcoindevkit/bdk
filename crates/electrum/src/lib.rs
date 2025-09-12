@@ -19,6 +19,10 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![warn(missing_docs)]
 
+#[allow(unused_imports)]
+#[macro_use]
+extern crate bdk_common;
+
 mod bdk_electrum_client;
 pub use bdk_electrum_client::*;
 

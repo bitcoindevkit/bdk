@@ -1,0 +1,17 @@
+[package]
+name = "bdk_common"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.63"
+homepage = "https://bitcoindevkit.org"
+repository = "https://github.com/bitcoindevkit/bdk"
+description = "Shared utilities and macros for BDK chain sources."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+publish = false
+
+[dependencies]
+tracing = { version = "0.1", optional = true }
+
+[features]
+log = ["tracing"]
