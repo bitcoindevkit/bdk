@@ -1,6 +1,6 @@
 [package]
 name = "bdk_file_store"
-version = "0.21.1"
+version = "0.22.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/bitcoindevkit/bdk"

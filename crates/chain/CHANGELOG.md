@@ -7,6 +7,16 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [chain-0.23.2]
+
+### Added
+
+- Added a doctest illustrating how to filter confirmed balance results by simulating a minimum confirmation threshold via `chain_tip` height. #2007
+
+### Fixed
+
+- Behavior of `IndexedTxGraph` methods (`apply_block_relevant`, `batch_insert_relevant` and `batch_insert_relevant_unconfirmed`) to also consider conflicts of spk-relevant transactions as relevant. #2008
+
 ## [chain-0.23.1]
 
 ### Added
@@ -75,3 +85,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [chain-0.22.0]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.22.0
 [chain-0.23.0]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.0
 [chain-0.23.1]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.1
+[chain-0.23.2]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.2
