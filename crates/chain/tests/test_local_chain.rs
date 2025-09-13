@@ -1,5 +1,6 @@
 #![cfg(feature = "miniscript")]
 
+use std::collections::BTreeMap;
 use std::ops::{Bound, RangeBounds};
 
 use bdk_chain::{
@@ -10,14 +11,14 @@ use bdk_chain::{
     BlockId,
 };
 use bdk_testenv::{chain_update, hash, local_chain};
-use bitcoin::{block::Header, hashes::Hash, BlockHash};
+use bitcoin::{block::Header, hashes::Hash, BlockHash, CompactTarget, TxMerkleNode};
 use proptest::prelude::*;
 
 #[derive(Debug)]
 struct TestLocalChain<'a> {
     name: &'static str,
     chain: LocalChain,
-    update: CheckPoint,
+    update: CheckPoint<BlockHash>,
     exp: ExpectedResult<'a>,
 }
 
@@ -368,12 +369,262 @@ fn local_chain_insert_block() {
 
     for (i, t) in test_cases.into_iter().enumerate() {
         let mut chain = t.original;
+        let block_id: BlockId = t.insert.into();
         assert_eq!(
-            chain.insert_block(t.insert.into()),
+            chain.insert_block(block_id.height, block_id.hash),
             t.expected_result,
             "[{i}] unexpected result when inserting block",
         );
         assert_eq!(chain, t.expected_final, "[{i}] unexpected final chain",);
+    }
+}
+
+#[test]
+fn local_chain_insert_header() {
+    fn header(prev_blockhash: BlockHash) -> Header {
+        Header {
+            version: bitcoin::block::Version::default(),
+            prev_blockhash,
+            merkle_root: bitcoin::hash_types::TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: bitcoin::CompactTarget::default(),
+            nonce: 0,
+        }
+    }
+
+    // Create consecutive headers of height `n`, where the genesis header is height 0.
+    fn build_headers(n: u32) -> Vec<Header> {
+        let mut headers = Vec::new();
+        let genesis = header(hash!("_"));
+        headers.push(genesis);
+        for i in 1..=n {
+            let prev = headers[(i - 1) as usize].block_hash();
+            headers.push(header(prev));
+        }
+        headers
+    }
+
+    let headers = build_headers(5);
+
+    fn local_chain(data: Vec<(u32, Header)>) -> LocalChain<Header> {
+        bdk_chain::local_chain::LocalChain::from_blocks(
+            data.into_iter().collect::<BTreeMap<_, _>>(),
+        )
+        .expect("chain must have genesis block")
+    }
+
+    struct TestCase {
+        original: LocalChain<Header>,
+        insert: (u32, Header),
+        expected_result: Result<ChangeSet<Header>, AlterCheckPointError>,
+        expected_final: LocalChain<Header>,
+    }
+
+    let test_cases = [
+        // Test case 1: start with only the genesis header and insert header at height 5.
+        TestCase {
+            original: local_chain(vec![(0, headers[0])]),
+            insert: (5, headers[5]),
+            expected_result: Ok([(5, Some(headers[5]))].into()),
+            expected_final: local_chain(vec![(0, headers[0]), (5, headers[5])]),
+        },
+        // Test case 2: start with headers at heights 0 and 3. Insert header at height 4.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (3, headers[3])]),
+            insert: (4, headers[4]),
+            expected_result: Ok([(4, Some(headers[4]))].into()),
+            expected_final: local_chain(vec![(0, headers[0]), (3, headers[3]), (4, headers[4])]),
+        },
+        // Test case 3: start with headers at heights 0 and 4. Insert header at height 3.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (4, headers[4])]),
+            insert: (3, headers[3]),
+            expected_result: Ok([(3, Some(headers[3]))].into()),
+            expected_final: local_chain(vec![(0, headers[0]), (3, headers[3]), (4, headers[4])]),
+        },
+        // Test case 4: start with headers at heights 0 and 2. Insert the same header at height 2.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+            insert: (2, headers[2]),
+            expected_result: Ok([].into()),
+            expected_final: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+        },
+        // Test case 5: start with headers at heights 0 and 2. Insert conflicting header at height
+        // 2.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+            insert: (2, header(hash!("conflict"))),
+            expected_result: Err(AlterCheckPointError {
+                height: 2,
+                original_hash: headers[2].block_hash(),
+                update_hash: Some(header(hash!("conflict")).block_hash()),
+            }),
+            expected_final: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        let mut chain = t.original;
+        assert_eq!(
+            chain.insert_block(t.insert.0, t.insert.1),
+            t.expected_result,
+            "[{i}] unexpected result when inserting block",
+        );
+        assert_eq!(chain, t.expected_final, "[{i}] unexpected final chain",);
+    }
+}
+
+/// Validates `merge_chains` behavior on chains that contain placeholder checkpoints (`data: None`).
+///
+/// Placeholders are created when a `CheckPoint`’s `prev_blockhash` references a block at a height
+/// with no stored checkpoint. This test ensures `merge_chains` handles them correctly and that the
+/// resulting chain never exposes a placeholder checkpoint.
+#[test]
+fn merge_chains_handles_placeholders() {
+    fn header(prev_blockhash: bitcoin::BlockHash, nonce: u32) -> Header {
+        Header {
+            version: bitcoin::block::Version::default(),
+            prev_blockhash,
+            merkle_root: TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: CompactTarget::default(),
+            nonce,
+        }
+    }
+
+    fn local_chain(blocks: Vec<(u32, Header)>) -> LocalChain<Header> {
+        LocalChain::from_blocks(blocks.into_iter().collect::<BTreeMap<_, _>>())
+            .expect("chain must have genesis block")
+    }
+
+    fn update_chain(blocks: &[(u32, Header)]) -> CheckPoint<Header> {
+        CheckPoint::from_blocks(blocks.iter().copied()).expect("checkpoint must be valid")
+    }
+
+    let a = header(hash!("genesis"), 0);
+    let b = header(a.block_hash(), 0);
+    let c = header(b.block_hash(), 0);
+    let d = header(c.block_hash(), 0);
+    let e = header(d.block_hash(), 0);
+
+    // Set a different `nonce` for conflicting `Header`s to ensure different `BlockHash`.
+    let c_conflict = header(b.block_hash(), 1);
+    let d_conflict = header(c_conflict.block_hash(), 1);
+
+    struct TestCase {
+        name: &'static str,
+        updates: Vec<CheckPoint<Header>>,
+        invalidate_heights: Vec<u32>,
+        expected_placeholder_heights: Vec<u32>,
+        expected_chain: LocalChain<Header>,
+    }
+
+    let test_cases = [
+        // Test case 1: Create a placeholder for B via C and a placeholder for D via E.
+        TestCase {
+            name: "insert_placeholder",
+            updates: vec![update_chain(&[(0, a), (2, c), (4, e)])],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![1, 3],
+            expected_chain: local_chain(vec![(0, a), (2, c), (4, e)]),
+        },
+        // Test cast 2: Create a placeholder for B via C, then update provides conflicting C'.
+        TestCase {
+            name: "conflict_at_tip_keeps_placeholder",
+            updates: vec![
+                update_chain(&[(0, a), (2, c)]),
+                update_chain(&[(2, c_conflict)]),
+            ],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![1],
+            expected_chain: local_chain(vec![(0, a), (1, b), (2, c_conflict)]),
+        },
+        // Test case 3: Create placeholder for C via D.
+        TestCase {
+            name: "conflict_at_filled_height",
+            updates: vec![update_chain(&[(0, a), (3, d)])],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![2],
+            expected_chain: local_chain(vec![(0, a), (3, d)]),
+        },
+        // Test case 4: Create placeholder for C via D, then insert conflicting C' which should
+        // drop D and replace C.
+        TestCase {
+            name: "conflict_at_filled_height",
+            updates: vec![
+                update_chain(&[(0, a), (3, d)]),
+                update_chain(&[(0, a), (2, c_conflict)]),
+            ],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![1],
+            expected_chain: local_chain(vec![(0, a), (2, c_conflict)]),
+        },
+        // Test case 5: Create placeholder for B via C, then invalidate C.
+        TestCase {
+            name: "invalidate_tip_falls_back",
+            updates: vec![update_chain(&[(0, a), (2, c)])],
+            invalidate_heights: vec![2],
+            expected_placeholder_heights: vec![],
+            expected_chain: local_chain(vec![(0, a)]),
+        },
+        // Test case 6: Create placeholder for C via D, then insert D' which has `prev_blockhash`
+        // that does not point to C. TODO: Handle error?
+        TestCase {
+            name: "expected_error",
+            updates: vec![
+                update_chain(&[(0, a), (3, d)]),
+                update_chain(&[(3, d_conflict)]),
+            ],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![2],
+            expected_chain: local_chain(vec![(0, a), (3, d)]),
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        let mut chain = local_chain(vec![(0, a)]);
+        for upd in t.updates {
+            // If `apply_update` errors, it is because the new chain cannot be merged. So it should
+            // follow that this validates behavior if the final `expected_chain` state is correct.
+            if chain.apply_update(upd).is_ok() {
+                if !t.invalidate_heights.is_empty() {
+                    let cs: ChangeSet<Header> = t
+                        .invalidate_heights
+                        .iter()
+                        .copied()
+                        .map(|h| (h, None))
+                        .collect();
+                    chain.apply_changeset(&cs).expect("changeset should apply");
+                }
+
+                // Ensure we never end up with a placeholder tip.
+                assert!(
+                    chain.tip().data_ref().is_some(),
+                    "[{}] {}: tip must always be materialized",
+                    i,
+                    t.name
+                );
+            }
+        }
+
+        let mut placeholder_heights = chain
+            .tip()
+            .iter()
+            .filter(|cp| cp.data_ref().is_none())
+            .map(|cp| cp.height())
+            .collect::<Vec<_>>();
+        placeholder_heights.sort();
+        assert_eq!(
+            placeholder_heights, t.expected_placeholder_heights,
+            "[{}] {}: placeholder height mismatch",
+            i, t.name
+        );
+
+        assert_eq!(
+            chain, t.expected_chain,
+            "[{}] {}: unexpected final chain",
+            i, t.name
+        );
     }
 }
 
@@ -490,11 +741,7 @@ fn checkpoint_from_block_ids() {
     ];
 
     for (i, t) in test_cases.into_iter().enumerate() {
-        let result = CheckPoint::from_block_ids(
-            t.blocks
-                .iter()
-                .map(|&(height, hash)| BlockId { height, hash }),
-        );
+        let result = CheckPoint::<BlockHash>::from_blocks(t.blocks.iter().copied());
         match t.exp_result {
             Ok(_) => {
                 assert!(result.is_ok(), "[{}:{}] should be Ok", i, t.name);
@@ -639,18 +886,23 @@ fn checkpoint_insert() {
     }
 
     for t in test_cases.into_iter() {
-        let chain = CheckPoint::from_block_ids(
-            genesis_block().chain(t.chain.iter().copied().map(BlockId::from)),
+        let chain = CheckPoint::from_blocks(
+            genesis_block()
+                .chain(t.chain.iter().copied().map(BlockId::from))
+                .map(|block_id| (block_id.height, block_id.hash)),
         )
         .expect("test formed incorrectly, must construct checkpoint chain");
 
-        let exp_final_chain = CheckPoint::from_block_ids(
-            genesis_block().chain(t.exp_final_chain.iter().copied().map(BlockId::from)),
+        let exp_final_chain = CheckPoint::from_blocks(
+            genesis_block()
+                .chain(t.exp_final_chain.iter().copied().map(BlockId::from))
+                .map(|block_id| (block_id.height, block_id.hash)),
         )
         .expect("test formed incorrectly, must construct checkpoint chain");
 
+        let BlockId { height, hash } = t.to_insert.into();
         assert_eq!(
-            chain.insert(t.to_insert.into()),
+            chain.insert(height, hash),
             exp_final_chain,
             "unexpected final chain"
         );
@@ -824,12 +1076,15 @@ fn generate_height_range_bounds(
     )
 }
 
-fn generate_checkpoints(max_height: u32, max_count: usize) -> impl Strategy<Value = CheckPoint> {
+fn generate_checkpoints(
+    max_height: u32,
+    max_count: usize,
+) -> impl Strategy<Value = CheckPoint<BlockHash>> {
     proptest::collection::btree_set(1..max_height, 0..max_count).prop_map(|mut heights| {
         heights.insert(0); // must have genesis
-        CheckPoint::from_block_ids(heights.into_iter().map(|height| {
+        CheckPoint::from_blocks(heights.into_iter().map(|height| {
             let hash = bitcoin::hashes::Hash::hash(height.to_le_bytes().as_slice());
-            BlockId { height, hash }
+            (height, hash)
         }))
         .expect("blocks must be in order as it comes from btreeset")
     })

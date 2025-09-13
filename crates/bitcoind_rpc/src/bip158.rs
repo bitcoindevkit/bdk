@@ -7,7 +7,8 @@
 //! [1]: https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki
 
 use bdk_core::bitcoin;
-use bdk_core::{BlockId, CheckPoint};
+use bdk_core::CheckPoint;
+use bitcoin::BlockHash;
 use bitcoin::{bip158::BlockFilter, Block, ScriptBuf};
 use bitcoincore_rpc;
 use bitcoincore_rpc::{json::GetBlockHeaderResult, RpcApi};
@@ -34,7 +35,7 @@ pub struct FilterIter<'a> {
     /// SPK inventory
     spks: Vec<ScriptBuf>,
     /// checkpoint
-    cp: CheckPoint,
+    cp: CheckPoint<BlockHash>,
     /// Header info, contains the prev and next hashes for each header.
     header: Option<GetBlockHeaderResult>,
 }
@@ -125,10 +126,7 @@ impl Iterator for FilterIter<'_> {
             next_hash = next_header.hash;
             let next_height: u32 = next_header.height.try_into()?;
 
-            cp = cp.insert(BlockId {
-                height: next_height,
-                hash: next_hash,
-            });
+            cp = cp.insert(next_height, next_hash);
 
             let mut block = None;
             let filter =
