@@ -20,5 +20,5 @@ serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"
-bdk_testenv = {path = "../testenv"}
+bdk_testenv = {path = "../testenv", features = ["miniscript"]}
 bdk_chain = { path = "../chain", version = "0.23.1", default-features = false, features = ["serde"]}
