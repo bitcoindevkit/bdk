@@ -1,5 +1,5 @@
 use bdk_bitcoind_rpc::bip158::{Error, FilterIter};
-use bdk_core::{BlockId, CheckPoint};
+use bdk_core::CheckPoint;
 use bdk_testenv::{anyhow, bitcoind, TestEnv};
 use bitcoin::{Address, Amount, Network, ScriptBuf};
 use bitcoincore_rpc::RpcApi;
@@ -36,10 +36,7 @@ fn filter_iter_matches_blocks() -> anyhow::Result<()> {
     let _ = env.mine_blocks(1, None);
 
     let genesis_hash = env.genesis_hash()?;
-    let cp = CheckPoint::new(BlockId {
-        height: 0,
-        hash: genesis_hash,
-    });
+    let cp = CheckPoint::new(0, genesis_hash);
 
     let iter = FilterIter::new(&env.bitcoind.client, cp, [addr.script_pubkey()]);
 
@@ -62,11 +59,7 @@ fn filter_iter_error_wrong_network() -> anyhow::Result<()> {
     let _ = env.mine_blocks(10, None)?;
 
     // Try to initialize FilterIter with a CP on the wrong network
-    let block_id = BlockId {
-        height: 0,
-        hash: bitcoin::hashes::Hash::hash(b"wrong-hash"),
-    };
-    let cp = CheckPoint::new(block_id);
+    let cp = CheckPoint::new(0, bitcoin::hashes::Hash::hash(b"wrong-hash"));
     let mut iter = FilterIter::new(&env.bitcoind.client, cp, [ScriptBuf::new()]);
     assert!(matches!(iter.next(), Some(Err(Error::ReorgDepthExceeded))));
 
@@ -85,10 +78,7 @@ fn filter_iter_detects_reorgs() -> anyhow::Result<()> {
     }
 
     let genesis_hash = env.genesis_hash()?;
-    let cp = CheckPoint::new(BlockId {
-        height: 0,
-        hash: genesis_hash,
-    });
+    let cp = CheckPoint::new(0, genesis_hash);
 
     let spk = ScriptBuf::from_hex("0014446906a6560d8ad760db3156706e72e171f3a2aa")?;
     let mut iter = FilterIter::new(&env.bitcoind.client, cp, [spk]);

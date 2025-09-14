@@ -21,7 +21,7 @@ use bitcoincore_rpc::RpcApi;
 pub fn test_sync_local_chain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let network_tip = env.rpc_client().get_block_count()?;
-    let (mut local_chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
+    let (mut local_chain, _) = LocalChain::from_genesis(env.rpc_client().get_block_hash(0)?);
     let mut emitter = Emitter::new(
         env.rpc_client(),
         local_chain.tip(),
@@ -152,7 +152,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
     env.mine_blocks(101, None)?;
 
-    let (mut chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
+    let (mut chain, _) = LocalChain::from_genesis(env.rpc_client().get_block_hash(0)?);
     let mut indexed_tx_graph = IndexedTxGraph::<BlockId, _>::new({
         let mut index = SpkTxOutIndex::<usize>::default();
         index.insert_spk(0, addr_0.script_pubkey());
@@ -252,10 +252,7 @@ fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let mut emitter = Emitter::new(
         env.rpc_client(),
-        CheckPoint::new(BlockId {
-            height: 0,
-            hash: env.rpc_client().get_block_hash(0)?,
-        }),
+        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
         EMITTER_START_HEIGHT as _,
         NO_EXPECTED_MEMPOOL_TXS,
     );
@@ -286,7 +283,7 @@ fn process_block(
     block: Block,
     block_height: u32,
 ) -> anyhow::Result<()> {
-    recv_chain.apply_update(CheckPoint::from_header(&block.header, block_height))?;
+    recv_chain.apply_header(&block.header, block_height)?;
     let _ = recv_graph.apply_block(block, block_height);
     Ok(())
 }
@@ -334,10 +331,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let mut emitter = Emitter::new(
         env.rpc_client(),
-        CheckPoint::new(BlockId {
-            height: 0,
-            hash: env.rpc_client().get_block_hash(0)?,
-        }),
+        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
         0,
         NO_EXPECTED_MEMPOOL_TXS,
     );
@@ -351,7 +345,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     let addr_to_track = Address::from_script(&spk_to_track, Network::Regtest)?;
 
     // setup receiver
-    let (mut recv_chain, _) = LocalChain::from_genesis_hash(env.rpc_client().get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.rpc_client().get_block_hash(0)?);
     let mut recv_graph = IndexedTxGraph::<BlockId, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -425,10 +419,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let mut emitter = Emitter::new(
         env.rpc_client(),
-        CheckPoint::new(BlockId {
-            height: 0,
-            hash: env.rpc_client().get_block_hash(0)?,
-        }),
+        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
         0,
         NO_EXPECTED_MEMPOOL_TXS,
     );
@@ -498,10 +489,7 @@ fn no_agreement_point() -> anyhow::Result<()> {
     // start height is 99
     let mut emitter = Emitter::new(
         env.rpc_client(),
-        CheckPoint::new(BlockId {
-            height: 0,
-            hash: env.rpc_client().get_block_hash(0)?,
-        }),
+        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
         (PREMINE_COUNT - 2) as u32,
         NO_EXPECTED_MEMPOOL_TXS,
     );
@@ -573,7 +561,7 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
         .0;
     let spk = desc.at_derivation_index(0)?.script_pubkey();
 
-    let mut chain = LocalChain::from_genesis_hash(genesis_block(Network::Regtest).block_hash()).0;
+    let mut chain = LocalChain::from_genesis(genesis_block(Network::Regtest).block_hash()).0;
     let chain_tip = chain.tip().block_id();
 
     let mut index = SpkTxOutIndex::default();
@@ -594,7 +582,7 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     let mut emitter = Emitter::new(env.rpc_client(), chain.tip(), 1, core::iter::once(tx_1));
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
-        chain.apply_update(CheckPoint::from_header(&emission.block.header, height))?;
+        chain.apply_header(&emission.block.header, height)?;
     }
 
     let changeset = graph.batch_insert_unconfirmed(emitter.mempool()?.update);
@@ -670,10 +658,7 @@ fn detect_new_mempool_txs() -> anyhow::Result<()> {
 
     let mut emitter = Emitter::new(
         env.rpc_client(),
-        CheckPoint::new(BlockId {
-            height: 0,
-            hash: env.rpc_client().get_block_hash(0)?,
-        }),
+        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
         0,
         NO_EXPECTED_MEMPOOL_TXS,
     );

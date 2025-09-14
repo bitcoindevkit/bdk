@@ -1,5 +1,6 @@
 #![cfg(feature = "miniscript")]
 
+use std::collections::BTreeMap;
 use std::ops::{Bound, RangeBounds};
 
 use bdk_chain::{
@@ -17,7 +18,7 @@ use proptest::prelude::*;
 struct TestLocalChain<'a> {
     name: &'static str,
     chain: LocalChain,
-    update: CheckPoint,
+    update: CheckPoint<BlockHash>,
     exp: ExpectedResult<'a>,
 }
 
@@ -368,8 +369,104 @@ fn local_chain_insert_block() {
 
     for (i, t) in test_cases.into_iter().enumerate() {
         let mut chain = t.original;
+        let block_id: BlockId = t.insert.into();
         assert_eq!(
-            chain.insert_block(t.insert.into()),
+            chain.insert_block(block_id.height, block_id.hash),
+            t.expected_result,
+            "[{i}] unexpected result when inserting block",
+        );
+        assert_eq!(chain, t.expected_final, "[{i}] unexpected final chain",);
+    }
+}
+
+#[test]
+fn local_chain_insert_header() {
+    fn header(prev_blockhash: BlockHash) -> Header {
+        Header {
+            version: bitcoin::block::Version::default(),
+            prev_blockhash,
+            merkle_root: bitcoin::hash_types::TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: bitcoin::CompactTarget::default(),
+            nonce: 0,
+        }
+    }
+
+    // Create consecutive headers of height `n`, where the genesis header is height 0.
+    fn build_headers(n: u32) -> Vec<Header> {
+        let mut headers = Vec::new();
+        let genesis = header(hash!("_"));
+        headers.push(genesis);
+        for i in 1..=n {
+            let prev = headers[(i - 1) as usize].block_hash();
+            headers.push(header(prev));
+        }
+        headers
+    }
+
+    let headers = build_headers(5);
+
+    fn local_chain(data: Vec<(u32, Header)>) -> LocalChain<Header> {
+        bdk_chain::local_chain::LocalChain::from_blocks(
+            data.into_iter().collect::<BTreeMap<_, _>>(),
+        )
+        .expect("chain must have genesis block")
+    }
+
+    struct TestCase {
+        original: LocalChain<Header>,
+        insert: (u32, Header),
+        expected_result: Result<ChangeSet<Header>, AlterCheckPointError>,
+        expected_final: LocalChain<Header>,
+    }
+
+    let test_cases = [
+        // Test case 1: start with only the genesis header and insert header at height 5.
+        TestCase {
+            original: local_chain(vec![(0, headers[0])]),
+            insert: (5, headers[5]),
+            expected_result: Ok([(5, Some(headers[5]))].into()),
+            expected_final: local_chain(vec![(0, headers[0]), (5, headers[5])]),
+        },
+        // Test case 2: start with headers at heights 0 and 3. Insert header at height 4.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (3, headers[3])]),
+            insert: (4, headers[4]),
+            expected_result: Ok([(4, Some(headers[4]))].into()),
+            expected_final: local_chain(vec![(0, headers[0]), (3, headers[3]), (4, headers[4])]),
+        },
+        // Test case 3: start with headers at heights 0 and 4. Insert header at height 3.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (4, headers[4])]),
+            insert: (3, headers[3]),
+            expected_result: Ok([(3, Some(headers[3]))].into()),
+            expected_final: local_chain(vec![(0, headers[0]), (3, headers[3]), (4, headers[4])]),
+        },
+        // Test case 4: start with headers at heights 0 and 2. Insert the same header at height 2.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+            insert: (2, headers[2]),
+            expected_result: Ok([].into()),
+            expected_final: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+        },
+        // Test case 5: start with headers at heights 0 and 2. Insert conflicting header at height
+        // 2.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+            insert: (2, header(hash!("conflict"))),
+            expected_result: Err(AlterCheckPointError {
+                height: 2,
+                original_hash: headers[2].block_hash(),
+                update_hash: Some(header(hash!("conflict")).block_hash()),
+            }),
+            expected_final: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        let mut chain = t.original;
+        assert_eq!(
+            chain.insert_block(t.insert.0, t.insert.1),
             t.expected_result,
             "[{i}] unexpected result when inserting block",
         );
@@ -490,11 +587,7 @@ fn checkpoint_from_block_ids() {
     ];
 
     for (i, t) in test_cases.into_iter().enumerate() {
-        let result = CheckPoint::from_block_ids(
-            t.blocks
-                .iter()
-                .map(|&(height, hash)| BlockId { height, hash }),
-        );
+        let result = CheckPoint::<BlockHash>::from_blocks(t.blocks.iter().copied());
         match t.exp_result {
             Ok(_) => {
                 assert!(result.is_ok(), "[{}:{}] should be Ok", i, t.name);
@@ -639,18 +732,23 @@ fn checkpoint_insert() {
     }
 
     for t in test_cases.into_iter() {
-        let chain = CheckPoint::from_block_ids(
-            genesis_block().chain(t.chain.iter().copied().map(BlockId::from)),
+        let chain = CheckPoint::from_blocks(
+            genesis_block()
+                .chain(t.chain.iter().copied().map(BlockId::from))
+                .map(|block_id| (block_id.height, block_id.hash)),
         )
         .expect("test formed incorrectly, must construct checkpoint chain");
 
-        let exp_final_chain = CheckPoint::from_block_ids(
-            genesis_block().chain(t.exp_final_chain.iter().copied().map(BlockId::from)),
+        let exp_final_chain = CheckPoint::from_blocks(
+            genesis_block()
+                .chain(t.exp_final_chain.iter().copied().map(BlockId::from))
+                .map(|block_id| (block_id.height, block_id.hash)),
         )
         .expect("test formed incorrectly, must construct checkpoint chain");
 
+        let BlockId { height, hash } = t.to_insert.into();
         assert_eq!(
-            chain.insert(t.to_insert.into()),
+            chain.insert(height, hash),
             exp_final_chain,
             "unexpected final chain"
         );
@@ -824,12 +922,15 @@ fn generate_height_range_bounds(
     )
 }
 
-fn generate_checkpoints(max_height: u32, max_count: usize) -> impl Strategy<Value = CheckPoint> {
+fn generate_checkpoints(
+    max_height: u32,
+    max_count: usize,
+) -> impl Strategy<Value = CheckPoint<BlockHash>> {
     proptest::collection::btree_set(1..max_height, 0..max_count).prop_map(|mut heights| {
         heights.insert(0); // must have genesis
-        CheckPoint::from_block_ids(heights.into_iter().map(|height| {
+        CheckPoint::from_blocks(heights.into_iter().map(|height| {
             let hash = bitcoin::hashes::Hash::hash(height.to_le_bytes().as_slice());
-            BlockId { height, hash }
+            (height, hash)
         }))
         .expect("blocks must be in order as it comes from btreeset")
     })

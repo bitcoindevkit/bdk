@@ -24,8 +24,8 @@ use bdk_testenv::{
     TestEnv,
 };
 use bitcoin::{
-    secp256k1::Secp256k1, Address, Amount, Network, OutPoint, ScriptBuf, Transaction, TxIn, TxOut,
-    Txid,
+    secp256k1::Secp256k1, Address, Amount, BlockHash, Network, OutPoint, ScriptBuf, Transaction,
+    TxIn, TxOut, Txid,
 };
 use miniscript::Descriptor;
 
@@ -323,9 +323,10 @@ fn insert_relevant_txs() {
 #[test]
 fn test_list_owned_txouts() {
     // Create Local chains
-    let local_chain =
-        LocalChain::from_blocks((0..150).map(|i| (i as u32, hash!("random"))).collect())
-            .expect("must have genesis hash");
+    let local_chain = LocalChain::<BlockHash>::from_blocks(
+        (0..150).map(|i| (i as u32, hash!("random"))).collect(),
+    )
+    .expect("must have genesis hash");
 
     // Initiate IndexedTxGraph
 
@@ -751,9 +752,14 @@ fn test_get_chain_position() {
     });
 
     // Anchors to test
-    let blocks = vec![block_id!(0, "g"), block_id!(1, "A"), block_id!(2, "B")];
+    let blocks = [block_id!(0, "g"), block_id!(1, "A"), block_id!(2, "B")];
 
-    let cp = CheckPoint::from_block_ids(blocks.clone()).unwrap();
+    let cp = CheckPoint::from_blocks(
+        blocks
+            .iter()
+            .map(|block_id| (block_id.height, block_id.hash)),
+    )
+    .unwrap();
     let chain = LocalChain::from_tip(cp).unwrap();
 
     // The test will insert a transaction into the indexed tx graph along with any anchors and
