@@ -1,50 +1,28 @@
 //! This module provides utility functions for testing custom persistence backends.
-use crate::block_id;
-use crate::hash;
-use bdk_chain::bitcoin;
-use bdk_chain::miniscript::{Descriptor, DescriptorPublicKey};
+use crate::{block_id, hash};
+#[cfg(feature = "miniscript")]
 use bdk_chain::{
-    bitcoin::{
-        absolute, key::Secp256k1, transaction, Address, Amount, OutPoint, ScriptBuf, Transaction,
-        TxIn, TxOut, Txid,
-    },
-    indexer::keychain_txout,
-    local_chain, tx_graph, ConfirmationBlockTime, DescriptorExt, DescriptorId, Merge, SpkIterator,
+    bitcoin::ScriptBuf, indexer::keychain_txout, DescriptorExt, DescriptorId, SpkIterator,
+};
+use bdk_chain::{
+    bitcoin::{self, OutPoint, Transaction, TxOut, Txid},
+    local_chain, tx_graph, ConfirmationBlockTime, Merge,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Arc;
 
-fn create_one_inp_one_out_tx(txid: Txid, amount: u64) -> Transaction {
-    Transaction {
-        version: transaction::Version::ONE,
-        lock_time: absolute::LockTime::ZERO,
-        input: vec![TxIn {
-            previous_output: OutPoint::new(txid, 0),
-            ..TxIn::default()
-        }],
-        output: vec![TxOut {
-            value: Amount::from_sat(amount),
-            script_pubkey: Address::from_str("bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5")
-                .unwrap()
-                .assume_checked()
-                .script_pubkey(),
-        }],
-    }
-}
+use crate::utils::{create_test_tx, create_txout};
 
-fn spk_at_index(descriptor: &Descriptor<DescriptorPublicKey>, index: u32) -> ScriptBuf {
-    descriptor
-        .derived_descriptor(&Secp256k1::verification_only(), index)
-        .expect("must derive")
-        .script_pubkey()
-}
+#[cfg(feature = "miniscript")]
+use crate::utils::{parse_descriptor, spk_at_index};
+
+const ADDRS: [&str; 2] = [
+    "bcrt1q3qtze4ys45tgdvguj66zrk4fu6hq3a3v9pfly5",
+    "bcrt1q8an5jfmpq8w2hr648nn34ecf9zdtxk0qyqtrfl",
+];
 
 /// tests if [`TxGraph`] is being persisted correctly
-///
-/// [`TxGraph`]: <https://docs.rs/bdk_chain/latest/bdk_chain/tx_graph/struct.TxGraph.html>
-/// [`tx_graph::ChangeSet`]: <https://docs.rs/bdk_chain/latest/bdk_chain/tx_graph/struct.ChangeSet.html>
 ///
 /// We create a dummy [`tx_graph::ChangeSet`], persist it and check if loaded `ChangeSet` matches
 /// the persisted one. We then create another such dummy `ChangeSet`, persist it and load it to
@@ -70,7 +48,14 @@ pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
     // create changeset
-    let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BTC"), 30_000));
+    let tx1 = Arc::new(create_test_tx(
+        [hash!("BTC")],
+        [0],
+        [30_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
 
     let conf_anchor: ConfirmationBlockTime = ConfirmationBlockTime {
         block_id: block_id!(910425, "Rust"),
@@ -80,29 +65,10 @@ pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
     let mut tx_graph_changeset1 = ChangeSet::<ConfirmationBlockTime> {
         txs: [tx1.clone()].into(),
         txouts: [
-            (
-                OutPoint::new(hash!("BDK"), 0),
-                TxOut {
-                    value: Amount::from_sat(1300),
-                    script_pubkey: Address::from_str(
-                        "bcrt1q8an5jfmpq8w2hr648nn34ecf9zdtxk0qyqtrfl",
-                    )
-                    .unwrap()
-                    .assume_checked()
-                    .script_pubkey(),
-                },
-            ),
+            (OutPoint::new(hash!("BDK"), 0), create_txout(1300, ADDRS[1])),
             (
                 OutPoint::new(hash!("Bitcoin_fixes_things"), 0),
-                TxOut {
-                    value: Amount::from_sat(1400),
-                    script_pubkey: Address::from_str(
-                        "bcrt1q8an5jfmpq8w2hr648nn34ecf9zdtxk0qyqtrfl",
-                    )
-                    .unwrap()
-                    .assume_checked()
-                    .script_pubkey(),
-                },
+                create_txout(1400, ADDRS[1]),
             ),
         ]
         .into(),
@@ -119,7 +85,14 @@ pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, tx_graph_changeset1);
 
     // create another changeset
-    let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
+    let tx2 = Arc::new(create_test_tx(
+        [tx1.compute_txid()],
+        [0],
+        [20_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
 
     let conf_anchor: ConfirmationBlockTime = ConfirmationBlockTime {
         block_id: block_id!(910426, "BOSS"),
@@ -129,14 +102,8 @@ pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
     let tx_graph_changeset2 = ChangeSet::<ConfirmationBlockTime> {
         txs: [tx2.clone()].into(),
         txouts: [(
-            OutPoint::new(hash!("REDB"), 0),
-            TxOut {
-                value: Amount::from_sat(10000),
-                script_pubkey: Address::from_str("bcrt1q8an5jfmpq8w2hr648nn34ecf9zdtxk0qyqtrfl")
-                    .unwrap()
-                    .assume_checked()
-                    .script_pubkey(),
-            },
+            OutPoint::new(hash!("Magical_Bitcoin"), 0),
+            create_txout(10000, ADDRS[1]),
         )]
         .into(),
         anchors: [(conf_anchor, tx2.compute_txid())].into(),
@@ -155,22 +122,12 @@ pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
     assert_eq!(tx_graph_changeset1, changeset);
 }
 
-fn parse_descriptor(descriptor: &str) -> Descriptor<DescriptorPublicKey> {
-    let secp = bdk_chain::bitcoin::secp256k1::Secp256k1::signing_only();
-    Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, descriptor)
-        .unwrap()
-        .0
-}
-
 /// tests if [`KeychainTxOutIndex`] is being persisted correctly
-///
-/// [`KeychainTxOutIndex`]: <https://docs.rs/bdk_chain/latest/bdk_chain/indexer/keychain_txout/struct.KeychainTxOutIndex.html>
-///
-/// [`keychain_txout::ChangeSet`]: <https://docs.rs/bdk_chain/latest/bdk_chain/indexer/keychain_txout/struct.ChangeSet.html>
 ///
 /// We create a dummy [`keychain_txout::ChangeSet`], persist it and check if loaded `ChangeSet`
 /// matches the persisted one. We then create another such dummy `ChangeSet`, persist it and load it
 /// to check if merged `ChangeSet` is returned.
+#[cfg(feature = "miniscript")]
 pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -194,8 +151,8 @@ pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::default());
 
     // create changeset
-    let descriptor_ids = DESCRIPTORS.map(|d| parse_descriptor(d).descriptor_id());
-    let descs = DESCRIPTORS.map(parse_descriptor);
+    let descriptor_ids = DESCRIPTORS.map(|d| parse_descriptor(d).0.descriptor_id());
+    let descs = DESCRIPTORS.map(|desc| parse_descriptor(desc).0);
 
     let mut changeset = ChangeSet {
         last_revealed: [(descriptor_ids[0], 1), (descriptor_ids[1], 100)].into(),
@@ -239,9 +196,6 @@ pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
 }
 
 /// tests if [`LocalChain`] is being persisted correctly
-///
-/// [`LocalChain`]: <https://docs.rs/bdk_chain/latest/bdk_chain/local_chain/struct.LocalChain.html>
-/// [`local_chain::ChangeSet`]: <https://docs.rs/bdk_chain/latest/bdk_chain/local_chain/struct.ChangeSet.html>
 ///
 /// We create a dummy [`local_chain::ChangeSet`], persist it and check if loaded `ChangeSet` matches
 /// the persisted one. We then create another such dummy `ChangeSet`, persist it and load it to
@@ -327,9 +281,30 @@ pub fn persist_last_seen<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
     // create changeset
-    let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BTC"), 30_000));
-    let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
-    let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
+    let tx1 = Arc::new(create_test_tx(
+        [hash!("BTC")],
+        [0],
+        [30_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx2 = Arc::new(create_test_tx(
+        [tx1.compute_txid()],
+        [0],
+        [20_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx3 = Arc::new(create_test_tx(
+        [tx2.compute_txid()],
+        [0],
+        [19_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
 
     let txs: BTreeSet<Arc<Transaction>> = [tx1.clone(), tx2.clone()].into();
     let mut last_seen: BTreeMap<Txid, u64> = [
@@ -393,9 +368,30 @@ pub fn persist_last_evicted<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
     // create changeset
-    let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BDK"), 30_000));
-    let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
-    let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
+    let tx1 = Arc::new(create_test_tx(
+        [hash!("BDK")],
+        [0],
+        [30_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx2 = Arc::new(create_test_tx(
+        [tx1.compute_txid()],
+        [0],
+        [20_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx3 = Arc::new(create_test_tx(
+        [tx2.compute_txid()],
+        [0],
+        [19_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
 
     // try persisting and reading last_evicted
     let mut last_evicted: BTreeMap<Txid, u64> = [
@@ -457,9 +453,30 @@ pub fn persist_first_seen<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
     // create changeset
-    let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BTC"), 30_000));
-    let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
-    let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
+    let tx1 = Arc::new(create_test_tx(
+        [hash!("BTC")],
+        [0],
+        [30_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx2 = Arc::new(create_test_tx(
+        [tx1.compute_txid()],
+        [0],
+        [20_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx3 = Arc::new(create_test_tx(
+        [tx2.compute_txid()],
+        [0],
+        [19_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
 
     let txs: BTreeSet<Arc<Transaction>> = [tx1.clone(), tx2.clone()].into();
     let mut first_seen: BTreeMap<Txid, u64> = [
@@ -521,26 +538,8 @@ pub fn persist_txouts<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::default());
 
     let mut txouts: BTreeMap<OutPoint, TxOut> = [
-        (
-            OutPoint::new(hash!("B"), 0),
-            TxOut {
-                value: Amount::from_sat(1300),
-                script_pubkey: Address::from_str("bcrt1q8an5jfmpq8w2hr648nn34ecf9zdtxk0qyqtrfl")
-                    .unwrap()
-                    .assume_checked()
-                    .script_pubkey(),
-            },
-        ),
-        (
-            OutPoint::new(hash!("D"), 0),
-            TxOut {
-                value: Amount::from_sat(1400),
-                script_pubkey: Address::from_str("bcrt1q8an5jfmpq8w2hr648nn34ecf9zdtxk0qyqtrfl")
-                    .unwrap()
-                    .assume_checked()
-                    .script_pubkey(),
-            },
-        ),
+        (OutPoint::new(hash!("B"), 0), create_txout(1300, ADDRS[1])),
+        (OutPoint::new(hash!("D"), 0), create_txout(1400, ADDRS[1])),
     ]
     .into();
 
@@ -556,17 +555,8 @@ pub fn persist_txouts<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset_read.txouts, txouts);
 
     // create another changeset
-    let txouts_new: BTreeMap<OutPoint, TxOut> = [(
-        OutPoint::new(hash!("K"), 0),
-        TxOut {
-            value: Amount::from_sat(10000),
-            script_pubkey: Address::from_str("bcrt1q8an5jfmpq8w2hr648nn34ecf9zdtxk0qyqtrfl")
-                .unwrap()
-                .assume_checked()
-                .script_pubkey(),
-        },
-    )]
-    .into();
+    let txouts_new: BTreeMap<OutPoint, TxOut> =
+        [(OutPoint::new(hash!("K"), 0), create_txout(10000, ADDRS[1]))].into();
 
     let changeset = ChangeSet::<ConfirmationBlockTime> {
         txouts: txouts_new.clone(),
@@ -607,9 +597,30 @@ pub fn persist_txs<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
     // create changeset
-    let tx1 = Arc::new(create_one_inp_one_out_tx(hash!("BTC"), 30_000));
-    let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
-    let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
+    let tx1 = Arc::new(create_test_tx(
+        [hash!("BTC")],
+        [0],
+        [30_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx2 = Arc::new(create_test_tx(
+        [tx1.compute_txid()],
+        [0],
+        [20_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx3 = Arc::new(create_test_tx(
+        [tx2.compute_txid()],
+        [0],
+        [19_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
 
     let mut txs: BTreeSet<Arc<Transaction>> = [tx1, tx2.clone()].into();
 
@@ -664,10 +675,30 @@ pub fn persist_anchors<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::<ConfirmationBlockTime>::default());
 
     // create changeset
-    let tx1 = Arc::new(create_one_inp_one_out_tx(hash!(""), 30_000));
-    let tx2 = Arc::new(create_one_inp_one_out_tx(tx1.compute_txid(), 20_000));
-    let tx3 = Arc::new(create_one_inp_one_out_tx(tx2.compute_txid(), 19_000));
-
+    let tx1 = Arc::new(create_test_tx(
+        [hash!("Running_Bitcoin")],
+        [0],
+        [30_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx2 = Arc::new(create_test_tx(
+        [tx1.compute_txid()],
+        [0],
+        [20_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
+    let tx3 = Arc::new(create_test_tx(
+        [tx2.compute_txid()],
+        [0],
+        [19_000],
+        [ADDRS[0]],
+        1,
+        0,
+    ));
     let anchor1 = ConfirmationBlockTime {
         block_id: block_id!(23, "BTC"),
         confirmation_time: 1756838400,
@@ -717,6 +748,7 @@ pub fn persist_anchors<Store, CreateStore, Initialize, Persist>(
 /// We create a dummy [`keychain_txout::ChangeSet`] with only `last_revealed` field populated,
 /// persist it and check if loaded `ChangeSet` matches the persisted one. We then create another
 /// such dummy `ChangeSet`, persist it and load it to check if merged `ChangeSet` is returned.
+#[cfg(feature = "miniscript")]
 pub fn persist_last_revealed<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -738,7 +770,7 @@ pub fn persist_last_revealed<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::default());
 
     // create changeset
-    let descriptor_ids = crate::utils::DESCRIPTORS.map(|d| parse_descriptor(d).descriptor_id());
+    let descriptor_ids = crate::utils::DESCRIPTORS.map(|d| parse_descriptor(d).0.descriptor_id());
 
     let mut last_revealed: BTreeMap<DescriptorId, u32> =
         [(descriptor_ids[0], 1), (descriptor_ids[1], 100)].into();
@@ -773,6 +805,7 @@ pub fn persist_last_revealed<Store, CreateStore, Initialize, Persist>(
 /// We create a dummy [`keychain_txout::ChangeSet`] with only `spk_cache` field populated, persist
 /// it and check if loaded `ChangeSet` matches the persisted one. We then create another such dummy
 /// `ChangeSet`, persist it and load it to check if merged `ChangeSet` is returned.
+#[cfg(feature = "miniscript")]
 pub fn persist_spk_cache<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -794,8 +827,8 @@ pub fn persist_spk_cache<Store, CreateStore, Initialize, Persist>(
     assert_eq!(changeset, ChangeSet::default());
 
     // create changeset
-    let descriptor_ids = crate::utils::DESCRIPTORS.map(|d| parse_descriptor(d).descriptor_id());
-    let descs = crate::utils::DESCRIPTORS.map(parse_descriptor);
+    let descriptor_ids = crate::utils::DESCRIPTORS.map(|d| parse_descriptor(d).0.descriptor_id());
+    let descs = crate::utils::DESCRIPTORS.map(|desc| parse_descriptor(desc).0);
 
     let spk_cache: BTreeMap<DescriptorId, BTreeMap<u32, ScriptBuf>> = [
         (

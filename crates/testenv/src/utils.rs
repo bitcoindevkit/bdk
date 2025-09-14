@@ -1,4 +1,10 @@
-use bdk_chain::bitcoin;
+use bdk_chain::bitcoin::{
+    self, absolute, transaction, Address, Amount, OutPoint, Transaction, TxIn, TxOut, Txid,
+};
+use core::str::FromStr;
+
+#[cfg(feature = "miniscript")]
+use bdk_chain::miniscript::{descriptor::KeyMap, Descriptor, DescriptorPublicKey};
 
 #[allow(unused_macros)]
 #[macro_export]
@@ -75,6 +81,71 @@ pub fn new_tx(lt: u32) -> bitcoin::Transaction {
         input: vec![],
         output: vec![],
     }
+}
+
+/// Utility function to create a [`TxOut`] given amount (in satoshis) and address.
+pub fn create_txout(sats: u64, addr: &str) -> TxOut {
+    TxOut {
+        value: Amount::from_sat(sats),
+        script_pubkey: Address::from_str(addr)
+            .unwrap()
+            .assume_checked()
+            .script_pubkey(),
+    }
+}
+
+/// Utility function to create a transaction given txids, vouts of inputs and amounts (in satoshis),
+/// addresses of outputs.
+///
+/// The locktime should be in the form given to `OP_CHEKCLOCKTIMEVERIFY`.
+pub fn create_test_tx(
+    txids: impl IntoIterator<Item = Txid>,
+    vouts: impl IntoIterator<Item = u32>,
+    amounts: impl IntoIterator<Item = u64>,
+    addrs: impl IntoIterator<Item = &'static str>,
+    version: u32,
+    locktime: u32,
+) -> Transaction {
+    let input_vec = core::iter::zip(txids, vouts)
+        .map(|(txid, vout)| TxIn {
+            previous_output: OutPoint::new(txid, vout),
+            ..TxIn::default()
+        })
+        .collect();
+    let output_vec = core::iter::zip(amounts, addrs)
+        .map(|(amount, addr)| create_txout(amount, addr))
+        .collect();
+    let version = transaction::Version::non_standard(version as i32);
+    assert!(version.is_standard());
+    let lock_time = absolute::LockTime::from_consensus(locktime);
+    assert_eq!(lock_time.to_consensus_u32(), locktime);
+    Transaction {
+        version,
+        lock_time,
+        input: input_vec,
+        output: output_vec,
+    }
+}
+
+/// Generates `script_pubkey` corresponding to `index` on keychain of `descriptor`.
+#[cfg(feature = "miniscript")]
+pub fn spk_at_index(
+    descriptor: &Descriptor<DescriptorPublicKey>,
+    index: u32,
+) -> bdk_chain::bitcoin::ScriptBuf {
+    use bdk_chain::bitcoin::key::Secp256k1;
+    descriptor
+        .derived_descriptor(&Secp256k1::verification_only(), index)
+        .expect("must derive")
+        .script_pubkey()
+}
+
+/// Parses a descriptor string.
+#[cfg(feature = "miniscript")]
+pub fn parse_descriptor(descriptor: &str) -> (Descriptor<DescriptorPublicKey>, KeyMap) {
+    use bdk_chain::bitcoin::key::Secp256k1;
+    let secp = Secp256k1::signing_only();
+    Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, descriptor).unwrap()
 }
 
 #[allow(unused)]

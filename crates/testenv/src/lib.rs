@@ -1,5 +1,6 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[cfg(feature = "std")]
 pub mod persist_test_utils;
 pub mod utils;
 
