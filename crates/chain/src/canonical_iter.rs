@@ -1,5 +1,5 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
-use crate::tx_graph::{TxAncestors, TxDescendants};
+use crate::tx_graph::{TxAncestors, TxDescendants, TxNode};
 use crate::{Anchor, ChainOracle, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
@@ -35,6 +35,9 @@ pub struct CanonicalIter<'g, A, C> {
 
     canonical: CanonicalMap<A>,
     not_canonical: NotCanonicalSet,
+
+    canonical_ancestors: HashMap<Txid, Vec<Txid>>,
+    canonical_roots: VecDeque<Txid>,
 
     queue: VecDeque<Txid>,
 }
@@ -75,6 +78,8 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
             unprocessed_leftover_txs: VecDeque::new(),
             canonical: HashMap::new(),
             not_canonical: HashSet::new(),
+            canonical_ancestors: HashMap::new(),
+            canonical_roots: VecDeque::new(),
             queue: VecDeque::new(),
         }
     }
@@ -160,7 +165,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
 
                 // Any conflicts with a canonical tx can be added to `not_canonical`. Descendants
                 // of `not_canonical` txs can also be added to `not_canonical`.
-                for (_, conflict_txid) in self.tx_graph.direct_conflicts(&tx) {
+                for (_, conflict_txid) in self.tx_graph.direct_conflicts(&tx.clone()) {
                     TxDescendants::new_include_root(
                         self.tx_graph,
                         conflict_txid,
@@ -181,6 +186,18 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                     detected_self_double_spend = true;
                     return None;
                 }
+
+                // Calculates all the existing ancestors for the given Txid
+                self.canonical_ancestors.insert(
+                    this_txid,
+                    tx.clone()
+                        .input
+                        .iter()
+                        .filter(|txin| self.tx_graph.get_tx(txin.previous_output.txid).is_some())
+                        .map(|txin| txin.previous_output.txid)
+                        .collect(),
+                );
+
                 canonical_entry.insert((tx, this_reason));
                 Some(this_txid)
             },
@@ -190,12 +207,29 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
         if detected_self_double_spend {
             for txid in staged_queue {
                 self.canonical.remove(&txid);
+                self.canonical_ancestors.remove(&txid);
             }
             for txid in undo_not_canonical {
                 self.not_canonical.remove(&txid);
             }
         } else {
-            self.queue.extend(staged_queue);
+            // TODO: (@oleonardolima) Can this be optimized somehow ?
+            // Can we just do a simple lookup on the `canonical_ancestors` field ?
+            for txid in staged_queue {
+                let tx = self.tx_graph.get_tx(txid).expect("tx must exist");
+                let ancestors = tx
+                    .input
+                    .iter()
+                    .map(|txin| txin.previous_output.txid)
+                    .filter_map(|prev_txid| self.tx_graph.get_tx(prev_txid))
+                    .collect::<Vec<_>>();
+
+                // check if it's a root: it's either a coinbase transaction or has not known
+                // ancestors in the tx_graph
+                if tx.is_coinbase() || ancestors.is_empty() {
+                    self.canonical_roots.push_back(txid);
+                }
+            }
         }
     }
 }
@@ -204,52 +238,58 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
     type Item = Result<(Txid, Arc<Transaction>, CanonicalReason<A>), C::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(txid) = self.queue.pop_front() {
-                let (tx, reason) = self
-                    .canonical
-                    .get(&txid)
-                    .cloned()
-                    .expect("reason must exist");
-                return Some(Ok((txid, tx, reason)));
+        while let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
+            if !self.is_canonicalized(txid) {
+                self.mark_canonical(txid, tx, CanonicalReason::assumed());
             }
+        }
 
-            if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
-                if !self.is_canonicalized(txid) {
-                    self.mark_canonical(txid, tx, CanonicalReason::assumed());
+        while let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
+            if !self.is_canonicalized(txid) {
+                if let Err(err) = self.scan_anchors(txid, tx, anchors) {
+                    return Some(Err(err));
                 }
             }
+        }
 
-            if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
-                if !self.is_canonicalized(txid) {
-                    if let Err(err) = self.scan_anchors(txid, tx, anchors) {
-                        return Some(Err(err));
-                    }
-                }
-                continue;
+        while let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
+            debug_assert!(
+                !tx.is_coinbase(),
+                "Coinbase txs must not have `last_seen` (in mempool) value"
+            );
+            if !self.is_canonicalized(txid) {
+                let observed_in = ObservedIn::Mempool(last_seen);
+                self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
             }
+        }
 
-            if let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
-                debug_assert!(
-                    !tx.is_coinbase(),
-                    "Coinbase txs must not have `last_seen` (in mempool) value"
-                );
-                if !self.is_canonicalized(txid) {
-                    let observed_in = ObservedIn::Mempool(last_seen);
-                    self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
-                }
-                continue;
+        while let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
+            if !self.is_canonicalized(txid) && !tx.is_coinbase() {
+                let observed_in = ObservedIn::Block(height);
+                self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
             }
+        }
 
-            if let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
-                if !self.is_canonicalized(txid) && !tx.is_coinbase() {
-                    let observed_in = ObservedIn::Block(height);
-                    self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
-                }
-                continue;
-            }
+        if !self.canonical_roots.is_empty() {
+            let topological_iter = TopologicalIteratorWithLevels::new(
+                self.tx_graph,
+                self.chain,
+                self.chain_tip,
+                &self.canonical_ancestors,
+                self.canonical_roots.drain(..).collect(),
+            );
+            self.queue.extend(topological_iter);
+        }
 
-            return None;
+        if let Some(txid) = self.queue.pop_front() {
+            let (tx, reason) = self
+                .canonical
+                .get(&txid)
+                .cloned()
+                .expect("canonical reason must exist");
+            Some(Ok((txid, tx, reason)))
+        } else {
+            None
         }
     }
 }
@@ -340,5 +380,131 @@ impl<A: Clone> CanonicalReason<A> {
             CanonicalReason::Anchor { descendant, .. } => descendant,
             CanonicalReason::ObservedIn { descendant, .. } => descendant,
         }
+    }
+}
+
+struct TopologicalIteratorWithLevels<'a, A, C> {
+    tx_graph: &'a TxGraph<A>,
+    chain: &'a C,
+    chain_tip: BlockId,
+
+    current_level: Vec<Txid>,
+    next_level: Vec<Txid>,
+
+    adj_list: HashMap<Txid, Vec<Txid>>,
+    parent_count: HashMap<Txid, usize>,
+
+    current_index: usize,
+}
+
+impl<'a, A: Anchor, C: ChainOracle> TopologicalIteratorWithLevels<'a, A, C> {
+    fn new(
+        tx_graph: &'a TxGraph<A>,
+        chain: &'a C,
+        chain_tip: BlockId,
+        ancestors_by_txid: &HashMap<Txid, Vec<Txid>>,
+        roots: Vec<Txid>,
+    ) -> Self {
+        let mut parent_count = HashMap::new();
+        let mut adj_list: HashMap<Txid, Vec<Txid>> = HashMap::new();
+
+        for (txid, ancestors) in ancestors_by_txid {
+            for ancestor in ancestors {
+                adj_list.entry(*ancestor).or_default().push(*txid);
+                *parent_count.entry(*txid).or_insert(0) += 1;
+            }
+        }
+
+        let mut current_level: Vec<Txid> = roots.to_vec();
+
+        // Sort the initial level by confirmation height
+        current_level.sort_by_key(|&txid| {
+            let tx_node = tx_graph.get_tx_node(txid).expect("tx should exist");
+            Self::find_direct_anchor(&tx_node, chain, chain_tip)
+                .expect("should not fail")
+                .map(|anchor| anchor.confirmation_height_upper_bound())
+                .unwrap_or(u32::MAX)
+        });
+
+        Self {
+            current_level,
+            next_level: Vec::new(),
+            adj_list,
+            parent_count,
+            current_index: 0,
+            tx_graph,
+            chain,
+            chain_tip,
+        }
+    }
+
+    fn find_direct_anchor(
+        tx_node: &TxNode<'_, Arc<Transaction>, A>,
+        chain: &C,
+        chain_tip: BlockId,
+    ) -> Result<Option<A>, C::Error> {
+        tx_node
+            .anchors
+            .iter()
+            .find_map(|a| -> Option<Result<A, C::Error>> {
+                match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
+                    Ok(Some(true)) => Some(Ok(a.clone())),
+                    Ok(Some(false)) | Ok(None) => None,
+                    Err(err) => Some(Err(err)),
+                }
+            })
+            .transpose()
+    }
+
+    fn advance_to_next_level(&mut self) {
+        self.current_level = core::mem::take(&mut self.next_level);
+
+        // Sort by confirmation height
+        self.current_level.sort_by_key(|&txid| {
+            let tx_node = self.tx_graph.get_tx_node(txid).expect("tx should exist");
+
+            Self::find_direct_anchor(&tx_node, self.chain, self.chain_tip)
+                .expect("should not fail")
+                .map(|anchor| anchor.confirmation_height_upper_bound())
+                .unwrap_or(u32::MAX)
+        });
+
+        self.current_index = 0;
+    }
+}
+
+impl<'a, A: Anchor, C: ChainOracle> Iterator for TopologicalIteratorWithLevels<'a, A, C> {
+    type Item = Txid;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // If we've exhausted the current level, move to next
+        if self.current_index >= self.current_level.len() {
+            if self.next_level.is_empty() {
+                return None;
+            }
+            self.advance_to_next_level();
+        }
+
+        let current = self.current_level[self.current_index];
+        self.current_index += 1;
+
+        // If this is the last item in current level, prepare dependents for next level
+        if self.current_index == self.current_level.len() {
+            // Process all dependents of all transactions in current level
+            for &tx in &self.current_level {
+                if let Some(dependents) = self.adj_list.get(&tx) {
+                    for &dependent in dependents {
+                        if let Some(degree) = self.parent_count.get_mut(&dependent) {
+                            *degree -= 1;
+                            if *degree == 0 {
+                                self.next_level.push(dependent);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Some(current)
     }
 }
