@@ -648,6 +648,9 @@ where
         match (curr_orig.as_ref(), curr_update.as_ref()) {
             // Update block that doesn't exist in the original chain
             (o, Some(u)) if Some(u.height()) > o.map(|o| o.height()) => {
+                // Only append to `ChangeSet` when the update has complete data. Entries where
+                // `data` does not exist that are created via `prev_blockhash` should not alter the
+                // `ChangeSet`.
                 if let Some(data) = u.data() {
                     changeset.blocks.insert(u.height(), Some(data));
                 }
