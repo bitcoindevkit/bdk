@@ -1,5 +1,5 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
-use crate::tx_graph::{TxAncestors, TxDescendants, TxNode};
+use crate::tx_graph::{TxAncestors, TxDescendants};
 use crate::{Anchor, ChainOracle, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
@@ -213,20 +213,17 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 self.not_canonical.remove(&txid);
             }
         } else {
-            // TODO: (@oleonardolima) Can this be optimized somehow ?
-            // Can we just do a simple lookup on the `canonical_ancestors` field ?
             for txid in staged_queue {
                 let tx = self.tx_graph.get_tx(txid).expect("tx must exist");
-                let ancestors = tx
-                    .input
-                    .iter()
-                    .map(|txin| txin.previous_output.txid)
-                    .filter_map(|prev_txid| self.tx_graph.get_tx(prev_txid))
-                    .collect::<Vec<_>>();
+                let has_no_ancestors = self
+                    .canonical_ancestors
+                    .get(&txid)
+                    .expect("should exist")
+                    .is_empty();
 
-                // check if it's a root: it's either a coinbase transaction or has not known
-                // ancestors in the tx_graph
-                if tx.is_coinbase() || ancestors.is_empty() {
+                // check if it's a root: it's either a coinbase transaction or has no known
+                // ancestors in the tx_graph.
+                if tx.is_coinbase() || has_no_ancestors {
                     self.canonical_roots.push_back(txid);
                 }
             }
@@ -271,12 +268,18 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
         }
 
         if !self.canonical_roots.is_empty() {
-            let topological_iter = TopologicalIteratorWithLevels::new(
-                self.tx_graph,
-                self.chain,
-                self.chain_tip,
+            let topological_iter = TopologicalIter::new(
                 &self.canonical_ancestors,
                 self.canonical_roots.drain(..).collect(),
+                |txid| {
+                    let tx_node = self.tx_graph.get_tx_node(txid).expect("tx should exist");
+                    self.tx_graph
+                        .find_direct_anchor(&tx_node, self.chain, self.chain_tip)
+                        .expect("should not fail")
+                        .map(|anchor| anchor.confirmation_height_upper_bound())
+                        .unwrap_or(u32::MAX) // FIXME: (@oleonardo) should we use the `first_seen`
+                                             // instead ?
+                },
             );
             self.queue.extend(topological_iter);
         }
@@ -383,97 +386,65 @@ impl<A: Clone> CanonicalReason<A> {
     }
 }
 
-struct TopologicalIteratorWithLevels<'a, A, C> {
-    tx_graph: &'a TxGraph<A>,
-    chain: &'a C,
-    chain_tip: BlockId,
-
+struct TopologicalIter<F>
+where
+    F: FnMut(Txid) -> u32,
+{
     current_level: Vec<Txid>,
     next_level: Vec<Txid>,
 
     adj_list: HashMap<Txid, Vec<Txid>>,
-    parent_count: HashMap<Txid, usize>,
+    inputs_count: HashMap<Txid, usize>,
 
     current_index: usize,
+
+    sort_by: F,
 }
 
-impl<'a, A: Anchor, C: ChainOracle> TopologicalIteratorWithLevels<'a, A, C> {
-    fn new(
-        tx_graph: &'a TxGraph<A>,
-        chain: &'a C,
-        chain_tip: BlockId,
-        ancestors_by_txid: &HashMap<Txid, Vec<Txid>>,
-        roots: Vec<Txid>,
-    ) -> Self {
-        let mut parent_count = HashMap::new();
+impl<F> TopologicalIter<F>
+where
+    F: FnMut(bitcoin::Txid) -> u32,
+{
+    fn new(ancestors: &HashMap<Txid, Vec<Txid>>, roots: Vec<Txid>, mut sort_by: F) -> Self {
+        let mut inputs_count = HashMap::new();
         let mut adj_list: HashMap<Txid, Vec<Txid>> = HashMap::new();
 
-        for (txid, ancestors) in ancestors_by_txid {
+        for (txid, ancestors) in ancestors {
             for ancestor in ancestors {
                 adj_list.entry(*ancestor).or_default().push(*txid);
-                *parent_count.entry(*txid).or_insert(0) += 1;
+                *inputs_count.entry(*txid).or_insert(0) += 1;
             }
         }
 
         let mut current_level: Vec<Txid> = roots.to_vec();
 
-        // Sort the initial level by confirmation height
-        current_level.sort_by_key(|&txid| {
-            let tx_node = tx_graph.get_tx_node(txid).expect("tx should exist");
-            Self::find_direct_anchor(&tx_node, chain, chain_tip)
-                .expect("should not fail")
-                .map(|anchor| anchor.confirmation_height_upper_bound())
-                .unwrap_or(u32::MAX)
-        });
+        // sort the level by confirmation height
+        current_level.sort_by_key(|txid| sort_by(*txid));
 
         Self {
             current_level,
             next_level: Vec::new(),
             adj_list,
-            parent_count,
+            inputs_count,
             current_index: 0,
-            tx_graph,
-            chain,
-            chain_tip,
+            sort_by,
         }
-    }
-
-    fn find_direct_anchor(
-        tx_node: &TxNode<'_, Arc<Transaction>, A>,
-        chain: &C,
-        chain_tip: BlockId,
-    ) -> Result<Option<A>, C::Error> {
-        tx_node
-            .anchors
-            .iter()
-            .find_map(|a| -> Option<Result<A, C::Error>> {
-                match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
-                    Ok(Some(true)) => Some(Ok(a.clone())),
-                    Ok(Some(false)) | Ok(None) => None,
-                    Err(err) => Some(Err(err)),
-                }
-            })
-            .transpose()
     }
 
     fn advance_to_next_level(&mut self) {
         self.current_level = core::mem::take(&mut self.next_level);
 
-        // Sort by confirmation height
-        self.current_level.sort_by_key(|&txid| {
-            let tx_node = self.tx_graph.get_tx_node(txid).expect("tx should exist");
-
-            Self::find_direct_anchor(&tx_node, self.chain, self.chain_tip)
-                .expect("should not fail")
-                .map(|anchor| anchor.confirmation_height_upper_bound())
-                .unwrap_or(u32::MAX)
-        });
+        // sort the level by confirmation height
+        self.current_level.sort_by_key(|&txid| (self.sort_by)(txid));
 
         self.current_index = 0;
     }
 }
 
-impl<'a, A: Anchor, C: ChainOracle> Iterator for TopologicalIteratorWithLevels<'a, A, C> {
+impl<F> Iterator for TopologicalIter<F>
+where
+    F: FnMut(bitcoin::Txid) -> u32,
+{
     type Item = Txid;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -494,7 +465,7 @@ impl<'a, A: Anchor, C: ChainOracle> Iterator for TopologicalIteratorWithLevels<'
             for &tx in &self.current_level {
                 if let Some(dependents) = self.adj_list.get(&tx) {
                     for &dependent in dependents {
-                        if let Some(degree) = self.parent_count.get_mut(&dependent) {
+                        if let Some(degree) = self.inputs_count.get_mut(&dependent) {
                             *degree -= 1;
                             if *degree == 0 {
                                 self.next_level.push(dependent);
