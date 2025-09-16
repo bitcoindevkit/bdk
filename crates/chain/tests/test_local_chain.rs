@@ -11,7 +11,7 @@ use bdk_chain::{
     BlockId,
 };
 use bdk_testenv::{chain_update, hash, local_chain};
-use bitcoin::{block::Header, hashes::Hash, BlockHash};
+use bitcoin::{block::Header, hashes::Hash, BlockHash, CompactTarget, TxMerkleNode};
 use proptest::prelude::*;
 
 #[derive(Debug)]
@@ -471,6 +471,160 @@ fn local_chain_insert_header() {
             "[{i}] unexpected result when inserting block",
         );
         assert_eq!(chain, t.expected_final, "[{i}] unexpected final chain",);
+    }
+}
+
+/// Validates `merge_chains` behavior on chains that contain placeholder checkpoints (`data: None`).
+///
+/// Placeholders are created when a `CheckPoint`’s `prev_blockhash` references a block at a height
+/// with no stored checkpoint. This test ensures `merge_chains` handles them correctly and that the
+/// resulting chain never exposes a placeholder checkpoint.
+#[test]
+fn merge_chains_handles_placeholders() {
+    fn header(prev_blockhash: bitcoin::BlockHash, nonce: u32) -> Header {
+        Header {
+            version: bitcoin::block::Version::default(),
+            prev_blockhash,
+            merkle_root: TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: CompactTarget::default(),
+            nonce,
+        }
+    }
+
+    fn local_chain(blocks: Vec<(u32, Header)>) -> LocalChain<Header> {
+        LocalChain::from_blocks(blocks.into_iter().collect::<BTreeMap<_, _>>())
+            .expect("chain must have genesis block")
+    }
+
+    fn update_chain(blocks: &[(u32, Header)]) -> CheckPoint<Header> {
+        CheckPoint::from_blocks(blocks.iter().copied()).expect("checkpoint must be valid")
+    }
+
+    let a = header(hash!("genesis"), 0);
+    let b = header(a.block_hash(), 0);
+    let c = header(b.block_hash(), 0);
+    let d = header(c.block_hash(), 0);
+    let e = header(d.block_hash(), 0);
+
+    // Set a different `nonce` for conflicting `Header`s to ensure different `BlockHash`.
+    let c_conflict = header(b.block_hash(), 1);
+    let d_conflict = header(c_conflict.block_hash(), 1);
+
+    struct TestCase {
+        name: &'static str,
+        updates: Vec<CheckPoint<Header>>,
+        invalidate_heights: Vec<u32>,
+        expected_placeholder_heights: Vec<u32>,
+        expected_chain: LocalChain<Header>,
+    }
+
+    let test_cases = [
+        // Test case 1: Create a placeholder for B via C and a placeholder for D via E.
+        TestCase {
+            name: "insert_placeholder",
+            updates: vec![update_chain(&[(0, a), (2, c), (4, e)])],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![1, 3],
+            expected_chain: local_chain(vec![(0, a), (2, c), (4, e)]),
+        },
+        // Test cast 2: Create a placeholder for B via C, then update provides conflicting C'.
+        TestCase {
+            name: "conflict_at_tip_keeps_placeholder",
+            updates: vec![
+                update_chain(&[(0, a), (2, c)]),
+                update_chain(&[(2, c_conflict)]),
+            ],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![1],
+            expected_chain: local_chain(vec![(0, a), (1, b), (2, c_conflict)]),
+        },
+        // Test case 3: Create placeholder for C via D.
+        TestCase {
+            name: "conflict_at_filled_height",
+            updates: vec![update_chain(&[(0, a), (3, d)])],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![2],
+            expected_chain: local_chain(vec![(0, a), (3, d)]),
+        },
+        // Test case 4: Create placeholder for C via D, then insert conflicting C' which should
+        // drop D and replace C.
+        TestCase {
+            name: "conflict_at_filled_height",
+            updates: vec![
+                update_chain(&[(0, a), (3, d)]),
+                update_chain(&[(0, a), (2, c_conflict)]),
+            ],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![1],
+            expected_chain: local_chain(vec![(0, a), (2, c_conflict)]),
+        },
+        // Test case 5: Create placeholder for B via C, then invalidate C.
+        TestCase {
+            name: "invalidate_tip_falls_back",
+            updates: vec![update_chain(&[(0, a), (2, c)])],
+            invalidate_heights: vec![2],
+            expected_placeholder_heights: vec![],
+            expected_chain: local_chain(vec![(0, a)]),
+        },
+        // Test case 6: Create placeholder for C via D, then insert D' which has `prev_blockhash`
+        // that does not point to C. TODO: Handle error?
+        TestCase {
+            name: "expected_error",
+            updates: vec![
+                update_chain(&[(0, a), (3, d)]),
+                update_chain(&[(3, d_conflict)]),
+            ],
+            invalidate_heights: vec![],
+            expected_placeholder_heights: vec![2],
+            expected_chain: local_chain(vec![(0, a), (3, d)]),
+        },
+    ];
+
+    for (i, t) in test_cases.into_iter().enumerate() {
+        let mut chain = local_chain(vec![(0, a)]);
+        for upd in t.updates {
+            // If `apply_update` errors, it is because the new chain cannot be merged. So it should
+            // follow that this validates behavior if the final `expected_chain` state is correct.
+            if chain.apply_update(upd).is_ok() {
+                if !t.invalidate_heights.is_empty() {
+                    let cs: ChangeSet<Header> = t
+                        .invalidate_heights
+                        .iter()
+                        .copied()
+                        .map(|h| (h, None))
+                        .collect();
+                    chain.apply_changeset(&cs).expect("changeset should apply");
+                }
+
+                // Ensure we never end up with a placeholder tip.
+                assert!(
+                    chain.tip().data_ref().is_some(),
+                    "[{}] {}: tip must always be materialized",
+                    i,
+                    t.name
+                );
+            }
+        }
+
+        let mut placeholder_heights = chain
+            .tip()
+            .iter()
+            .filter(|cp| cp.data_ref().is_none())
+            .map(|cp| cp.height())
+            .collect::<Vec<_>>();
+        placeholder_heights.sort();
+        assert_eq!(
+            placeholder_heights, t.expected_placeholder_heights,
+            "[{}] {}: placeholder height mismatch",
+            i, t.name
+        );
+
+        assert_eq!(
+            chain, t.expected_chain,
+            "[{}] {}: unexpected final chain",
+            i, t.name
+        );
     }
 }
 
