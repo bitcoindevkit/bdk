@@ -213,6 +213,11 @@ where
 {
     /// Construct a new base [`CheckPoint`] from given `height` and `data` at the front of a linked
     /// list.
+    ///
+    /// If `data` contains previous block via [`ToBlockHash::prev_blockhash`], this will also create
+    /// a placeholder checkpoint at `height - 1` with that hash and with `data: None`, and link the
+    /// new checkpoint to it. The placeholder can be materialized later by inserting data at its
+    /// height.
     pub fn new(height: u32, data: D) -> Self {
         // If `data` has a `prev_blockhash`, create a placeholder checkpoint one height below.
         let prev = if height > 0 {
@@ -272,8 +277,10 @@ where
     /// The effect of `insert` depends on whether a height already exists. If it doesn't, the data
     /// we inserted and all pre-existing entries higher than it will be re-inserted after it. If the
     /// height already existed and has a conflicting block hash then it will be purged along with
-    /// all entries following it. The returned chain will have a tip of the data passed in. Of
-    /// course, if the data was already present then this just returns `self`.
+    /// all entries following it. If the existing checkpoint at height is a placeholder where
+    /// `data: None` with the same hash, then the `data` is inserted to make a complete checkpoint.
+    /// The returned chain will have a tip of the data passed in. If the data was already present
+    /// then this just returns `self`. This method does not create new placeholders.
     ///
     /// # Panics
     ///
