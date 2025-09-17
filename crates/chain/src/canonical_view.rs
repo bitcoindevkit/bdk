@@ -355,7 +355,7 @@ impl<A: Anchor> CanonicalView<A> {
     pub fn balance<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
-        mut trust_predicate: impl FnMut(&O, ScriptBuf) -> bool,
+        mut trust_predicate: impl FnMut(&O, &FullTxOut<A>) -> bool,
         additional_confirmations: u32,
     ) -> Balance {
         let mut immature = Amount::ZERO;
@@ -376,7 +376,7 @@ impl<A: Anchor> CanonicalView<A> {
 
                     if confirmations < required_confirmations {
                         // Not enough confirmations, treat as trusted/untrusted pending
-                        if trust_predicate(&spk_i, txout.txout.script_pubkey) {
+                        if trust_predicate(&spk_i, &txout) {
                             trusted_pending += txout.txout.value;
                         } else {
                             untrusted_pending += txout.txout.value;
@@ -388,7 +388,7 @@ impl<A: Anchor> CanonicalView<A> {
                     }
                 }
                 ChainPosition::Unconfirmed { .. } => {
-                    if trust_predicate(&spk_i, txout.txout.script_pubkey) {
+                    if trust_predicate(&spk_i, &txout) {
                         trusted_pending += txout.txout.value;
                     } else {
                         untrusted_pending += txout.txout.value;

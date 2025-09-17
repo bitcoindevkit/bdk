@@ -5,7 +5,7 @@ mod common;
 
 use bdk_chain::{local_chain::LocalChain, Balance, BlockId};
 use bdk_testenv::{block_id, hash, local_chain};
-use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf};
+use bitcoin::{Amount, BlockHash, OutPoint};
 use common::*;
 use std::collections::{BTreeSet, HashSet};
 
@@ -1032,8 +1032,12 @@ fn test_tx_conflict_handling() {
             .canonical_view(&local_chain, chain_tip, env.canonicalization_params.clone())
             .balance(
                 env.indexer.outpoints().iter().cloned(),
-                |_, spk: ScriptBuf| env.indexer.index_of_spk(spk).is_some(),
-                1,
+                |_, txout| {
+                    env.indexer
+                        .index_of_spk(txout.txout.script_pubkey.clone())
+                        .is_some()
+                },
+                0,
             );
         assert_eq!(
             balance, scenario.exp_balance,
