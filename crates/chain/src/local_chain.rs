@@ -1,6 +1,5 @@
 //! The [`LocalChain`] is a local implementation of [`ChainOracle`].
 
-use core::convert::Infallible;
 use core::fmt;
 use core::ops::RangeBounds;
 
@@ -70,27 +69,20 @@ impl<D> PartialEq for LocalChain<D> {
 }
 
 impl<D> ChainOracle for LocalChain<D> {
-    type Error = Infallible;
-
-    fn is_block_in_chain(
-        &self,
-        block: BlockId,
-        chain_tip: BlockId,
-    ) -> Result<Option<bool>, Self::Error> {
+    fn is_block_in_chain(&self, block: BlockId, chain_tip: BlockId) -> Option<bool> {
         let chain_tip_cp = match self.tip.get(chain_tip.height) {
             // we can only determine whether `block` is in chain of `chain_tip` if `chain_tip` can
             // be identified in chain
             Some(cp) if cp.hash() == chain_tip.hash => cp,
-            _ => return Ok(None),
+            _ => return None,
         };
-        match chain_tip_cp.get(block.height) {
-            Some(cp) => Ok(Some(cp.hash() == block.hash)),
-            None => Ok(None),
-        }
+        chain_tip_cp
+            .get(block.height)
+            .map(|cp| cp.hash() == block.hash)
     }
 
-    fn get_chain_tip(&self) -> Result<BlockId, Self::Error> {
-        Ok(self.tip.block_id())
+    fn get_chain_tip(&self) -> BlockId {
+        self.tip.block_id()
     }
 }
 

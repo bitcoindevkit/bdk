@@ -85,19 +85,14 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
     }
 
     /// Mark transaction as canonical if it is anchored in the best chain.
-    fn scan_anchors(
-        &mut self,
-        txid: Txid,
-        tx: Arc<Transaction>,
-        anchors: &BTreeSet<A>,
-    ) -> Result<(), C::Error> {
+    fn scan_anchors(&mut self, txid: Txid, tx: Arc<Transaction>, anchors: &BTreeSet<A>) {
         for anchor in anchors {
             let in_chain_opt = self
                 .chain
-                .is_block_in_chain(anchor.anchor_block(), self.chain_tip)?;
+                .is_block_in_chain(anchor.anchor_block(), self.chain_tip);
             if in_chain_opt == Some(true) {
                 self.mark_canonical(txid, tx, CanonicalReason::from_anchor(anchor.clone()));
-                return Ok(());
+                return;
             }
         }
         // cannot determine
@@ -112,7 +107,6 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 )
                 .confirmation_height_upper_bound(),
         ));
-        Ok(())
     }
 
     /// Marks `tx` and it's ancestors as canonical and mark all conflicts of these as
@@ -201,7 +195,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
 }
 
 impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
-    type Item = Result<(Txid, Arc<Transaction>, CanonicalReason<A>), C::Error>;
+    type Item = (Txid, Arc<Transaction>, CanonicalReason<A>);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -211,7 +205,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
                     .get(&txid)
                     .cloned()
                     .expect("reason must exist");
-                return Some(Ok((txid, tx, reason)));
+                return Some((txid, tx, reason));
             }
 
             if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
@@ -222,9 +216,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
 
             if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
                 if !self.is_canonicalized(txid) {
-                    if let Err(err) = self.scan_anchors(txid, tx, anchors) {
-                        return Some(Err(err));
-                    }
+                    self.scan_anchors(txid, tx, anchors);
                 }
                 continue;
             }

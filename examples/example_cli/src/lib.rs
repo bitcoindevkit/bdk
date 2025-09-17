@@ -268,10 +268,7 @@ pub fn create_tx<O: ChainOracle>(
     address: Address,
     value: u64,
     feerate: f32,
-) -> anyhow::Result<(Psbt, Option<ChangeInfo>)>
-where
-    O::Error: std::error::Error + Send + Sync + 'static,
-{
+) -> anyhow::Result<(Psbt, Option<ChangeInfo>)> {
     let mut changeset = keychain_txout::ChangeSet::default();
 
     // get planned utxos
@@ -395,7 +392,7 @@ where
         lock_time: assets
             .absolute_timelock
             .unwrap_or(absolute::LockTime::from_height(
-                chain.get_chain_tip()?.height,
+                chain.get_chain_tip().height,
             )?),
         input: selected
             .iter()
@@ -428,17 +425,17 @@ pub fn planned_utxos<O: ChainOracle>(
     graph: &KeychainTxGraph,
     chain: &O,
     assets: &Assets,
-) -> Result<Vec<PlanUtxo>, O::Error> {
-    let chain_tip = chain.get_chain_tip()?;
+) -> anyhow::Result<Vec<PlanUtxo>> {
+    let chain_tip = chain.get_chain_tip();
     let outpoints = graph.index.outpoints();
     graph
         .graph()
-        .try_filter_chain_unspents(
+        .filter_chain_unspents(
             chain,
             chain_tip,
             CanonicalizationParams::default(),
             outpoints.iter().cloned(),
-        )?
+        )
         .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
             let desc = graph
                 .index
@@ -529,13 +526,13 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 }
             }
 
-            let balance = graph.graph().try_balance(
+            let balance = graph.graph().balance(
                 chain,
-                chain.get_chain_tip()?,
+                chain.get_chain_tip(),
                 CanonicalizationParams::default(),
                 graph.index.outpoints().iter().cloned(),
                 |(k, _), _| k == &Keychain::Internal,
-            )?;
+            );
 
             let confirmed_total = balance.confirmed + balance.immature;
             let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;
@@ -562,7 +559,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
         Commands::TxOut { txout_cmd } => {
             let graph = &*graph.lock().unwrap();
             let chain = &*chain.lock().unwrap();
-            let chain_tip = chain.get_chain_tip()?;
+            let chain_tip = chain.get_chain_tip();
             let outpoints = graph.index.outpoints();
 
             match txout_cmd {
@@ -574,12 +571,12 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 } => {
                     let txouts = graph
                         .graph()
-                        .try_filter_chain_txouts(
+                        .filter_chain_txouts(
                             chain,
                             chain_tip,
                             CanonicalizationParams::default(),
                             outpoints.iter().cloned(),
-                        )?
+                        )
                         .filter(|(_, full_txo)| match (spent, unspent) {
                             (true, false) => full_txo.spent_by.is_some(),
                             (false, true) => full_txo.spent_by.is_none(),
