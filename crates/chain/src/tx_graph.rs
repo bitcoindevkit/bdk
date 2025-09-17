@@ -998,7 +998,7 @@ impl<A: Anchor> TxGraph<A> {
         chain: &'a C,
         chain_tip: BlockId,
         params: CanonicalizationParams,
-    ) -> impl Iterator<Item = Result<CanonicalTx<'a, Arc<Transaction>, A>, C::Error>> {
+    ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
         fn find_direct_anchor<A: Anchor, C: ChainOracle>(
             tx_node: &TxNode<'_, Arc<Transaction>, A>,
             chain: &C,
@@ -1016,60 +1016,61 @@ impl<A: Anchor> TxGraph<A> {
                 })
                 .transpose()
         }
-        self.canonical_iter(chain, chain_tip, params)
-            .flat_map(move |res| {
-                res.map(|(txid, _, canonical_reason)| {
-                    let tx_node = self.get_tx_node(txid).expect("must contain tx");
-                    let chain_position = match canonical_reason {
-                        CanonicalReason::Assumed { descendant } => match descendant {
-                            Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                                Some(anchor) => ChainPosition::Confirmed {
-                                    anchor,
-                                    transitively: None,
-                                },
-                                None => ChainPosition::Unconfirmed {
-                                    first_seen: tx_node.first_seen,
-                                    last_seen: tx_node.last_seen,
-                                },
-                            },
-                            None => ChainPosition::Unconfirmed {
-                                first_seen: tx_node.first_seen,
-                                last_seen: tx_node.last_seen,
-                            },
+        self.canonical_iter(params, move |block_id: BlockId| -> Option<bool> {
+            // FIXME: (@leonardolima) how should we handle the error from ChainOracle ?
+            chain.is_block_in_chain(block_id, chain_tip).unwrap_or_default()
+        })
+        .flat_map(move |(txid, _, canonical_reason)| -> Result<CanonicalTx<'_, Arc<Transaction>, A>, C::Error> {
+            let tx_node = self.get_tx_node(txid).expect("must contain tx");
+            let chain_position = match canonical_reason {
+                CanonicalReason::Assumed { descendant } => match descendant {
+                    Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
+                        Some(anchor) => ChainPosition::Confirmed {
+                            anchor,
+                            transitively: None,
                         },
-                        CanonicalReason::Anchor { anchor, descendant } => match descendant {
-                            Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                                Some(anchor) => ChainPosition::Confirmed {
-                                    anchor,
-                                    transitively: None,
-                                },
-                                None => ChainPosition::Confirmed {
-                                    anchor,
-                                    transitively: descendant,
-                                },
-                            },
-                            None => ChainPosition::Confirmed {
-                                anchor,
-                                transitively: None,
-                            },
+                        None => ChainPosition::Unconfirmed {
+                            first_seen: tx_node.first_seen,
+                            last_seen: tx_node.last_seen,
                         },
-                        CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
-                            ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
-                                first_seen: tx_node.first_seen,
-                                last_seen: Some(last_seen),
-                            },
-                            ObservedIn::Block(_) => ChainPosition::Unconfirmed {
-                                first_seen: tx_node.first_seen,
-                                last_seen: None,
-                            },
+                    },
+                    None => ChainPosition::Unconfirmed {
+                        first_seen: tx_node.first_seen,
+                        last_seen: tx_node.last_seen,
+                    },
+                },
+                CanonicalReason::Anchor { anchor, descendant } => match descendant {
+                    Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
+                        Some(anchor) => ChainPosition::Confirmed {
+                            anchor,
+                            transitively: None,
                         },
-                    };
-                    Ok(CanonicalTx {
-                        chain_position,
-                        tx_node,
-                    })
-                })
+                        None => ChainPosition::Confirmed {
+                            anchor,
+                            transitively: descendant,
+                        },
+                    },
+                    None => ChainPosition::Confirmed {
+                        anchor,
+                        transitively: None,
+                    },
+                },
+                CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
+                    ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
+                        first_seen: tx_node.first_seen,
+                        last_seen: Some(last_seen),
+                    },
+                    ObservedIn::Block(_) => ChainPosition::Unconfirmed {
+                        first_seen: tx_node.first_seen,
+                        last_seen: None,
+                    },
+                },
+            };
+            Ok(CanonicalTx {
+                chain_position,
+                tx_node,
             })
+        })
     }
 
     /// List graph transactions that are in `chain` with `chain_tip`.
@@ -1084,7 +1085,6 @@ impl<A: Anchor> TxGraph<A> {
         params: CanonicalizationParams,
     ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
         self.try_list_canonical_txs(chain, chain_tip, params)
-            .map(|res| res.expect("infallible"))
     }
 
     /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
@@ -1116,7 +1116,7 @@ impl<A: Anchor> TxGraph<A> {
         let mut canon_txs = HashMap::<Txid, CanonicalTx<Arc<Transaction>, A>>::new();
         let mut canon_spends = HashMap::<OutPoint, Txid>::new();
         for r in self.try_list_canonical_txs(chain, chain_tip, params) {
-            let canonical_tx = r?;
+            let canonical_tx = r;
             let txid = canonical_tx.tx_node.txid;
 
             if !canonical_tx.tx_node.tx.is_coinbase() {
@@ -1183,13 +1183,15 @@ impl<A: Anchor> TxGraph<A> {
     }
 
     /// Returns a [`CanonicalIter`].
-    pub fn canonical_iter<'a, C: ChainOracle>(
+    pub fn canonical_iter<'a, F>(
         &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
         params: CanonicalizationParams,
-    ) -> CanonicalIter<'a, A, C> {
-        CanonicalIter::new(self, chain, chain_tip, params)
+        is_block_in_chain: F,
+    ) -> CanonicalIter<'a, A, F>
+    where
+        F: FnMut(BlockId) -> Option<bool>,
+    {
+        CanonicalIter::new(self, params, is_block_in_chain)
     }
 
     /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
@@ -1416,12 +1418,13 @@ impl<A: Anchor> TxGraph<A> {
     {
         let indexer = indexer.as_ref();
         self.try_list_canonical_txs(chain, chain_tip, CanonicalizationParams::default())
-            .flat_map(move |res| -> Vec<Result<(ScriptBuf, Txid), C::Error>> {
+            .flat_map(move |c_tx| -> Vec<Result<(ScriptBuf, Txid), C::Error>> {
                 let range = &spk_index_range;
-                let c_tx = match res {
-                    Ok(c_tx) => c_tx,
-                    Err(err) => return vec![Err(err)],
-                };
+                // FIXME: (@oleonardolima) should we handle the error here somehow ?
+                // let c_tx = match res {
+                //     Ok(c_tx) => c_tx,
+                //     Err(err) => return vec![Err(err)],
+                // };
                 let relevant_spks = indexer.relevant_spks_of_tx(&c_tx.tx_node);
                 relevant_spks
                     .into_iter()
