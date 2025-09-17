@@ -2,28 +2,28 @@
 
 use bdk_chain::{local_chain::LocalChain, CanonicalizationParams, ConfirmationBlockTime, TxGraph};
 use bdk_testenv::{hash, utils::new_tx};
-use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use std::collections::BTreeMap;
 
 #[test]
-fn test_min_confirmations_parameter() {
+fn test_additional_confirmations_parameter() {
     // Create a local chain with several blocks
-    let chain = LocalChain::from_blocks(
-        [
-            (0, hash!("block0")),
-            (1, hash!("block1")),
-            (2, hash!("block2")),
-            (3, hash!("block3")),
-            (4, hash!("block4")),
-            (5, hash!("block5")),
-            (6, hash!("block6")),
-            (7, hash!("block7")),
-            (8, hash!("block8")),
-            (9, hash!("block9")),
-            (10, hash!("block10")),
-        ]
-        .into(),
-    )
-    .unwrap();
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("block0")),
+        (1, hash!("block1")),
+        (2, hash!("block2")),
+        (3, hash!("block3")),
+        (4, hash!("block4")),
+        (5, hash!("block5")),
+        (6, hash!("block6")),
+        (7, hash!("block7")),
+        (8, hash!("block8")),
+        (9, hash!("block9")),
+        (10, hash!("block10")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
 
     let mut tx_graph = TxGraph::default();
 
@@ -56,35 +56,35 @@ fn test_min_confirmations_parameter() {
     let canonical_view =
         tx_graph.canonical_view(&chain, chain_tip, CanonicalizationParams::default());
 
-    // Test min_confirmations = 1: Should be confirmed (has 6 confirmations)
+    // Test additional_confirmations = 0: Should be confirmed (has 6 confirmations, needs 1)
     let balance_1_conf = canonical_view.balance(
         [((), outpoint)],
         |_, _| true, // trust all
-        1,
+        0,
     );
 
     assert_eq!(balance_1_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_1_conf.trusted_pending, Amount::ZERO);
 
-    // Test min_confirmations = 6: Should be confirmed (has exactly 6 confirmations)
+    // Test additional_confirmations = 5: Should be confirmed (has 6 confirmations, needs 6)
     let balance_6_conf = canonical_view.balance(
         [((), outpoint)],
         |_, _| true, // trust all
-        6,
+        5,
     );
     assert_eq!(balance_6_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_6_conf.trusted_pending, Amount::ZERO);
 
-    // Test min_confirmations = 7: Should be trusted pending (only has 6 confirmations)
+    // Test additional_confirmations = 6: Should be trusted pending (has 6 confirmations, needs 7)
     let balance_7_conf = canonical_view.balance(
         [((), outpoint)],
         |_, _| true, // trust all
-        7,
+        6,
     );
     assert_eq!(balance_7_conf.confirmed, Amount::ZERO);
     assert_eq!(balance_7_conf.trusted_pending, Amount::from_sat(50_000));
 
-    // Test min_confirmations = 0: Should behave same as 1 (confirmed)
+    // Test additional_confirmations = 0: Should be confirmed
     let balance_0_conf = canonical_view.balance(
         [((), outpoint)],
         |_, _| true, // trust all
@@ -92,29 +92,27 @@ fn test_min_confirmations_parameter() {
     );
     assert_eq!(balance_0_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_0_conf.trusted_pending, Amount::ZERO);
-    assert_eq!(balance_0_conf, balance_1_conf);
 }
 
 #[test]
-fn test_min_confirmations_with_untrusted_tx() {
+fn test_additional_confirmations_with_untrusted_tx() {
     // Create a local chain
-    let chain = LocalChain::from_blocks(
-        [
-            (0, hash!("genesis")),
-            (1, hash!("b1")),
-            (2, hash!("b2")),
-            (3, hash!("b3")),
-            (4, hash!("b4")),
-            (5, hash!("b5")),
-            (6, hash!("b6")),
-            (7, hash!("b7")),
-            (8, hash!("b8")),
-            (9, hash!("b9")),
-            (10, hash!("tip")),
-        ]
-        .into(),
-    )
-    .unwrap();
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("genesis")),
+        (1, hash!("b1")),
+        (2, hash!("b2")),
+        (3, hash!("b3")),
+        (4, hash!("b4")),
+        (5, hash!("b5")),
+        (6, hash!("b6")),
+        (7, hash!("b7")),
+        (8, hash!("b8")),
+        (9, hash!("b9")),
+        (10, hash!("tip")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
 
     let mut tx_graph = TxGraph::default();
 
@@ -148,11 +146,11 @@ fn test_min_confirmations_with_untrusted_tx() {
         CanonicalizationParams::default(),
     );
 
-    // Test with min_confirmations = 5 and untrusted predicate
+    // Test with additional_confirmations = 4 and untrusted predicate (requires 5 total)
     let balance = canonical_view.balance(
         [((), outpoint)],
         |_, _| false, // don't trust
-        5,
+        4,
     );
 
     // Should be untrusted pending (not enough confirmations and not trusted)
@@ -162,30 +160,29 @@ fn test_min_confirmations_with_untrusted_tx() {
 }
 
 #[test]
-fn test_min_confirmations_multiple_transactions() {
+fn test_additional_confirmations_multiple_transactions() {
     // Create a local chain
-    let chain = LocalChain::from_blocks(
-        [
-            (0, hash!("genesis")),
-            (1, hash!("b1")),
-            (2, hash!("b2")),
-            (3, hash!("b3")),
-            (4, hash!("b4")),
-            (5, hash!("b5")),
-            (6, hash!("b6")),
-            (7, hash!("b7")),
-            (8, hash!("b8")),
-            (9, hash!("b9")),
-            (10, hash!("b10")),
-            (11, hash!("b11")),
-            (12, hash!("b12")),
-            (13, hash!("b13")),
-            (14, hash!("b14")),
-            (15, hash!("tip")),
-        ]
-        .into(),
-    )
-    .unwrap();
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("genesis")),
+        (1, hash!("b1")),
+        (2, hash!("b2")),
+        (3, hash!("b3")),
+        (4, hash!("b4")),
+        (5, hash!("b5")),
+        (6, hash!("b6")),
+        (7, hash!("b7")),
+        (8, hash!("b8")),
+        (9, hash!("b9")),
+        (10, hash!("b10")),
+        (11, hash!("b11")),
+        (12, hash!("b12")),
+        (13, hash!("b13")),
+        (14, hash!("b14")),
+        (15, hash!("tip")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
 
     let mut tx_graph = TxGraph::default();
 
@@ -270,11 +267,11 @@ fn test_min_confirmations_multiple_transactions() {
         CanonicalizationParams::default(),
     );
 
-    // Test with min_confirmations = 5
+    // Test with additional_confirmations = 4 (requires 5 total)
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> confirmed
     // tx2: 3 confirmations -> trusted pending
-    let balance = canonical_view.balance(outpoints.clone(), |_, _| true, 5);
+    let balance = canonical_view.balance(outpoints.clone(), |_, _| true, 4);
 
     assert_eq!(
         balance.confirmed,
@@ -286,11 +283,11 @@ fn test_min_confirmations_multiple_transactions() {
     );
     assert_eq!(balance.untrusted_pending, Amount::ZERO);
 
-    // Test with min_confirmations = 10
+    // Test with additional_confirmations = 9 (requires 10 total)
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> trusted pending
     // tx2: 3 confirmations -> trusted pending
-    let balance_high = canonical_view.balance(outpoints, |_, _| true, 10);
+    let balance_high = canonical_view.balance(outpoints, |_, _| true, 9);
 
     assert_eq!(
         balance_high.confirmed,

@@ -60,12 +60,12 @@ pub struct CanonicalTx<A> {
 /// provides methods to query transaction data, unspent outputs, and balances.
 ///
 /// The view maintains:
-/// - An ordered list of canonical transactions (WIP)
+/// - An ordered list of canonical transactions in topological-spending order
 /// - A mapping of outpoints to the transactions that spend them
 /// - The chain tip used for canonicalization
 #[derive(Debug)]
 pub struct CanonicalView<A> {
-    /// Ordered list of transaction IDs in canonical order.
+    /// Ordered list of transaction IDs in topological-spending order.
     order: Vec<Txid>,
     /// Map of transaction IDs to their transaction data and chain position.
     txs: HashMap<Txid, (Arc<Transaction>, ChainPosition<A>)>,
@@ -119,7 +119,7 @@ impl<A: Anchor> CanonicalView<A> {
         };
 
         for r in CanonicalIter::new(tx_graph, chain, chain_tip, params) {
-            let (txid, tx, why) = r?;
+            let (txid, tx, reason) = r?;
 
             let tx_node = match tx_graph.get_tx_node(txid) {
                 Some(tx_node) => tx_node,
@@ -137,7 +137,7 @@ impl<A: Anchor> CanonicalView<A> {
                     .extend(tx.input.iter().map(|txin| (txin.previous_output, txid)));
             }
 
-            let pos = match why {
+            let pos = match reason {
                 CanonicalReason::Assumed { descendant } => match descendant {
                     Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
                         Some(anchor) => ChainPosition::Confirmed {
@@ -189,8 +189,8 @@ impl<A: Anchor> CanonicalView<A> {
 
     /// Get a single canonical transaction by its transaction ID.
     ///
-    /// Returns `Some(CanonicalViewTx)` if the transaction exists in the canonical view,
-    /// or `None` if the transaction doesn't exist or was excluded due to conflicts.
+    /// Returns `Some(CanonicalTx)` if the transaction exists in the canonical view,
+    /// or `None` if it doesn't exist.
     pub fn tx(&self, txid: Txid) -> Option<CanonicalTx<A>> {
         self.txs
             .get(&txid)
@@ -206,7 +206,6 @@ impl<A: Anchor> CanonicalView<A> {
     /// Returns `None` if:
     /// - The transaction doesn't exist in the canonical view
     /// - The output index is out of bounds
-    /// - The transaction was excluded due to conflicts
     pub fn txout(&self, op: OutPoint) -> Option<FullTxOut<A>> {
         let (tx, pos) = self.txs.get(&op.txid)?;
         let vout: usize = op.vout.try_into().ok()?;
@@ -226,8 +225,9 @@ impl<A: Anchor> CanonicalView<A> {
 
     /// Get an iterator over all canonical transactions in order.
     ///
-    /// Transactions are returned in canonical order, with confirmed transactions ordered by
-    /// block height and position, followed by unconfirmed transactions.
+    /// Transactions are returned in topological-spending order, where ancestors appear before
+    /// their descendants (i.e., transactions that spend outputs come after the transactions
+    /// that create those outputs).
     ///
     /// # Example
     ///
@@ -326,16 +326,14 @@ impl<A: Anchor> CanonicalView<A> {
     /// * `trust_predicate` - Function that returns `true` for trusted scripts. Trusted outputs
     ///   count toward `trusted_pending` balance, while untrusted ones count toward
     ///   `untrusted_pending`
-    /// * `min_confirmations` - Minimum confirmations required for an output to be considered
-    ///   confirmed. Outputs with fewer confirmations are treated as pending.
+    /// * `additional_confirmations` - Additional confirmations required beyond the first one.
+    ///   Outputs with fewer than (1 + additional_confirmations) are treated as pending.
     ///
-    /// # Minimum Confirmations
+    /// # Additional Confirmations
     ///
-    /// The `min_confirmations` parameter controls when outputs are considered confirmed. A
-    /// `min_confirmations` value of `0` is equivalent to `1` (require at least 1 confirmation).
-    ///
-    /// Outputs with fewer than `min_confirmations` are categorized as pending (trusted or
-    /// untrusted based on the trust predicate).
+    /// The `additional_confirmations` parameter specifies how many confirmations beyond the
+    /// first one are required. For example, `additional_confirmations = 5` means 6 total
+    /// confirmations are required (1 + 5).
     ///
     /// # Example
     ///
@@ -351,14 +349,14 @@ impl<A: Anchor> CanonicalView<A> {
     /// let balance = view.balance(
     ///     indexer.outpoints().into_iter().map(|(k, op)| (k.clone(), *op)),
     ///     |_keychain, _script| true,  // Trust all outputs
-    ///     6,  // Require 6 confirmations
+    ///     5,  // Require 6 confirmations (1 + 5)
     /// );
     /// ```
     pub fn balance<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
         mut trust_predicate: impl FnMut(&O, ScriptBuf) -> bool,
-        min_confirmations: u32,
+        additional_confirmations: u32,
     ) -> Balance {
         let mut immature = Amount::ZERO;
         let mut trusted_pending = Amount::ZERO;
@@ -374,9 +372,9 @@ impl<A: Anchor> CanonicalView<A> {
                         .height
                         .saturating_sub(confirmation_height)
                         .saturating_add(1);
-                    let min_confirmations = min_confirmations.max(1); // 0 and 1 behave identically
+                    let required_confirmations = 1 + additional_confirmations;
 
-                    if confirmations < min_confirmations {
+                    if confirmations < required_confirmations {
                         // Not enough confirmations, treat as trusted/untrusted pending
                         if trust_predicate(&spk_i, txout.txout.script_pubkey) {
                             trusted_pending += txout.txout.value;

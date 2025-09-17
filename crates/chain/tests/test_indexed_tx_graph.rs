@@ -474,7 +474,7 @@ fn test_list_owned_txouts() {
                 .balance(
                     graph.index.outpoints().iter().cloned(),
                     |_, spk: ScriptBuf| trusted_spks.contains(&spk),
-                    1,
+                    0,
                 );
 
             let confirmed_txouts_txid = txouts

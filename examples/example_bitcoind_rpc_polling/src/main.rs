@@ -205,7 +205,7 @@ fn main() -> anyhow::Result<()> {
                             .balance(
                                 graph.index.outpoints().iter().cloned(),
                                 |(k, _), _| k == &Keychain::Internal,
-                                1,
+                                0,
                             )
                     };
                     println!(
@@ -365,7 +365,7 @@ fn main() -> anyhow::Result<()> {
                             .balance(
                                 graph.index.outpoints().iter().cloned(),
                                 |(k, _), _| k == &Keychain::Internal,
-                                1,
+                                0,
                             )
                     };
                     println!(

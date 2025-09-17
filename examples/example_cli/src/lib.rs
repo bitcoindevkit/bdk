@@ -533,7 +533,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 .balance(
                     graph.index.outpoints().iter().cloned(),
                     |(k, _), _| k == &Keychain::Internal,
-                    1,
+                    0,
                 );
 
             let confirmed_total = balance.confirmed + balance.immature;
