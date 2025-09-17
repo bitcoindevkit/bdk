@@ -473,7 +473,7 @@ fn test_list_owned_txouts() {
                 .canonical_view(&local_chain, chain_tip, CanonicalizationParams::default())
                 .balance(
                     graph.index.outpoints().iter().cloned(),
-                    |_, spk: ScriptBuf| trusted_spks.contains(&spk),
+                    |_, txout| trusted_spks.contains(&txout.txout.script_pubkey),
                     1,
                 );
 

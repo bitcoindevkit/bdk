@@ -1,29 +1,30 @@
 #![cfg(feature = "miniscript")]
 
+use std::collections::BTreeMap;
+
 use bdk_chain::{local_chain::LocalChain, CanonicalizationParams, ConfirmationBlockTime, TxGraph};
 use bdk_testenv::{hash, utils::new_tx};
-use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
 
 #[test]
 fn test_min_confirmations_parameter() {
     // Create a local chain with several blocks
-    let chain = LocalChain::from_blocks(
-        [
-            (0, hash!("block0")),
-            (1, hash!("block1")),
-            (2, hash!("block2")),
-            (3, hash!("block3")),
-            (4, hash!("block4")),
-            (5, hash!("block5")),
-            (6, hash!("block6")),
-            (7, hash!("block7")),
-            (8, hash!("block8")),
-            (9, hash!("block9")),
-            (10, hash!("block10")),
-        ]
-        .into(),
-    )
-    .unwrap();
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("block0")),
+        (1, hash!("block1")),
+        (2, hash!("block2")),
+        (3, hash!("block3")),
+        (4, hash!("block4")),
+        (5, hash!("block5")),
+        (6, hash!("block6")),
+        (7, hash!("block7")),
+        (8, hash!("block8")),
+        (9, hash!("block9")),
+        (10, hash!("block10")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
 
     let mut tx_graph = TxGraph::default();
 
@@ -98,23 +99,22 @@ fn test_min_confirmations_parameter() {
 #[test]
 fn test_min_confirmations_with_untrusted_tx() {
     // Create a local chain
-    let chain = LocalChain::from_blocks(
-        [
-            (0, hash!("genesis")),
-            (1, hash!("b1")),
-            (2, hash!("b2")),
-            (3, hash!("b3")),
-            (4, hash!("b4")),
-            (5, hash!("b5")),
-            (6, hash!("b6")),
-            (7, hash!("b7")),
-            (8, hash!("b8")),
-            (9, hash!("b9")),
-            (10, hash!("tip")),
-        ]
-        .into(),
-    )
-    .unwrap();
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("genesis")),
+        (1, hash!("b1")),
+        (2, hash!("b2")),
+        (3, hash!("b3")),
+        (4, hash!("b4")),
+        (5, hash!("b5")),
+        (6, hash!("b6")),
+        (7, hash!("b7")),
+        (8, hash!("b8")),
+        (9, hash!("b9")),
+        (10, hash!("tip")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
 
     let mut tx_graph = TxGraph::default();
 
@@ -164,28 +164,27 @@ fn test_min_confirmations_with_untrusted_tx() {
 #[test]
 fn test_min_confirmations_multiple_transactions() {
     // Create a local chain
-    let chain = LocalChain::from_blocks(
-        [
-            (0, hash!("genesis")),
-            (1, hash!("b1")),
-            (2, hash!("b2")),
-            (3, hash!("b3")),
-            (4, hash!("b4")),
-            (5, hash!("b5")),
-            (6, hash!("b6")),
-            (7, hash!("b7")),
-            (8, hash!("b8")),
-            (9, hash!("b9")),
-            (10, hash!("b10")),
-            (11, hash!("b11")),
-            (12, hash!("b12")),
-            (13, hash!("b13")),
-            (14, hash!("b14")),
-            (15, hash!("tip")),
-        ]
-        .into(),
-    )
-    .unwrap();
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("genesis")),
+        (1, hash!("b1")),
+        (2, hash!("b2")),
+        (3, hash!("b3")),
+        (4, hash!("b4")),
+        (5, hash!("b5")),
+        (6, hash!("b6")),
+        (7, hash!("b7")),
+        (8, hash!("b8")),
+        (9, hash!("b9")),
+        (10, hash!("b10")),
+        (11, hash!("b11")),
+        (12, hash!("b12")),
+        (13, hash!("b13")),
+        (14, hash!("b14")),
+        (15, hash!("tip")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
 
     let mut tx_graph = TxGraph::default();
 

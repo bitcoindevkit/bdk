@@ -60,12 +60,12 @@ pub struct CanonicalTx<A> {
 /// provides methods to query transaction data, unspent outputs, and balances.
 ///
 /// The view maintains:
-/// - An ordered list of canonical transactions (WIP)
+/// - An ordered list of canonical transactions in topological-spending order
 /// - A mapping of outpoints to the transactions that spend them
 /// - The chain tip used for canonicalization
 #[derive(Debug)]
 pub struct CanonicalView<A> {
-    /// Ordered list of transaction IDs in canonical order.
+    /// Ordered list of transaction IDs in in topological-spending order.
     order: Vec<Txid>,
     /// Map of transaction IDs to their transaction data and chain position.
     txs: HashMap<Txid, (Arc<Transaction>, ChainPosition<A>)>,
@@ -357,7 +357,7 @@ impl<A: Anchor> CanonicalView<A> {
     pub fn balance<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
-        mut trust_predicate: impl FnMut(&O, ScriptBuf) -> bool,
+        mut trust_predicate: impl FnMut(&O, &FullTxOut<A>) -> bool,
         min_confirmations: u32,
     ) -> Balance {
         let mut immature = Amount::ZERO;
@@ -378,7 +378,7 @@ impl<A: Anchor> CanonicalView<A> {
 
                     if confirmations < min_confirmations {
                         // Not enough confirmations, treat as trusted/untrusted pending
-                        if trust_predicate(&spk_i, txout.txout.script_pubkey) {
+                        if trust_predicate(&spk_i, &txout) {
                             trusted_pending += txout.txout.value;
                         } else {
                             untrusted_pending += txout.txout.value;
@@ -390,7 +390,7 @@ impl<A: Anchor> CanonicalView<A> {
                     }
                 }
                 ChainPosition::Unconfirmed { .. } => {
-                    if trust_predicate(&spk_i, txout.txout.script_pubkey) {
+                    if trust_predicate(&spk_i, &txout) {
                         trusted_pending += txout.txout.value;
                     } else {
                         untrusted_pending += txout.txout.value;
