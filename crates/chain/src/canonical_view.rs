@@ -23,7 +23,7 @@
 
 use crate::collections::HashMap;
 use alloc::sync::Arc;
-use core::{fmt, ops::RangeBounds};
+use core::{convert::Infallible, fmt, ops::RangeBounds};
 
 use alloc::vec::Vec;
 
@@ -31,8 +31,9 @@ use bdk_core::BlockId;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, Txid};
 
 use crate::{
-    spk_txout::SpkTxOutIndex, tx_graph::TxNode, Anchor, Balance, CanonicalIter, CanonicalReason,
-    CanonicalizationParams, ChainOracle, ChainPosition, FullTxOut, ObservedIn, TxGraph,
+    local_chain::LocalChain, spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalizationParams,
+    CanonicalizationRequest, CanonicalizationResponse, CanonicalizationTask, ChainOracle,
+    ChainPosition, FullTxOut, TxGraph,
 };
 
 /// A single canonical transaction with its chain position.
@@ -76,6 +77,22 @@ pub struct CanonicalView<A> {
 }
 
 impl<A: Anchor> CanonicalView<A> {
+    /// Creates a CanonicalView from its constituent parts.
+    /// This is used by CanonicalizationTask to build the view.
+    pub(crate) fn from_parts(
+        tip: BlockId,
+        order: Vec<Txid>,
+        txs: HashMap<Txid, (Arc<Transaction>, ChainPosition<A>)>,
+        spends: HashMap<OutPoint, Txid>,
+    ) -> Self {
+        Self {
+            tip,
+            order,
+            txs,
+            spends,
+        }
+    }
+
     /// Create a new canonical view from a transaction graph.
     ///
     /// This constructor analyzes the given [`TxGraph`] and creates a canonical view of all
@@ -93,98 +110,59 @@ impl<A: Anchor> CanonicalView<A> {
     where
         C: ChainOracle,
     {
-        fn find_direct_anchor<'g, A: Anchor, C: ChainOracle>(
-            tx_node: &TxNode<'g, Arc<Transaction>, A>,
-            chain: &C,
-            chain_tip: BlockId,
-        ) -> Result<Option<A>, C::Error> {
-            tx_node
-                .anchors
-                .iter()
-                .find_map(|a| -> Option<Result<A, C::Error>> {
-                    match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
-                        Ok(Some(true)) => Some(Ok(a.clone())),
-                        Ok(Some(false)) | Ok(None) => None,
-                        Err(err) => Some(Err(err)),
-                    }
-                })
-                .transpose()
-        }
+        let (mut task, initial_request) = CanonicalizationTask::new(tx_graph, chain_tip, params);
 
-        let mut view = Self {
-            tip: chain_tip,
-            order: vec![],
-            txs: HashMap::new(),
-            spends: HashMap::new(),
-        };
-
-        for r in CanonicalIter::new(tx_graph, chain, chain_tip, params) {
-            let (txid, tx, why) = r?;
-
-            let tx_node = match tx_graph.get_tx_node(txid) {
-                Some(tx_node) => tx_node,
-                None => {
-                    // TODO: Have the `CanonicalIter` return `TxNode`s.
-                    debug_assert!(false, "tx node must exist!");
-                    continue;
+        // Process the initial request if present
+        if let Some(request) = initial_request {
+            let response = match request {
+                CanonicalizationRequest::IsBlockInChain { block, chain_tip } => {
+                    let result = chain.is_block_in_chain(block, chain_tip)?;
+                    CanonicalizationResponse::IsBlockInChain(result)
                 }
             };
-
-            view.order.push(txid);
-
-            if !tx.is_coinbase() {
-                view.spends
-                    .extend(tx.input.iter().map(|txin| (txin.previous_output, txid)));
-            }
-
-            let pos = match why {
-                CanonicalReason::Assumed { descendant } => match descendant {
-                    Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                        Some(anchor) => ChainPosition::Confirmed {
-                            anchor,
-                            transitively: None,
-                        },
-                        None => ChainPosition::Unconfirmed {
-                            first_seen: tx_node.first_seen,
-                            last_seen: tx_node.last_seen,
-                        },
-                    },
-                    None => ChainPosition::Unconfirmed {
-                        first_seen: tx_node.first_seen,
-                        last_seen: tx_node.last_seen,
-                    },
-                },
-                CanonicalReason::Anchor { anchor, descendant } => match descendant {
-                    Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                        Some(anchor) => ChainPosition::Confirmed {
-                            anchor,
-                            transitively: None,
-                        },
-                        None => ChainPosition::Confirmed {
-                            anchor,
-                            transitively: descendant,
-                        },
-                    },
-                    None => ChainPosition::Confirmed {
-                        anchor,
-                        transitively: None,
-                    },
-                },
-                CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
-                    ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
-                        first_seen: tx_node.first_seen,
-                        last_seen: Some(last_seen),
-                    },
-                    ObservedIn::Block(_) => ChainPosition::Unconfirmed {
-                        first_seen: tx_node.first_seen,
-                        last_seen: None,
-                    },
-                },
-            };
-            view.txs.insert(txid, (tx_node.tx, pos));
+            task.resolve_query(response);
         }
 
-        Ok(view)
+        // Process all subsequent requests
+        while let Some(request) = task.next_query() {
+            let response = match request {
+                CanonicalizationRequest::IsBlockInChain { block, chain_tip } => {
+                    let result = chain.is_block_in_chain(block, chain_tip)?;
+                    CanonicalizationResponse::IsBlockInChain(result)
+                }
+            };
+            task.resolve_query(response);
+        }
+
+        // Return the finished canonical view
+        Ok(task.finish())
+    }
+
+    /// Create a new canonical view from a transaction graph using a LocalChain.
+    ///
+    /// This is a convenience method for working with [`LocalChain`] specifically.
+    pub fn new_with_local_chain<'g>(
+        tx_graph: &'g TxGraph<A>,
+        chain: &'g LocalChain,
+        chain_tip: BlockId,
+        params: CanonicalizationParams,
+    ) -> Result<Self, Infallible> {
+        let (mut task, initial_request) = CanonicalizationTask::new(tx_graph, chain_tip, params);
+
+        // Process the initial request if present
+        if let Some(request) = initial_request {
+            let response = chain.handle_canonicalization_request(&request)?;
+            task.resolve_query(response);
+        }
+
+        // Process all subsequent requests
+        while let Some(request) = task.next_query() {
+            let response = chain.handle_canonicalization_request(&request)?;
+            task.resolve_query(response);
+        }
+
+        // Return the finished canonical view
+        Ok(task.finish())
     }
 
     /// Get a single canonical transaction by its transaction ID.

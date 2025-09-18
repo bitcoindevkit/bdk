@@ -1007,6 +1007,8 @@ impl<A: Anchor> TxGraph<A> {
         chain_tip: BlockId,
         params: CanonicalizationParams,
     ) -> CanonicalView<A> {
+        // For now, just use the original implementation
+        // TODO: Update to use CanonicalizationTask once CanonicalView is updated to support it
         CanonicalView::new(self, chain, chain_tip, params).expect("infallible")
     }
 
