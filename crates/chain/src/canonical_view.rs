@@ -31,8 +31,8 @@ use bdk_core::BlockId;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, Txid};
 
 use crate::{
-    spk_txout::SpkTxOutIndex, tx_graph::TxNode, Anchor, Balance, CanonicalIter, CanonicalReason,
-    CanonicalizationParams, ChainOracle, ChainPosition, FullTxOut, ObservedIn, TxGraph,
+    spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalizationParams, CanonicalizationTask,
+    ChainOracle, ChainPosition, FullTxOut, TxGraph,
 };
 
 /// A single canonical transaction with its chain position.
@@ -91,14 +91,30 @@ pub struct CanonicalView<A> {
 }
 
 impl<A: Anchor> CanonicalView<A> {
-    /// Create a new canonical view from a transaction graph.
+    /// Creates a CanonicalView from its constituent parts.
+    /// This is used by CanonicalizationTask to build the view.
+    pub(crate) fn from_parts(
+        tip: BlockId,
+        order: Vec<Txid>,
+        txs: HashMap<Txid, (Arc<Transaction>, ChainPosition<A>)>,
+        spends: HashMap<OutPoint, Txid>,
+    ) -> Self {
+        Self {
+            tip,
+            order,
+            txs,
+            spends,
+        }
+    }
+
+    /// Create a new [`CanonicalView`] from a transaction graph.
     ///
-    /// This constructor analyzes the given [`TxGraph`] and creates a canonical view of all
+    /// This constructor analyzes the given [`TxGraph`] and creates a [`CanonicalView`] of all
     /// transactions, resolving conflicts and ordering them according to their chain position.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Returns `Ok(CanonicalView)` on success, or an error if the chain oracle fails.
+    /// An error will occur if the [`ChainOracle`] fails.
     pub fn new<'g, C>(
         tx_graph: &'g TxGraph<A>,
         chain: &'g C,
@@ -108,98 +124,40 @@ impl<A: Anchor> CanonicalView<A> {
     where
         C: ChainOracle,
     {
-        fn find_direct_anchor<A: Anchor, C: ChainOracle>(
-            tx_node: &TxNode<'_, Arc<Transaction>, A>,
-            chain: &C,
-            chain_tip: BlockId,
-        ) -> Result<Option<A>, C::Error> {
-            tx_node
-                .anchors
-                .iter()
-                .find_map(|a| -> Option<Result<A, C::Error>> {
-                    match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
-                        Ok(Some(true)) => Some(Ok(a.clone())),
-                        Ok(Some(false)) | Ok(None) => None,
-                        Err(err) => Some(Err(err)),
-                    }
-                })
-                .transpose()
-        }
+        let (mut task, init_request) = CanonicalizationTask::new(tx_graph, chain_tip, params);
 
-        let mut view = Self {
-            tip: chain_tip,
-            order: vec![],
-            txs: HashMap::new(),
-            spends: HashMap::new(),
-        };
-
-        for r in CanonicalIter::new(tx_graph, chain, chain_tip, params) {
-            let (txid, tx, why) = r?;
-
-            let tx_node = match tx_graph.get_tx_node(txid) {
-                Some(tx_node) => tx_node,
-                None => {
-                    // TODO: Have the `CanonicalIter` return `TxNode`s.
-                    debug_assert!(false, "tx node must exist!");
-                    continue;
+        // If an initial request is available, start by first processing it.
+        if let Some(request) = init_request {
+            // It verifies each `Anchor` provided in the request, resolving the query for the first
+            // confirmed one.
+            let mut best_anchor = None;
+            for anchor in &request.anchors {
+                if chain.is_block_in_chain(anchor.anchor_block(), request.chain_tip)? == Some(true)
+                {
+                    best_anchor = Some(anchor.clone());
+                    break;
                 }
-            };
-
-            view.order.push(txid);
-
-            if !tx.is_coinbase() {
-                view.spends
-                    .extend(tx.input.iter().map(|txin| (txin.previous_output, txid)));
             }
-
-            let pos = match why {
-                CanonicalReason::Assumed { descendant } => match descendant {
-                    Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                        Some(anchor) => ChainPosition::Confirmed {
-                            anchor,
-                            transitively: None,
-                        },
-                        None => ChainPosition::Unconfirmed {
-                            first_seen: tx_node.first_seen,
-                            last_seen: tx_node.last_seen,
-                        },
-                    },
-                    None => ChainPosition::Unconfirmed {
-                        first_seen: tx_node.first_seen,
-                        last_seen: tx_node.last_seen,
-                    },
-                },
-                CanonicalReason::Anchor { anchor, descendant } => match descendant {
-                    Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                        Some(anchor) => ChainPosition::Confirmed {
-                            anchor,
-                            transitively: None,
-                        },
-                        None => ChainPosition::Confirmed {
-                            anchor,
-                            transitively: descendant,
-                        },
-                    },
-                    None => ChainPosition::Confirmed {
-                        anchor,
-                        transitively: None,
-                    },
-                },
-                CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
-                    ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
-                        first_seen: tx_node.first_seen,
-                        last_seen: Some(last_seen),
-                    },
-                    ObservedIn::Block(_) => ChainPosition::Unconfirmed {
-                        first_seen: tx_node.first_seen,
-                        last_seen: None,
-                    },
-                },
-            };
-            view.txs.insert(txid, (tx_node.tx, pos));
+            task.resolve_query(best_anchor);
         }
 
-        Ok(view)
+        // Process all the following requests
+        while let Some(request) = task.next_query() {
+            // It verifies each `Anchor` provided in the request, resolving the query for the first
+            // confirmed one.
+            let mut best_anchor = None;
+            for anchor in &request.anchors {
+                if chain.is_block_in_chain(anchor.anchor_block(), request.chain_tip)? == Some(true)
+                {
+                    best_anchor = Some(anchor.clone());
+                    break;
+                }
+            }
+            task.resolve_query(best_anchor);
+        }
+
+        // Return the finished canonical view
+        Ok(task.finish())
     }
 
     /// Get a single canonical transaction by its transaction ID.
