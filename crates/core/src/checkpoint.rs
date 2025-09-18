@@ -2,6 +2,7 @@ use core::fmt;
 use core::ops::RangeBounds;
 
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use bitcoin::{block::Header, BlockHash};
 
 use crate::BlockId;
@@ -56,10 +57,10 @@ impl<D> Drop for CPInner<D> {
 
 /// Trait that converts [`CheckPoint`] `data` to [`BlockHash`].
 ///
-/// Implementations of [`ToBlockHash`] must always return the block’s consensus-defined hash. If
+/// Implementations of [`ToBlockHash`] must always return the block's consensus-defined hash. If
 /// your type contains extra fields (timestamps, metadata, etc.), these must be ignored. For
 /// example, [`BlockHash`] trivially returns itself, [`Header`] calls its `block_hash()`, and a
-/// wrapper type around a [`Header`] should delegate to the header’s hash rather than derive one
+/// wrapper type around a [`Header`] should delegate to the header's hash rather than derive one
 /// from other fields.
 pub trait ToBlockHash {
     /// Returns the [`BlockHash`] for the associated [`CheckPoint`] `data` type.
@@ -75,6 +76,20 @@ impl ToBlockHash for BlockHash {
 impl ToBlockHash for Header {
     fn to_blockhash(&self) -> BlockHash {
         self.block_hash()
+    }
+}
+
+/// Trait that extracts a block time from [`CheckPoint`] `data`.
+///
+/// `data` types that contain a block time should implement this.
+pub trait ToBlockTime {
+    /// Returns the block time from the [`CheckPoint`] `data`.
+    fn to_blocktime(&self) -> u32;
+}
+
+impl ToBlockTime for Header {
+    fn to_blocktime(&self) -> u32 {
+        self.time
     }
 }
 
@@ -191,6 +206,8 @@ impl<D> CheckPoint<D>
 where
     D: ToBlockHash + fmt::Debug + Copy,
 {
+    const MTP_BLOCK_COUNT: u32 = 11;
+
     /// Construct a new base [`CheckPoint`] from given `height` and `data` at the front of a linked
     /// list.
     pub fn new(height: u32, data: D) -> Self {
@@ -202,6 +219,38 @@ where
             data,
             prev: None,
         }))
+    }
+
+    /// Calculate the median time past (MTP) for this checkpoint.
+    ///
+    /// Uses 11 blocks (heights h-10 through h, where h is the current height) to compute the MTP
+    /// for the current block. This is used in Bitcoin's consensus rules for time-based validations
+    /// (BIP-0113).
+    ///
+    /// Note: This is a pseudo-median that doesn't average the two middle values.
+    ///
+    /// Returns `None` if the data type doesn't support block times or if any of the required
+    /// 11 sequential blocks are missing.
+    pub fn median_time_past(&self) -> Option<u32>
+    where
+        D: ToBlockTime,
+    {
+        let current_height = self.height();
+        let earliest_height = current_height.saturating_sub(Self::MTP_BLOCK_COUNT - 1);
+
+        let mut timestamps = (earliest_height..=current_height)
+            .map(|height| {
+                // Return `None` for missing blocks or missing block times
+                let cp = self.get(height)?;
+                let block_time = cp.data_ref().to_blocktime();
+                Some(block_time)
+            })
+            .collect::<Option<Vec<u32>>>()?;
+        timestamps.sort_unstable();
+
+        // If there are more than 1 middle values, use the higher middle value.
+        // This is mathematically incorrect, but this is the BIP-0113 specification.
+        Some(timestamps[timestamps.len() / 2])
     }
 
     /// Construct from an iterator of block data.
