@@ -4,8 +4,9 @@ use core::convert::Infallible;
 use core::fmt;
 use core::ops::RangeBounds;
 
+use crate::canonical_task::{CanonicalizationRequest, CanonicalizationResponse};
 use crate::collections::BTreeMap;
-use crate::{BlockId, ChainOracle, Merge};
+use crate::{Anchor, BlockId, ChainOracle, Merge};
 use bdk_core::ToBlockHash;
 pub use bdk_core::{CheckPoint, CheckPointIter};
 use bitcoin::block::Header;
@@ -96,6 +97,25 @@ impl<D> ChainOracle for LocalChain<D> {
 
 // Methods for `LocalChain<BlockHash>`
 impl LocalChain<BlockHash> {
+    /// Handle a canonicalization request.
+    ///
+    /// This method processes requests from [`CanonicalizationTask`] to check if blocks
+    /// are in the chain.
+    ///
+    /// [`CanonicalizationTask`]: crate::canonical_task::CanonicalizationTask
+    pub fn handle_canonicalization_request<A: Anchor>(
+        &self,
+        request: &CanonicalizationRequest<A>,
+    ) -> Result<CanonicalizationResponse<A>, Infallible> {
+        // Check each anchor and return the first confirmed one
+        for anchor in &request.anchors {
+            if self.is_block_in_chain(anchor.anchor_block(), request.chain_tip)? == Some(true) {
+                return Ok(Some(anchor.clone()));
+            }
+        }
+        Ok(None)
+    }
+
     /// Update the chain with a given [`Header`] at `height` which you claim is connected to a
     /// existing block in the chain.
     ///
