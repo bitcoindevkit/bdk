@@ -6,6 +6,78 @@ use bitcoin::{block::Header, BlockHash};
 
 use crate::BlockId;
 
+/// Internal type to represent entries in `CheckPoint` that can handle both actual checkpoint data
+/// and placeholder entries for types that have `prev_blockhash`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CheckPointEntry<D> {
+    /// An actual `CheckPoint` entry.
+    CheckPoint(CheckPoint<D>),
+    /// A `CheckPoint` representing a `prev_blockhash` reference.
+    PrevBlockHash(CheckPoint<D>),
+}
+
+impl<D> CheckPointEntry<D> {
+    /// Returns true if this entry is a `prev_blockhash` reference.
+    pub fn is_prev_blockhash(&self) -> bool {
+        matches!(self, CheckPointEntry::PrevBlockHash(_))
+    }
+
+    /// Returns true if this entry contains actual `CheckPoint` data.
+    pub fn is_checkpoint(&self) -> bool {
+        matches!(self, CheckPointEntry::CheckPoint(_))
+    }
+
+    /// Get the height of this entry.
+    pub fn height(&self) -> u32 {
+        match self {
+            CheckPointEntry::CheckPoint(cp) => cp.height(),
+            CheckPointEntry::PrevBlockHash(cp) => cp.height().saturating_sub(1),
+        }
+    }
+
+    /// Get the `BlockHash` of this entry.
+    pub fn hash(&self) -> BlockHash
+    where
+        D: ToBlockHash,
+    {
+        match self {
+            CheckPointEntry::CheckPoint(cp) => cp.hash(),
+            CheckPointEntry::PrevBlockHash(cp) => cp
+                .prev_blockhash()
+                .expect("PrevBlockHash variant must have prev_blockhash"),
+        }
+    }
+
+    /// Create a synthetic prev entry at height `h - 1`.
+    pub fn as_prev(&self) -> Option<CheckPointEntry<D>>
+    where
+        D: ToBlockHash,
+    {
+        match self {
+            CheckPointEntry::CheckPoint(cp) => {
+                if cp.prev_blockhash().is_some() && cp.height() > 0 {
+                    Some(CheckPointEntry::PrevBlockHash(cp.clone()))
+                } else {
+                    None
+                }
+            }
+            CheckPointEntry::PrevBlockHash(_) => None, // Can't create prev of prev
+        }
+    }
+
+    /// Move to the next lower height `CheckPoint` entry.
+    pub fn next(&self) -> Option<CheckPointEntry<D>> {
+        match self {
+            CheckPointEntry::CheckPoint(cp) => cp
+                .prev()
+                .map(|prev_cp| CheckPointEntry::CheckPoint(prev_cp)),
+            CheckPointEntry::PrevBlockHash(cp) => cp
+                .prev()
+                .map(|prev_cp| CheckPointEntry::CheckPoint(prev_cp)),
+        }
+    }
+}
+
 /// A checkpoint is a node of a reference-counted linked list of [`BlockId`]s.
 ///
 /// Checkpoints are cheaply cloneable and are useful to find the agreement point between two sparse
@@ -68,6 +140,11 @@ impl<D> Drop for CPInner<D> {
 pub trait ToBlockHash {
     /// Returns the [`BlockHash`] for the associated [`CheckPoint`] `data` type.
     fn to_blockhash(&self) -> BlockHash;
+
+    /// Returns `None` if the type has no knowledge of the previous [`BlockHash`].
+    fn prev_blockhash(&self) -> Option<BlockHash> {
+        None
+    }
 }
 
 impl ToBlockHash for BlockHash {
@@ -79,6 +156,23 @@ impl ToBlockHash for BlockHash {
 impl ToBlockHash for Header {
     fn to_blockhash(&self) -> BlockHash {
         self.block_hash()
+    }
+
+    fn prev_blockhash(&self) -> Option<BlockHash> {
+        Some(self.prev_blockhash)
+    }
+}
+
+impl<D: ToBlockHash> ToBlockHash for CheckPointEntry<D> {
+    fn to_blockhash(&self) -> BlockHash {
+        self.hash()
+    }
+
+    fn prev_blockhash(&self) -> Option<BlockHash> {
+        match self {
+            CheckPointEntry::CheckPoint(cp) => cp.prev_blockhash(),
+            CheckPointEntry::PrevBlockHash(_) => None,
+        }
     }
 }
 
@@ -187,6 +281,14 @@ impl<D> CheckPoint<D> {
     /// This method tests for `self` and `other` to have equal internal pointers.
     pub fn eq_ptr(&self, other: &Self) -> bool {
         Arc::as_ptr(&self.0) == Arc::as_ptr(&other.0)
+    }
+
+    /// Return the `prev_blockhash` from the `CheckPoint`, if available.
+    pub fn prev_blockhash(&self) -> Option<BlockHash>
+    where
+        D: ToBlockHash,
+    {
+        self.0.data.prev_blockhash()
     }
 }
 
