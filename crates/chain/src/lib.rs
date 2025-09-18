@@ -46,6 +46,8 @@ mod chain_oracle;
 pub use chain_oracle::*;
 mod canonical_iter;
 pub use canonical_iter::*;
+mod canonical_task;
+pub use canonical_task::*;
 mod canonical_view;
 pub use canonical_view::*;
 
