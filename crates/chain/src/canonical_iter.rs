@@ -6,7 +6,7 @@ use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bdk_core::BlockId;
-use bitcoin::{Transaction, Txid};
+use bitcoin::{OutPoint, Transaction, Txid};
 
 type CanonicalMap<A> = HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>;
 type NotCanonicalSet = HashSet<Txid>;
@@ -36,7 +36,7 @@ pub struct CanonicalIter<'g, A, C> {
     canonical: CanonicalMap<A>,
     not_canonical: NotCanonicalSet,
 
-    canonical_ancestors: HashMap<Txid, Vec<Txid>>,
+    canonical_spends: HashMap<OutPoint, Txid>,
     canonical_roots: VecDeque<Txid>,
 
     queue: VecDeque<Txid>,
@@ -78,7 +78,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
             unprocessed_leftover_txs: VecDeque::new(),
             canonical: HashMap::new(),
             not_canonical: HashSet::new(),
-            canonical_ancestors: HashMap::new(),
+            canonical_spends: HashMap::new(),
             canonical_roots: VecDeque::new(),
             queue: VecDeque::new(),
         }
@@ -187,16 +187,13 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                     return None;
                 }
 
-                // Calculates all the existing ancestors for the given Txid
-                self.canonical_ancestors.insert(
-                    this_txid,
-                    tx.clone()
-                        .input
-                        .iter()
-                        .filter(|txin| self.tx_graph.get_tx(txin.previous_output.txid).is_some())
-                        .map(|txin| txin.previous_output.txid)
-                        .collect(),
-                );
+                // Record each input's outpoint as being spent by this transaction
+                for input in &tx.input {
+                    if self.tx_graph.get_tx(input.previous_output.txid).is_some() {
+                        self.canonical_spends
+                            .insert(input.previous_output, this_txid);
+                    }
+                }
 
                 canonical_entry.insert((tx, this_reason));
                 Some(this_txid)
@@ -206,8 +203,12 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
 
         if detected_self_double_spend {
             for txid in staged_queue {
-                self.canonical.remove(&txid);
-                self.canonical_ancestors.remove(&txid);
+                if let Some((tx, _)) = self.canonical.remove(&txid) {
+                    // Remove all the spends that were added for this transaction
+                    for input in &tx.input {
+                        self.canonical_spends.remove(&input.previous_output);
+                    }
+                }
             }
             for txid in undo_not_canonical {
                 self.not_canonical.remove(&txid);
@@ -215,11 +216,10 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
         } else {
             for txid in staged_queue {
                 let tx = self.tx_graph.get_tx(txid).expect("tx must exist");
-                let has_no_ancestors = self
-                    .canonical_ancestors
-                    .get(&txid)
-                    .expect("should exist")
-                    .is_empty();
+                let has_no_ancestors = tx
+                    .input
+                    .iter()
+                    .all(|input| self.tx_graph.get_tx(input.previous_output.txid).is_none());
 
                 // check if it's a root: it's either a coinbase transaction or has no known
                 // ancestors in the tx_graph.
@@ -269,7 +269,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
 
         if !self.canonical_roots.is_empty() {
             let topological_iter = TopologicalIter::new(
-                &self.canonical_ancestors,
+                &self.canonical_spends,
                 self.canonical_roots.drain(..).collect(),
                 |txid| {
                     let tx_node = self.tx_graph.get_tx_node(txid).expect("tx should exist");
@@ -405,15 +405,20 @@ impl<F> TopologicalIter<F>
 where
     F: FnMut(bitcoin::Txid) -> u32,
 {
-    fn new(ancestors: &HashMap<Txid, Vec<Txid>>, roots: Vec<Txid>, mut sort_by: F) -> Self {
+    fn new(canonical_spends: &HashMap<OutPoint, Txid>, roots: Vec<Txid>, mut sort_by: F) -> Self {
         let mut inputs_count = HashMap::new();
         let mut adj_list: HashMap<Txid, Vec<Txid>> = HashMap::new();
 
-        for (txid, ancestors) in ancestors {
-            for ancestor in ancestors {
-                adj_list.entry(*ancestor).or_default().push(*txid);
-                *inputs_count.entry(*txid).or_insert(0) += 1;
-            }
+        // Build adjacency list from canonical_spends
+        // Each entry in canonical_spends tells us that outpoint is spent by txid
+        // So if outpoint's txid exists, we create an edge from that tx to the spending tx
+        for (outpoint, spending_txid) in canonical_spends {
+            let ancestor_txid = outpoint.txid;
+            adj_list
+                .entry(ancestor_txid)
+                .or_default()
+                .push(*spending_txid);
+            *inputs_count.entry(*spending_txid).or_insert(0) += 1;
         }
 
         let mut current_level: Vec<Txid> = roots.to_vec();
