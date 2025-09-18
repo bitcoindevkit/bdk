@@ -213,11 +213,14 @@ fn main() -> anyhow::Result<()> {
                         eprintln!("[ SCANNING {pc:03.0}% ] {item}");
                     });
 
-            request = request.expected_spk_txids(graph.list_expected_spk_txids(
+            let canonical_view = graph.canonical_view(
                 &*chain,
                 chain_tip.block_id(),
-                ..,
-            ));
+                CanonicalizationParams::default(),
+            );
+
+            request = request
+                .expected_spk_txids(canonical_view.list_expected_spk_txids(&graph.index, ..));
             if all_spks {
                 request = request.spks_with_indexes(graph.index.revealed_spks(..));
             }
@@ -227,28 +230,17 @@ fn main() -> anyhow::Result<()> {
             if utxos {
                 let init_outpoints = graph.index.outpoints();
                 request = request.outpoints(
-                    graph
-                        .graph()
-                        .filter_chain_unspents(
-                            &*chain,
-                            chain_tip.block_id(),
-                            CanonicalizationParams::default(),
-                            init_outpoints.iter().cloned(),
-                        )
+                    canonical_view
+                        .filter_unspent_outpoints(init_outpoints.iter().cloned())
                         .map(|(_, utxo)| utxo.outpoint),
                 );
             };
             if unconfirmed {
                 request = request.txids(
-                    graph
-                        .graph()
-                        .list_canonical_txs(
-                            &*chain,
-                            chain_tip.block_id(),
-                            CanonicalizationParams::default(),
-                        )
-                        .filter(|canonical_tx| !canonical_tx.chain_position.is_confirmed())
-                        .map(|canonical_tx| canonical_tx.tx_node.txid),
+                    canonical_view
+                        .txs()
+                        .filter(|canonical_tx| !canonical_tx.pos.is_confirmed())
+                        .map(|canonical_tx| canonical_tx.txid),
                 );
             }
 
