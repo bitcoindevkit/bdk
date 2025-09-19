@@ -980,6 +980,30 @@ impl<A: Anchor> TxGraph<A> {
 }
 
 impl<A: Anchor> TxGraph<A> {
+    /// TODO: (@oleonardolima).
+    ///
+    /// # Errors
+    ///
+    /// This function will return an error if .
+    pub(crate) fn find_direct_anchor<C: ChainOracle>(
+        &self,
+        tx_node: &TxNode<'_, Arc<Transaction>, A>,
+        chain: &C,
+        chain_tip: BlockId,
+    ) -> Result<Option<A>, C::Error> {
+        tx_node
+            .anchors
+            .iter()
+            .find_map(|a| -> Option<Result<A, C::Error>> {
+                match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
+                    Ok(Some(true)) => Some(Ok(a.clone())),
+                    Ok(Some(false)) | Ok(None) => None,
+                    Err(err) => Some(Err(err)),
+                }
+            })
+            .transpose()
+    }
+
     /// List graph transactions that are in `chain` with `chain_tip`.
     ///
     /// Each transaction is represented as a [`CanonicalTx`] that contains where the transaction is
@@ -999,55 +1023,42 @@ impl<A: Anchor> TxGraph<A> {
         chain_tip: BlockId,
         params: CanonicalizationParams,
     ) -> impl Iterator<Item = Result<CanonicalTx<'a, Arc<Transaction>, A>, C::Error>> {
-        fn find_direct_anchor<A: Anchor, C: ChainOracle>(
-            tx_node: &TxNode<'_, Arc<Transaction>, A>,
-            chain: &C,
-            chain_tip: BlockId,
-        ) -> Result<Option<A>, C::Error> {
-            tx_node
-                .anchors
-                .iter()
-                .find_map(|a| -> Option<Result<A, C::Error>> {
-                    match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
-                        Ok(Some(true)) => Some(Ok(a.clone())),
-                        Ok(Some(false)) | Ok(None) => None,
-                        Err(err) => Some(Err(err)),
-                    }
-                })
-                .transpose()
-        }
         self.canonical_iter(chain, chain_tip, params)
             .flat_map(move |res| {
                 res.map(|(txid, _, canonical_reason)| {
                     let tx_node = self.get_tx_node(txid).expect("must contain tx");
                     let chain_position = match canonical_reason {
                         CanonicalReason::Assumed { descendant } => match descendant {
-                            Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                                Some(anchor) => ChainPosition::Confirmed {
-                                    anchor,
-                                    transitively: None,
-                                },
-                                None => ChainPosition::Unconfirmed {
-                                    first_seen: tx_node.first_seen,
-                                    last_seen: tx_node.last_seen,
-                                },
-                            },
+                            Some(_) => {
+                                match self.find_direct_anchor(&tx_node, chain, chain_tip)? {
+                                    Some(anchor) => ChainPosition::Confirmed {
+                                        anchor,
+                                        transitively: None,
+                                    },
+                                    None => ChainPosition::Unconfirmed {
+                                        first_seen: tx_node.first_seen,
+                                        last_seen: tx_node.last_seen,
+                                    },
+                                }
+                            }
                             None => ChainPosition::Unconfirmed {
                                 first_seen: tx_node.first_seen,
                                 last_seen: tx_node.last_seen,
                             },
                         },
                         CanonicalReason::Anchor { anchor, descendant } => match descendant {
-                            Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                                Some(anchor) => ChainPosition::Confirmed {
-                                    anchor,
-                                    transitively: None,
-                                },
-                                None => ChainPosition::Confirmed {
-                                    anchor,
-                                    transitively: descendant,
-                                },
-                            },
+                            Some(_) => {
+                                match self.find_direct_anchor(&tx_node, chain, chain_tip)? {
+                                    Some(anchor) => ChainPosition::Confirmed {
+                                        anchor,
+                                        transitively: None,
+                                    },
+                                    None => ChainPosition::Confirmed {
+                                        anchor,
+                                        transitively: descendant,
+                                    },
+                                }
+                            }
                             None => ChainPosition::Confirmed {
                                 anchor,
                                 transitively: None,
