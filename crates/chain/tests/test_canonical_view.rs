@@ -299,3 +299,462 @@ fn test_additional_confirmations_multiple_transactions() {
     );
     assert_eq!(balance_high.untrusted_pending, Amount::ZERO);
 }
+
+#[test]
+fn test_extract_subgraph_basic_chain() {
+    // Test extracting a simple chain: tx0 -> tx1 -> tx2
+    // Extracting tx1 should also extract tx2 (its child)
+
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("genesis")),
+        (1, hash!("block1")),
+        (2, hash!("block2")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::default();
+
+    // Create tx0 (coinbase - will be canonical)
+    let tx0 = Transaction {
+        output: vec![TxOut {
+            value: Amount::from_sat(100_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(0)
+    };
+    let txid0 = tx0.compute_txid();
+    let _ = tx_graph.insert_tx(tx0.clone());
+    let _ = tx_graph.insert_anchor(
+        txid0,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+
+    // Create tx1 that spends from tx0
+    let tx1 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(txid0, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(90_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let txid1 = tx1.compute_txid();
+    let _ = tx_graph.insert_tx(tx1.clone());
+    let _ = tx_graph.insert_anchor(
+        txid1,
+        ConfirmationBlockTime {
+            block_id: chain.get(2).unwrap().block_id(),
+            confirmation_time: 200,
+        },
+    );
+
+    // Create tx2 that spends from tx1
+    let tx2 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(txid1, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(80_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(2)
+    };
+    let txid2 = tx2.compute_txid();
+    let _ = tx_graph.insert_tx(tx2.clone());
+    // tx2 is unconfirmed but seen
+    let _ = tx_graph.insert_seen_at(txid2, 300);
+
+    let mut canonical_view = tx_graph.canonical_view(
+        &chain,
+        chain.tip().block_id(),
+        CanonicalizationParams::default(),
+    );
+
+    // Extract tx1 and its descendants
+    let extracted = canonical_view.extract_subgraph([txid1].into_iter());
+
+    // Verify extracted view contains tx1 and tx2 but not tx0
+    assert!(extracted.tx(txid1).is_some());
+    assert!(extracted.tx(txid2).is_some());
+    assert!(extracted.tx(txid0).is_none());
+
+    // Verify remaining view contains only tx0
+    assert!(canonical_view.tx(txid0).is_some());
+    assert!(canonical_view.tx(txid1).is_none());
+    assert!(canonical_view.tx(txid2).is_none());
+
+    // Verify that tx1's input (spending from tx0) is properly handled
+    let tx1_data = extracted.tx(txid1).unwrap();
+    assert_eq!(tx1_data.tx.input[0].previous_output.txid, txid0);
+
+    // Verify that tx2's input (spending from tx1) is properly handled
+    let tx2_data = extracted.tx(txid2).unwrap();
+    assert_eq!(tx2_data.tx.input[0].previous_output.txid, txid1);
+
+    // Verify through txout that spending relationships are maintained
+    // tx0 output 0 is spent (but tx0 is not in the extracted view)
+    assert!(extracted.txout(OutPoint::new(txid0, 0)).is_none());
+
+    // tx1 output 0 is spent by tx2
+    let tx1_out = extracted.txout(OutPoint::new(txid1, 0)).unwrap();
+    assert_eq!(
+        tx1_out.spent_by.as_ref().map(|(_, txid)| *txid),
+        Some(txid2)
+    );
+
+    // tx2 output 0 is unspent
+    let tx2_out = extracted.txout(OutPoint::new(txid2, 0)).unwrap();
+    assert!(tx2_out.spent_by.is_none());
+
+    // Verify remaining view: tx0 output should be unspent (tx1 was removed)
+    let tx0_out = canonical_view.txout(OutPoint::new(txid0, 0)).unwrap();
+    assert!(tx0_out.spent_by.is_none());
+}
+
+#[test]
+fn test_extract_subgraph_complex_graph() {
+    // Test a more complex graph:
+    //       tx0
+    //      /    \
+    //    tx1    tx2
+    //      \    /
+    //       tx3
+    //        |
+    //       tx4
+
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("genesis")),
+        (1, hash!("block1")),
+        (2, hash!("block2")),
+        (3, hash!("block3")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::default();
+
+    // Create tx0 with 2 outputs
+    let tx0 = Transaction {
+        output: vec![
+            TxOut {
+                value: Amount::from_sat(50_000),
+                script_pubkey: ScriptBuf::new(),
+            },
+            TxOut {
+                value: Amount::from_sat(50_000),
+                script_pubkey: ScriptBuf::new(),
+            },
+        ],
+        ..new_tx(0)
+    };
+    let txid0 = tx0.compute_txid();
+    let _ = tx_graph.insert_tx(tx0.clone());
+    let _ = tx_graph.insert_anchor(
+        txid0,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+
+    // tx1 spends first output of tx0
+    let tx1 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(txid0, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(45_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let txid1 = tx1.compute_txid();
+    let _ = tx_graph.insert_tx(tx1.clone());
+    let _ = tx_graph.insert_anchor(
+        txid1,
+        ConfirmationBlockTime {
+            block_id: chain.get(2).unwrap().block_id(),
+            confirmation_time: 200,
+        },
+    );
+
+    // tx2 spends second output of tx0
+    let tx2 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(txid0, 1),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(45_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(2)
+    };
+    let txid2 = tx2.compute_txid();
+    let _ = tx_graph.insert_tx(tx2.clone());
+    let _ = tx_graph.insert_anchor(
+        txid2,
+        ConfirmationBlockTime {
+            block_id: chain.get(2).unwrap().block_id(),
+            confirmation_time: 201,
+        },
+    );
+
+    // tx3 spends from both tx1 and tx2
+    let tx3 = Transaction {
+        input: vec![
+            TxIn {
+                previous_output: OutPoint::new(txid1, 0),
+                ..Default::default()
+            },
+            TxIn {
+                previous_output: OutPoint::new(txid2, 0),
+                ..Default::default()
+            },
+        ],
+        output: vec![TxOut {
+            value: Amount::from_sat(85_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(3)
+    };
+    let txid3 = tx3.compute_txid();
+    let _ = tx_graph.insert_tx(tx3.clone());
+    let _ = tx_graph.insert_anchor(
+        txid3,
+        ConfirmationBlockTime {
+            block_id: chain.get(3).unwrap().block_id(),
+            confirmation_time: 300,
+        },
+    );
+
+    // tx4 spends from tx3
+    let tx4 = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(txid3, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(80_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(4)
+    };
+    let txid4 = tx4.compute_txid();
+    let _ = tx_graph.insert_tx(tx4.clone());
+    // tx4 is unconfirmed but seen
+    let _ = tx_graph.insert_seen_at(txid4, 400);
+
+    let mut canonical_view = tx_graph.canonical_view(
+        &chain,
+        chain.tip().block_id(),
+        CanonicalizationParams::default(),
+    );
+
+    // Extract tx1 and tx2, should also get tx3 and tx4 as descendants
+    let extracted = canonical_view.extract_subgraph([txid1, txid2].into_iter());
+
+    // Verify extracted view contains tx1, tx2, tx3, tx4 but not tx0
+    assert!(extracted.tx(txid1).is_some());
+    assert!(extracted.tx(txid2).is_some());
+    assert!(extracted.tx(txid3).is_some());
+    assert!(extracted.tx(txid4).is_some());
+    assert!(extracted.tx(txid0).is_none());
+
+    // Verify remaining view contains only tx0
+    assert!(canonical_view.tx(txid0).is_some());
+    assert!(canonical_view.tx(txid1).is_none());
+    assert!(canonical_view.tx(txid2).is_none());
+    assert!(canonical_view.tx(txid3).is_none());
+    assert!(canonical_view.tx(txid4).is_none());
+
+    // Verify spends field correctness
+    verify_spends_consistency(&extracted);
+    verify_spends_consistency(&canonical_view);
+}
+
+#[test]
+fn test_extract_subgraph_nonexistent_tx() {
+    // Test extracting a transaction that doesn't exist
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("genesis")), (1, hash!("block1"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::default();
+
+    let tx = Transaction {
+        output: vec![TxOut {
+            value: Amount::from_sat(100_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(0)
+    };
+    let txid = tx.compute_txid();
+    let _ = tx_graph.insert_tx(tx);
+    let _ = tx_graph.insert_anchor(
+        txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+
+    let mut canonical_view = tx_graph.canonical_view(
+        &chain,
+        chain.tip().block_id(),
+        CanonicalizationParams::default(),
+    );
+
+    // Try to extract a non-existent transaction
+    let fake_txid = hash!("nonexistent");
+    let extracted = canonical_view.extract_subgraph([fake_txid].into_iter());
+
+    // Should return empty view
+    assert_eq!(extracted.txs().count(), 0);
+
+    // Original view should be unchanged
+    assert!(canonical_view.tx(txid).is_some());
+}
+
+#[test]
+fn test_extract_subgraph_partial_chain() {
+    // Test extracting from the middle of a chain
+    // tx0 -> tx1 -> tx2 -> tx3
+    // Extract tx1 should give tx1, tx2, tx3 but not tx0
+
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("genesis")),
+        (1, hash!("block1")),
+        (2, hash!("block2")),
+        (3, hash!("block3")),
+        (4, hash!("block4")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::default();
+
+    // Build chain of transactions
+    let mut txids = vec![];
+    let mut prev_txid = None;
+
+    for i in 0..4 {
+        let tx = if let Some(prev) = prev_txid {
+            Transaction {
+                input: vec![TxIn {
+                    previous_output: OutPoint::new(prev, 0),
+                    ..Default::default()
+                }],
+                output: vec![TxOut {
+                    value: Amount::from_sat(100_000 - i * 10_000),
+                    script_pubkey: ScriptBuf::new(),
+                }],
+                ..new_tx(i as u32)
+            }
+        } else {
+            Transaction {
+                output: vec![TxOut {
+                    value: Amount::from_sat(100_000),
+                    script_pubkey: ScriptBuf::new(),
+                }],
+                ..new_tx(i as u32)
+            }
+        };
+
+        let txid = tx.compute_txid();
+        let _ = tx_graph.insert_tx(tx);
+
+        // Anchor each transaction in successive blocks
+        let _ = tx_graph.insert_anchor(
+            txid,
+            ConfirmationBlockTime {
+                block_id: chain.get(i as u32 + 1).unwrap().block_id(),
+                confirmation_time: (i + 1) * 100,
+            },
+        );
+
+        txids.push(txid);
+        prev_txid = Some(txid);
+    }
+
+    let mut canonical_view = tx_graph.canonical_view(
+        &chain,
+        chain.tip().block_id(),
+        CanonicalizationParams::default(),
+    );
+
+    // Extract from tx1
+    let extracted = canonical_view.extract_subgraph([txids[1]].into_iter());
+
+    // Verify extracted contains tx1, tx2, tx3 but not tx0
+    assert!(extracted.tx(txids[1]).is_some());
+    assert!(extracted.tx(txids[2]).is_some());
+    assert!(extracted.tx(txids[3]).is_some());
+    assert!(extracted.tx(txids[0]).is_none());
+
+    // Verify remaining contains only tx0
+    assert!(canonical_view.tx(txids[0]).is_some());
+    assert!(canonical_view.tx(txids[1]).is_none());
+
+    verify_spends_consistency(&extracted);
+    verify_spends_consistency(&canonical_view);
+}
+
+// Helper function to verify spends field consistency
+fn verify_spends_consistency<A: bdk_chain::Anchor>(view: &bdk_chain::CanonicalView<A>) {
+    // Verify each transaction's outputs and their spent status
+    for tx in view.txs() {
+        // Verify the transaction exists
+        assert!(view.tx(tx.txid).is_some());
+
+        // For each output, check if it's properly tracked as spent
+        for vout in 0..tx.tx.output.len() {
+            let op = OutPoint::new(tx.txid, vout as u32);
+            if let Some(txout) = view.txout(op) {
+                // If this output is spent, verify the spending tx exists
+                if let Some((_, spending_txid)) = txout.spent_by {
+                    assert!(
+                        view.tx(spending_txid).is_some(),
+                        "Spending tx {spending_txid} not found in view"
+                    );
+
+                    // Verify the spending tx actually has this input
+                    let spending_tx = view.tx(spending_txid).unwrap();
+                    assert!(
+                        spending_tx
+                            .tx
+                            .input
+                            .iter()
+                            .any(|input| input.previous_output == op),
+                        "Transaction {spending_txid} doesn't actually spend outpoint {op}"
+                    );
+                }
+            }
+        }
+
+        // For each input (except coinbase), verify it references valid outpoints
+        if !tx.tx.is_coinbase() {
+            for input in &tx.tx.input {
+                // If the parent tx is in this view, verify the output exists and shows as spent
+                if let Some(parent_txout) = view.txout(input.previous_output) {
+                    assert_eq!(
+                        parent_txout.spent_by.as_ref().map(|(_, txid)| *txid),
+                        Some(tx.txid),
+                        "Output {:?} should be marked as spent by tx {}",
+                        input.previous_output,
+                        tx.txid
+                    );
+                }
+            }
+        }
+    }
+}
