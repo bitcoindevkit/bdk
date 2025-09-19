@@ -21,7 +21,7 @@
 //! }
 //! ```
 
-use crate::collections::HashMap;
+use crate::collections::{BTreeSet, HashMap};
 use alloc::sync::Arc;
 use core::{fmt, ops::RangeBounds};
 
@@ -430,5 +430,92 @@ impl<A: Anchor> CanonicalView<A> {
                 .map(|(_, spk)| (spk, c_tx.txid))
                 .collect()
         })
+    }
+
+    /// Extracts a subgraph containing the specified transactions and all their descendants.
+    ///
+    /// Takes transaction IDs and returns a new `CanonicalView` containing those transactions
+    /// plus any transactions that spend their outputs (recursively). The extracted transactions
+    /// are removed from this view.
+    pub fn extract_subgraph(&mut self, txids: impl Iterator<Item = Txid>) -> Self {
+        use crate::collections::hash_map::Entry;
+
+        let mut to_vist = txids.collect::<Vec<Txid>>();
+
+        let mut spends = HashMap::<OutPoint, Txid>::new();
+        let mut txs = HashMap::<Txid, (Arc<Transaction>, ChainPosition<A>)>::new();
+
+        while let Some(txid) = to_vist.pop() {
+            let tx_entry = match txs.entry(txid) {
+                Entry::Occupied(_) => continue, // Already visited.
+                Entry::Vacant(entry) => entry,
+            };
+
+            let (tx, pos) = match self.txs.remove(&txid) {
+                Some(tx_and_pos) => tx_and_pos,
+                None => continue, // Doesn't exist in graph.
+            };
+
+            tx_entry.insert((tx.clone(), pos.clone()));
+
+            for op in (0_u32..tx.output.len() as u32).map(|vout| OutPoint::new(txid, vout)) {
+                let spent_by = match self.spends.remove(&op) {
+                    Some(spent_by) => spent_by,
+                    None => continue,
+                };
+                spends.insert(op, spent_by);
+                to_vist.push(spent_by);
+            }
+        }
+
+        // final pass to clean `self.spends`.
+        for txin in txs.values().flat_map(|(tx, _)| &tx.input) {
+            self.spends.remove(&txin.previous_output);
+        }
+
+        // Remove extracted transactions from self.order
+        let extracted_txids = txs.keys().copied().collect::<BTreeSet<Txid>>();
+        self.order.retain(|txid| !extracted_txids.contains(txid));
+
+        // TODO: Use this with `TopologicalIter` once #2027 gets merged to return a view that has
+        // topologically-ordered transactions.
+        let _roots = txs
+            .iter()
+            .filter(|(_, (tx, _))| {
+                tx.is_coinbase()
+                    || tx
+                        .input
+                        .iter()
+                        .all(|txin| !spends.contains_key(&txin.previous_output))
+            })
+            .map(|(&txid, _)| txid);
+
+        CanonicalView {
+            order: txs.keys().copied().collect(), // TODO: Not ordered.
+            txs,
+            spends,
+            tip: self.tip,
+        }
+    }
+
+    /// Returns transactions without parent transactions in this view.
+    ///
+    /// Root transactions are either coinbase transactions or transactions whose inputs
+    /// reference outputs not present in this canonical view.
+    pub fn roots(&self) -> impl Iterator<Item = CanonicalTx<A>> + '_ {
+        self.txs
+            .iter()
+            .filter(|(_, (tx, _))| {
+                tx.is_coinbase()
+                    || tx
+                        .input
+                        .iter()
+                        .all(|txin| !self.spends.contains_key(&txin.previous_output))
+            })
+            .map(|(&txid, (tx, pos))| CanonicalTx {
+                pos: pos.clone(),
+                txid,
+                tx: tx.clone(),
+            })
     }
 }
