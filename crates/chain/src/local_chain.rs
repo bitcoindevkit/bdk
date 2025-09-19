@@ -107,12 +107,14 @@ impl LocalChain<BlockHash> {
         &self,
         request: &CanonicalizationRequest,
     ) -> Result<CanonicalizationResponse, Infallible> {
-        match request {
-            CanonicalizationRequest::IsBlockInChain { block, chain_tip } => {
-                let result = self.is_block_in_chain(*block, *chain_tip)?;
-                Ok(CanonicalizationResponse::IsBlockInChain(result))
+        // Check each anchor until we find one that's confirmed
+        for (i, block) in request.anchors.iter().enumerate() {
+            if self.is_block_in_chain(*block, request.chain_tip)? == Some(true) {
+                return Ok(Some(i));
             }
         }
+        // No confirmed anchors found
+        Ok(None)
     }
 
     /// Update the chain with a given [`Header`] at `height` which you claim is connected to a

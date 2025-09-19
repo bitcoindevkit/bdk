@@ -9,24 +9,17 @@ use alloc::vec::Vec;
 use bdk_core::BlockId;
 use bitcoin::{Transaction, Txid};
 
-/// A request for chain data needed during canonicalization.
+/// A request to scan anchors for canonicalization.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CanonicalizationRequest {
-    /// Request to check if a block is in the chain.
-    IsBlockInChain {
-        /// The block to check.
-        block: BlockId,
-        /// The chain tip to check against.
-        chain_tip: BlockId,
-    },
+pub struct CanonicalizationRequest {
+    /// The anchor blocks to check.
+    pub anchors: Vec<BlockId>,
+    /// The chain tip to check against.
+    pub chain_tip: BlockId,
 }
 
-/// A response to a canonicalization request.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CanonicalizationResponse {
-    /// Response to IsBlockInChain request.
-    IsBlockInChain(Option<bool>),
-}
+/// Response with the index of the first confirmed anchor, if any.
+pub type CanonicalizationResponse = Option<usize>;
 
 /// Parameters that modify the canonicalization algorithm.
 pub use crate::canonical_iter::CanonicalizationParams;
@@ -48,12 +41,14 @@ pub struct CanonicalizationTask<'g, A> {
     canonical: CanonicalMap<A>,
     not_canonical: NotCanonicalSet,
 
-    pending_anchor_checks: VecDeque<(Txid, Arc<Transaction>, Vec<A>, usize)>,
+    // FIXME: (@oleonardolima) we probably can remove this queue
+    pending_anchor_checks: VecDeque<(Txid, Arc<Transaction>, &'g BTreeSet<A>)>,
 
     // Store canonical transactions in order
     canonical_order: Vec<Txid>,
 
     // Track which transactions have confirmed anchors
+    // FIXME: (@oleonardolima) do we really need this ?
     confirmed_anchors: HashMap<Txid, A>,
 }
 
@@ -103,78 +98,52 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
         task.process_assumed_txs();
 
         // Process anchored transactions and get the first request if needed
-        let initial_request = task.process_next_anchored_batch();
+        let initial_request = task.process_anchored_txs();
 
         (task, initial_request)
     }
 
     /// Returns the next query needed, if any.
     pub fn next_query(&mut self) -> Option<CanonicalizationRequest> {
-        // Check if we have pending anchor checks
-        if let Some((_, _, anchors, idx)) = self.pending_anchor_checks.front() {
-            if *idx < anchors.len() {
-                let anchor = &anchors[*idx];
-                return Some(CanonicalizationRequest::IsBlockInChain {
-                    block: anchor.anchor_block(),
-                    chain_tip: self.chain_tip,
-                });
-            }
+        if let Some((_, _, anchors)) = self.pending_anchor_checks.front() {
+            let anchors: Vec<BlockId> = anchors.iter().map(|a| a.anchor_block()).collect();
+
+            return Some(CanonicalizationRequest {
+                anchors,
+                chain_tip: self.chain_tip,
+            });
         }
 
-        // Process more anchored transactions if available
-        self.process_next_anchored_batch()
+        self.process_anchored_txs()
     }
 
     /// Resolves a query with the given response.
     pub fn resolve_query(&mut self, response: CanonicalizationResponse) {
-        match response {
-            CanonicalizationResponse::IsBlockInChain(result) => {
-                if let Some((txid, tx, anchors, idx)) = self.pending_anchor_checks.front_mut() {
-                    if result == Some(true) && *idx < anchors.len() {
-                        // This anchor is in the chain, mark transaction as canonical
-                        let anchor = anchors[*idx].clone();
-                        let txid = *txid;
-                        let tx = tx.clone();
+        if let Some((txid, tx, anchors)) = self.pending_anchor_checks.pop_front() {
+            match response {
+                Some(anchor_idx) => {
+                    let anchor: A = anchors
+                        .iter()
+                        .nth(anchor_idx)
+                        .expect("index must be valid")
+                        .clone();
 
-                        // Remove from pending checks
-                        self.pending_anchor_checks.pop_front();
+                    self.confirmed_anchors.insert(txid, anchor.clone());
 
-                        // Track this confirmed anchor
-                        self.confirmed_anchors.insert(txid, anchor.clone());
-
-                        // Check if this transaction was already marked canonical transitively
-                        if let Some((_, reason)) = self.canonical.get(&txid) {
-                            if matches!(
-                                reason,
-                                CanonicalReason::Anchor {
-                                    descendant: Some(_),
-                                    ..
-                                }
-                            ) {
-                                // Update to direct anchor
-                                if let Some((_, reason)) = self.canonical.get_mut(&txid) {
-                                    *reason = CanonicalReason::from_anchor(anchor);
-                                }
-                            }
-                        } else {
-                            // Mark as canonical
-                            self.mark_canonical(txid, tx, CanonicalReason::from_anchor(anchor));
-                        }
-                    } else {
-                        // Move to next anchor
-                        *idx += 1;
-
-                        // If we've checked all anchors, move to leftover
-                        if *idx >= anchors.len() {
-                            let (txid, tx, anchors, _) =
-                                self.pending_anchor_checks.pop_front().unwrap();
-                            let height = anchors
-                                .last()
-                                .map(|a| a.confirmation_height_upper_bound())
-                                .unwrap_or(0);
-                            self.unprocessed_leftover_txs.push_back((txid, tx, height));
-                        }
-                    }
+                    self.mark_canonical(txid, tx, CanonicalReason::from_anchor(anchor));
+                }
+                None => {
+                    self.unprocessed_leftover_txs.push_back((
+                        txid,
+                        tx,
+                        anchors
+                            .iter()
+                            .last()
+                            .expect(
+                                "tx taken from `unprocessed_txs_with_anchors` so it must at least have an anchor",
+                            )
+                            .confirmation_height_upper_bound(),
+                    ))
                 }
             }
         }
@@ -198,87 +167,70 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
 
         for txid in &self.canonical_order {
             if let Some((tx, reason)) = self.canonical.get(txid) {
-                view_order.push(*txid);
-
-                // Add spends
-                if !tx.is_coinbase() {
-                    for input in &tx.input {
-                        view_spends.insert(input.previous_output, *txid);
-                    }
-                }
-
-                // Get transaction node for first_seen/last_seen info
-                let tx_node = self.tx_graph.get_tx_node(*txid);
-                let first_seen = tx_node.as_ref().and_then(|node| node.first_seen);
-                let last_seen = tx_node.as_ref().and_then(|node| node.last_seen);
-
-                // Determine chain position based on reason
-                let chain_position = match reason {
-                    CanonicalReason::Assumed { descendant: _ } => {
-                        // Check if we have a confirmed anchor for this assumed tx
-                        if let Some(anchor) = self.confirmed_anchors.get(txid) {
-                            ChainPosition::Confirmed {
-                                anchor: anchor.clone(),
-                                transitively: None,
-                            }
-                        } else {
-                            ChainPosition::Unconfirmed {
-                                first_seen,
-                                last_seen,
-                            }
-                        }
-                    }
-                    CanonicalReason::Anchor { anchor, descendant } => ChainPosition::Confirmed {
-                        anchor: anchor.clone(),
-                        transitively: *descendant,
-                    },
-                    CanonicalReason::ObservedIn {
-                        observed_in,
-                        descendant,
-                    } => {
-                        // Check if we found a confirmed anchor for this observed tx
-                        if let Some(anchor) = self.confirmed_anchors.get(txid) {
-                            ChainPosition::Confirmed {
-                                anchor: anchor.clone(),
-                                transitively: *descendant,
-                            }
-                        } else {
-                            match observed_in {
-                                ObservedIn::Block(_height) => ChainPosition::Unconfirmed {
-                                    first_seen,
-                                    last_seen: None,
-                                },
-                                ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
-                                    first_seen,
-                                    last_seen: Some(*last_seen),
-                                },
-                            }
-                        }
+                let tx_node = match self.tx_graph.get_tx_node(*txid) {
+                    Some(tx_node) => tx_node,
+                    None => {
+                        // TODO: Have the `CanonicalIter` return `TxNode`s.
+                        debug_assert!(false, "tx node must exist!");
+                        continue;
                     }
                 };
 
-                view_txs.insert(*txid, (tx.clone(), chain_position));
+                view_order.push(*txid);
+
+                if !tx.is_coinbase() {
+                    view_spends.extend(tx.input.iter().map(|txin| (txin.previous_output, *txid)));
+                }
+
+                let pos = match reason {
+                    CanonicalReason::Assumed { descendant } => match descendant {
+                        Some(_) => match self.confirmed_anchors.get(txid) {
+                            Some(anchor) => ChainPosition::Confirmed {
+                                anchor: anchor.clone(),
+                                transitively: None,
+                            },
+                            None => ChainPosition::Unconfirmed {
+                                first_seen: tx_node.first_seen,
+                                last_seen: tx_node.last_seen,
+                            },
+                        },
+                        None => ChainPosition::Unconfirmed {
+                            first_seen: tx_node.first_seen,
+                            last_seen: tx_node.last_seen,
+                        },
+                    },
+                    CanonicalReason::Anchor { anchor, descendant } => match descendant {
+                        Some(_) => match self.confirmed_anchors.get(txid) {
+                            Some(anchor) => ChainPosition::Confirmed {
+                                anchor: anchor.clone(),
+                                transitively: None,
+                            },
+                            None => ChainPosition::Confirmed {
+                                anchor: anchor.clone(),
+                                transitively: *descendant,
+                            },
+                        },
+                        None => ChainPosition::Confirmed {
+                            anchor: anchor.clone(),
+                            transitively: None,
+                        },
+                    },
+                    CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
+                        ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
+                            first_seen: tx_node.first_seen,
+                            last_seen: Some(*last_seen),
+                        },
+                        ObservedIn::Block(_) => ChainPosition::Unconfirmed {
+                            first_seen: tx_node.first_seen,
+                            last_seen: None,
+                        },
+                    },
+                };
+                view_txs.insert(*txid, (tx_node.tx, pos));
             }
         }
 
         CanonicalView::from_parts(self.chain_tip, view_order, view_txs, view_spends)
-    }
-
-    fn process_next_anchored_batch(&mut self) -> Option<CanonicalizationRequest> {
-        while let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
-            if !self.is_canonicalized(txid) {
-                // Check if we already have a confirmed anchor for this transaction
-                if let Some(anchor) = self.confirmed_anchors.get(&txid).cloned() {
-                    self.mark_canonical(txid, tx, CanonicalReason::from_anchor(anchor));
-                } else if !anchors.is_empty() {
-                    let anchors_vec: Vec<A> = anchors.iter().cloned().collect();
-                    self.pending_anchor_checks
-                        .push_back((txid, tx, anchors_vec, 0));
-                    return self.next_query();
-                }
-            }
-        }
-        None
     }
 
     fn is_canonicalized(&self, txid: Txid) -> bool {
@@ -291,6 +243,16 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
                 self.mark_canonical(txid, tx, CanonicalReason::assumed());
             }
         }
+    }
+
+    fn process_anchored_txs(&mut self) -> Option<CanonicalizationRequest> {
+        while let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
+            if !self.is_canonicalized(txid) {
+                self.pending_anchor_checks.push_back((txid, tx, anchors));
+                return self.next_query();
+            }
+        }
+        None
     }
 
     fn process_seen_txs(&mut self) {
@@ -323,10 +285,9 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
         // `tx` double spends itself.
         let mut detected_self_double_spend = false;
         let mut undo_not_canonical = Vec::<Txid>::new();
-        let mut staged_canonical = Vec::<(Txid, Arc<Transaction>, CanonicalReason<A>)>::new();
 
-        // Process ancestors
-        TxAncestors::new_include_root(
+        // `staged_queue` doubles as the `undo_canonical` data.
+        let staged_queue = TxAncestors::new_include_root(
             self.tx_graph,
             tx,
             |_: usize, tx: Arc<Transaction>| -> Option<Txid> {
@@ -335,9 +296,6 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
                     is_starting_tx = false;
                     reason.clone()
                 } else {
-                    // This is an ancestor being marked transitively
-                    // Check if it has its own anchor that needs to be verified later
-                    // We'll check anchors after marking it canonical
                     reason.to_transitive(starting_txid)
                 };
 
@@ -372,50 +330,21 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
                     return None;
                 }
 
-                staged_canonical.push((this_txid, tx.clone(), this_reason.clone()));
-                canonical_entry.insert((tx.clone(), this_reason));
+                canonical_entry.insert((tx, this_reason));
                 Some(this_txid)
             },
         )
-        .run_until_finished();
+        .collect::<Vec<Txid>>();
 
         if detected_self_double_spend {
-            // Undo changes
-            for (txid, _, _) in staged_canonical {
+            for txid in staged_queue {
                 self.canonical.remove(&txid);
             }
             for txid in undo_not_canonical {
                 self.not_canonical.remove(&txid);
             }
         } else {
-            // Add to canonical order
-            for (txid, _, reason) in &staged_canonical {
-                self.canonical_order.push(*txid);
-
-                // If this was marked transitively, check if it has anchors to verify
-                let is_transitive = matches!(
-                    reason,
-                    CanonicalReason::Anchor {
-                        descendant: Some(_),
-                        ..
-                    } | CanonicalReason::Assumed {
-                        descendant: Some(_),
-                        ..
-                    }
-                );
-
-                if is_transitive {
-                    if let Some(anchors) = self.tx_graph.all_anchors().get(txid) {
-                        // Only check anchors we haven't already confirmed
-                        if !self.confirmed_anchors.contains_key(txid) && !anchors.is_empty() {
-                            let tx = self.tx_graph.get_tx(*txid).expect("tx must exist");
-                            let anchors_vec: Vec<A> = anchors.iter().cloned().collect();
-                            self.pending_anchor_checks
-                                .push_back((*txid, tx, anchors_vec, 0));
-                        }
-                    }
-                }
-            }
+            self.canonical_order.extend(staged_queue);
         }
     }
 }

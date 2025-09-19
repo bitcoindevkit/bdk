@@ -32,8 +32,7 @@ use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, Txid};
 
 use crate::{
     local_chain::LocalChain, spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalizationParams,
-    CanonicalizationRequest, CanonicalizationResponse, CanonicalizationTask, ChainOracle,
-    ChainPosition, FullTxOut, TxGraph,
+    CanonicalizationTask, ChainOracle, ChainPosition, FullTxOut, TxGraph,
 };
 
 /// A single canonical transaction with its chain position.
@@ -114,23 +113,27 @@ impl<A: Anchor> CanonicalView<A> {
 
         // Process the initial request if present
         if let Some(request) = initial_request {
-            let response = match request {
-                CanonicalizationRequest::IsBlockInChain { block, chain_tip } => {
-                    let result = chain.is_block_in_chain(block, chain_tip)?;
-                    CanonicalizationResponse::IsBlockInChain(result)
+            // Check each anchor until we find one that's confirmed
+            let mut response = None;
+            for (i, block) in request.anchors.iter().enumerate() {
+                if chain.is_block_in_chain(*block, request.chain_tip)? == Some(true) {
+                    response = Some(i);
+                    break;
                 }
-            };
+            }
             task.resolve_query(response);
         }
 
         // Process all subsequent requests
         while let Some(request) = task.next_query() {
-            let response = match request {
-                CanonicalizationRequest::IsBlockInChain { block, chain_tip } => {
-                    let result = chain.is_block_in_chain(block, chain_tip)?;
-                    CanonicalizationResponse::IsBlockInChain(result)
+            // Check each anchor until we find one that's confirmed
+            let mut response = None;
+            for (i, block) in request.anchors.iter().enumerate() {
+                if chain.is_block_in_chain(*block, request.chain_tip)? == Some(true) {
+                    response = Some(i);
+                    break;
                 }
-            };
+            }
             task.resolve_query(response);
         }
 
@@ -151,13 +154,27 @@ impl<A: Anchor> CanonicalView<A> {
 
         // Process the initial request if present
         if let Some(request) = initial_request {
-            let response = chain.handle_canonicalization_request(&request)?;
+            // Check each anchor until we find one that's confirmed
+            let mut response = None;
+            for (i, block) in request.anchors.iter().enumerate() {
+                if chain.is_block_in_chain(*block, request.chain_tip)? == Some(true) {
+                    response = Some(i);
+                    break;
+                }
+            }
             task.resolve_query(response);
         }
 
         // Process all subsequent requests
         while let Some(request) = task.next_query() {
-            let response = chain.handle_canonicalization_request(&request)?;
+            // Check each anchor until we find one that's confirmed
+            let mut response = None;
+            for (i, block) in request.anchors.iter().enumerate() {
+                if chain.is_block_in_chain(*block, request.chain_tip)? == Some(true) {
+                    response = Some(i);
+                    break;
+                }
+            }
             task.resolve_query(response);
         }
 
