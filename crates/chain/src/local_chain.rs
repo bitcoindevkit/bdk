@@ -4,6 +4,7 @@ use core::convert::Infallible;
 use core::fmt;
 use core::ops::RangeBounds;
 
+use crate::canonical_task::{CanonicalizationRequest, CanonicalizationResponse};
 use crate::collections::BTreeMap;
 use crate::{BlockId, ChainOracle, Merge};
 use bdk_core::ToBlockHash;
@@ -96,6 +97,26 @@ impl<D> ChainOracle for LocalChain<D> {
 
 // Methods for `LocalChain<BlockHash>`
 impl LocalChain<BlockHash> {
+    /// Handle a canonicalization request.
+    ///
+    /// This method processes requests from [`CanonicalizationTask`] to check if blocks
+    /// are in the chain.
+    ///
+    /// [`CanonicalizationTask`]: crate::canonical_task::CanonicalizationTask
+    pub fn handle_canonicalization_request(
+        &self,
+        request: &CanonicalizationRequest,
+    ) -> Result<CanonicalizationResponse, Infallible> {
+        // Check each anchor until we find one that's confirmed
+        for (i, block) in request.anchors.iter().enumerate() {
+            if self.is_block_in_chain(*block, request.chain_tip)? == Some(true) {
+                return Ok(Some(i));
+            }
+        }
+        // No confirmed anchors found
+        Ok(None)
+    }
+
     /// Update the chain with a given [`Header`] at `height` which you claim is connected to a
     /// existing block in the chain.
     ///
