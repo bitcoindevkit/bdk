@@ -32,8 +32,7 @@ use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, Txid};
 
 use crate::{
     local_chain::LocalChain, spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalizationParams,
-    CanonicalizationRequest, CanonicalizationResponse, CanonicalizationTask, ChainOracle,
-    ChainPosition, FullTxOut, TxGraph,
+    CanonicalizationTask, ChainOracle, ChainPosition, FullTxOut, TxGraph,
 };
 
 /// A single canonical transaction with its chain position.
@@ -114,24 +113,30 @@ impl<A: Anchor> CanonicalView<A> {
 
         // Process the initial request if present
         if let Some(request) = initial_request {
-            let response = match request {
-                CanonicalizationRequest::IsBlockInChain { block, chain_tip } => {
-                    let result = chain.is_block_in_chain(block, chain_tip)?;
-                    CanonicalizationResponse::IsBlockInChain(result)
+            // Check each anchor and return the first confirmed one
+            let mut best_anchor = None;
+            for anchor in &request.anchors {
+                if chain.is_block_in_chain(anchor.anchor_block(), request.chain_tip)? == Some(true)
+                {
+                    best_anchor = Some(anchor.clone());
+                    break;
                 }
-            };
-            task.resolve_query(response);
+            }
+            task.resolve_query(best_anchor);
         }
 
         // Process all subsequent requests
         while let Some(request) = task.next_query() {
-            let response = match request {
-                CanonicalizationRequest::IsBlockInChain { block, chain_tip } => {
-                    let result = chain.is_block_in_chain(block, chain_tip)?;
-                    CanonicalizationResponse::IsBlockInChain(result)
+            // Check each anchor and return the first confirmed one
+            let mut best_anchor = None;
+            for anchor in &request.anchors {
+                if chain.is_block_in_chain(anchor.anchor_block(), request.chain_tip)? == Some(true)
+                {
+                    best_anchor = Some(anchor.clone());
+                    break;
                 }
-            };
-            task.resolve_query(response);
+            }
+            task.resolve_query(best_anchor);
         }
 
         // Return the finished canonical view
