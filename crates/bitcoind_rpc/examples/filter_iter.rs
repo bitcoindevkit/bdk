@@ -69,7 +69,8 @@ fn main() -> anyhow::Result<()> {
     println!("\ntook: {}s", start.elapsed().as_secs());
     println!("Local tip: {}", chain.tip().height());
 
-    let canonical_view = graph.canonical_view(&chain, chain.tip().block_id(), Default::default());
+    let task = graph.canonicalization_task(Default::default());
+    let canonical_view = chain.canonicalize(task, Some(chain.tip().block_id()));
 
     let unspent: Vec<_> = canonical_view
         .filter_unspent_outpoints(graph.index.outpoints().clone())
