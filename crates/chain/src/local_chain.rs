@@ -4,9 +4,9 @@ use core::convert::Infallible;
 use core::fmt;
 use core::ops::RangeBounds;
 
-use crate::canonical_task::{CanonicalizationRequest, CanonicalizationResponse};
+use crate::canonical_task::CanonicalizationTask;
 use crate::collections::BTreeMap;
-use crate::{Anchor, BlockId, ChainOracle, Merge};
+use crate::{Anchor, BlockId, CanonicalView, ChainOracle, Merge};
 use bdk_core::ToBlockHash;
 pub use bdk_core::{CheckPoint, CheckPointIter};
 use bitcoin::block::Header;
@@ -97,23 +97,81 @@ impl<D> ChainOracle for LocalChain<D> {
 
 // Methods for `LocalChain<BlockHash>`
 impl LocalChain<BlockHash> {
-    /// Handle a canonicalization request.
+    // /// Check if a block is in the chain.
+    // ///
+    // /// # Arguments
+    // /// * `block` - The block to check
+    // /// * `chain_tip` - The chain tip to check against
+    // ///
+    // /// # Returns
+    // /// * `Some(true)` if the block is in the chain
+    // /// * `Some(false)` if the block is not in the chain
+    // /// * `None` if it cannot be determined
+    // pub fn is_block_in_chain(&self, block: BlockId, chain_tip: BlockId) -> Option<bool> {
+    //     let chain_tip_cp = match self.tip.get(chain_tip.height) {
+    //         // we can only determine whether `block` is in chain of `chain_tip` if `chain_tip`
+    // can         // be identified in chain
+    //         Some(cp) if cp.hash() == chain_tip.hash => cp,
+    //         _ => return None,
+    //     };
+    //     chain_tip_cp
+    //         .get(block.height)
+    //         .map(|cp| cp.hash() == block.hash)
+    // }
+
+    // /// Get the chain tip.
+    // ///
+    // /// # Returns
+    // /// The [`BlockId`] of the chain tip.
+    // pub fn chain_tip(&self) -> BlockId {
+    //     self.tip.block_id()
+    // }
+
+    /// Canonicalize a transaction graph using this chain.
     ///
-    /// This method processes requests from [`CanonicalizationTask`] to check if blocks
-    /// are in the chain.
+    /// This method processes a [`CanonicalizationTask`], handling all its requests
+    /// to determine which transactions are canonical, and returns a [`CanonicalView`].
     ///
-    /// [`CanonicalizationTask`]: crate::canonical_task::CanonicalizationTask
-    pub fn handle_canonicalization_request<A: Anchor>(
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalizationTask, CanonicalizationParams, TxGraph, local_chain::LocalChain};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph: TxGraph<BlockId> = TxGraph::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// let task = CanonicalizationTask::new(&tx_graph, CanonicalizationParams::default());
+    /// let view = chain.canonicalize(task, Some(chain.tip().block_id()));
+    /// ```
+    pub fn canonicalize<A: Anchor>(
         &self,
-        request: &CanonicalizationRequest<A>,
-    ) -> Result<CanonicalizationResponse<A>, Infallible> {
-        // Check each anchor and return the first confirmed one
-        for anchor in &request.anchors {
-            if self.is_block_in_chain(anchor.anchor_block(), request.chain_tip)? == Some(true) {
-                return Ok(Some(anchor.clone()));
+        mut task: CanonicalizationTask<'_, A>,
+        chain_tip: Option<BlockId>,
+    ) -> CanonicalView<A> {
+        let chain_tip = match chain_tip {
+            Some(chain_tip) => chain_tip,
+            None => self.get_chain_tip().expect("infallible"),
+        };
+
+        // Process all requests from the task
+        while let Some(request) = task.next_query() {
+            // Check each anchor and return the first confirmed one
+            let mut best_anchor = None;
+            for anchor in &request.anchors {
+                if self
+                    .is_block_in_chain(anchor.anchor_block(), chain_tip)
+                    .expect("infallible")
+                    == Some(true)
+                {
+                    best_anchor = Some(anchor.clone());
+                    break;
+                }
             }
+            task.resolve_query(best_anchor);
         }
-        Ok(None)
+
+        // Return the finished canonical view
+        task.finish(chain_tip)
     }
 
     /// Update the chain with a given [`Header`] at `height` which you claim is connected to a

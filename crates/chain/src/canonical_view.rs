@@ -6,14 +6,14 @@
 //! ## Example
 //!
 //! ```
-//! # use bdk_chain::{CanonicalView, TxGraph, CanonicalizationParams, local_chain::LocalChain};
+//! # use bdk_chain::{TxGraph, CanonicalizationParams, CanonicalizationTask, local_chain::LocalChain};
 //! # use bdk_core::BlockId;
 //! # use bitcoin::hashes::Hash;
 //! # let tx_graph = TxGraph::<BlockId>::default();
 //! # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
-//! # let chain_tip = chain.tip().block_id();
 //! let params = CanonicalizationParams::default();
-//! let view = CanonicalView::new(&tx_graph, &chain, chain_tip, params).unwrap();
+//! let task = CanonicalizationTask::new(&tx_graph, params);
+//! let view = chain.canonicalize(task, Some(chain.tip().block_id()));
 //!
 //! // Iterate over canonical transactions
 //! for tx in view.txs() {
@@ -23,17 +23,14 @@
 
 use crate::collections::HashMap;
 use alloc::sync::Arc;
-use core::{convert::Infallible, fmt, ops::RangeBounds};
+use core::{fmt, ops::RangeBounds};
 
 use alloc::vec::Vec;
 
 use bdk_core::BlockId;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, Txid};
 
-use crate::{
-    local_chain::LocalChain, spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalizationParams,
-    CanonicalizationTask, ChainOracle, ChainPosition, FullTxOut, TxGraph,
-};
+use crate::{spk_txout::SpkTxOutIndex, Anchor, Balance, ChainPosition, FullTxOut};
 
 /// A single canonical transaction with its chain position.
 ///
@@ -76,9 +73,13 @@ pub struct CanonicalView<A> {
 }
 
 impl<A: Anchor> CanonicalView<A> {
-    /// Creates a CanonicalView from its constituent parts.
-    /// This is used by CanonicalizationTask to build the view.
-    pub(crate) fn from_parts(
+    /// Creates a [`CanonicalView`] from its constituent parts.
+    ///
+    /// This internal constructor is used by [`CanonicalizationTask`] to build the view
+    /// after completing the canonicalization process. It takes the processed transaction
+    /// data including the canonical ordering, transaction map with chain positions, and
+    /// spend information.
+    pub(crate) fn new(
         tip: BlockId,
         order: Vec<Txid>,
         txs: HashMap<Txid, (Arc<Transaction>, ChainPosition<A>)>,
@@ -90,84 +91,6 @@ impl<A: Anchor> CanonicalView<A> {
             txs,
             spends,
         }
-    }
-
-    /// Create a new canonical view from a transaction graph.
-    ///
-    /// This constructor analyzes the given [`TxGraph`] and creates a canonical view of all
-    /// transactions, resolving conflicts and ordering them according to their chain position.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(CanonicalView)` on success, or an error if the chain oracle fails.
-    pub fn new<'g, C>(
-        tx_graph: &'g TxGraph<A>,
-        chain: &'g C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> Result<Self, C::Error>
-    where
-        C: ChainOracle,
-    {
-        let (mut task, initial_request) = CanonicalizationTask::new(tx_graph, chain_tip, params);
-
-        // Process the initial request if present
-        if let Some(request) = initial_request {
-            // Check each anchor and return the first confirmed one
-            let mut best_anchor = None;
-            for anchor in &request.anchors {
-                if chain.is_block_in_chain(anchor.anchor_block(), request.chain_tip)? == Some(true)
-                {
-                    best_anchor = Some(anchor.clone());
-                    break;
-                }
-            }
-            task.resolve_query(best_anchor);
-        }
-
-        // Process all subsequent requests
-        while let Some(request) = task.next_query() {
-            // Check each anchor and return the first confirmed one
-            let mut best_anchor = None;
-            for anchor in &request.anchors {
-                if chain.is_block_in_chain(anchor.anchor_block(), request.chain_tip)? == Some(true)
-                {
-                    best_anchor = Some(anchor.clone());
-                    break;
-                }
-            }
-            task.resolve_query(best_anchor);
-        }
-
-        // Return the finished canonical view
-        Ok(task.finish())
-    }
-
-    /// Create a new canonical view from a transaction graph using a LocalChain.
-    ///
-    /// This is a convenience method for working with [`LocalChain`] specifically.
-    pub fn new_with_local_chain<'g>(
-        tx_graph: &'g TxGraph<A>,
-        chain: &'g LocalChain,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> Result<Self, Infallible> {
-        let (mut task, initial_request) = CanonicalizationTask::new(tx_graph, chain_tip, params);
-
-        // Process the initial request if present
-        if let Some(request) = initial_request {
-            let response = chain.handle_canonicalization_request(&request)?;
-            task.resolve_query(response);
-        }
-
-        // Process all subsequent requests
-        while let Some(request) = task.next_query() {
-            let response = chain.handle_canonicalization_request(&request)?;
-            task.resolve_query(response);
-        }
-
-        // Return the finished canonical view
-        Ok(task.finish())
     }
 
     /// Get a single canonical transaction by its transaction ID.
@@ -215,12 +138,13 @@ impl<A: Anchor> CanonicalView<A> {
     /// # Example
     ///
     /// ```
-    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain};
+    /// # use bdk_chain::{TxGraph, CanonicalizationTask, local_chain::LocalChain};
     /// # use bdk_core::BlockId;
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph = TxGraph::<BlockId>::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
-    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let task = CanonicalizationTask::new(&tx_graph, Default::default());
+    /// # let view = chain.canonicalize(task, Some(chain.tip().block_id()));
     /// // Iterate over all canonical transactions
     /// for tx in view.txs() {
     ///     println!("TX {}: {:?}", tx.txid, tx.pos);
@@ -248,12 +172,13 @@ impl<A: Anchor> CanonicalView<A> {
     /// # Example
     ///
     /// ```
-    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_chain::{TxGraph, CanonicalizationTask, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
     /// # use bdk_core::BlockId;
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph = TxGraph::<BlockId>::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
-    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let task = CanonicalizationTask::new(&tx_graph, Default::default());
+    /// # let view = chain.canonicalize(task, Some(chain.tip().block_id()));
     /// # let indexer = KeychainTxOutIndex::<&str>::default();
     /// // Get all outputs from an indexer
     /// for (keychain, txout) in view.filter_outpoints(indexer.outpoints().clone()) {
@@ -277,12 +202,13 @@ impl<A: Anchor> CanonicalView<A> {
     /// # Example
     ///
     /// ```
-    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_chain::{TxGraph, CanonicalizationTask, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
     /// # use bdk_core::BlockId;
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph = TxGraph::<BlockId>::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
-    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let task = CanonicalizationTask::new(&tx_graph, Default::default());
+    /// # let view = chain.canonicalize(task, Some(chain.tip().block_id()));
     /// # let indexer = KeychainTxOutIndex::<&str>::default();
     /// // Get unspent outputs (UTXOs) from an indexer
     /// for (keychain, utxo) in view.filter_unspent_outpoints(indexer.outpoints().clone()) {
@@ -323,12 +249,13 @@ impl<A: Anchor> CanonicalView<A> {
     /// # Example
     ///
     /// ```
-    /// # use bdk_chain::{CanonicalView, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_chain::{CanonicalizationTask, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
     /// # use bdk_core::BlockId;
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph = TxGraph::<BlockId>::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
-    /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
+    /// # let task = CanonicalizationTask::new(&tx_graph, Default::default());
+    /// # let view = chain.canonicalize(task, Some(chain.tip().block_id()));
     /// # let indexer = KeychainTxOutIndex::<&str>::default();
     /// // Calculate balance with 6 confirmations, trusting all outputs
     /// let balance = view.balance(
