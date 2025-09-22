@@ -1,14 +1,14 @@
 //! Contains the [`IndexedTxGraph`] and associated types. Refer to the
 //! [`IndexedTxGraph`] documentation for more.
-use core::{convert::Infallible, fmt::Debug};
+use core::fmt::Debug;
 
 use alloc::{sync::Arc, vec::Vec};
 use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
+    canonical_task::CanonicalizationParams,
     tx_graph::{self, TxGraph},
-    Anchor, BlockId, CanonicalView, CanonicalizationParams, ChainOracle, Indexer, Merge,
-    TxPosInBlock,
+    Anchor, BlockId, CanonicalizationTask, Indexer, Merge, TxPosInBlock,
 };
 
 /// A [`TxGraph<A>`] paired with an indexer `I`, enforcing that every insertion into the graph is
@@ -423,36 +423,27 @@ where
     }
 }
 
+impl<A, I> AsRef<TxGraph<A>> for IndexedTxGraph<A, I> {
+    fn as_ref(&self) -> &TxGraph<A> {
+        &self.graph
+    }
+}
+
 impl<A, X> IndexedTxGraph<A, X>
 where
     A: Anchor,
 {
-    /// Returns a [`CanonicalView`].
-    pub fn try_canonical_view<'a, C: ChainOracle>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> Result<CanonicalView<A>, C::Error> {
-        self.graph.try_canonical_view(chain, chain_tip, params)
-    }
-
-    /// Returns a [`CanonicalView`].
+    /// Creates a `[CanonicalizationTask]` to determine the `[CanonicalView]` of transactions.
     ///
-    /// This is the infallible version of [`try_canonical_view`](Self::try_canonical_view).
-    pub fn canonical_view<'a, C: ChainOracle<Error = Infallible>>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
+    /// This method delegates to the underlying [`TxGraph`] to create a [`CanonicalizationTask`]
+    /// that can be used to determine which transactions are canonical based on the provided
+    /// parameters. The task handles the stateless canonicalization logic and can be polled
+    /// for anchor verification requests.
+    pub fn canonicalization_task(
+        &'_ self,
         params: CanonicalizationParams,
-    ) -> CanonicalView<A> {
-        self.graph.canonical_view(chain, chain_tip, params)
-    }
-}
-
-impl<A, I> AsRef<TxGraph<A>> for IndexedTxGraph<A, I> {
-    fn as_ref(&self) -> &TxGraph<A> {
-        &self.graph
+    ) -> CanonicalizationTask<'_, A> {
+        self.graph.canonicalization_task(params)
     }
 }
 

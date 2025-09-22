@@ -14,8 +14,6 @@ use bitcoin::{Transaction, Txid};
 pub struct CanonicalizationRequest<A> {
     /// The anchors to check.
     pub anchors: Vec<A>,
-    /// The chain tip to check against.
-    pub chain_tip: BlockId,
 }
 
 /// Response containing the best confirmed anchor, if any.
@@ -30,7 +28,6 @@ type NotCanonicalSet = HashSet<Txid>;
 /// Manages the canonicalization process without direct I/O operations.
 pub struct CanonicalizationTask<'g, A> {
     tx_graph: &'g TxGraph<A>,
-    chain_tip: BlockId,
 
     unprocessed_assumed_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>)> + 'g>,
     unprocessed_anchored_txs:
@@ -52,13 +49,7 @@ pub struct CanonicalizationTask<'g, A> {
 
 impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
     /// Creates a new canonicalization task.
-    ///
-    /// Returns the task and an optional initial request.
-    pub fn new(
-        tx_graph: &'g TxGraph<A>,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> (Self, Option<CanonicalizationRequest<A>>) {
+    pub fn new(tx_graph: &'g TxGraph<A>, params: CanonicalizationParams) -> Self {
         let anchors = tx_graph.all_anchors();
         let unprocessed_assumed_txs = Box::new(
             params
@@ -80,7 +71,6 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
 
         let mut task = Self {
             tx_graph,
-            chain_tip,
 
             unprocessed_assumed_txs,
             unprocessed_anchored_txs,
@@ -96,13 +86,10 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
             confirmed_anchors: HashMap::new(),
         };
 
-        // Process assumed transactions first (they don't need queries)
+        // process assumed transactions first (they don't need queries)
         task.process_assumed_txs();
 
-        // Process anchored transactions and get the first request if needed
-        let initial_request = task.process_anchored_txs();
-
-        (task, initial_request)
+        task
     }
 
     /// Returns the next query needed, if any.
@@ -111,7 +98,6 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
         if let Some((_, _, anchors)) = self.pending_anchor_checks.front() {
             return Some(CanonicalizationRequest {
                 anchors: anchors.clone(),
-                chain_tip: self.chain_tip,
             });
         }
 
@@ -152,7 +138,7 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
     }
 
     /// Completes the canonicalization and returns a CanonicalView.
-    pub fn finish(mut self) -> CanonicalView<A> {
+    pub fn finish(mut self, chain_tip: BlockId) -> CanonicalView<A> {
         // Process remaining transactions (seen and leftover)
         self.process_seen_txs();
         self.process_leftover_txs();
@@ -232,7 +218,7 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
             }
         }
 
-        CanonicalView::from_parts(self.chain_tip, view_order, view_txs, view_spends)
+        CanonicalView::new(chain_tip, view_order, view_txs, view_spends)
     }
 
     fn is_canonicalized(&self, txid: Txid) -> bool {
@@ -426,23 +412,10 @@ mod tests {
         };
         let _ = tx_graph.insert_anchor(txid, anchor);
 
-        // Create canonicalization task
+        // Create canonicalization task and canonicalize using the chain
         let params = CanonicalizationParams::default();
-        let (mut task, initial_request) = CanonicalizationTask::new(&tx_graph, chain_tip, params);
-
-        // Process requests
-        if let Some(request) = initial_request {
-            let response = chain.handle_canonicalization_request(&request).unwrap();
-            task.resolve_query(response);
-        }
-
-        while let Some(request) = task.next_query() {
-            let response = chain.handle_canonicalization_request(&request).unwrap();
-            task.resolve_query(response);
-        }
-
-        // Get canonical view
-        let canonical_view = task.finish();
+        let task = CanonicalizationTask::new(&tx_graph, params);
+        let canonical_view = chain.canonicalize(task, Some(chain_tip));
 
         // Should have one canonical transaction
         assert_eq!(canonical_view.txs().len(), 1);
