@@ -226,11 +226,11 @@ fn main() -> anyhow::Result<()> {
                         }
                         let _ = io::stderr().flush();
                     });
-            let canonical_view = graph.canonical_view(
-                &*chain,
-                chain_tip.block_id(),
-                CanonicalizationParams::default(),
-            );
+
+            let task = graph
+                .graph()
+                .canonicalization_task(CanonicalizationParams::default());
+            let canonical_view = chain.canonicalize(task, Some(chain_tip.block_id()));
 
             request = request
                 .expected_spk_txids(canonical_view.list_expected_spk_txids(&graph.index, ..));
