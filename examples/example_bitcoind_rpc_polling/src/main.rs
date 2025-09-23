@@ -137,6 +137,7 @@ fn main() -> anyhow::Result<()> {
             } = rpc_args;
 
             let rpc_client = rpc_args.new_client()?;
+
             let mut emitter = {
                 let chain = chain.lock().unwrap();
                 let graph = graph.lock().unwrap();
@@ -237,6 +238,7 @@ fn main() -> anyhow::Result<()> {
             let sigterm_flag = start_ctrlc_handler();
 
             let rpc_client = Arc::new(rpc_args.new_client()?);
+
             let mut emitter = {
                 let chain = chain.lock().unwrap();
                 let graph = graph.lock().unwrap();
