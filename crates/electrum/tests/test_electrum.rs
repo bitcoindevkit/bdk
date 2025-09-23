@@ -71,7 +71,7 @@ where
     if let Some(chain_update) = update.chain_update.clone() {
         let _ = chain
             .apply_update(chain_update)
-            .map_err(|err| anyhow::anyhow!("LocalChain update error: {:?}", err))?;
+            .map_err(|err| anyhow::anyhow!("LocalChain update error: {err:?}"))?;
     }
     let _ = graph.apply_update(update.tx_update.clone());
 
