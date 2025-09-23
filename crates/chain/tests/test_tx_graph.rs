@@ -1201,6 +1201,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
         .into_iter()
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
+
     let canonical_txs: Vec<_> = graph
         .list_canonical_txs(
             &chain,
@@ -1212,6 +1213,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
 
     // tx0 with seen_at should be returned by canonical txs
     let _ = graph.insert_seen_at(txids[0], 2);
+
     let mut canonical_txs = graph.list_canonical_txs(
         &chain,
         chain.tip().block_id(),
@@ -1225,6 +1227,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
 
     // tx1 with anchor is also canonical
     let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
+
     let canonical_txids: Vec<_> = graph
         .list_canonical_txs(
             &chain,
@@ -2022,31 +2025,34 @@ fn test_list_ordered_canonical_txs() {
         exp_chain_txs: Vec::from(["a0", "e0", "f0", "b0", "c0", "b1", "c1", "d0"]),
     }];
 
-    for (_, scenario) in scenarios.iter().enumerate() {
+    for scenario in scenarios {
         let env = init_graph(scenario.tx_templates.iter());
 
-        let canonical_txs = env
+        let canonical_txids = env
             .tx_graph
-            .list_canonical_txs(&local_chain, chain_tip, env.canonicalization_params.clone())
+            .list_ordered_canonical_txs(
+                &local_chain,
+                chain_tip,
+                env.canonicalization_params.clone(),
+            )
             .map(|tx| tx.tx_node.txid)
-            .collect::<BTreeSet<_>>();
+            .collect::<Vec<_>>();
 
-        let exp_txs = scenario
+        let exp_txids = scenario
             .exp_chain_txs
             .iter()
             .map(|txid| *env.tx_name_to_txid.get(txid).expect("txid must exist"))
-            .collect::<BTreeSet<_>>();
+            .collect::<Vec<_>>();
 
         assert_eq!(
-            canonical_txs, exp_txs,
+            HashSet::<Txid>::from_iter(canonical_txids.clone()),
+            HashSet::<Txid>::from_iter(exp_txids.clone()),
             "\n[{}] 'list_canonical_txs' failed",
             scenario.name
         );
 
-        let canonical_txs = canonical_txs.iter().map(|txid| *txid).collect::<Vec<_>>();
-
         assert!(
-            is_txs_in_topological_order(canonical_txs, env.tx_graph),
+            is_txs_in_topological_order(canonical_txids, env.tx_graph),
             "\n[{}] 'list_canonical_txs' failed to output the txs in topological order",
             scenario.name
         );

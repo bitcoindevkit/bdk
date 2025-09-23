@@ -253,6 +253,7 @@ fn main() -> anyhow::Result<()> {
                             .map(|(_, utxo)| utxo.outpoint),
                     );
                 };
+
                 if unconfirmed {
                     // We want to search for whether the unconfirmed transaction is now confirmed.
                     // We provide the unconfirmed txids to
