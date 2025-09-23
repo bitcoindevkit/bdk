@@ -1028,6 +1028,7 @@ fn test_chain_spends() {
     let build_canonical_positions = |chain: &LocalChain,
                                      tx_graph: &TxGraph<ConfirmationBlockTime>|
      -> HashMap<Txid, ChainPosition<ConfirmationBlockTime>> {
+        #[allow(deprecated)]
         tx_graph
             .list_canonical_txs(chain, tip.block_id(), CanonicalizationParams::default())
             .map(|canon_tx| (canon_tx.tx_node.txid, canon_tx.chain_position))
@@ -1201,6 +1202,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
         .into_iter()
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
+    #[allow(deprecated)]
     let canonical_txs: Vec<_> = graph
         .list_canonical_txs(
             &chain,
@@ -1212,6 +1214,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
 
     // tx0 with seen_at should be returned by canonical txs
     let _ = graph.insert_seen_at(txids[0], 2);
+    #[allow(deprecated)]
     let mut canonical_txs = graph.list_canonical_txs(
         &chain,
         chain.tip().block_id(),
@@ -1225,6 +1228,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
 
     // tx1 with anchor is also canonical
     let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
+    #[allow(deprecated)]
     let canonical_txids: Vec<_> = graph
         .list_canonical_txs(
             &chain,
@@ -1552,7 +1556,7 @@ struct Scenario<'a> {
 }
 
 #[test]
-fn test_list_canonical_txs_topological_order() {
+fn test_list_canonical_txs_topologically() {
     // chain
     let local_chain: LocalChain<BlockHash> = local_chain!(
         (0, hash!("A")),
@@ -1994,31 +1998,34 @@ fn test_list_canonical_txs_topological_order() {
         exp_chain_txs: Vec::from(["a0", "e0", "f0", "b0", "c0", "b1", "c1", "d0"]),
     }];
 
-    for (_, scenario) in scenarios.iter().enumerate() {
+    for scenario in scenarios {
         let env = init_graph(scenario.tx_templates.iter());
 
-        let canonical_txs = env
+        let canonical_txids = env
             .tx_graph
-            .list_canonical_txs(&local_chain, chain_tip, env.canonicalization_params.clone())
+            .list_ordered_canonical_txs(
+                &local_chain,
+                chain_tip,
+                env.canonicalization_params.clone(),
+            )
             .map(|tx| tx.tx_node.txid)
-            .collect::<BTreeSet<_>>();
+            .collect::<Vec<_>>();
 
-        let exp_txs = scenario
+        let exp_txids = scenario
             .exp_chain_txs
             .iter()
             .map(|txid| *env.tx_name_to_txid.get(txid).expect("txid must exist"))
-            .collect::<BTreeSet<_>>();
+            .collect::<Vec<_>>();
 
         assert_eq!(
-            canonical_txs, exp_txs,
+            HashSet::<Txid>::from_iter(canonical_txids.clone()),
+            HashSet::<Txid>::from_iter(exp_txids.clone()),
             "\n[{}] 'list_canonical_txs' failed",
             scenario.name
         );
 
-        let canonical_txs = canonical_txs.iter().map(|txid| *txid).collect::<Vec<_>>();
-
         assert!(
-            is_txs_in_topological_order(canonical_txs, env.tx_graph),
+            is_txs_in_topological_order(canonical_txids, env.tx_graph),
             "\n[{}] 'list_canonical_txs' failed to output the txs in topological order",
             scenario.name
         );
@@ -2026,34 +2033,26 @@ fn test_list_canonical_txs_topological_order() {
 }
 
 fn is_txs_in_topological_order(txs: Vec<Txid>, tx_graph: TxGraph<BlockId>) -> bool {
-    let enumerated_txs = txs
-        .iter()
-        .enumerate()
-        .map(|(i, txid)| (i, *txid))
-        .collect::<Vec<(usize, Txid)>>();
+    let mut seen: HashSet<Txid> = HashSet::new();
 
-    let txid_to_pos = enumerated_txs
-        .iter()
-        .map(|(i, txid)| (*txid, *i))
-        .collect::<HashMap<Txid, usize>>();
-
-    for (pos, txid) in enumerated_txs {
-        let descendants_pos: Vec<(&usize, Txid)> = tx_graph
-            .walk_descendants(txid, |_depth, this_txid| {
-                let pos = txid_to_pos.get(&this_txid).unwrap();
-                Some((pos, this_txid))
-            })
+    for txid in txs {
+        let tx = tx_graph.get_tx(txid).expect("should exist");
+        let inputs: Vec<Txid> = tx
+            .input
+            .iter()
+            .map(|txin| txin.previous_output.txid)
             .collect();
 
-        for (desc_pos, this_txid) in descendants_pos {
-            if desc_pos < &pos {
-                println!(
-                    "ancestor: ({:?}, {:?}) , descendant ({:?}, {:?})",
-                    txid, pos, this_txid, desc_pos
-                );
+        // assert that all the txin's have been seen already
+        for input_txid in inputs {
+            if !seen.contains(&input_txid) {
                 return false;
             }
         }
+
+        // Add current transaction to seen set
+        seen.insert(txid);
     }
-    return true;
+
+    true
 }

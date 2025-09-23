@@ -788,6 +788,7 @@ fn test_get_chain_position() {
         }
 
         // check chain position
+        #[allow(deprecated)]
         let chain_pos = graph
             .graph()
             .list_canonical_txs(
