@@ -44,8 +44,6 @@ pub mod tx_graph;
 pub use tx_graph::TxGraph;
 mod chain_oracle;
 pub use chain_oracle::*;
-mod canonical_iter;
-pub use canonical_iter::*;
 mod canonical_task;
 pub use canonical_task::*;
 mod canonical_view;
