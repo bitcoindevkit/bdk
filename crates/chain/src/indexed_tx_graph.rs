@@ -1,18 +1,14 @@
 //! Contains the [`IndexedTxGraph`] and associated types. Refer to the
 //! [`IndexedTxGraph`] documentation for more.
-use core::{
-    convert::Infallible,
-    fmt::{self, Debug},
-    ops::RangeBounds,
-};
+use core::{convert::Infallible, fmt::Debug};
 
 use alloc::{sync::Arc, vec::Vec};
-use bitcoin::{Block, OutPoint, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
-    spk_txout::SpkTxOutIndex,
     tx_graph::{self, TxGraph},
-    Anchor, BlockId, ChainOracle, Indexer, Merge, TxPosInBlock,
+    Anchor, BlockId, CanonicalView, CanonicalizationParams, ChainOracle, Indexer, Merge,
+    TxPosInBlock,
 };
 
 /// A [`TxGraph<A>`] paired with an indexer `I`, enforcing that every insertion into the graph is
@@ -431,53 +427,26 @@ impl<A, X> IndexedTxGraph<A, X>
 where
     A: Anchor,
 {
-    /// List txids that are expected to exist under the given spks.
-    ///
-    /// This is used to fill
-    /// [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
-    ///
-    ///
-    /// The spk index range can be contrained with `range`.
-    ///
-    /// # Error
-    ///
-    /// If the [`ChainOracle`] implementation (`chain`) fails, an error will be returned with the
-    /// returned item.
-    ///
-    /// If the [`ChainOracle`] is infallible,
-    /// [`list_expected_spk_txids`](Self::list_expected_spk_txids) can be used instead.
-    pub fn try_list_expected_spk_txids<'a, C, I>(
+    /// Returns a [`CanonicalView`].
+    pub fn try_canonical_view<'a, C: ChainOracle>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        spk_index_range: impl RangeBounds<I> + 'a,
-    ) -> impl Iterator<Item = Result<(ScriptBuf, Txid), C::Error>> + 'a
-    where
-        C: ChainOracle,
-        X: AsRef<SpkTxOutIndex<I>> + 'a,
-        I: fmt::Debug + Clone + Ord + 'a,
-    {
-        self.graph
-            .try_list_expected_spk_txids(chain, chain_tip, &self.index, spk_index_range)
+        params: CanonicalizationParams,
+    ) -> Result<CanonicalView<A>, C::Error> {
+        self.graph.try_canonical_view(chain, chain_tip, params)
     }
 
-    /// List txids that are expected to exist under the given spks.
+    /// Returns a [`CanonicalView`].
     ///
-    /// This is the infallible version of
-    /// [`try_list_expected_spk_txids`](Self::try_list_expected_spk_txids).
-    pub fn list_expected_spk_txids<'a, C, I>(
+    /// This is the infallible version of [`try_canonical_view`](Self::try_canonical_view).
+    pub fn canonical_view<'a, C: ChainOracle<Error = Infallible>>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
-        spk_index_range: impl RangeBounds<I> + 'a,
-    ) -> impl Iterator<Item = (ScriptBuf, Txid)> + 'a
-    where
-        C: ChainOracle<Error = Infallible>,
-        X: AsRef<SpkTxOutIndex<I>> + 'a,
-        I: fmt::Debug + Clone + Ord + 'a,
-    {
-        self.try_list_expected_spk_txids(chain, chain_tip, spk_index_range)
-            .map(|r| r.expect("infallible"))
+        params: CanonicalizationParams,
+    ) -> CanonicalView<A> {
+        self.graph.canonical_view(chain, chain_tip, params)
     }
 }
 
