@@ -1,7 +1,7 @@
 use bdk_core::CheckPoint;
-use bitcoin::BlockHash;
 use bitcoin::hashes::Hash;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Bencher};
+use bitcoin::BlockHash;
+use criterion::{black_box, criterion_group, criterion_main, Bencher, Criterion};
 
 /// Create a checkpoint chain with the given length
 fn create_checkpoint_chain(length: u32) -> CheckPoint<BlockHash> {

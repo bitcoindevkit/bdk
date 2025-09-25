@@ -246,12 +246,11 @@ impl<D> CheckPoint<D> {
         }
 
         // Now iterate normally from the found starting point
-        current.into_iter()
-            .take_while(move |cp| match start_bound {
-                core::ops::Bound::Included(inc_bound) => cp.height() >= inc_bound,
-                core::ops::Bound::Excluded(exc_bound) => cp.height() > exc_bound,
-                core::ops::Bound::Unbounded => true,
-            })
+        current.into_iter().take_while(move |cp| match start_bound {
+            core::ops::Bound::Included(inc_bound) => cp.height() >= inc_bound,
+            core::ops::Bound::Excluded(exc_bound) => cp.height() > exc_bound,
+            core::ops::Bound::Unbounded => true,
+        })
     }
 
     /// Returns the checkpoint at `height` if one exists, otherwise the nearest checkpoint at a
@@ -435,12 +434,16 @@ where
         let base_index = result.index();
 
         // First insert the new block
-        result = result.push_with_index(height, data, base_index + 1).expect("height is valid");
+        result = result
+            .push_with_index(height, data, base_index + 1)
+            .expect("height is valid");
 
         // Then re-add all the tail blocks with updated indices
         let mut current_index = base_index + 2;
         for (h, d) in tail.into_iter().rev() {
-            result = result.push_with_index(h, d, current_index).expect("tail is in order");
+            result = result
+                .push_with_index(h, d, current_index)
+                .expect("tail is in order");
             current_index += 1;
         }
 
@@ -451,7 +454,9 @@ where
     fn push_with_index(self, height: u32, data: D, new_index: u32) -> Result<Self, Self> {
         if self.height() < height {
             // Calculate skip pointer
-            let skip = if new_index >= CHECKPOINT_SKIP_INTERVAL && new_index % CHECKPOINT_SKIP_INTERVAL == 0 {
+            let skip = if new_index >= CHECKPOINT_SKIP_INTERVAL
+                && new_index % CHECKPOINT_SKIP_INTERVAL == 0
+            {
                 // Navigate back CHECKPOINT_SKIP_INTERVAL checkpoints
                 let target_index = new_index - CHECKPOINT_SKIP_INTERVAL;
                 let mut current = Some(self.0.clone());
@@ -498,7 +503,9 @@ where
             let new_index = self.0.index + 1;
 
             // Calculate skip pointer
-            let skip = if new_index >= CHECKPOINT_SKIP_INTERVAL && new_index % CHECKPOINT_SKIP_INTERVAL == 0 {
+            let skip = if new_index >= CHECKPOINT_SKIP_INTERVAL
+                && new_index % CHECKPOINT_SKIP_INTERVAL == 0
+            {
                 // Navigate back CHECKPOINT_SKIP_INTERVAL checkpoints
                 let mut current = Some(self.0.clone());
                 let mut steps = 0;
