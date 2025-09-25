@@ -1,6 +1,6 @@
 use bdk_core::CheckPoint;
-use bitcoin::BlockHash;
 use bitcoin::hashes::Hash;
+use bitcoin::BlockHash;
 
 #[test]
 fn test_skiplist_indices() {
@@ -160,8 +160,8 @@ fn test_skiplist_insert_maintains_indices() {
 
     // Check the full chain has correct indices
     let mut current = cp.clone();
-    let expected_heights = vec![50, 40, 30, 25, 20, 10, 0];
-    let expected_indices = vec![6, 5, 4, 3, 2, 1, 0];
+    let expected_heights = [50, 40, 30, 25, 20, 10, 0];
+    let expected_indices = [6, 5, 4, 3, 2, 1, 0];
 
     for (expected_height, expected_index) in expected_heights.iter().zip(expected_indices.iter()) {
         assert_eq!(current.height(), *expected_height);
