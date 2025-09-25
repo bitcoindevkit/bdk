@@ -36,8 +36,6 @@ jobs:
         uses: coverallsapp/github-action@master
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-        retry: 3
-        retry-delay: 30
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
