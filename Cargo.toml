@@ -8,9 +8,11 @@ members = [
     "crates/esplora",
     "crates/bitcoind_rpc",
     "crates/testenv",
+    "crates/waterfalls",
     "examples/example_cli",
     "examples/example_electrum",
     "examples/example_esplora",
+    "examples/example_waterfalls",
     "examples/example_bitcoind_rpc_polling",
 ]
 
@@ -22,4 +24,6 @@ print_stdout = "deny"
 print_stderr = "deny"
 
 [workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(coverage,coverage_nightly)',
+] }
