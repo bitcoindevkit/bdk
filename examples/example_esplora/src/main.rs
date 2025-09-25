@@ -225,10 +225,11 @@ fn main() -> anyhow::Result<()> {
             {
                 let graph = graph.lock().unwrap();
                 let chain = chain.lock().unwrap();
+                let local_tip_block = local_tip.block_id();
                 let task = graph
                     .graph()
-                    .canonicalization_task(CanonicalizationParams::default());
-                let canonical_view = chain.canonicalize(task, Some(local_tip.block_id()));
+                    .canonicalization_task(local_tip_block, CanonicalizationParams::default());
+                let canonical_view = chain.canonicalize(task);
 
                 request = request
                     .expected_spk_txids(canonical_view.list_expected_spk_txids(&graph.index, ..));

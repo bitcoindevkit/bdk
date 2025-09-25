@@ -29,7 +29,7 @@
 //!    encapsulates the canonicalization logic without performing any I/O operations.
 //!
 //! 2. **Execute the task** with a chain oracle to obtain a [`CanonicalView`]: ```ignore let view =
-//!    chain.canonicalize(task, Some(chain_tip)); ``` The chain oracle (such as
+//!    chain.canonicalize(task); ``` The chain oracle (such as
 //!    [`LocalChain`](crate::local_chain::LocalChain)) handles all anchor verification queries from
 //!    the task.
 //!
@@ -129,7 +129,7 @@
 use crate::collections::*;
 use crate::CanonicalizationParams;
 use crate::CanonicalizationTask;
-use crate::{Anchor, Merge};
+use crate::{Anchor, BlockId, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -964,9 +964,10 @@ impl<A: Anchor> TxGraph<A> {
     /// for anchor verification requests.
     pub fn canonicalization_task(
         &'_ self,
+        chain_tip: BlockId,
         params: CanonicalizationParams,
     ) -> CanonicalizationTask<'_, A> {
-        CanonicalizationTask::new(self, params)
+        CanonicalizationTask::new(self, chain_tip, params)
     }
 }
 

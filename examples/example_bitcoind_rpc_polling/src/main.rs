@@ -145,10 +145,11 @@ fn main() -> anyhow::Result<()> {
                     chain.tip(),
                     fallback_height,
                     {
+                        let chain_tip = chain.tip().block_id();
                         let task = graph
                             .graph()
-                            .canonicalization_task(CanonicalizationParams::default());
-                        chain.canonicalize(task, Some(chain.tip().block_id()))
+                            .canonicalization_task(chain_tip, CanonicalizationParams::default());
+                        chain.canonicalize(task)
                     }
                     .txs()
                     .filter(|tx| tx.pos.is_unconfirmed())
@@ -197,10 +198,12 @@ fn main() -> anyhow::Result<()> {
                     let synced_to = chain.tip();
                     let balance = {
                         {
-                            let task = graph
-                                .graph()
-                                .canonicalization_task(CanonicalizationParams::default());
-                            chain.canonicalize(task, Some(synced_to.block_id()))
+                            let synced_to_block = synced_to.block_id();
+                            let task = graph.graph().canonicalization_task(
+                                synced_to_block,
+                                CanonicalizationParams::default(),
+                            );
+                            chain.canonicalize(task)
                         }
                         .balance(
                             graph.index.outpoints().iter().cloned(),
@@ -250,10 +253,11 @@ fn main() -> anyhow::Result<()> {
                     chain.tip(),
                     fallback_height,
                     {
+                        let chain_tip = chain.tip().block_id();
                         let task = graph
                             .graph()
-                            .canonicalization_task(CanonicalizationParams::default());
-                        chain.canonicalize(task, Some(chain.tip().block_id()))
+                            .canonicalization_task(chain_tip, CanonicalizationParams::default());
+                        chain.canonicalize(task)
                     }
                     .txs()
                     .filter(|tx| tx.pos.is_unconfirmed())
@@ -357,10 +361,12 @@ fn main() -> anyhow::Result<()> {
                     let synced_to = chain.tip();
                     let balance = {
                         {
-                            let task = graph
-                                .graph()
-                                .canonicalization_task(CanonicalizationParams::default());
-                            chain.canonicalize(task, Some(synced_to.block_id()))
+                            let synced_to_block = synced_to.block_id();
+                            let task = graph.graph().canonicalization_task(
+                                synced_to_block,
+                                CanonicalizationParams::default(),
+                            );
+                            chain.canonicalize(task)
                         }
                         .balance(
                             graph.index.outpoints().iter().cloned(),
