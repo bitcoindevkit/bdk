@@ -431,9 +431,9 @@ pub fn planned_utxos(
     let outpoints = graph.index.outpoints();
     let task = graph
         .graph()
-        .canonicalization_task(CanonicalizationParams::default());
+        .canonicalization_task(chain_tip, CanonicalizationParams::default());
     chain
-        .canonicalize(task, Some(chain_tip))
+        .canonicalize(task)
         .filter_unspent_outpoints(outpoints.iter().cloned())
         .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
             let desc = graph
@@ -525,16 +525,15 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 }
             }
 
+            let chain_tip = chain.tip().block_id();
             let task = graph
                 .graph()
-                .canonicalization_task(CanonicalizationParams::default());
-            let balance = chain
-                .canonicalize(task, Some(chain.tip().block_id()))
-                .balance(
-                    graph.index.outpoints().iter().cloned(),
-                    |(k, _), _| k == &Keychain::Internal,
-                    1,
-                );
+                .canonicalization_task(chain_tip, CanonicalizationParams::default());
+            let balance = chain.canonicalize(task).balance(
+                graph.index.outpoints().iter().cloned(),
+                |(k, _), _| k == &Keychain::Internal,
+                1,
+            );
 
             let confirmed_total = balance.confirmed + balance.immature;
             let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;
@@ -573,9 +572,9 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 } => {
                     let task = graph
                         .graph()
-                        .canonicalization_task(CanonicalizationParams::default());
+                        .canonicalization_task(chain_tip, CanonicalizationParams::default());
                     let txouts = chain
-                        .canonicalize(task, Some(chain_tip))
+                        .canonicalize(task)
                         .filter_outpoints(outpoints.iter().cloned())
                         .filter(|(_, full_txo)| match (spent, unspent) {
                             (true, false) => full_txo.spent_by.is_some(),

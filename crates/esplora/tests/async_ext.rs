@@ -89,8 +89,9 @@ pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
         .spks_with_indexes(graph.index.all_spks().clone())
         .expected_spk_txids(
             {
-                let task = graph.canonicalization_task(Default::default());
-                chain.canonicalize(task, Some(chain.tip().block_id()))
+                let chain_tip = chain.tip().block_id();
+                let task = graph.canonicalization_task(chain_tip, Default::default());
+                chain.canonicalize(task)
             }
             .list_expected_spk_txids(&graph.index, ..),
         );
@@ -120,8 +121,9 @@ pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
         .spks_with_indexes(graph.index.all_spks().clone())
         .expected_spk_txids(
             {
-                let task = graph.canonicalization_task(Default::default());
-                chain.canonicalize(task, Some(chain.tip().block_id()))
+                let chain_tip = chain.tip().block_id();
+                let task = graph.canonicalization_task(chain_tip, Default::default());
+                chain.canonicalize(task)
             }
             .list_expected_spk_txids(&graph.index, ..),
         );

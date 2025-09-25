@@ -312,9 +312,9 @@ fn get_balance(
     let outpoints = recv_graph.index.outpoints().clone();
     let task = recv_graph
         .graph()
-        .canonicalization_task(CanonicalizationParams::default());
+        .canonicalization_task(chain_tip, CanonicalizationParams::default());
     let balance = recv_chain
-        .canonicalize(task, Some(chain_tip))
+        .canonicalize(task)
         .balance(outpoints, |_, _| true, 0);
     Ok(balance)
 }
@@ -619,9 +619,9 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     let _txid_2 = core.send_raw_transaction(&tx1b)?;
 
     // Retrieve the expected unconfirmed txids and spks from the graph.
-    let task = graph.canonicalization_task(Default::default());
+    let task = graph.canonicalization_task(chain_tip, Default::default());
     let exp_spk_txids = chain
-        .canonicalize(task, Some(chain_tip))
+        .canonicalize(task)
         .list_expected_spk_txids(&graph.index, ..)
         .collect::<Vec<_>>();
     assert_eq!(exp_spk_txids, vec![(spk, txid_1)]);
@@ -638,9 +638,9 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
 
     let task = graph
         .graph()
-        .canonicalization_task(CanonicalizationParams::default());
+        .canonicalization_task(chain_tip, CanonicalizationParams::default());
     let canonical_txids = chain
-        .canonicalize(task, Some(chain_tip))
+        .canonicalize(task)
         .txs()
         .map(|tx| tx.txid)
         .collect::<Vec<_>>();

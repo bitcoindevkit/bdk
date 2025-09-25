@@ -441,9 +441,10 @@ where
     /// for anchor verification requests.
     pub fn canonicalization_task(
         &'_ self,
+        chain_tip: BlockId,
         params: CanonicalizationParams,
     ) -> CanonicalizationTask<'_, A> {
-        self.graph.canonicalization_task(params)
+        self.graph.canonicalization_task(chain_tip, params)
     }
 }
 
