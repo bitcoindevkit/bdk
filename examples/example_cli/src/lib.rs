@@ -2,6 +2,7 @@ use bdk_chain::keychain_txout::DEFAULT_LOOKAHEAD;
 use serde_json::json;
 use std::cmp;
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::env;
 use std::fmt;
 use std::str::FromStr;
@@ -260,18 +261,15 @@ pub struct ChangeInfo {
     pub index: u32,
 }
 
-pub fn create_tx<O: ChainOracle>(
+pub fn create_tx(
     graph: &mut KeychainTxGraph,
-    chain: &O,
+    chain: &LocalChain,
     assets: &Assets,
     cs_algorithm: CoinSelectionAlgo,
     address: Address,
     value: u64,
     feerate: f32,
-) -> anyhow::Result<(Psbt, Option<ChangeInfo>)>
-where
-    O::Error: std::error::Error + Send + Sync + 'static,
-{
+) -> anyhow::Result<(Psbt, Option<ChangeInfo>)> {
     let mut changeset = keychain_txout::ChangeSet::default();
 
     // get planned utxos
@@ -424,21 +422,19 @@ where
 // Alias the elements of `planned_utxos`
 pub type PlanUtxo = (Plan, FullTxOut<ConfirmationBlockTime>);
 
-pub fn planned_utxos<O: ChainOracle>(
+pub fn planned_utxos(
     graph: &KeychainTxGraph,
-    chain: &O,
+    chain: &LocalChain,
     assets: &Assets,
-) -> Result<Vec<PlanUtxo>, O::Error> {
-    let chain_tip = chain.get_chain_tip()?;
+) -> Result<Vec<PlanUtxo>, Infallible> {
+    let chain_tip = chain.tip().block_id();
     let outpoints = graph.index.outpoints();
-    graph
+    let task = graph
         .graph()
-        .try_filter_chain_unspents(
-            chain,
-            chain_tip,
-            CanonicalizationParams::default(),
-            outpoints.iter().cloned(),
-        )?
+        .canonicalization_task(CanonicalizationParams::default());
+    chain
+        .canonicalize(task, Some(chain_tip))
+        .filter_unspent_outpoints(outpoints.iter().cloned())
         .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
             let desc = graph
                 .index
@@ -529,13 +525,16 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 }
             }
 
-            let balance = graph.graph().try_balance(
-                chain,
-                chain.get_chain_tip()?,
-                CanonicalizationParams::default(),
-                graph.index.outpoints().iter().cloned(),
-                |(k, _), _| k == &Keychain::Internal,
-            )?;
+            let task = graph
+                .graph()
+                .canonicalization_task(CanonicalizationParams::default());
+            let balance = chain
+                .canonicalize(task, Some(chain.tip().block_id()))
+                .balance(
+                    graph.index.outpoints().iter().cloned(),
+                    |(k, _), _| k == &Keychain::Internal,
+                    1,
+                );
 
             let confirmed_total = balance.confirmed + balance.immature;
             let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;
@@ -572,14 +571,12 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     confirmed,
                     unconfirmed,
                 } => {
-                    let txouts = graph
+                    let task = graph
                         .graph()
-                        .try_filter_chain_txouts(
-                            chain,
-                            chain_tip,
-                            CanonicalizationParams::default(),
-                            outpoints.iter().cloned(),
-                        )?
+                        .canonicalization_task(CanonicalizationParams::default());
+                    let txouts = chain
+                        .canonicalize(task, Some(chain_tip))
+                        .filter_outpoints(outpoints.iter().cloned())
                         .filter(|(_, full_txo)| match (spent, unspent) {
                             (true, false) => full_txo.spent_by.is_some(),
                             (false, true) => full_txo.spent_by.is_none(),
@@ -637,7 +634,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
 
                     create_tx(
                         &mut graph,
-                        &*chain,
+                        &chain,
                         &assets,
                         coin_select,
                         address,
