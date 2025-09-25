@@ -6,6 +6,93 @@ use core::ops::RangeBounds;
 
 use crate::{BlockId, CheckPointEntry, CheckPointEntryIter};
 
+/// Returns the checkpoint index that index `i` should hold a skip pointer to.
+///
+/// Mirrors Bitcoin Core's `GetSkipHeight` (operating on checkpoint indices rather than block
+/// heights, so sparse chains work). The chosen targets give skip distances that grow
+/// exponentially as you walk back, yielding `O(log n)` traversal.
+///
+/// For `i < 2` returns `0` — `prev` already covers those distances trivially.
+fn skip_index(i: u32) -> u32 {
+    // Clears the lowest set bit of `n`. This is what unlocks the exponential skip range:
+    // each call strips one trailing 1-bit, so the result lands at a power-of-two-aligned
+    // index below `n`.
+    fn invert_lowest_one(n: u32) -> u32 {
+        // Wrapping sub so that `invert_lowest_one(0) == 0` (matches Bitcoin Core's signed-int
+        // `n & (n-1)` semantics). The odd-i branch below relies on `invert_lowest_one(0) == 0`
+        // when `i == 3`.
+        n & n.wrapping_sub(1)
+    }
+    if i < 2 {
+        return 0;
+    }
+    if i & 1 == 0 {
+        return invert_lowest_one(i);
+    }
+    invert_lowest_one(invert_lowest_one(i - 1)) + 1
+}
+
+/// Walks back from `start` to the ancestor at `target` index, riding skip pointers in `O(log n)`.
+///
+/// Equivalent to Bitcoin Core's `CBlockIndex::GetAncestor`.
+fn ancestor_by_index<D>(start: &Arc<CPInner<D>>, target: u32) -> Arc<CPInner<D>> {
+    debug_assert!(target <= start.index);
+    let mut curr = start.clone();
+    while curr.index > target {
+        let skip_i = skip_index(curr.index);
+        let skip_i_prev = skip_index(curr.index.saturating_sub(1));
+
+        // Prev's skip is "strictly better" when it lands more than 2 indices below current's
+        // skip AND still reaches `target`. In that case we'd rather take one step back via
+        // `prev` and ride its longer skip next iteration.
+        let prev_skip_strictly_better =
+            skip_i > skip_i_prev.saturating_add(2) && skip_i_prev >= target;
+        let use_skip = curr.skip.is_some()
+            && (skip_i == target || (skip_i > target && !prev_skip_strictly_better));
+
+        curr = if use_skip {
+            curr.skip.clone().expect("checked above")
+        } else {
+            curr.prev
+                .clone()
+                .expect("walking toward smaller target requires prev")
+        };
+    }
+
+    curr
+}
+
+/// Walks back from `current` to the highest checkpoint at or below `target_height`.
+///
+/// Internally rides skip pointers using Bitcoin Core's `GetAncestor` skip-vs-prev heuristic,
+/// adapted to operate on heights so it works on sparse checkpoint chains.
+///
+/// Returns `None` only when the chain's base is itself above `target_height` (no ancestor exists
+/// at or below the target).
+fn walk_to_floor<D>(current: &CheckPoint<D>, target_height: u32) -> Option<CheckPoint<D>> {
+    let mut curr = current.clone();
+    while curr.height() > target_height {
+        let skip = curr.skip();
+        let take_skip = match &skip {
+            Some(skip_cp) if skip_cp.height() < target_height => false,
+            Some(skip_cp) if skip_cp.height() == target_height => true,
+            // Skip lands above target. Prefer prev's skip if it's a strictly bigger jump (lands
+            // more than 2 heights lower than current's skip) that still reaches target.
+            Some(skip_cp) => match curr.prev().and_then(|p| p.skip()) {
+                Some(prev_skip_cp) => {
+                    let prev_skip_h = prev_skip_cp.height();
+                    let skip_gap = skip_cp.height().saturating_sub(prev_skip_h);
+                    !(skip_gap > 2 && prev_skip_h >= target_height)
+                }
+                None => true,
+            },
+            None => false,
+        };
+        curr = if take_skip { skip? } else { curr.prev()? };
+    }
+    Some(curr)
+}
+
 /// A checkpoint is a node of a reference-counted linked list of [`BlockId`]s.
 ///
 /// Checkpoints are cheaply cloneable and are useful to find the agreement point between two sparse
@@ -28,6 +115,10 @@ struct CPInner<D> {
     data: D,
     /// Previous checkpoint (if any).
     prev: Option<Arc<CPInner<D>>>,
+    /// Skip pointer for fast traversals.
+    skip: Option<Arc<CPInner<D>>>,
+    /// Index of this checkpoint (number of checkpoints from the first).
+    index: u32,
 }
 
 /// When a `CPInner` is dropped we need to go back down the chain and manually remove any
@@ -46,8 +137,10 @@ impl<D> Drop for CPInner<D> {
             let arc_inner = Arc::into_inner(arc_node);
 
             match arc_inner {
-                // Keep going backwards.
-                Some(mut node) => current = node.prev.take(),
+                Some(mut node) => {
+                    node.skip.take(); // We don't want to recursively drop `node.skip`.
+                    current = node.prev.take();
+                }
                 None => break,
             }
         }
@@ -144,6 +237,25 @@ impl<D> CheckPoint<D> {
         self.0.prev.clone().map(CheckPoint)
     }
 
+    /// Get the index of this checkpoint (number of checkpoints from the first).
+    pub fn index(&self) -> u32 {
+        self.0.index
+    }
+
+    /// Get this checkpoint's pskip ancestor, if one exists.
+    ///
+    /// Returns the ancestor at the [skip index](Self::index) — a deterministically chosen
+    /// checkpoint that lets traversals cover exponentially-growing distances per hop. Returns
+    /// `None` for the genesis checkpoint (index `0`); for index `1`, the skip ancestor is the same
+    /// checkpoint as `prev`.
+    ///
+    /// This accessor exposes the internal pskip topology and is intended for diagnostics and
+    /// benchmarks, not for general-purpose traversal — use [`get`](Self::get),
+    /// [`range`](Self::range), or [`floor_at`](Self::floor_at) instead.
+    pub fn skip(&self) -> Option<CheckPoint<D>> {
+        self.0.skip.clone().map(CheckPoint)
+    }
+
     /// Iterate from this checkpoint in descending height.
     pub fn iter(&self) -> CheckPointIter<D> {
         self.clone().into_iter()
@@ -153,7 +265,15 @@ impl<D> CheckPoint<D> {
     ///
     /// Returns `None` if checkpoint at `height` does not exist`.
     pub fn get(&self, height: u32) -> Option<Self> {
-        self.range(height..=height).next()
+        if self.height() < height {
+            return None;
+        }
+        let floor = walk_to_floor(self, height)?;
+        if floor.height() == height {
+            Some(floor)
+        } else {
+            None
+        }
     }
 
     /// Iterate checkpoints over a height range.
@@ -166,12 +286,18 @@ impl<D> CheckPoint<D> {
     {
         let start_bound = range.start_bound().cloned();
         let end_bound = range.end_bound().cloned();
-        self.iter()
-            .skip_while(move |cp| match end_bound {
-                core::ops::Bound::Included(inc_bound) => cp.height() > inc_bound,
-                core::ops::Bound::Excluded(exc_bound) => cp.height() >= exc_bound,
-                core::ops::Bound::Unbounded => false,
-            })
+
+        // Find the highest checkpoint at or below the upper bound in `O(log n)`. For unbounded
+        // upper, start at `self`; for an excluded `0`, the range is empty.
+        let start = match end_bound {
+            core::ops::Bound::Included(b) => walk_to_floor(self, b),
+            core::ops::Bound::Excluded(b) => b.checked_sub(1).and_then(|b| walk_to_floor(self, b)),
+            core::ops::Bound::Unbounded => Some(self.clone()),
+        };
+
+        start
+            .into_iter()
+            .flat_map(IntoIterator::into_iter)
             .take_while(move |cp| match start_bound {
                 core::ops::Bound::Included(inc_bound) => cp.height() >= inc_bound,
                 core::ops::Bound::Excluded(exc_bound) => cp.height() > exc_bound,
@@ -246,6 +372,8 @@ where
             },
             data,
             prev: None,
+            skip: None,
+            index: 0,
         }))
     }
 
@@ -408,6 +536,13 @@ where
             }
         }
 
+        let new_index = self.0.index + 1;
+
+        // Wire the pskip pointer to the ancestor at skip_index(new_index). This is what makes
+        // traversal O(log n): each checkpoint carries one skip Arc to a deterministically chosen
+        // ancestor, and the chosen distances grow exponentially as you walk back.
+        let skip = Some(ancestor_by_index(&self.0, skip_index(new_index)));
+
         Ok(Self(Arc::new(CPInner {
             block_id: BlockId {
                 height,
@@ -415,6 +550,8 @@ where
             },
             data,
             prev: Some(self.0),
+            skip,
+            index: new_index,
         })))
     }
 }
@@ -471,9 +608,11 @@ mod tests {
 
     #[test]
     fn checkpoint_does_not_leak() {
+        const CHAIN_LEN: u32 = 1000;
+
         let mut cp = CheckPoint::new(0, bitcoin::hashes::Hash::hash(b"genesis"));
 
-        for height in 1u32..=1000 {
+        for height in 1u32..=CHAIN_LEN {
             let hash: BlockHash = bitcoin::hashes::Hash::hash(height.to_be_bytes().as_slice());
             cp = cp.push(height, hash).unwrap();
         }
@@ -481,15 +620,22 @@ mod tests {
         let genesis = cp.get(0).expect("genesis exists");
         let weak = Arc::downgrade(&genesis.0);
 
-        // At this point there should be exactly two strong references to the
-        // genesis checkpoint: the variable `genesis` and the chain `cp`.
+        // Expected strong references to genesis:
+        //  - the `genesis` local variable
+        //  - the chain `cp` via index 1's prev pointer
+        //  - one skip Arc per node `i` in `1..=CHAIN_LEN` where `skip_index(i) == 0` (under pskip,
+        //    those are i=1 and every power of 2 in [2, CHAIN_LEN]).
+        let expected_skips_to_genesis = (1..=CHAIN_LEN).filter(|&i| skip_index(i) == 0).count();
+        let expected_strong = 2 + expected_skips_to_genesis;
+
         assert_eq!(
             Arc::strong_count(&genesis.0),
-            2,
-            "`cp` and `genesis` should be the only strong references",
+            expected_strong,
+            "`genesis`, the chain's prev to genesis, and every pskip ancestor pointing to genesis \
+             should be the only strong references",
         );
 
-        // Dropping the chain should remove one strong reference.
+        // Dropping the chain should leave `genesis` as the only remaining strong reference.
         drop(cp);
         assert_eq!(
             Arc::strong_count(&genesis.0),
@@ -504,5 +650,49 @@ mod tests {
             weak.upgrade().is_none(),
             "the checkpoint node should be freed when all strong references are dropped",
         );
+    }
+
+    #[test]
+    fn skip_index_formula_table() {
+        // Hand-computed table of skip_index(i) for i in 0..=32, matching Bitcoin Core's
+        // GetSkipHeight. This locks the bit-twiddling formula against silent breakage.
+        let expected: [u32; 33] = [
+            0,  // 0
+            0,  // 1
+            0,  // 2  -> 010 & 001 = 000
+            1,  // 3  odd: ilo(ilo(2))+1 = ilo(0)+1 = 1
+            0,  // 4  -> 100 & 011 = 000
+            1,  // 5  odd: ilo(ilo(4))+1 = 1
+            4,  // 6  -> 110 & 101 = 100
+            1,  // 7  odd: ilo(ilo(6))+1 = ilo(4)+1 = 1
+            0,  // 8
+            1,  // 9
+            8,  // 10 -> 1010 & 1001 = 1000
+            1,  // 11
+            8,  // 12 -> 1100 & 1011 = 1000
+            1,  // 13
+            12, // 14 -> 1110 & 1101 = 1100
+            9,  // 15 odd: ilo(ilo(14))+1 = ilo(12)+1 = 8+1 = 9
+            0,  // 16
+            1,  // 17
+            16, // 18
+            1,  // 19
+            16, // 20
+            1,  // 21
+            20, // 22 -> 10110 & 10101 = 10100
+            17, // 23 odd: ilo(ilo(22))+1 = ilo(20)+1 = 16+1 = 17
+            16, // 24
+            1,  // 25
+            24, // 26 -> 11010 & 11001 = 11000
+            17, // 27 odd: ilo(ilo(26))+1 = ilo(24)+1 = 16+1 = 17
+            24, // 28 -> 11100 & 11011 = 11000
+            17, // 29 odd: ilo(ilo(28))+1 = ilo(24)+1 = 17
+            28, // 30 -> 11110 & 11101 = 11100
+            25, // 31 odd: ilo(ilo(30))+1 = ilo(28)+1 = 24+1 = 25
+            0,  // 32
+        ];
+        for (i, want) in expected.iter().enumerate() {
+            assert_eq!(skip_index(i as u32), *want, "skip_index({i}) mismatch");
+        }
     }
 }
