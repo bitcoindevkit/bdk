@@ -40,13 +40,9 @@ fn get_balance(
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
-    let balance = recv_graph.graph().balance(
-        recv_chain,
-        chain_tip,
-        CanonicalizationParams::default(),
-        outpoints,
-        |_, _| true,
-    );
+    let balance = recv_graph
+        .canonical_view(recv_chain, chain_tip, CanonicalizationParams::default())
+        .balance(outpoints, |_, _| true, 1);
     Ok(balance)
 }
 
@@ -150,7 +146,11 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     let sync_request = SyncRequest::builder()
         .chain_tip(chain.tip())
         .spks_with_indexes(graph.index.all_spks().clone())
-        .expected_spk_txids(graph.list_expected_spk_txids(&chain, chain.tip().block_id(), ..));
+        .expected_spk_txids(
+            graph
+                .canonical_view(&chain, chain.tip().block_id(), Default::default())
+                .list_expected_spk_txids(&graph.index, ..),
+        );
     let sync_response = client.sync(sync_request, BATCH_SIZE, true)?;
     assert!(
         sync_response
@@ -175,7 +175,11 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     let sync_request = SyncRequest::builder()
         .chain_tip(chain.tip())
         .spks_with_indexes(graph.index.all_spks().clone())
-        .expected_spk_txids(graph.list_expected_spk_txids(&chain, chain.tip().block_id(), ..));
+        .expected_spk_txids(
+            graph
+                .canonical_view(&chain, chain.tip().block_id(), Default::default())
+                .list_expected_spk_txids(&graph.index, ..),
+        );
     let sync_response = client.sync(sync_request, BATCH_SIZE, true)?;
     assert!(
         sync_response
