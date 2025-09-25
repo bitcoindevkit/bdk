@@ -140,38 +140,35 @@ impl LocalChain<BlockHash> {
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph: TxGraph<BlockId> = TxGraph::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
-    /// let task = CanonicalizationTask::new(&tx_graph, CanonicalizationParams::default());
-    /// let view = chain.canonicalize(task, Some(chain.tip().block_id()));
+    /// let chain_tip = chain.tip().block_id();
+    /// let task = CanonicalizationTask::new(&tx_graph, chain_tip, CanonicalizationParams::default());
+    /// let view = chain.canonicalize(task);
     /// ```
     pub fn canonicalize<A: Anchor>(
         &self,
         mut task: CanonicalizationTask<'_, A>,
-        chain_tip: Option<BlockId>,
     ) -> CanonicalView<A> {
-        let chain_tip = match chain_tip {
-            Some(chain_tip) => chain_tip,
-            None => self.get_chain_tip().expect("infallible"),
-        };
-
         // Process all requests from the task
         while let Some(request) = task.next_query() {
-            // Check each anchor and return the first confirmed one
-            let mut best_anchor = None;
-            for anchor in &request.anchors {
+            let chain_tip = request.chain_tip;
+
+            // Check each block ID and return the first confirmed one
+            let mut best_block_id = None;
+            for block_id in &request.block_ids {
                 if self
-                    .is_block_in_chain(anchor.anchor_block(), chain_tip)
+                    .is_block_in_chain(*block_id, chain_tip)
                     .expect("infallible")
                     == Some(true)
                 {
-                    best_anchor = Some(anchor.clone());
+                    best_block_id = Some(*block_id);
                     break;
                 }
             }
-            task.resolve_query(best_anchor);
+            task.resolve_query(best_block_id);
         }
 
         // Return the finished canonical view
-        task.finish(chain_tip)
+        task.finish()
     }
 
     /// Update the chain with a given [`Header`] at `height` which you claim is connected to a
