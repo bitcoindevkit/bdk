@@ -5,7 +5,7 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bdk_core::BlockId;
+use bdk_core::{BlockId, ChainQuery};
 use bitcoin::{Transaction, Txid};
 
 type CanonicalMap<A> = HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>;
@@ -53,53 +53,13 @@ pub struct CanonicalizationTask<'g, A> {
     confirmed_anchors: HashMap<Txid, A>,
 }
 
-impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
-    /// Creates a new canonicalization task.
-    pub fn new(tx_graph: &'g TxGraph<A>, params: CanonicalizationParams) -> Self {
-        let anchors = tx_graph.all_anchors();
-        let unprocessed_assumed_txs = Box::new(
-            params
-                .assume_canonical
-                .into_iter()
-                .rev()
-                .filter_map(|txid| Some((txid, tx_graph.get_tx(txid)?))),
-        );
-        let unprocessed_anchored_txs = Box::new(
-            tx_graph
-                .txids_by_descending_anchor_height()
-                .filter_map(|(_, txid)| Some((txid, tx_graph.get_tx(txid)?, anchors.get(&txid)?))),
-        );
-        let unprocessed_seen_txs = Box::new(
-            tx_graph
-                .txids_by_descending_last_seen()
-                .filter_map(|(last_seen, txid)| Some((txid, tx_graph.get_tx(txid)?, last_seen))),
-        );
+impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
+    type Request = CanonicalizationRequest<A>;
+    type Response = CanonicalizationResponse<A>;
+    type Context = BlockId;
+    type Result = CanonicalView<A>;
 
-        let mut task = Self {
-            tx_graph,
-
-            unprocessed_assumed_txs,
-            unprocessed_anchored_txs,
-            unprocessed_seen_txs,
-            unprocessed_leftover_txs: VecDeque::new(),
-
-            canonical: HashMap::new(),
-            not_canonical: HashSet::new(),
-
-            pending_anchor_checks: VecDeque::new(),
-
-            canonical_order: Vec::new(),
-            confirmed_anchors: HashMap::new(),
-        };
-
-        // process assumed transactions first (they don't need queries)
-        task.process_assumed_txs();
-
-        task
-    }
-
-    /// Returns the next query needed, if any.
-    pub fn next_query(&mut self) -> Option<CanonicalizationRequest<A>> {
+    fn next_query(&mut self) -> Option<Self::Request> {
         // Check if we have pending anchor checks
         if let Some((_, _, anchors)) = self.pending_anchor_checks.front() {
             return Some(CanonicalizationRequest {
@@ -111,8 +71,7 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
         self.process_anchored_txs()
     }
 
-    /// Resolves a query with the given response.
-    pub fn resolve_query(&mut self, response: CanonicalizationResponse<A>) {
+    fn resolve_query(&mut self, response: Self::Response) {
         if let Some((txid, tx, anchors)) = self.pending_anchor_checks.pop_front() {
             match response {
                 Some(best_anchor) => {
@@ -138,13 +97,11 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
         }
     }
 
-    /// Returns true if the canonicalization process is complete.
-    pub fn is_finished(&self) -> bool {
+    fn is_finished(&mut self) -> bool {
         self.pending_anchor_checks.is_empty() && self.unprocessed_anchored_txs.size_hint().0 == 0
     }
 
-    /// Completes the canonicalization and returns a CanonicalView.
-    pub fn finish(mut self, chain_tip: BlockId) -> CanonicalView<A> {
+    fn finish(mut self, context: Self::Context) -> Self::Result {
         // Process remaining transactions (seen and leftover)
         self.process_seen_txs();
         self.process_leftover_txs();
@@ -224,7 +181,53 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
             }
         }
 
-        CanonicalView::new(chain_tip, view_order, view_txs, view_spends)
+        CanonicalView::new(context, view_order, view_txs, view_spends)
+    }
+}
+
+impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
+    /// Creates a new canonicalization task.
+    pub fn new(tx_graph: &'g TxGraph<A>, params: CanonicalizationParams) -> Self {
+        let anchors = tx_graph.all_anchors();
+        let unprocessed_assumed_txs = Box::new(
+            params
+                .assume_canonical
+                .into_iter()
+                .rev()
+                .filter_map(|txid| Some((txid, tx_graph.get_tx(txid)?))),
+        );
+        let unprocessed_anchored_txs = Box::new(
+            tx_graph
+                .txids_by_descending_anchor_height()
+                .filter_map(|(_, txid)| Some((txid, tx_graph.get_tx(txid)?, anchors.get(&txid)?))),
+        );
+        let unprocessed_seen_txs = Box::new(
+            tx_graph
+                .txids_by_descending_last_seen()
+                .filter_map(|(last_seen, txid)| Some((txid, tx_graph.get_tx(txid)?, last_seen))),
+        );
+
+        let mut task = Self {
+            tx_graph,
+
+            unprocessed_assumed_txs,
+            unprocessed_anchored_txs,
+            unprocessed_seen_txs,
+            unprocessed_leftover_txs: VecDeque::new(),
+
+            canonical: HashMap::new(),
+            not_canonical: HashSet::new(),
+
+            pending_anchor_checks: VecDeque::new(),
+
+            canonical_order: Vec::new(),
+            confirmed_anchors: HashMap::new(),
+        };
+
+        // process assumed transactions first (they don't need queries)
+        task.process_assumed_txs();
+
+        task
     }
 
     fn is_canonicalized(&self, txid: Txid) -> bool {
