@@ -7,8 +7,8 @@ use core::ops::RangeBounds;
 use crate::canonical_task::CanonicalizationTask;
 use crate::collections::BTreeMap;
 use crate::{Anchor, BlockId, CanonicalView, ChainOracle, Merge};
+use bdk_core::{ChainQuery, CheckPointEntry, ToBlockHash};
 pub use bdk_core::{CheckPoint, CheckPointIter};
-use bdk_core::{CheckPointEntry, ToBlockHash};
 use bitcoin::block::Header;
 use bitcoin::BlockHash;
 
