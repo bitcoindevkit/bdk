@@ -7,6 +7,9 @@ use bitcoin::{block::Header, BlockHash};
 
 use crate::BlockId;
 
+/// Interval for skiplist pointers based on checkpoint index.
+const CHECKPOINT_SKIP_INTERVAL: u32 = 100;
+
 /// A checkpoint is a node of a reference-counted linked list of [`BlockId`]s.
 ///
 /// Checkpoints are cheaply cloneable and are useful to find the agreement point between two sparse
@@ -29,6 +32,10 @@ struct CPInner<D> {
     data: D,
     /// Previous checkpoint (if any).
     prev: Option<Arc<CPInner<D>>>,
+    /// Skip pointer for fast traversals.
+    skip: Option<Arc<CPInner<D>>>,
+    /// Index of this checkpoint (number of checkpoints from the first).
+    index: u32,
 }
 
 /// When a `CPInner` is dropped we need to go back down the chain and manually remove any
@@ -136,6 +143,16 @@ impl<D> CheckPoint<D> {
         self.0.prev.clone().map(CheckPoint)
     }
 
+    /// Get the index of this checkpoint (number of checkpoints from the first).
+    pub fn index(&self) -> u32 {
+        self.0.index
+    }
+
+    /// Get the skip pointer checkpoint if it exists.
+    pub fn skip(&self) -> Option<CheckPoint<D>> {
+        self.0.skip.clone().map(CheckPoint)
+    }
+
     /// Iterate from this checkpoint in descending height.
     pub fn iter(&self) -> CheckPointIter<D> {
         self.clone().into_iter()
@@ -145,7 +162,47 @@ impl<D> CheckPoint<D> {
     ///
     /// Returns `None` if checkpoint at `height` does not exist`.
     pub fn get(&self, height: u32) -> Option<Self> {
-        self.range(height..=height).next()
+        // Quick path for current height
+        if self.height() == height {
+            return Some(self.clone());
+        }
+
+        // Use skip pointers for efficient traversal
+        let mut current = self.clone();
+
+        // First, use skip pointers to get close
+        while current.height() > height {
+            // Try to use skip pointer if it won't overshoot
+            if let Some(skip_cp) = current.skip() {
+                if skip_cp.height() >= height {
+                    current = skip_cp;
+                    continue;
+                }
+            }
+
+            // Fall back to regular traversal
+            match current.prev() {
+                Some(prev) => {
+                    if prev.height() < height {
+                        // Height doesn't exist in the chain
+                        return None;
+                    }
+                    current = prev;
+                }
+                None => return None,
+            }
+
+            if current.height() == height {
+                return Some(current);
+            }
+        }
+
+        // Check if we found the height after the loop
+        if current.height() == height {
+            Some(current)
+        } else {
+            None
+        }
     }
 
     /// Iterate checkpoints over a height range.
@@ -158,12 +215,38 @@ impl<D> CheckPoint<D> {
     {
         let start_bound = range.start_bound().cloned();
         let end_bound = range.end_bound().cloned();
-        self.iter()
-            .skip_while(move |cp| match end_bound {
-                core::ops::Bound::Included(inc_bound) => cp.height() > inc_bound,
-                core::ops::Bound::Excluded(exc_bound) => cp.height() >= exc_bound,
-                core::ops::Bound::Unbounded => false,
-            })
+
+        // Fast-path to find starting point using skip pointers
+        let mut current = self.clone();
+
+        // Skip past checkpoints that are above the end bound
+        while match end_bound {
+            core::ops::Bound::Included(inc_bound) => current.height() > inc_bound,
+            core::ops::Bound::Excluded(exc_bound) => current.height() >= exc_bound,
+            core::ops::Bound::Unbounded => false,
+        } {
+            // Try to use skip pointer if it won't overshoot
+            if let Some(skip_cp) = current.skip() {
+                let use_skip = match end_bound {
+                    core::ops::Bound::Included(inc_bound) => skip_cp.height() > inc_bound,
+                    core::ops::Bound::Excluded(exc_bound) => skip_cp.height() >= exc_bound,
+                    core::ops::Bound::Unbounded => false,
+                };
+                if use_skip {
+                    current = skip_cp;
+                    continue;
+                }
+            }
+
+            // Fall back to regular traversal
+            match current.prev() {
+                Some(prev) => current = prev,
+                None => break,
+            }
+        }
+
+        // Now iterate normally from the found starting point
+        current.into_iter()
             .take_while(move |cp| match start_bound {
                 core::ops::Bound::Included(inc_bound) => cp.height() >= inc_bound,
                 core::ops::Bound::Excluded(exc_bound) => cp.height() > exc_bound,
@@ -178,7 +261,38 @@ impl<D> CheckPoint<D> {
     ///
     /// Returns `None` if no checkpoint exists at or below the given height.
     pub fn floor_at(&self, height: u32) -> Option<Self> {
-        self.range(..=height).next()
+        // Quick path for current height or higher
+        if self.height() <= height {
+            return Some(self.clone());
+        }
+
+        // Use skip pointers for efficient traversal
+        let mut current = self.clone();
+
+        while current.height() > height {
+            // Try to use skip pointer if it won't undershoot
+            if let Some(skip_cp) = current.skip() {
+                if skip_cp.height() > height {
+                    current = skip_cp;
+                    continue;
+                }
+            }
+
+            // Fall back to regular traversal
+            match current.prev() {
+                Some(prev) => {
+                    // If prev is at or below height, we've found our floor
+                    if prev.height() <= height {
+                        return Some(prev);
+                    }
+                    current = prev;
+                }
+                None => return None,
+            }
+        }
+
+        // Current is at or below height
+        Some(current)
     }
 
     /// Returns the checkpoint located a number of heights below this one.
@@ -218,6 +332,8 @@ where
             },
             data,
             prev: None,
+            skip: None,
+            index: 0,
         }))
     }
 
@@ -314,8 +430,63 @@ where
             cp = cp.prev().expect("will break before genesis block");
         };
 
-        base.extend(core::iter::once((height, data)).chain(tail.into_iter().rev()))
-            .expect("tail is in order")
+        // Rebuild the chain with proper indices
+        let mut result = base.clone();
+        let base_index = result.index();
+
+        // First insert the new block
+        result = result.push_with_index(height, data, base_index + 1).expect("height is valid");
+
+        // Then re-add all the tail blocks with updated indices
+        let mut current_index = base_index + 2;
+        for (h, d) in tail.into_iter().rev() {
+            result = result.push_with_index(h, d, current_index).expect("tail is in order");
+            current_index += 1;
+        }
+
+        result
+    }
+
+    // Helper method to push with a specific index (internal use)
+    fn push_with_index(self, height: u32, data: D, new_index: u32) -> Result<Self, Self> {
+        if self.height() < height {
+            // Calculate skip pointer
+            let skip = if new_index >= CHECKPOINT_SKIP_INTERVAL && new_index % CHECKPOINT_SKIP_INTERVAL == 0 {
+                // Navigate back CHECKPOINT_SKIP_INTERVAL checkpoints
+                let target_index = new_index - CHECKPOINT_SKIP_INTERVAL;
+                let mut current = Some(self.0.clone());
+                loop {
+                    match current {
+                        Some(ref cp) if cp.index == target_index => break,
+                        Some(ref cp) if cp.index < target_index => {
+                            // We've gone too far back, skip pointer not available
+                            current = None;
+                            break;
+                        }
+                        Some(ref cp) => {
+                            current = cp.prev.clone();
+                        }
+                        None => break,
+                    }
+                }
+                current
+            } else {
+                None
+            };
+
+            Ok(Self(Arc::new(CPInner {
+                block_id: BlockId {
+                    height,
+                    hash: data.to_blockhash(),
+                },
+                data,
+                prev: Some(self.0),
+                skip,
+                index: new_index,
+            })))
+        } else {
+            Err(self)
+        }
     }
 
     /// Puts another checkpoint onto the linked list representing the blockchain.
@@ -324,6 +495,33 @@ where
     /// one you are pushing on to.
     pub fn push(self, height: u32, data: D) -> Result<Self, Self> {
         if self.height() < height {
+            let new_index = self.0.index + 1;
+
+            // Calculate skip pointer
+            let skip = if new_index >= CHECKPOINT_SKIP_INTERVAL && new_index % CHECKPOINT_SKIP_INTERVAL == 0 {
+                // Navigate back CHECKPOINT_SKIP_INTERVAL checkpoints
+                let mut current = Some(self.0.clone());
+                let mut steps = 0;
+                loop {
+                    match current {
+                        Some(ref cp) if cp.index == new_index - CHECKPOINT_SKIP_INTERVAL => break,
+                        Some(ref cp) => {
+                            current = cp.prev.clone();
+                            steps += 1;
+                            // Safety check to avoid infinite loop
+                            if steps > CHECKPOINT_SKIP_INTERVAL {
+                                current = None;
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                current
+            } else {
+                None
+            };
+
             Ok(Self(Arc::new(CPInner {
                 block_id: BlockId {
                     height,
@@ -331,6 +529,8 @@ where
                 },
                 data,
                 prev: Some(self.0),
+                skip,
+                index: new_index,
             })))
         } else {
             Err(self)
