@@ -1,6 +1,6 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
 use crate::tx_graph::{TxAncestors, TxDescendants};
-use crate::{Anchor, ChainOracle, TxGraph};
+use crate::{Anchor, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
@@ -22,10 +22,12 @@ pub struct CanonicalizationParams {
 }
 
 /// Iterates over canonical txs.
-pub struct CanonicalIter<'g, A, C> {
+pub struct CanonicalIter<'g, A, F>
+where
+    F: FnMut(BlockId) -> Option<bool>,
+{
     tx_graph: &'g TxGraph<A>,
-    chain: &'g C,
-    chain_tip: BlockId,
+    is_block_in_chain: F,
 
     unprocessed_assumed_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>)> + 'g>,
     unprocessed_anchored_txs:
@@ -39,13 +41,15 @@ pub struct CanonicalIter<'g, A, C> {
     queue: VecDeque<Txid>,
 }
 
-impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
+impl<'g, A: Anchor, F> CanonicalIter<'g, A, F>
+where
+    F: FnMut(BlockId) -> Option<bool>,
+{
     /// Constructs [`CanonicalIter`].
     pub fn new(
         tx_graph: &'g TxGraph<A>,
-        chain: &'g C,
-        chain_tip: BlockId,
         params: CanonicalizationParams,
+        is_block_in_chain: F,
     ) -> Self {
         let anchors = tx_graph.all_anchors();
         let unprocessed_assumed_txs = Box::new(
@@ -67,8 +71,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
         );
         Self {
             tx_graph,
-            chain,
-            chain_tip,
+            is_block_in_chain,
             unprocessed_assumed_txs,
             unprocessed_anchored_txs,
             unprocessed_seen_txs,
@@ -85,19 +88,13 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
     }
 
     /// Mark transaction as canonical if it is anchored in the best chain.
-    fn scan_anchors(
-        &mut self,
-        txid: Txid,
-        tx: Arc<Transaction>,
-        anchors: &BTreeSet<A>,
-    ) -> Result<(), C::Error> {
+    fn scan_anchors(&mut self, txid: Txid, tx: Arc<Transaction>, anchors: &BTreeSet<A>) {
         for anchor in anchors {
-            let in_chain_opt = self
-                .chain
-                .is_block_in_chain(anchor.anchor_block(), self.chain_tip)?;
-            if in_chain_opt == Some(true) {
+            let block_id = anchor.anchor_block();
+            let is_block_in_chain = (self.is_block_in_chain)(block_id);
+            if is_block_in_chain == Some(true) {
                 self.mark_canonical(txid, tx, CanonicalReason::from_anchor(anchor.clone()));
-                return Ok(());
+                return;
             }
         }
         // cannot determine
@@ -112,7 +109,6 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 )
                 .confirmation_height_upper_bound(),
         ));
-        Ok(())
     }
 
     /// Marks `tx` and it's ancestors as canonical and mark all conflicts of these as
@@ -200,8 +196,11 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
     }
 }
 
-impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
-    type Item = Result<(Txid, Arc<Transaction>, CanonicalReason<A>), C::Error>;
+impl<A: Anchor, F> Iterator for CanonicalIter<'_, A, F>
+where
+    F: FnMut(BlockId) -> Option<bool>,
+{
+    type Item = (Txid, Arc<Transaction>, CanonicalReason<A>);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -211,7 +210,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
                     .get(&txid)
                     .cloned()
                     .expect("reason must exist");
-                return Some(Ok((txid, tx, reason)));
+                return Some((txid, tx, reason));
             }
 
             if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
@@ -222,9 +221,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
 
             if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
                 if !self.is_canonicalized(txid) {
-                    if let Err(err) = self.scan_anchors(txid, tx, anchors) {
-                        return Some(Err(err));
-                    }
+                    self.scan_anchors(txid, tx, anchors);
                 }
                 continue;
             }
