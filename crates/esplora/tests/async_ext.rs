@@ -87,7 +87,14 @@ pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     let sync_request = SyncRequest::builder()
         .chain_tip(chain.tip())
         .spks_with_indexes(graph.index.all_spks().clone())
-        .expected_spk_txids(graph.list_expected_spk_txids(&chain, chain.tip().block_id(), ..));
+        .expected_spk_txids(
+            {
+                let chain_tip = chain.tip().block_id();
+                let task = graph.canonicalization_task(chain_tip, Default::default());
+                chain.canonicalize(task)
+            }
+            .list_expected_spk_txids(&graph.index, ..),
+        );
     let sync_response = client.sync(sync_request, 1).await?;
     assert!(
         sync_response
@@ -112,7 +119,14 @@ pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     let sync_request = SyncRequest::builder()
         .chain_tip(chain.tip())
         .spks_with_indexes(graph.index.all_spks().clone())
-        .expected_spk_txids(graph.list_expected_spk_txids(&chain, chain.tip().block_id(), ..));
+        .expected_spk_txids(
+            {
+                let chain_tip = chain.tip().block_id();
+                let task = graph.canonicalization_task(chain_tip, Default::default());
+                chain.canonicalize(task)
+            }
+            .list_expected_spk_txids(&graph.index, ..),
+        );
     let sync_response = client.sync(sync_request, 1).await?;
     assert!(
         sync_response

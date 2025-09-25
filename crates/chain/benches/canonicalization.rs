@@ -95,31 +95,32 @@ fn setup<F: Fn(&mut KeychainTxGraph, &LocalChain)>(f: F) -> (KeychainTxGraph, Lo
 }
 
 fn run_list_canonical_txs(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txs: usize) {
-    let txs = tx_graph.graph().list_canonical_txs(
-        chain,
-        chain.tip().block_id(),
-        CanonicalizationParams::default(),
-    );
+    let chain_tip = chain.tip().block_id();
+    let task = tx_graph
+        .graph()
+        .canonicalization_task(chain_tip, CanonicalizationParams::default());
+    let view = chain.canonicalize(task);
+    let txs = view.txs();
     assert_eq!(txs.count(), exp_txs);
 }
 
 fn run_filter_chain_txouts(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txos: usize) {
-    let utxos = tx_graph.graph().filter_chain_txouts(
-        chain,
-        chain.tip().block_id(),
-        CanonicalizationParams::default(),
-        tx_graph.index.outpoints().clone(),
-    );
+    let chain_tip = chain.tip().block_id();
+    let task = tx_graph
+        .graph()
+        .canonicalization_task(chain_tip, CanonicalizationParams::default());
+    let view = chain.canonicalize(task);
+    let utxos = view.filter_outpoints(tx_graph.index.outpoints().clone());
     assert_eq!(utxos.count(), exp_txos);
 }
 
 fn run_filter_chain_unspents(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_utxos: usize) {
-    let utxos = tx_graph.graph().filter_chain_unspents(
-        chain,
-        chain.tip().block_id(),
-        CanonicalizationParams::default(),
-        tx_graph.index.outpoints().clone(),
-    );
+    let chain_tip = chain.tip().block_id();
+    let task = tx_graph
+        .graph()
+        .canonicalization_task(chain_tip, CanonicalizationParams::default());
+    let view = chain.canonicalize(task);
+    let utxos = view.filter_unspent_outpoints(tx_graph.index.outpoints().clone());
     assert_eq!(utxos.count(), exp_utxos);
 }
 

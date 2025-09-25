@@ -1,18 +1,14 @@
 //! Contains the [`IndexedTxGraph`] and associated types. Refer to the
 //! [`IndexedTxGraph`] documentation for more.
-use core::{
-    convert::Infallible,
-    fmt::{self, Debug},
-    ops::RangeBounds,
-};
+use core::fmt::Debug;
 
 use alloc::{sync::Arc, vec::Vec};
-use bitcoin::{Block, OutPoint, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
-    spk_txout::SpkTxOutIndex,
+    canonical_task::CanonicalizationParams,
     tx_graph::{self, TxGraph},
-    Anchor, BlockId, ChainOracle, Indexer, Merge, TxPosInBlock,
+    Anchor, BlockId, CanonicalizationTask, Indexer, Merge, TxPosInBlock,
 };
 
 /// A [`TxGraph<A>`] paired with an indexer `I`, enforcing that every insertion into the graph is
@@ -427,63 +423,28 @@ where
     }
 }
 
+impl<A, I> AsRef<TxGraph<A>> for IndexedTxGraph<A, I> {
+    fn as_ref(&self) -> &TxGraph<A> {
+        &self.graph
+    }
+}
+
 impl<A, X> IndexedTxGraph<A, X>
 where
     A: Anchor,
 {
-    /// List txids that are expected to exist under the given spks.
+    /// Creates a `[CanonicalizationTask]` to determine the `[CanonicalView]` of transactions.
     ///
-    /// This is used to fill
-    /// [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
-    ///
-    ///
-    /// The spk index range can be contrained with `range`.
-    ///
-    /// # Error
-    ///
-    /// If the [`ChainOracle`] implementation (`chain`) fails, an error will be returned with the
-    /// returned item.
-    ///
-    /// If the [`ChainOracle`] is infallible,
-    /// [`list_expected_spk_txids`](Self::list_expected_spk_txids) can be used instead.
-    pub fn try_list_expected_spk_txids<'a, C, I>(
-        &'a self,
-        chain: &'a C,
+    /// This method delegates to the underlying [`TxGraph`] to create a [`CanonicalizationTask`]
+    /// that can be used to determine which transactions are canonical based on the provided
+    /// parameters. The task handles the stateless canonicalization logic and can be polled
+    /// for anchor verification requests.
+    pub fn canonicalization_task(
+        &'_ self,
         chain_tip: BlockId,
-        spk_index_range: impl RangeBounds<I> + 'a,
-    ) -> impl Iterator<Item = Result<(ScriptBuf, Txid), C::Error>> + 'a
-    where
-        C: ChainOracle,
-        X: AsRef<SpkTxOutIndex<I>> + 'a,
-        I: fmt::Debug + Clone + Ord + 'a,
-    {
-        self.graph
-            .try_list_expected_spk_txids(chain, chain_tip, &self.index, spk_index_range)
-    }
-
-    /// List txids that are expected to exist under the given spks.
-    ///
-    /// This is the infallible version of
-    /// [`try_list_expected_spk_txids`](Self::try_list_expected_spk_txids).
-    pub fn list_expected_spk_txids<'a, C, I>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        spk_index_range: impl RangeBounds<I> + 'a,
-    ) -> impl Iterator<Item = (ScriptBuf, Txid)> + 'a
-    where
-        C: ChainOracle<Error = Infallible>,
-        X: AsRef<SpkTxOutIndex<I>> + 'a,
-        I: fmt::Debug + Clone + Ord + 'a,
-    {
-        self.try_list_expected_spk_txids(chain, chain_tip, spk_index_range)
-            .map(|r| r.expect("infallible"))
-    }
-}
-
-impl<A, I> AsRef<TxGraph<A>> for IndexedTxGraph<A, I> {
-    fn as_ref(&self) -> &TxGraph<A> {
-        &self.graph
+        params: CanonicalizationParams,
+    ) -> CanonicalizationTask<'_, A> {
+        self.graph.canonicalization_task(chain_tip, params)
     }
 }
 

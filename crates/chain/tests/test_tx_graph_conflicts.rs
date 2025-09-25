@@ -5,7 +5,7 @@ mod common;
 
 use bdk_chain::{local_chain::LocalChain, Balance, BlockId};
 use bdk_testenv::{block_id, hash, local_chain};
-use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf};
+use bitcoin::{Amount, BlockHash, OutPoint};
 use common::*;
 use std::collections::{BTreeSet, HashSet};
 
@@ -970,10 +970,13 @@ fn test_tx_conflict_handling() {
     for scenario in scenarios {
         let env = init_graph(scenario.tx_templates.iter());
 
-        let txs = env
+        let task = env
             .tx_graph
-            .list_canonical_txs(&local_chain, chain_tip, env.canonicalization_params.clone())
-            .map(|tx| tx.tx_node.txid)
+            .canonicalization_task(chain_tip, env.canonicalization_params.clone());
+        let txs = local_chain
+            .canonicalize(task)
+            .txs()
+            .map(|tx| tx.txid)
             .collect::<BTreeSet<_>>();
         let exp_txs = scenario
             .exp_chain_txs
@@ -986,14 +989,12 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
 
-        let txouts = env
+        let task = env
             .tx_graph
-            .filter_chain_txouts(
-                &local_chain,
-                chain_tip,
-                env.canonicalization_params.clone(),
-                env.indexer.outpoints().iter().cloned(),
-            )
+            .canonicalization_task(chain_tip, env.canonicalization_params.clone());
+        let txouts = local_chain
+            .canonicalize(task)
+            .filter_outpoints(env.indexer.outpoints().iter().cloned())
             .map(|(_, full_txout)| full_txout.outpoint)
             .collect::<BTreeSet<_>>();
         let exp_txouts = scenario
@@ -1010,14 +1011,12 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
 
-        let utxos = env
+        let task = env
             .tx_graph
-            .filter_chain_unspents(
-                &local_chain,
-                chain_tip,
-                env.canonicalization_params.clone(),
-                env.indexer.outpoints().iter().cloned(),
-            )
+            .canonicalization_task(chain_tip, env.canonicalization_params.clone());
+        let utxos = local_chain
+            .canonicalize(task)
+            .filter_unspent_outpoints(env.indexer.outpoints().iter().cloned())
             .map(|(_, full_txout)| full_txout.outpoint)
             .collect::<BTreeSet<_>>();
         let exp_utxos = scenario
@@ -1034,12 +1033,17 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
 
-        let balance = env.tx_graph.balance(
-            &local_chain,
-            chain_tip,
-            env.canonicalization_params.clone(),
+        let task = env
+            .tx_graph
+            .canonicalization_task(chain_tip, env.canonicalization_params.clone());
+        let balance = local_chain.canonicalize(task).balance(
             env.indexer.outpoints().iter().cloned(),
-            |_, spk: ScriptBuf| env.indexer.index_of_spk(spk).is_some(),
+            |_, txout| {
+                env.indexer
+                    .index_of_spk(txout.txout.script_pubkey.clone())
+                    .is_some()
+            },
+            0,
         );
         assert_eq!(
             balance, scenario.exp_balance,

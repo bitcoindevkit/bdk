@@ -4,9 +4,10 @@ use core::convert::Infallible;
 use core::fmt;
 use core::ops::RangeBounds;
 
+use crate::canonical_task::CanonicalizationTask;
 use crate::collections::BTreeMap;
-use crate::{BlockId, ChainOracle, Merge};
-use bdk_core::ToBlockHash;
+use crate::{Anchor, BlockId, CanonicalView, ChainOracle, Merge};
+use bdk_core::{ChainQuery, ToBlockHash};
 pub use bdk_core::{CheckPoint, CheckPointIter};
 use bitcoin::block::Header;
 use bitcoin::BlockHash;
@@ -96,6 +97,80 @@ impl<D> ChainOracle for LocalChain<D> {
 
 // Methods for `LocalChain<BlockHash>`
 impl LocalChain<BlockHash> {
+    // /// Check if a block is in the chain.
+    // ///
+    // /// # Arguments
+    // /// * `block` - The block to check
+    // /// * `chain_tip` - The chain tip to check against
+    // ///
+    // /// # Returns
+    // /// * `Some(true)` if the block is in the chain
+    // /// * `Some(false)` if the block is not in the chain
+    // /// * `None` if it cannot be determined
+    // pub fn is_block_in_chain(&self, block: BlockId, chain_tip: BlockId) -> Option<bool> {
+    //     let chain_tip_cp = match self.tip.get(chain_tip.height) {
+    //         // we can only determine whether `block` is in chain of `chain_tip` if `chain_tip`
+    // can         // be identified in chain
+    //         Some(cp) if cp.hash() == chain_tip.hash => cp,
+    //         _ => return None,
+    //     };
+    //     chain_tip_cp
+    //         .get(block.height)
+    //         .map(|cp| cp.hash() == block.hash)
+    // }
+
+    // /// Get the chain tip.
+    // ///
+    // /// # Returns
+    // /// The [`BlockId`] of the chain tip.
+    // pub fn chain_tip(&self) -> BlockId {
+    //     self.tip.block_id()
+    // }
+
+    /// Canonicalize a transaction graph using this chain.
+    ///
+    /// This method processes a [`CanonicalizationTask`], handling all its requests
+    /// to determine which transactions are canonical, and returns a [`CanonicalView`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalizationTask, CanonicalizationParams, TxGraph, local_chain::LocalChain};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph: TxGraph<BlockId> = TxGraph::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// let chain_tip = chain.tip().block_id();
+    /// let task = CanonicalizationTask::new(&tx_graph, chain_tip, CanonicalizationParams::default());
+    /// let view = chain.canonicalize(task);
+    /// ```
+    pub fn canonicalize<A: Anchor>(
+        &self,
+        mut task: CanonicalizationTask<'_, A>,
+    ) -> CanonicalView<A> {
+        // Process all requests from the task
+        while let Some(request) = task.next_query() {
+            let chain_tip = request.chain_tip;
+
+            // Check each block ID and return the first confirmed one
+            let mut best_block_id = None;
+            for block_id in &request.block_ids {
+                if self
+                    .is_block_in_chain(*block_id, chain_tip)
+                    .expect("infallible")
+                    == Some(true)
+                {
+                    best_block_id = Some(*block_id);
+                    break;
+                }
+            }
+            task.resolve_query(best_block_id);
+        }
+
+        // Return the finished canonical view
+        task.finish()
+    }
+
     /// Update the chain with a given [`Header`] at `height` which you claim is connected to a
     /// existing block in the chain.
     ///
