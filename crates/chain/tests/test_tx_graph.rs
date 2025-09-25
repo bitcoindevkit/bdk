@@ -1014,9 +1014,10 @@ fn test_chain_spends() {
 
     let build_canonical_spends =
         |chain: &LocalChain, tx_graph: &TxGraph<ConfirmationBlockTime>| -> HashMap<OutPoint, _> {
-            let task = tx_graph.canonicalization_task(CanonicalizationParams::default());
+            let task =
+                tx_graph.canonicalization_task(tip.block_id(), CanonicalizationParams::default());
             chain
-                .canonicalize(task, Some(tip.block_id()))
+                .canonicalize(task)
                 .filter_outpoints(tx_graph.all_txouts().map(|(op, _)| ((), op)))
                 .filter_map(|(_, full_txo)| Some((full_txo.outpoint, full_txo.spent_by?)))
                 .collect()
@@ -1024,9 +1025,10 @@ fn test_chain_spends() {
     let build_canonical_positions = |chain: &LocalChain,
                                      tx_graph: &TxGraph<ConfirmationBlockTime>|
      -> HashMap<Txid, ChainPosition<ConfirmationBlockTime>> {
-        let task = tx_graph.canonicalization_task(CanonicalizationParams::default());
+        let task =
+            tx_graph.canonicalization_task(tip.block_id(), CanonicalizationParams::default());
         chain
-            .canonicalize(task, Some(tip.block_id()))
+            .canonicalize(task)
             .txs()
             .map(|canon_tx| (canon_tx.txid, canon_tx.pos))
             .collect()
@@ -1199,29 +1201,25 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
         .into_iter()
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
-    let task = graph.canonicalization_task(CanonicalizationParams::default());
-    let canonical_txs: Vec<_> = chain
-        .canonicalize(task, Some(chain.tip().block_id()))
-        .txs()
-        .collect();
+    let chain_tip = chain.tip().block_id();
+    let task = graph.canonicalization_task(chain_tip, CanonicalizationParams::default());
+    let canonical_txs: Vec<_> = chain.canonicalize(task).txs().collect();
     assert!(canonical_txs.is_empty());
 
     // tx0 with seen_at should be returned by canonical txs
     let _ = graph.insert_seen_at(txids[0], 2);
-    let task = graph.canonicalization_task(CanonicalizationParams::default());
-    let canonical_view = chain.canonicalize(task, Some(chain.tip().block_id()));
+    let chain_tip = chain.tip().block_id();
+    let task = graph.canonicalization_task(chain_tip, CanonicalizationParams::default());
+    let canonical_view = chain.canonicalize(task);
     let mut canonical_txs = canonical_view.txs();
     assert_eq!(canonical_txs.next().map(|tx| tx.txid).unwrap(), txids[0]);
     drop(canonical_txs);
 
     // tx1 with anchor is also canonical
     let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
-    let task = graph.canonicalization_task(CanonicalizationParams::default());
-    let canonical_txids: Vec<_> = chain
-        .canonicalize(task, Some(chain.tip().block_id()))
-        .txs()
-        .map(|tx| tx.txid)
-        .collect();
+    let chain_tip = chain.tip().block_id();
+    let task = graph.canonicalization_task(chain_tip, CanonicalizationParams::default());
+    let canonical_txids: Vec<_> = chain.canonicalize(task).txs().map(|tx| tx.txid).collect();
     assert!(canonical_txids.contains(&txids[1]));
     assert!(graph.txs_with_no_anchor_or_last_seen().next().is_none());
 }
