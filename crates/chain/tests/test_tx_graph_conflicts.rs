@@ -972,9 +972,9 @@ fn test_tx_conflict_handling() {
 
         let task = env
             .tx_graph
-            .canonicalization_task(env.canonicalization_params.clone());
+            .canonicalization_task(chain_tip, env.canonicalization_params.clone());
         let txs = local_chain
-            .canonicalize(task, Some(chain_tip))
+            .canonicalize(task)
             .txs()
             .map(|tx| tx.txid)
             .collect::<BTreeSet<_>>();
@@ -991,9 +991,9 @@ fn test_tx_conflict_handling() {
 
         let task = env
             .tx_graph
-            .canonicalization_task(env.canonicalization_params.clone());
+            .canonicalization_task(chain_tip, env.canonicalization_params.clone());
         let txouts = local_chain
-            .canonicalize(task, Some(chain_tip))
+            .canonicalize(task)
             .filter_outpoints(env.indexer.outpoints().iter().cloned())
             .map(|(_, full_txout)| full_txout.outpoint)
             .collect::<BTreeSet<_>>();
@@ -1013,9 +1013,9 @@ fn test_tx_conflict_handling() {
 
         let task = env
             .tx_graph
-            .canonicalization_task(env.canonicalization_params.clone());
+            .canonicalization_task(chain_tip, env.canonicalization_params.clone());
         let utxos = local_chain
-            .canonicalize(task, Some(chain_tip))
+            .canonicalize(task)
             .filter_unspent_outpoints(env.indexer.outpoints().iter().cloned())
             .map(|(_, full_txout)| full_txout.outpoint)
             .collect::<BTreeSet<_>>();
@@ -1035,8 +1035,8 @@ fn test_tx_conflict_handling() {
 
         let task = env
             .tx_graph
-            .canonicalization_task(env.canonicalization_params.clone());
-        let balance = local_chain.canonicalize(task, Some(chain_tip)).balance(
+            .canonicalization_task(chain_tip, env.canonicalization_params.clone());
+        let balance = local_chain.canonicalize(task).balance(
             env.indexer.outpoints().iter().cloned(),
             |_, txout| {
                 env.indexer
