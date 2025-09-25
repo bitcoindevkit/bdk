@@ -24,8 +24,8 @@ impl<D> Clone for CheckPoint<D> {
 struct CPInner<D> {
     /// Block id
     block_id: BlockId,
-    /// Data.
-    data: D,
+    /// Data (if any).
+    data: Option<D>,
     /// Previous checkpoint (if any).
     prev: Option<Arc<CPInner<D>>>,
 }
@@ -68,6 +68,11 @@ impl<D> Drop for CPInner<D> {
 pub trait ToBlockHash {
     /// Returns the [`BlockHash`] for the associated [`CheckPoint`] `data` type.
     fn to_blockhash(&self) -> BlockHash;
+
+    /// Returns `None` if the type has no knowledge of the previous [`BlockHash`].
+    fn prev_blockhash(&self) -> Option<BlockHash> {
+        None
+    }
 }
 
 impl ToBlockHash for BlockHash {
@@ -79,6 +84,10 @@ impl ToBlockHash for BlockHash {
 impl ToBlockHash for Header {
     fn to_blockhash(&self) -> BlockHash {
         self.block_hash()
+    }
+
+    fn prev_blockhash(&self) -> Option<BlockHash> {
+        Some(self.prev_blockhash)
     }
 }
 
@@ -92,13 +101,13 @@ impl<D> PartialEq for CheckPoint<D> {
 
 // Methods for any `D`
 impl<D> CheckPoint<D> {
-    /// Get a reference of the `data` of the checkpoint.
-    pub fn data_ref(&self) -> &D {
-        &self.0.data
+    /// Get a reference of the `data` of the checkpoint if it exists.
+    pub fn data_ref(&self) -> Option<&D> {
+        self.0.data.as_ref()
     }
 
-    /// Get the `data` of a the checkpoint.
-    pub fn data(&self) -> D
+    /// Get the `data` of the checkpoint if it exists.
+    pub fn data(&self) -> Option<D>
     where
         D: Clone,
     {
@@ -170,6 +179,17 @@ impl<D> CheckPoint<D> {
         self.range(..=height).next()
     }
 
+    /// Finds the checkpoint with `data` at `height` if one exists, otherwise the neareast
+    /// checkpoint with `data` at a lower height.
+    ///
+    /// This is equivalent to taking the “floor” of "height" over this checkpoint chain, filtering
+    /// out any placeholder entries that do not contain any `data`.
+    ///
+    /// Returns `None` if no checkpoint with `data` exists at or below the given height.
+    pub fn find_data(&self, height: u32) -> Option<Self> {
+        self.range(..=height).find(|cp| cp.data_ref().is_some())
+    }
+
     /// Returns the checkpoint located a number of heights below this one.
     ///
     /// This is a convenience wrapper for [`CheckPoint::floor_at`], subtracting `to_subtract` from
@@ -197,14 +217,36 @@ where
 {
     /// Construct a new base [`CheckPoint`] from given `height` and `data` at the front of a linked
     /// list.
+    ///
+    /// If `data` contains previous block via [`ToBlockHash::prev_blockhash`], this will also create
+    /// a placeholder checkpoint at `height - 1` with that hash and with `data: None`, and link the
+    /// new checkpoint to it. The placeholder can be materialized later by inserting data at its
+    /// height.
     pub fn new(height: u32, data: D) -> Self {
+        // If `data` has a `prev_blockhash`, create a placeholder checkpoint one height below.
+        let prev = if height > 0 {
+            match data.prev_blockhash() {
+                Some(prev_blockhash) => Some(Arc::new(CPInner {
+                    block_id: BlockId {
+                        height: height - 1,
+                        hash: prev_blockhash,
+                    },
+                    data: None,
+                    prev: None,
+                })),
+                None => None,
+            }
+        } else {
+            None
+        };
+
         Self(Arc::new(CPInner {
             block_id: BlockId {
                 height,
                 hash: data.to_blockhash(),
             },
-            data,
-            prev: None,
+            data: Some(data),
+            prev,
         }))
     }
 
@@ -239,8 +281,10 @@ where
     /// The effect of `insert` depends on whether a height already exists. If it doesn't, the data
     /// we inserted and all pre-existing entries higher than it will be re-inserted after it. If the
     /// height already existed and has a conflicting block hash then it will be purged along with
-    /// all entries following it. The returned chain will have a tip of the data passed in. Of
-    /// course, if the data was already present then this just returns `self`.
+    /// all entries following it. If the existing checkpoint at height is a placeholder where
+    /// `data: None` with the same hash, then the `data` is inserted to make a complete checkpoint.
+    /// The returned chain will have a tip of the data passed in. If the data was already present
+    /// then this just returns `self`. This method does not create new placeholders.
     ///
     /// # Panics
     ///
@@ -251,21 +295,30 @@ where
         let mut tail = vec![];
         let base = loop {
             if cp.height() == height {
-                if cp.hash() == data.to_blockhash() {
-                    return self;
+                let same_hash = cp.hash() == data.to_blockhash();
+                if same_hash {
+                    if cp.data().is_some() {
+                        return self;
+                    } else {
+                        // If `CheckPoint` is a placeholder, return previous `CheckPoint`.
+                        break cp.prev().expect("can't be called on genesis block");
+                    }
+                } else {
+                    assert_ne!(cp.height(), 0, "cannot replace genesis block");
+                    // If we have a conflict we just return the inserted data because the tail is by
+                    // implication invalid.
+                    tail = vec![];
+                    break cp.prev().expect("can't be called on genesis block");
                 }
-                assert_ne!(cp.height(), 0, "cannot replace genesis block");
-                // If we have a conflict we just return the inserted data because the tail is by
-                // implication invalid.
-                tail = vec![];
-                break cp.prev().expect("can't be called on genesis block");
             }
 
             if cp.height() < height {
                 break cp;
             }
 
-            tail.push((cp.height(), cp.data()));
+            if let Some(d) = cp.data() {
+                tail.push((cp.height(), d));
+            }
             cp = cp.prev().expect("will break before genesis block");
         };
 
@@ -277,15 +330,35 @@ where
     ///
     /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the
     /// one you are pushing on to.
+    ///
+    /// If `height` is non-contiguous and `data.prev_blockhash()` is available, a placeholder is
+    /// created at height - 1.
     pub fn push(self, height: u32, data: D) -> Result<Self, Self> {
         if self.height() < height {
+            let mut current_cp = self.0.clone();
+
+            // If non-contiguous and `prev_blockhash` exists, insert a placeholder at height - 1.
+            if height > self.height() + 1 {
+                if let Some(prev_hash) = data.prev_blockhash() {
+                    let empty = Arc::new(CPInner {
+                        block_id: BlockId {
+                            height: height - 1,
+                            hash: prev_hash,
+                        },
+                        data: None,
+                        prev: Some(current_cp),
+                    });
+                    current_cp = empty;
+                }
+            }
+
             Ok(Self(Arc::new(CPInner {
                 block_id: BlockId {
                     height,
                     hash: data.to_blockhash(),
                 },
-                data,
-                prev: Some(self.0),
+                data: Some(data),
+                prev: Some(current_cp),
             })))
         } else {
             Err(self)
