@@ -993,6 +993,10 @@ impl<A: Anchor> TxGraph<A> {
     /// If the [`ChainOracle`] is infallible, [`list_canonical_txs`] can be used instead.
     ///
     /// [`list_canonical_txs`]: Self::list_canonical_txs
+    #[deprecated(
+        since = "0.23.3",
+        note = "Use `list_ordered_canonical_txs` instead, which returns transactions in topological order"
+    )]
     pub fn try_list_canonical_txs<'a, C: ChainOracle + 'a>(
         &'a self,
         chain: &'a C,
@@ -1077,14 +1081,44 @@ impl<A: Anchor> TxGraph<A> {
     /// This is the infallible version of [`try_list_canonical_txs`].
     ///
     /// [`try_list_canonical_txs`]: Self::try_list_canonical_txs
+    #[deprecated(
+        since = "0.23.3",
+        note = "Use `list_ordered_canonical_txs` instead, which returns transactions in topological order"
+    )]
     pub fn list_canonical_txs<'a, C: ChainOracle<Error = Infallible> + 'a>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
         params: CanonicalizationParams,
     ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
+        #[allow(deprecated)]
         self.try_list_canonical_txs(chain, chain_tip, params)
             .map(|res| res.expect("infallible"))
+    }
+
+    /// List graph transactions that are in `chain` with `chain_tip` in topological order.
+    ///
+    /// Each transaction is represented as a [`CanonicalTx`] that contains where the transaction is
+    /// observed in-chain, and the [`TxNode`].
+    ///
+    /// Transactions are returned in topological spending order, meaning that if transaction B
+    /// spends from transaction A, then A will always appear before B in the resulting list.
+    ///
+    /// This is the infallible version which uses [`list_canonical_txs`] internally and then
+    /// reorders the transactions based on their spending relationships.
+    ///
+    /// [`list_canonical_txs`]: Self::list_canonical_txs
+    pub fn list_ordered_canonical_txs<'a, C: ChainOracle<Error = Infallible>>(
+        &'a self,
+        chain: &'a C,
+        chain_tip: BlockId,
+        params: CanonicalizationParams,
+    ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
+        use crate::canonical_iter::TopologicalIterator;
+        // Use the topological iterator to get the correct ordering
+        // The iterator handles all the graph building internally
+        #[allow(deprecated)]
+        TopologicalIterator::new(self.list_canonical_txs(chain, chain_tip, params))
     }
 
     /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
@@ -1115,6 +1149,7 @@ impl<A: Anchor> TxGraph<A> {
     ) -> Result<impl Iterator<Item = (OI, FullTxOut<A>)> + 'a, C::Error> {
         let mut canon_txs = HashMap::<Txid, CanonicalTx<Arc<Transaction>, A>>::new();
         let mut canon_spends = HashMap::<OutPoint, Txid>::new();
+        #[allow(deprecated)]
         for r in self.try_list_canonical_txs(chain, chain_tip, params) {
             let canonical_tx = r?;
             let txid = canonical_tx.tx_node.txid;
@@ -1415,6 +1450,7 @@ impl<A: Anchor> TxGraph<A> {
         I: fmt::Debug + Clone + Ord + 'a,
     {
         let indexer = indexer.as_ref();
+        #[allow(deprecated)]
         self.try_list_canonical_txs(chain, chain_tip, CanonicalizationParams::default())
             .flat_map(move |res| -> Vec<Result<(ScriptBuf, Txid), C::Error>> {
                 let range = &spk_index_range;

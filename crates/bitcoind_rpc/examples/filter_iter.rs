@@ -85,6 +85,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    #[allow(deprecated)]
     for canon_tx in graph.graph().list_canonical_txs(
         &chain,
         chain.tip().block_id(),

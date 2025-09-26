@@ -635,6 +635,7 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     // Update graph with evicted tx.
     let _ = graph.batch_insert_relevant_evicted_at(mempool_event.evicted);
 
+    #[allow(deprecated)]
     let canonical_txids = graph
         .graph()
         .list_canonical_txs(&chain, chain_tip, CanonicalizationParams::default())
