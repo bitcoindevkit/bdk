@@ -1115,15 +1115,10 @@ impl<A: Anchor> TxGraph<A> {
         params: CanonicalizationParams,
     ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
         use crate::canonical_iter::TopologicalIterator;
-
-        // First, get all canonical transactions
-        #[allow(deprecated)]
-        let canonical_txs: Vec<CanonicalTx<'a, Arc<Transaction>, A>> =
-            self.list_canonical_txs(chain, chain_tip, params).collect();
-
         // Use the topological iterator to get the correct ordering
         // The iterator handles all the graph building internally
-        TopologicalIterator::new(canonical_txs)
+        #[allow(deprecated)]
+        TopologicalIterator::new(self.list_canonical_txs(chain, chain_tip, params))
     }
 
     /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
