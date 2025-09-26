@@ -343,7 +343,8 @@ impl<A: Clone> CanonicalReason<A> {
     }
 }
 
-/// Iterator that yields transactions in topological order with proper sorting within levels.
+/// Iterator based on the Kahn's Algorithm, that yields transactions in topological order with
+/// proper sorting within levels.
 pub(crate) struct TopologicalIterator<'a, A> {
     /// Map of txid to its canonical transaction
     canonical_txs: HashMap<Txid, CanonicalTx<'a, Arc<Transaction>, A>>,
@@ -363,7 +364,9 @@ pub(crate) struct TopologicalIterator<'a, A> {
 }
 
 impl<'a, A: Clone + Anchor> TopologicalIterator<'a, A> {
-    pub(crate) fn new(canonical_txs: Vec<CanonicalTx<'a, Arc<Transaction>, A>>) -> Self {
+    pub(crate) fn new(
+        canonical_txs: impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>>,
+    ) -> Self {
         // Build a map from txid to canonical tx for quick lookup
         let mut tx_map: HashMap<Txid, CanonicalTx<'a, Arc<Transaction>, A>> = HashMap::new();
         let mut canonical_set: HashSet<Txid> = HashSet::new();
@@ -442,46 +445,7 @@ impl<'a, A: Clone + Anchor> TopologicalIterator<'a, A> {
             let a_tx = canonical_txs.get(&a_txid).expect("txid must exist");
             let b_tx = canonical_txs.get(&b_txid).expect("txid must exist");
 
-            use crate::ChainPosition;
-            use core::cmp::Ordering;
-
-            match (&a_tx.chain_position, &b_tx.chain_position) {
-                // Both confirmed: sort by confirmation height
-                (
-                    ChainPosition::Confirmed {
-                        anchor: a_anchor, ..
-                    },
-                    ChainPosition::Confirmed {
-                        anchor: b_anchor, ..
-                    },
-                ) => {
-                    let a_height = a_anchor.confirmation_height_upper_bound();
-                    let b_height = b_anchor.confirmation_height_upper_bound();
-                    a_height.cmp(&b_height)
-                }
-                // Confirmed comes before unconfirmed
-                (ChainPosition::Confirmed { .. }, ChainPosition::Unconfirmed { .. }) => {
-                    Ordering::Less
-                }
-                // Unconfirmed comes after confirmed
-                (ChainPosition::Unconfirmed { .. }, ChainPosition::Confirmed { .. }) => {
-                    Ordering::Greater
-                }
-                // Both unconfirmed: sort by first_seen (earlier timestamp first)
-                (
-                    ChainPosition::Unconfirmed {
-                        first_seen: a_first_seen,
-                        ..
-                    },
-                    ChainPosition::Unconfirmed {
-                        first_seen: b_first_seen,
-                        ..
-                    },
-                ) => {
-                    // Earlier timestamps come first
-                    a_first_seen.cmp(b_first_seen)
-                }
-            }
+            a_tx.cmp(b_tx)
         });
     }
 
