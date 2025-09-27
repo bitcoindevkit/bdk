@@ -23,7 +23,7 @@ futures = { version = "0.3.26", optional = true }
 [dev-dependencies]
 esplora-client = { version = "0.12.0" }
 bdk_chain = { path = "../chain" }
-bdk_testenv = { path = "../testenv" }
+bdk_testenv = { path = "../testenv", features = ["download"]}
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 
 [features]

@@ -25,8 +25,7 @@ tempfile = "3.20.0"
 bdk_testenv = { path = "." }
 
 [features]
-default = ["std" , "download", "miniscript"]
-miniscript = ["std", "bdk_chain/default"]
+default = ["bdk_chain/default"]
 download = ["electrsd/bitcoind_25_0", "electrsd/esplora_a33e97e1"]
 std = ["bdk_chain/std"]
 serde = ["bdk_chain/serde"]

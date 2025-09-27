@@ -1,6 +1,5 @@
 //! This module provides utility functions for testing custom persistence backends.
 use crate::{block_id, hash};
-#[cfg(feature = "miniscript")]
 use bdk_chain::{
     bitcoin::ScriptBuf, indexer::keychain_txout, DescriptorExt, DescriptorId, SpkIterator,
 };
@@ -14,7 +13,6 @@ use std::sync::Arc;
 
 use crate::utils::{create_test_tx, create_txout};
 
-#[cfg(feature = "miniscript")]
 use crate::utils::{parse_descriptor, spk_at_index};
 
 const ADDRS: [&str; 2] = [
@@ -127,7 +125,6 @@ pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
 /// We create a dummy [`keychain_txout::ChangeSet`], persist it and check if loaded `ChangeSet`
 /// matches the persisted one. We then create another such dummy `ChangeSet`, persist it and load it
 /// to check if merged `ChangeSet` is returned.
-#[cfg(feature = "miniscript")]
 pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -748,7 +745,6 @@ pub fn persist_anchors<Store, CreateStore, Initialize, Persist>(
 /// We create a dummy [`keychain_txout::ChangeSet`] with only `last_revealed` field populated,
 /// persist it and check if loaded `ChangeSet` matches the persisted one. We then create another
 /// such dummy `ChangeSet`, persist it and load it to check if merged `ChangeSet` is returned.
-#[cfg(feature = "miniscript")]
 pub fn persist_last_revealed<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,
@@ -805,7 +801,6 @@ pub fn persist_last_revealed<Store, CreateStore, Initialize, Persist>(
 /// We create a dummy [`keychain_txout::ChangeSet`] with only `spk_cache` field populated, persist
 /// it and check if loaded `ChangeSet` matches the persisted one. We then create another such dummy
 /// `ChangeSet`, persist it and load it to check if merged `ChangeSet` is returned.
-#[cfg(feature = "miniscript")]
 pub fn persist_spk_cache<Store, CreateStore, Initialize, Persist>(
     file_name: &str,
     create_store: CreateStore,

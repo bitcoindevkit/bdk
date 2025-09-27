@@ -3,7 +3,7 @@ use bdk_chain::bitcoin::{
 };
 use core::str::FromStr;
 
-#[cfg(feature = "miniscript")]
+#[cfg(feature = "default")]
 use bdk_chain::miniscript::{descriptor::KeyMap, Descriptor, DescriptorPublicKey};
 
 #[allow(unused_macros)]
@@ -128,7 +128,7 @@ pub fn create_test_tx(
 }
 
 /// Generates `script_pubkey` corresponding to `index` on keychain of `descriptor`.
-#[cfg(feature = "miniscript")]
+#[cfg(feature = "default")]
 pub fn spk_at_index(
     descriptor: &Descriptor<DescriptorPublicKey>,
     index: u32,
@@ -141,7 +141,7 @@ pub fn spk_at_index(
 }
 
 /// Parses a descriptor string.
-#[cfg(feature = "miniscript")]
+#[cfg(feature = "default")]
 pub fn parse_descriptor(descriptor: &str) -> (Descriptor<DescriptorPublicKey>, KeyMap) {
     use bdk_chain::bitcoin::key::Secp256k1;
     let secp = Secp256k1::signing_only();
