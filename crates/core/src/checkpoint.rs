@@ -2,6 +2,7 @@ use core::fmt;
 use core::ops::RangeBounds;
 
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use bitcoin::{block::Header, BlockHash};
 
 use crate::BlockId;
@@ -280,7 +281,12 @@ where
     /// all entries following it. If the existing checkpoint at height is a placeholder where
     /// `data: None` with the same hash, then the `data` is inserted to make a complete checkpoint.
     /// The returned chain will have a tip of the data passed in. If the data was already present
-    /// then this just returns `self`. This method does not create new placeholders.
+    /// then this just returns `self`.
+    ///
+    /// When inserting data with a `prev_blockhash` that conflicts with existing checkpoints,
+    /// those checkpoints will be displaced and replaced with placeholders. When inserting data
+    /// whose block hash conflicts with the `prev_blockhash` of higher checkpoints, those higher
+    /// checkpoints will be purged.
     ///
     /// # Panics
     ///
@@ -288,8 +294,8 @@ where
     #[must_use]
     pub fn insert(self, height: u32, data: D) -> Self {
         let mut cp = self.clone();
-        let mut tail = vec![];
-        let base = loop {
+        let mut tail: Vec<(u32, D)> = vec![];
+        let mut base = loop {
             if cp.height() == height {
                 let same_hash = cp.hash() == data.to_blockhash();
                 if same_hash {
@@ -318,47 +324,107 @@ where
             cp = cp.prev().expect("will break before genesis block");
         };
 
-        base.extend(core::iter::once((height, data)).chain(tail.into_iter().rev()))
-            .expect("tail is in order")
-    }
+        if let Some(prev_hash) = data.prev_blockhash() {
+            // Check if the new data's `prev_blockhash` conflicts with the checkpoint at height - 1.
+            if let Some(lower_cp) = base.get(height.saturating_sub(1)) {
+                // New data's `prev_blockhash` conflicts with existing checkpoint, so we displace
+                // the existing checkpoint and create a placeholder.
+                if lower_cp.hash() != prev_hash {
+                    // Find the base to link to at height - 2 or lower with actual data.
+                    // We skip placeholders because when we displace a checkpoint, we can't ensure
+                    // that placeholders below it still maintain proper chain continuity.
+                    let link_base = if height > 1 {
+                        base.find_data(height - 2)
+                    } else {
+                        None
+                    };
 
-    /// Puts another checkpoint onto the linked list representing the blockchain.
-    ///
-    /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the
-    /// one you are pushing on to.
-    ///
-    /// If `height` is non-contiguous and `data.prev_blockhash()` is available, a placeholder is
-    /// created at height - 1.
-    pub fn push(self, height: u32, data: D) -> Result<Self, Self> {
-        if self.height() < height {
-            let mut current_cp = self.0.clone();
-
-            // If non-contiguous and `prev_blockhash` exists, insert a placeholder at height - 1.
-            if height > self.height() + 1 {
-                if let Some(prev_hash) = data.prev_blockhash() {
-                    let empty = Arc::new(CPInner {
+                    // Create a new placeholder at height - 1 with the required `prev_blockhash`.
+                    base = Self(Arc::new(CPInner {
                         block_id: BlockId {
                             height: height - 1,
                             hash: prev_hash,
                         },
                         data: None,
-                        prev: Some(current_cp),
-                    });
-                    current_cp = empty;
+                        prev: link_base.map(|cb| cb.0),
+                    }));
+                }
+            } else {
+                // No checkpoint at height - 1, but we may need to create a placeholder.
+                if height > 0 {
+                    base = Self(Arc::new(CPInner {
+                        block_id: BlockId {
+                            height: height - 1,
+                            hash: prev_hash,
+                        },
+                        data: None,
+                        prev: base.0.prev.clone(),
+                    }));
                 }
             }
-
-            Ok(Self(Arc::new(CPInner {
-                block_id: BlockId {
-                    height,
-                    hash: data.to_blockhash(),
-                },
-                data: Some(data),
-                prev: Some(current_cp),
-            })))
-        } else {
-            Err(self)
         }
+
+        // Check for conflicts with higher checkpoints and purge if necessary.
+        let mut filtered_tail = Vec::new();
+        for (tail_height, tail_data) in tail.into_iter().rev() {
+            // Check if this tail entry's `prev_blockhash` conflicts with our new data's blockhash.
+            if let Some(tail_prev_hash) = tail_data.prev_blockhash() {
+                // Conflict detected, so purge this and all tail entries.
+                if tail_prev_hash != data.to_blockhash() {
+                    break;
+                }
+            }
+            filtered_tail.push((tail_height, tail_data));
+        }
+
+        base.extend(core::iter::once((height, data)).chain(filtered_tail))
+            .expect("tail is in order")
+    }
+
+    /// Extends the chain by pushing a new checkpoint.
+    ///
+    /// Returns `Err(self)` if the height is not greater than the current height, or if the data's
+    /// `prev_blockhash` conflicts with `self`.
+    ///
+    /// Creates a placeholder at height - 1 if the height is non-contiguous and
+    /// `data.prev_blockhash()` is available.
+    pub fn push(mut self, height: u32, data: D) -> Result<Self, Self> {
+        // Reject if trying to push at or below current height - chain must grow forward
+        if height <= self.height() {
+            return Err(self);
+        }
+
+        if let Some(prev_hash) = data.prev_blockhash() {
+            if height == self.height() + 1 {
+                // For contiguous height, validate that prev_blockhash matches our hash
+                // to ensure chain continuity
+                if self.hash() != prev_hash {
+                    return Err(self);
+                }
+            } else {
+                // For non-contiguous heights, create placeholder to maintain chain linkage
+                // This allows sparse chains while preserving block relationships
+                self = CheckPoint(Arc::new(CPInner {
+                    block_id: BlockId {
+                        height: height
+                            .checked_sub(1)
+                            .expect("height has previous blocks so must be greater than 0"),
+                        hash: prev_hash,
+                    },
+                    data: None,
+                    prev: Some(self.0),
+                }));
+            }
+        }
+
+        Ok(Self(Arc::new(CPInner {
+            block_id: BlockId {
+                height,
+                hash: data.to_blockhash(),
+            },
+            data: Some(data),
+            prev: Some(self.0),
+        })))
     }
 }
 
