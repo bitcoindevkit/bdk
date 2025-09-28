@@ -129,10 +129,14 @@ fn checkpoint_insert_conflicting_prev_blockhash() {
 
     // Verify chain structure
     assert_eq!(result.height(), 100, "tip should be at height 100");
+    // Should have: 99 (placeholder), 100
+    // Note: The placeholder at height 98 (from block_99's prev_blockhash) is removed
+    // because when we displace block_99, we can't ensure the placeholder at 98 connects
+    // properly with the new placeholder at 99.
     assert_eq!(
         result.iter().count(),
-        3,
-        "should have 3 checkpoints (98 placeholder, 99 placeholder, 100)"
+        2,
+        "should have 2 checkpoints (99 placeholder, 100)"
     );
 }
 
@@ -303,8 +307,15 @@ fn checkpoint_insert_between_conflicting_both_sides() {
 
     // Verify chain structure
     assert_eq!(result.height(), 5, "tip should be at height 5");
-    // Should have: 3 (placeholder), 4 (placeholder), 5
-    assert_eq!(result.iter().count(), 3, "should have 3 checkpoints");
+    // Should have: 4 (placeholder), 5
+    // Note: The placeholder at height 3 (from block_4's prev_blockhash) is removed
+    // because when we displace block_4, we can't ensure the placeholder at 3 connects
+    // properly with the new placeholder at 4.
+    assert_eq!(
+        result.iter().count(),
+        2,
+        "should have 2 checkpoints (4 placeholder, 5)"
+    );
 }
 
 /// Test that push returns Err(self) when trying to push at the same height.
