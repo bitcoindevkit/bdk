@@ -21,15 +21,14 @@
 //! Conflicting transactions are allowed to coexist within a [`TxGraph`]. A process called
 //! canonicalization is required to get a conflict-free view of transactions.
 //!
-//! * [`list_canonical_txs`](TxGraph::list_canonical_txs) lists canonical transactions.
-//! * [`filter_chain_txouts`](TxGraph::filter_chain_txouts) filters out canonical outputs from a
-//!   list of outpoints.
-//! * [`filter_chain_unspents`](TxGraph::filter_chain_unspents) filters out canonical unspent
-//!   outputs from a list of outpoints.
-//! * [`balance`](TxGraph::balance) gets the total sum of unspent outputs filtered from a list of
-//!   outpoints.
-//! * [`canonical_iter`](TxGraph::canonical_iter) returns the [`CanonicalIter`] which contains all
-//!   of the canonicalization logic.
+//! * [`canonical_iter`](TxGraph::canonical_iter) returns a [`CanonicalIter`] which performs
+//!   incremental canonicalization. This is useful when you only need to check specific transactions
+//!   (e.g., verifying whether a few unconfirmed transactions are canonical) without computing the
+//!   entire canonical view.
+//! * [`canonical_view`](TxGraph::canonical_view) returns a [`CanonicalView`] which provides a
+//!   complete canonical view of the graph. This is required for typical wallet operations like
+//!   querying balances, listing outputs, transactions, and UTXOs. You must construct this first
+//!   before performing these operations.
 //!
 //! All these methods require a `chain` and `chain_tip` argument. The `chain` must be a
 //! [`ChainOracle`] implementation (such as [`LocalChain`](crate::local_chain::LocalChain)) which
@@ -120,21 +119,18 @@
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::collections::*;
-use crate::spk_txout::SpkTxOutIndex;
 use crate::BlockId;
 use crate::CanonicalIter;
-use crate::CanonicalReason;
+use crate::CanonicalView;
 use crate::CanonicalizationParams;
-use crate::ObservedIn;
-use crate::{Anchor, Balance, ChainOracle, ChainPosition, FullTxOut, Merge};
+use crate::{Anchor, ChainOracle, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bdk_core::ConfirmationBlockTime;
 pub use bdk_core::TxUpdate;
-use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
-use core::ops::RangeBounds;
 use core::{
     convert::Infallible,
     ops::{Deref, RangeInclusive},
@@ -245,27 +241,6 @@ enum TxNodeInternal {
 impl Default for TxNodeInternal {
     fn default() -> Self {
         Self::Partial(BTreeMap::new())
-    }
-}
-
-/// A transaction that is deemed to be part of the canonical history.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CanonicalTx<'a, T, A> {
-    /// How the transaction is observed in the canonical chain (confirmed or unconfirmed).
-    pub chain_position: ChainPosition<A>,
-    /// The transaction node (as part of the graph).
-    pub tx_node: TxNode<'a, T, A>,
-}
-
-impl<'a, T, A> From<CanonicalTx<'a, T, A>> for Txid {
-    fn from(tx: CanonicalTx<'a, T, A>) -> Self {
-        tx.tx_node.txid
-    }
-}
-
-impl<'a, A> From<CanonicalTx<'a, Arc<Transaction>, A>> for Arc<Transaction> {
-    fn from(tx: CanonicalTx<'a, Arc<Transaction>, A>) -> Self {
-        tx.tx_node.tx
     }
 }
 
@@ -980,183 +955,6 @@ impl<A: Anchor> TxGraph<A> {
 }
 
 impl<A: Anchor> TxGraph<A> {
-    /// List graph transactions that are in `chain` with `chain_tip`.
-    ///
-    /// Each transaction is represented as a [`CanonicalTx`] that contains where the transaction is
-    /// observed in-chain, and the [`TxNode`].
-    ///
-    /// # Error
-    ///
-    /// If the [`ChainOracle`] implementation (`chain`) fails, an error will be returned with the
-    /// returned item.
-    ///
-    /// If the [`ChainOracle`] is infallible, [`list_canonical_txs`] can be used instead.
-    ///
-    /// [`list_canonical_txs`]: Self::list_canonical_txs
-    pub fn try_list_canonical_txs<'a, C: ChainOracle + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> impl Iterator<Item = Result<CanonicalTx<'a, Arc<Transaction>, A>, C::Error>> {
-        fn find_direct_anchor<A: Anchor, C: ChainOracle>(
-            tx_node: &TxNode<'_, Arc<Transaction>, A>,
-            chain: &C,
-            chain_tip: BlockId,
-        ) -> Result<Option<A>, C::Error> {
-            tx_node
-                .anchors
-                .iter()
-                .find_map(|a| -> Option<Result<A, C::Error>> {
-                    match chain.is_block_in_chain(a.anchor_block(), chain_tip) {
-                        Ok(Some(true)) => Some(Ok(a.clone())),
-                        Ok(Some(false)) | Ok(None) => None,
-                        Err(err) => Some(Err(err)),
-                    }
-                })
-                .transpose()
-        }
-        self.canonical_iter(chain, chain_tip, params)
-            .flat_map(move |res| {
-                res.map(|(txid, _, canonical_reason)| {
-                    let tx_node = self.get_tx_node(txid).expect("must contain tx");
-                    let chain_position = match canonical_reason {
-                        CanonicalReason::Assumed { descendant } => match descendant {
-                            Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                                Some(anchor) => ChainPosition::Confirmed {
-                                    anchor,
-                                    transitively: None,
-                                },
-                                None => ChainPosition::Unconfirmed {
-                                    first_seen: tx_node.first_seen,
-                                    last_seen: tx_node.last_seen,
-                                },
-                            },
-                            None => ChainPosition::Unconfirmed {
-                                first_seen: tx_node.first_seen,
-                                last_seen: tx_node.last_seen,
-                            },
-                        },
-                        CanonicalReason::Anchor { anchor, descendant } => match descendant {
-                            Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
-                                Some(anchor) => ChainPosition::Confirmed {
-                                    anchor,
-                                    transitively: None,
-                                },
-                                None => ChainPosition::Confirmed {
-                                    anchor,
-                                    transitively: descendant,
-                                },
-                            },
-                            None => ChainPosition::Confirmed {
-                                anchor,
-                                transitively: None,
-                            },
-                        },
-                        CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
-                            ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
-                                first_seen: tx_node.first_seen,
-                                last_seen: Some(last_seen),
-                            },
-                            ObservedIn::Block(_) => ChainPosition::Unconfirmed {
-                                first_seen: tx_node.first_seen,
-                                last_seen: None,
-                            },
-                        },
-                    };
-                    Ok(CanonicalTx {
-                        chain_position,
-                        tx_node,
-                    })
-                })
-            })
-    }
-
-    /// List graph transactions that are in `chain` with `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_list_canonical_txs`].
-    ///
-    /// [`try_list_canonical_txs`]: Self::try_list_canonical_txs
-    pub fn list_canonical_txs<'a, C: ChainOracle<Error = Infallible> + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>> {
-        self.try_list_canonical_txs(chain, chain_tip, params)
-            .map(|res| res.expect("infallible"))
-    }
-
-    /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
-    /// `chain_tip`.
-    ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
-    /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
-    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
-    ///
-    /// Floating outputs (i.e., outputs for which we don't have the full transaction in the graph)
-    /// are ignored.
-    ///
-    /// # Error
-    ///
-    /// An [`Iterator::Item`] can be an [`Err`] if the [`ChainOracle`] implementation (`chain`)
-    /// fails.
-    ///
-    /// If the [`ChainOracle`] implementation is infallible, [`filter_chain_txouts`] can be used
-    /// instead.
-    ///
-    /// [`filter_chain_txouts`]: Self::filter_chain_txouts
-    pub fn try_filter_chain_txouts<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> Result<impl Iterator<Item = (OI, FullTxOut<A>)> + 'a, C::Error> {
-        let mut canon_txs = HashMap::<Txid, CanonicalTx<Arc<Transaction>, A>>::new();
-        let mut canon_spends = HashMap::<OutPoint, Txid>::new();
-        for r in self.try_list_canonical_txs(chain, chain_tip, params) {
-            let canonical_tx = r?;
-            let txid = canonical_tx.tx_node.txid;
-
-            if !canonical_tx.tx_node.tx.is_coinbase() {
-                for txin in &canonical_tx.tx_node.tx.input {
-                    let _res = canon_spends.insert(txin.previous_output, txid);
-                    assert!(_res.is_none(), "tried to replace {_res:?} with {txid:?}",);
-                }
-            }
-            canon_txs.insert(txid, canonical_tx);
-        }
-        Ok(outpoints.into_iter().filter_map(move |(spk_i, outpoint)| {
-            let canon_tx = canon_txs.get(&outpoint.txid)?;
-            let txout = canon_tx
-                .tx_node
-                .tx
-                .output
-                .get(outpoint.vout as usize)
-                .cloned()?;
-            let chain_position = canon_tx.chain_position.clone();
-            let spent_by = canon_spends.get(&outpoint).map(|spend_txid| {
-                let spend_tx = canon_txs
-                    .get(spend_txid)
-                    .cloned()
-                    .expect("must be canonical");
-                (spend_tx.chain_position, *spend_txid)
-            });
-            let is_on_coinbase = canon_tx.tx_node.is_coinbase();
-            Some((
-                spk_i,
-                FullTxOut {
-                    outpoint,
-                    txout,
-                    chain_position,
-                    spent_by,
-                    is_on_coinbase,
-                },
-            ))
-        }))
-    }
-
     /// List txids by descending anchor height order.
     ///
     /// If multiple anchors exist for a txid, the highest anchor height will be used. Transactions
@@ -1192,262 +990,24 @@ impl<A: Anchor> TxGraph<A> {
         CanonicalIter::new(self, chain, chain_tip, params)
     }
 
-    /// Get a filtered list of outputs from the given `outpoints` that are in `chain` with
-    /// `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_filter_chain_txouts`].
-    ///
-    /// [`try_filter_chain_txouts`]: Self::try_filter_chain_txouts
-    pub fn filter_chain_txouts<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
+    /// Returns a [`CanonicalView`].
+    pub fn try_canonical_view<'a, C: ChainOracle>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
         params: CanonicalizationParams,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
-        self.try_filter_chain_txouts(chain, chain_tip, params, outpoints)
-            .expect("oracle is infallible")
+    ) -> Result<CanonicalView<A>, C::Error> {
+        CanonicalView::new(self, chain, chain_tip, params)
     }
 
-    /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
-    /// `chain` with `chain_tip`.
-    ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
-    /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
-    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
-    ///
-    /// Floating outputs are ignored.
-    ///
-    /// # Error
-    ///
-    /// An [`Iterator::Item`] can be an [`Err`] if the [`ChainOracle`] implementation (`chain`)
-    /// fails.
-    ///
-    /// If the [`ChainOracle`] implementation is infallible, [`filter_chain_unspents`] can be used
-    /// instead.
-    ///
-    /// [`filter_chain_unspents`]: Self::filter_chain_unspents
-    pub fn try_filter_chain_unspents<'a, C: ChainOracle + 'a, OI: Clone + 'a>(
+    /// Returns a [`CanonicalView`].
+    pub fn canonical_view<'a, C: ChainOracle<Error = Infallible>>(
         &'a self,
         chain: &'a C,
         chain_tip: BlockId,
         params: CanonicalizationParams,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> Result<impl Iterator<Item = (OI, FullTxOut<A>)> + 'a, C::Error> {
-        Ok(self
-            .try_filter_chain_txouts(chain, chain_tip, params, outpoints)?
-            .filter(|(_, full_txo)| full_txo.spent_by.is_none()))
-    }
-
-    /// Get a filtered list of unspent outputs (UTXOs) from the given `outpoints` that are in
-    /// `chain` with `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_filter_chain_unspents`].
-    ///
-    /// [`try_filter_chain_unspents`]: Self::try_filter_chain_unspents
-    pub fn filter_chain_unspents<'a, C: ChainOracle<Error = Infallible> + 'a, OI: Clone + 'a>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-        txouts: impl IntoIterator<Item = (OI, OutPoint)> + 'a,
-    ) -> impl Iterator<Item = (OI, FullTxOut<A>)> + 'a {
-        self.try_filter_chain_unspents(chain, chain_tip, params, txouts)
-            .expect("oracle is infallible")
-    }
-
-    /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
-    ///
-    /// The output of `trust_predicate` should return `true` for scripts that we trust.
-    ///
-    /// `outpoints` is a list of outpoints we are interested in, coupled with an outpoint identifier
-    /// (`OI`) for convenience. If `OI` is not necessary, the caller can use `()`, or
-    /// [`Iterator::enumerate`] over a list of [`OutPoint`]s.
-    ///
-    /// If the provided [`ChainOracle`] implementation (`chain`) is infallible, [`balance`] can be
-    /// used instead.
-    ///
-    /// [`balance`]: Self::balance
-    pub fn try_balance<C: ChainOracle, OI: Clone>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
-        mut trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
-    ) -> Result<Balance, C::Error> {
-        let mut immature = Amount::ZERO;
-        let mut trusted_pending = Amount::ZERO;
-        let mut untrusted_pending = Amount::ZERO;
-        let mut confirmed = Amount::ZERO;
-
-        for (spk_i, txout) in self.try_filter_chain_unspents(chain, chain_tip, params, outpoints)? {
-            match &txout.chain_position {
-                ChainPosition::Confirmed { .. } => {
-                    if txout.is_confirmed_and_spendable(chain_tip.height) {
-                        confirmed += txout.txout.value;
-                    } else if !txout.is_mature(chain_tip.height) {
-                        immature += txout.txout.value;
-                    }
-                }
-                ChainPosition::Unconfirmed { .. } => {
-                    if trust_predicate(&spk_i, txout.txout.script_pubkey) {
-                        trusted_pending += txout.txout.value;
-                    } else {
-                        untrusted_pending += txout.txout.value;
-                    }
-                }
-            }
-        }
-
-        Ok(Balance {
-            immature,
-            trusted_pending,
-            untrusted_pending,
-            confirmed,
-        })
-    }
-
-    /// Get the total balance of `outpoints` that are in `chain` of `chain_tip`.
-    ///
-    /// This is the infallible version of [`try_balance`].
-    ///
-    /// ### Minimum confirmations
-    ///
-    /// To filter for transactions with at least `N` confirmations, pass a `chain_tip` that is
-    /// `N - 1` blocks below the actual tip. This ensures that only transactions with at least `N`
-    /// confirmations are counted as confirmed in the returned [`Balance`].
-    ///
-    /// ```
-    /// # use bdk_chain::tx_graph::TxGraph;
-    /// # use bdk_chain::{local_chain::LocalChain, CanonicalizationParams, ConfirmationBlockTime};
-    /// # use bdk_testenv::{hash, utils::new_tx};
-    /// # use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
-    ///
-    /// # let spk = ScriptBuf::from_hex("0014c692ecf13534982a9a2834565cbd37add8027140").unwrap();
-    /// # let chain =
-    /// #     LocalChain::<BlockHash>::from_blocks((0..=15).map(|i| (i as u32, hash!("h"))).collect()).unwrap();
-    /// # let mut graph: TxGraph = TxGraph::default();
-    /// # let coinbase_tx = Transaction {
-    /// #     input: vec![TxIn {
-    /// #         previous_output: OutPoint::null(),
-    /// #         ..Default::default()
-    /// #     }],
-    /// #     output: vec![TxOut {
-    /// #         value: Amount::from_sat(70000),
-    /// #         script_pubkey: spk.clone(),
-    /// #     }],
-    /// #     ..new_tx(0)
-    /// # };
-    /// # let tx = Transaction {
-    /// #     input: vec![TxIn {
-    /// #         previous_output: OutPoint::new(coinbase_tx.compute_txid(), 0),
-    /// #         ..Default::default()
-    /// #     }],
-    /// #     output: vec![TxOut {
-    /// #         value: Amount::from_sat(42_000),
-    /// #         script_pubkey: spk.clone(),
-    /// #     }],
-    /// #     ..new_tx(1)
-    /// # };
-    /// # let txid = tx.compute_txid();
-    /// # let _ = graph.insert_tx(tx.clone());
-    /// # let _ = graph.insert_anchor(
-    /// #     txid,
-    /// #     ConfirmationBlockTime {
-    /// #         block_id: chain.get(10).unwrap().block_id(),
-    /// #         confirmation_time: 123456,
-    /// #     },
-    /// # );
-    ///
-    /// let minimum_confirmations = 6;
-    /// let target_tip = chain
-    ///     .tip()
-    ///     .floor_below(minimum_confirmations - 1)
-    ///     .expect("checkpoint from local chain must have genesis");
-    /// let balance = graph.balance(
-    ///     &chain,
-    ///     target_tip.block_id(),
-    ///     CanonicalizationParams::default(),
-    ///     std::iter::once(((), OutPoint::new(txid, 0))),
-    ///     |_: &(), _| true,
-    /// );
-    /// assert_eq!(balance.confirmed, Amount::from_sat(42_000));
-    /// ```
-    ///
-    /// [`try_balance`]: Self::try_balance
-    pub fn balance<C: ChainOracle<Error = Infallible>, OI: Clone>(
-        &self,
-        chain: &C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-        outpoints: impl IntoIterator<Item = (OI, OutPoint)>,
-        trust_predicate: impl FnMut(&OI, ScriptBuf) -> bool,
-    ) -> Balance {
-        self.try_balance(chain, chain_tip, params, outpoints, trust_predicate)
-            .expect("oracle is infallible")
-    }
-
-    /// List txids that are expected to exist under the given spks.
-    ///
-    /// This is used to fill
-    /// [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
-    ///
-    ///
-    /// The spk index range can be constrained with `range`.
-    ///
-    /// # Error
-    ///
-    /// If the [`ChainOracle`] implementation (`chain`) fails, an error will be returned with the
-    /// returned item.
-    ///
-    /// If the [`ChainOracle`] is infallible,
-    /// [`list_expected_spk_txids`](Self::list_expected_spk_txids) can be used instead.
-    pub fn try_list_expected_spk_txids<'a, C, I>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        indexer: &'a impl AsRef<SpkTxOutIndex<I>>,
-        spk_index_range: impl RangeBounds<I> + 'a,
-    ) -> impl Iterator<Item = Result<(ScriptBuf, Txid), C::Error>> + 'a
-    where
-        C: ChainOracle,
-        I: fmt::Debug + Clone + Ord + 'a,
-    {
-        let indexer = indexer.as_ref();
-        self.try_list_canonical_txs(chain, chain_tip, CanonicalizationParams::default())
-            .flat_map(move |res| -> Vec<Result<(ScriptBuf, Txid), C::Error>> {
-                let range = &spk_index_range;
-                let c_tx = match res {
-                    Ok(c_tx) => c_tx,
-                    Err(err) => return vec![Err(err)],
-                };
-                let relevant_spks = indexer.relevant_spks_of_tx(&c_tx.tx_node);
-                relevant_spks
-                    .into_iter()
-                    .filter(|(i, _)| range.contains(i))
-                    .map(|(_, spk)| Ok((spk, c_tx.tx_node.txid)))
-                    .collect()
-            })
-    }
-
-    /// List txids that are expected to exist under the given spks.
-    ///
-    /// This is the infallible version of
-    /// [`try_list_expected_spk_txids`](Self::try_list_expected_spk_txids).
-    pub fn list_expected_spk_txids<'a, C, I>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        indexer: &'a impl AsRef<SpkTxOutIndex<I>>,
-        spk_index_range: impl RangeBounds<I> + 'a,
-    ) -> impl Iterator<Item = (ScriptBuf, Txid)> + 'a
-    where
-        C: ChainOracle<Error = Infallible>,
-        I: fmt::Debug + Clone + Ord + 'a,
-    {
-        self.try_list_expected_spk_txids(chain, chain_tip, indexer, spk_index_range)
-            .map(|r| r.expect("infallible"))
+    ) -> CanonicalView<A> {
+        CanonicalView::new(self, chain, chain_tip, params).expect("infallible")
     }
 
     /// Construct a `TxGraph` from a `changeset`.

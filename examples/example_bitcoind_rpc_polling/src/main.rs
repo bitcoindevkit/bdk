@@ -145,13 +145,14 @@ fn main() -> anyhow::Result<()> {
                     chain.tip(),
                     fallback_height,
                     graph
-                        .graph()
-                        .list_canonical_txs(
+                        .canonical_view(
                             &*chain,
                             chain.tip().block_id(),
                             CanonicalizationParams::default(),
                         )
-                        .filter(|tx| tx.chain_position.is_unconfirmed()),
+                        .txs()
+                        .filter(|tx| tx.pos.is_unconfirmed())
+                        .map(|tx| tx.tx),
                 )
             };
             let mut db_stage = ChangeSet::default();
@@ -195,13 +196,17 @@ fn main() -> anyhow::Result<()> {
                     last_print = Instant::now();
                     let synced_to = chain.tip();
                     let balance = {
-                        graph.graph().balance(
-                            &*chain,
-                            synced_to.block_id(),
-                            CanonicalizationParams::default(),
-                            graph.index.outpoints().iter().cloned(),
-                            |(k, _), _| k == &Keychain::Internal,
-                        )
+                        graph
+                            .canonical_view(
+                                &*chain,
+                                synced_to.block_id(),
+                                CanonicalizationParams::default(),
+                            )
+                            .balance(
+                                graph.index.outpoints().iter().cloned(),
+                                |(k, _), _| k == &Keychain::Internal,
+                                1,
+                            )
                     };
                     println!(
                         "[{:>10}s] synced to {} @ {} | total: {}",
@@ -245,13 +250,14 @@ fn main() -> anyhow::Result<()> {
                     chain.tip(),
                     fallback_height,
                     graph
-                        .graph()
-                        .list_canonical_txs(
+                        .canonical_view(
                             &*chain,
                             chain.tip().block_id(),
                             CanonicalizationParams::default(),
                         )
-                        .filter(|tx| tx.chain_position.is_unconfirmed()),
+                        .txs()
+                        .filter(|tx| tx.pos.is_unconfirmed())
+                        .map(|tx| tx.tx),
                 )
             };
 
@@ -350,13 +356,17 @@ fn main() -> anyhow::Result<()> {
                     last_print = Some(Instant::now());
                     let synced_to = chain.tip();
                     let balance = {
-                        graph.graph().balance(
-                            &*chain,
-                            synced_to.block_id(),
-                            CanonicalizationParams::default(),
-                            graph.index.outpoints().iter().cloned(),
-                            |(k, _), _| k == &Keychain::Internal,
-                        )
+                        graph
+                            .canonical_view(
+                                &*chain,
+                                synced_to.block_id(),
+                                CanonicalizationParams::default(),
+                            )
+                            .balance(
+                                graph.index.outpoints().iter().cloned(),
+                                |(k, _), _| k == &Keychain::Internal,
+                                1,
+                            )
                     };
                     println!(
                         "[{:>10}s] synced to {} @ {} / {} | total: {}",
