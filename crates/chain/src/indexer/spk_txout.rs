@@ -7,7 +7,7 @@ use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
     Indexer,
 };
-use bitcoin::{Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
+use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
@@ -280,8 +280,11 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     }
 
     /// Returns the index associated with the script pubkey.
-    pub fn index_of_spk(&self, script: ScriptBuf) -> Option<&I> {
-        self.spk_indices.get(script.as_script())
+    pub fn index_of_spk<T>(&self, script: T) -> Option<&I>
+    where
+        T: AsRef<Script>,
+    {
+        self.spk_indices.get(script.as_ref())
     }
 
     /// Computes the total value transfer effect `tx` has on the script pubkeys in `range`. Value is
@@ -305,7 +308,7 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
             }
         }
         for txout in &tx.output {
-            if let Some(index) = self.index_of_spk(txout.script_pubkey.clone()) {
+            if let Some(index) = self.index_of_spk(txout.script_pubkey.as_script()) {
                 if range.contains(index) {
                     received += txout.value;
                 }
