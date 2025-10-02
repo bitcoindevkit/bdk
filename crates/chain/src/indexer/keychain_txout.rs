@@ -1058,7 +1058,7 @@ impl Merge for ChangeSet {
             debug_assert!(
                 orig_spks
                     .iter()
-                    .all(|(i, orig_spk)| spks.get(i).map_or(true, |spk| spk == orig_spk)),
+                    .all(|(i, orig_spk)| spks.get(i).is_none_or(|spk| spk == orig_spk)),
                 "spk of the same descriptor-id and derivation index must not be different"
             );
             orig_spks.extend(spks);
