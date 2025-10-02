@@ -93,8 +93,8 @@ impl<A: Anchor> CanonicalView<A> {
     where
         C: ChainOracle,
     {
-        fn find_direct_anchor<'g, A: Anchor, C: ChainOracle>(
-            tx_node: &TxNode<'g, Arc<Transaction>, A>,
+        fn find_direct_anchor<A: Anchor, C: ChainOracle>(
+            tx_node: &TxNode<'_, Arc<Transaction>, A>,
             chain: &C,
             chain_tip: BlockId,
         ) -> Result<Option<A>, C::Error> {
