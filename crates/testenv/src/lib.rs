@@ -206,9 +206,10 @@ impl TestEnv {
             std::thread::sleep(delay);
         }
 
-        Err(anyhow::Error::msg(
-            "Timed out waiting for Electrsd to get block header",
-        ))
+        Err(anyhow::Error::msg(format!(
+            "Timed out waiting for Electrsd to get transaction, took: {:?}",
+            start.elapsed()
+        )))
     }
 
     /// This method waits for Electrsd to see a transaction with given `txid`. `timeout` is the
@@ -229,9 +230,10 @@ impl TestEnv {
             std::thread::sleep(delay);
         }
 
-        Err(anyhow::Error::msg(
-            "Timed out waiting for Electrsd to get transaction",
-        ))
+        Err(anyhow::Error::msg(format!(
+            "Timed out waiting for Electrsd to get transaction, took: {:?}",
+            start.elapsed()
+        )))
     }
 
     /// Invalidate a number of blocks of a given size `count`.

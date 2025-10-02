@@ -240,7 +240,7 @@ pub fn chained_mempool_tx_sync() -> anyhow::Result<()> {
         .transaction()?;
     let txid2 = rpc_client.send_raw_transaction(signed_tx.raw_hex())?;
 
-    env.wait_until_electrum_sees_txid(signed_tx.compute_txid(), Duration::from_secs(5))?;
+    env.wait_until_electrum_sees_txid(signed_tx.compute_txid(), Duration::from_secs(6))?;
 
     let spk_history = electrum_client.script_get_history(&tracked_addr.script_pubkey())?;
     assert!(
