@@ -1,0 +1,24 @@
+[package]
+name = "example_chain_query"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.84"
+
+[dependencies]
+bdk_chain = { path = "../../crates/chain" }
+bdk_core = { path = "../../crates/core" }
+bitcoin = { version = "0.32.0" }
+bitcoincore-rpc = { version = "0.19.0" }
+bip157 = { version = "0.3.2" }
+tokio = { version = "1.19", features = ["rt-multi-thread", "macros"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[[bin]]
+name = "kyoto_oracle"
+path = "bin/kyoto_oracle.rs"
+
+[[bin]]
+name = "bitcoind_rpc_oracle"
+path = "bin/bitcoind_rpc_oracle.rs"

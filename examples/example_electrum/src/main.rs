@@ -213,11 +213,11 @@ fn main() -> anyhow::Result<()> {
                         eprintln!("[ SCANNING {pc:03.0}% ] {item}");
                     });
 
-            let canonical_view = graph.canonical_view(
-                &*chain,
-                chain_tip.block_id(),
-                CanonicalizationParams::default(),
-            );
+            let chain_tip_block = chain_tip.block_id();
+            let task = graph
+                .graph()
+                .canonicalization_task(chain_tip_block, CanonicalizationParams::default());
+            let canonical_view = chain.canonicalize(task);
 
             request = request
                 .expected_spk_txids(canonical_view.list_expected_spk_txids(&graph.index, ..));

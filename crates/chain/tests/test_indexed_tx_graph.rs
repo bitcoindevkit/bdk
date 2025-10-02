@@ -459,23 +459,30 @@ fn test_list_owned_txouts() {
                 .get(height)
                 .map(|cp| cp.block_id())
                 .unwrap_or_else(|| panic!("block must exist at {height}"));
-            let txouts = graph
-                .canonical_view(&local_chain, chain_tip, CanonicalizationParams::default())
+            let task = graph
+                .graph()
+                .canonicalization_task(chain_tip, CanonicalizationParams::default());
+            let txouts = local_chain
+                .canonicalize(task)
                 .filter_outpoints(graph.index.outpoints().iter().cloned())
                 .collect::<Vec<_>>();
 
-            let utxos = graph
-                .canonical_view(&local_chain, chain_tip, CanonicalizationParams::default())
+            let task = graph
+                .graph()
+                .canonicalization_task(chain_tip, CanonicalizationParams::default());
+            let utxos = local_chain
+                .canonicalize(task)
                 .filter_unspent_outpoints(graph.index.outpoints().iter().cloned())
                 .collect::<Vec<_>>();
 
-            let balance = graph
-                .canonical_view(&local_chain, chain_tip, CanonicalizationParams::default())
-                .balance(
-                    graph.index.outpoints().iter().cloned(),
-                    |_, txout| trusted_spks.contains(&txout.txout.script_pubkey),
-                    1,
-                );
+            let task = graph
+                .graph()
+                .canonicalization_task(chain_tip, CanonicalizationParams::default());
+            let balance = local_chain.canonicalize(task).balance(
+                graph.index.outpoints().iter().cloned(),
+                |_, txout| trusted_spks.contains(&txout.txout.script_pubkey),
+                0,
+            );
 
             let confirmed_txouts_txid = txouts
                 .iter()
@@ -778,20 +785,17 @@ fn test_get_chain_position() {
         }
 
         // check chain position
-        let chain_pos = graph
-            .canonical_view(
-                chain,
-                chain.tip().block_id(),
-                CanonicalizationParams::default(),
-            )
-            .txs()
-            .find_map(|canon_tx| {
-                if canon_tx.txid == txid {
-                    Some(canon_tx.pos)
-                } else {
-                    None
-                }
-            });
+        let chain_tip = chain.tip().block_id();
+        let task = graph
+            .graph()
+            .canonicalization_task(chain_tip, CanonicalizationParams::default());
+        let chain_pos = chain.canonicalize(task).txs().find_map(|canon_tx| {
+            if canon_tx.txid == txid {
+                Some(canon_tx.pos)
+            } else {
+                None
+            }
+        });
         assert_eq!(chain_pos, exp_pos, "failed test case: {name}");
     }
 
