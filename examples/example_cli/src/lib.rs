@@ -229,7 +229,7 @@ impl FromStr for CoinSelectionAlgo {
             "oldest-first" => OldestFirst,
             "newest-first" => NewestFirst,
             "bnb" => BranchAndBound,
-            unknown => bail!("unknown coin selection algorithm '{}'", unknown),
+            unknown => bail!("unknown coin selection algorithm '{unknown}'"),
         })
     }
 }
@@ -715,8 +715,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     _ => unimplemented!("multi xkey signer"),
                 };
 
-                let _ = sign_res
-                    .map_err(|errors| anyhow::anyhow!("failed to sign PSBT {:?}", errors))?;
+                let _ =
+                    sign_res.map_err(|errors| anyhow::anyhow!("failed to sign PSBT {errors:?}"))?;
 
                 let mut obj = serde_json::Map::new();
                 obj.insert("psbt".to_string(), json!(psbt.to_string()));
