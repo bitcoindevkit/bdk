@@ -64,7 +64,7 @@ fn test_tx_conflict_handling() {
                 TxTemplate {
                     tx_name: "unconfirmed_conflict",
                     inputs: &[
-                        TxInTemplate::PrevTx("confirmed_genesis", 0), 
+                        TxInTemplate::PrevTx("confirmed_genesis", 0),
                         TxInTemplate::PrevTx("unconfirmed_coinbase", 0)
                     ],
                     outputs: &[TxOutTemplate::new(20000, Some(2))],
@@ -1034,7 +1034,7 @@ fn test_tx_conflict_handling() {
                 env.indexer.outpoints().iter().cloned(),
                 |_, txout| {
                     env.indexer
-                        .index_of_spk(txout.txout.script_pubkey.clone())
+                        .index_of_spk(txout.txout.script_pubkey.as_script())
                         .is_some()
                 },
                 0,

@@ -756,7 +756,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                                 .last()
                                 .expect("must have a keychain");
                             let change_index = tx.output.iter().find_map(|txout| {
-                                let spk = txout.script_pubkey.clone();
+                                let spk = txout.script_pubkey.as_script();
                                 match graph.index.index_of_spk(spk) {
                                     Some(&(keychain, index)) if keychain == change_keychain => {
                                         Some((keychain, index))

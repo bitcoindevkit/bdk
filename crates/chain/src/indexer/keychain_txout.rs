@@ -12,7 +12,7 @@ use crate::{
 };
 use alloc::{borrow::ToOwned, vec::Vec};
 use bitcoin::{
-    key::Secp256k1, Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxOut, Txid,
+    key::Secp256k1, Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid,
 };
 use core::{
     fmt::Debug,
@@ -354,7 +354,10 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Returns the keychain and keychain index associated with the spk.
     ///
     /// This calls [`SpkTxOutIndex::index_of_spk`] internally.
-    pub fn index_of_spk(&self, script: ScriptBuf) -> Option<&(K, u32)> {
+    pub fn index_of_spk<T>(&self, script: T) -> Option<&(K, u32)>
+    where
+        T: AsRef<Script>,
+    {
         self.inner.index_of_spk(script)
     }
 
