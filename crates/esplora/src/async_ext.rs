@@ -264,7 +264,7 @@ async fn chain_update<S: Sleeper>(
 
     tip = tip
         .extend(conflicts.into_iter().rev().map(|b| (b.height, b.hash)))
-        .expect("evicted are in order");
+        .map_err(|_| Box::new(esplora_client::Error::InvalidResponse))?;
 
     for (anchor, _txid) in anchors {
         let height = anchor.block_id.height;
@@ -348,6 +348,9 @@ where
             .collect::<FuturesOrdered<_>>();
 
         if handles.is_empty() {
+            if last_index.is_none() {
+                return Err(Box::new(esplora_client::Error::InvalidResponse));
+            }
             break;
         }
 
@@ -368,7 +371,8 @@ where
                 .extend(evicted.into_iter().map(|txid| (txid, start_time)));
         }
 
-        let last_index = last_index.expect("Must be set since handles wasn't empty.");
+        let last_index =
+            last_index.ok_or_else(|| Box::new(esplora_client::Error::InvalidResponse))?;
         let gap_limit_reached = if let Some(i) = last_active_index {
             last_index >= i.saturating_add(stop_gap as u32)
         } else {
@@ -569,6 +573,15 @@ mod test {
         ($index:literal) => {{
             bdk_chain::bitcoin::hashes::Hash::hash($index.as_bytes())
         }};
+    }
+
+    #[test]
+    fn ensure_last_index_none_returns_error() {
+        let last_index: Option<u32> = None;
+        let err = last_index
+            .ok_or_else(|| Box::new(esplora_client::Error::InvalidResponse))
+            .unwrap_err();
+        assert!(matches!(*err, esplora_client::Error::InvalidResponse));
     }
 
     // Test that `chain_update` fails due to wrong network.
