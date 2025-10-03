@@ -27,15 +27,12 @@ pub struct CanonicalizationTask<'g, A> {
     chain_tip: BlockId,
 
     unprocessed_assumed_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>)> + 'g>,
-    unprocessed_anchored_txs:
-        Box<dyn Iterator<Item = (Txid, Arc<Transaction>, &'g BTreeSet<A>)> + 'g>,
+    unprocessed_anchored_txs: VecDeque<(Txid, Arc<Transaction>, &'g BTreeSet<A>)>,
     unprocessed_seen_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>, u64)> + 'g>,
     unprocessed_leftover_txs: VecDeque<(Txid, Arc<Transaction>, u32)>,
 
     canonical: CanonicalMap<A>,
     not_canonical: NotCanonicalSet,
-
-    pending_anchor_checks: VecDeque<(Txid, Arc<Transaction>, Vec<A>)>,
 
     // Store canonical transactions in order
     canonical_order: Vec<Txid>,
@@ -48,22 +45,30 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
     type Output = CanonicalView<A>;
 
     fn next_query(&mut self) -> Option<ChainRequest> {
-        // Check if we have pending anchor checks
-        if let Some((_, _, anchors)) = self.pending_anchor_checks.front() {
-            // Convert anchors to BlockIds for the ChainRequest
+        // Find the next non-canonicalized transaction to query
+        if let Some((_txid, _, anchors)) = self.unprocessed_anchored_txs.front() {
+            // if !self.is_canonicalized(*txid) {
+            //     // Build query for this transaction
+            //     let block_ids = anchors.iter().map(|anchor| anchor.anchor_block()).collect();
+            //     return Some(ChainRequest {
+            //         chain_tip: self.chain_tip,
+            //         block_ids,
+            //     });
+            // }
+            // // Skip already canonicalized transaction
+            // self.unprocessed_anchored_txs.pop_front();
+            // Build query for this transaction
             let block_ids = anchors.iter().map(|anchor| anchor.anchor_block()).collect();
             return Some(ChainRequest {
                 chain_tip: self.chain_tip,
                 block_ids,
             });
         }
-
-        // Process more anchored transactions if available
-        self.process_anchored_txs()
+        None
     }
 
     fn resolve_query(&mut self, response: ChainResponse) {
-        if let Some((txid, tx, anchors)) = self.pending_anchor_checks.pop_front() {
+        if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.pop_front() {
             // Find the anchor that matches the confirmed BlockId
             let best_anchor = response.and_then(|block_id| {
                 anchors
@@ -81,23 +86,23 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
                 }
                 None => {
                     self.unprocessed_leftover_txs.push_back((
-                        txid,
-                        tx,
-                        anchors
-                            .iter()
-                            .last()
-                            .expect(
-                                "tx taken from `unprocessed_txs_with_anchors` so it must at least have an anchor",
-                            )
-                            .confirmation_height_upper_bound(),
-                    ))
+                            txid,
+                            tx,
+                            anchors
+                                .iter()
+                                .last()
+                                .expect(
+                                    "tx taken from `unprocessed_txs_with_anchors` so it must at least have an anchor",
+                                )
+                                .confirmation_height_upper_bound(),
+                        ))
                 }
             }
         }
     }
 
     fn is_finished(&mut self) -> bool {
-        self.pending_anchor_checks.is_empty() && self.unprocessed_anchored_txs.size_hint().0 == 0
+        self.unprocessed_anchored_txs.is_empty()
     }
 
     fn finish(mut self) -> Self::Output {
@@ -134,8 +139,8 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
                 let chain_position = match reason {
                     CanonicalReason::Assumed { descendant } => match descendant {
                         Some(_) => match self.confirmed_anchors.get(txid) {
-                            Some(anchor) => ChainPosition::Confirmed {
-                                anchor,
+                            Some(confirmed_anchor) => ChainPosition::Confirmed {
+                                anchor: confirmed_anchor,
                                 transitively: None,
                             },
                             None => ChainPosition::Unconfirmed {
@@ -150,8 +155,8 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
                     },
                     CanonicalReason::Anchor { anchor, descendant } => match descendant {
                         Some(_) => match self.confirmed_anchors.get(txid) {
-                            Some(anchor) => ChainPosition::Confirmed {
-                                anchor,
+                            Some(confirmed_anchor) => ChainPosition::Confirmed {
+                                anchor: confirmed_anchor,
                                 transitively: None,
                             },
                             None => ChainPosition::Confirmed {
@@ -199,11 +204,10 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
                 .rev()
                 .filter_map(|txid| Some((txid, tx_graph.get_tx(txid)?))),
         );
-        let unprocessed_anchored_txs = Box::new(
-            tx_graph
-                .txids_by_descending_anchor_height()
-                .filter_map(|(_, txid)| Some((txid, tx_graph.get_tx(txid)?, anchors.get(&txid)?))),
-        );
+        let unprocessed_anchored_txs: VecDeque<_> = tx_graph
+            .txids_by_descending_anchor_height()
+            .filter_map(|(_, txid)| Some((txid, tx_graph.get_tx(txid)?, anchors.get(&txid)?)))
+            .collect();
         let unprocessed_seen_txs = Box::new(
             tx_graph
                 .txids_by_descending_last_seen()
@@ -221,8 +225,6 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
 
             canonical: HashMap::new(),
             not_canonical: HashSet::new(),
-
-            pending_anchor_checks: VecDeque::new(),
 
             canonical_order: Vec::new(),
             confirmed_anchors: HashMap::new(),
@@ -244,17 +246,6 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
                 self.mark_canonical(txid, tx, CanonicalReason::assumed());
             }
         }
-    }
-
-    fn process_anchored_txs(&mut self) -> Option<ChainRequest> {
-        while let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
-            if !self.is_canonicalized(txid) {
-                self.pending_anchor_checks
-                    .push_back((txid, tx, anchors.iter().cloned().collect()));
-                return self.next_query();
-            }
-        }
-        None
     }
 
     fn process_seen_txs(&mut self) {
@@ -372,11 +363,8 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
                     if let Some(anchors) = self.tx_graph.all_anchors().get(txid) {
                         // only check anchors we haven't already confirmed
                         if !self.confirmed_anchors.contains_key(txid) {
-                            self.pending_anchor_checks.push_back((
-                                *txid,
-                                tx.clone(),
-                                anchors.iter().cloned().collect(),
-                            ));
+                            self.unprocessed_anchored_txs
+                                .push_back((*txid, tx.clone(), anchors));
                         }
                     }
                 }
