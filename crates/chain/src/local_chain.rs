@@ -4,9 +4,8 @@ use core::convert::Infallible;
 use core::fmt;
 use core::ops::RangeBounds;
 
-use crate::canonical_task::CanonicalizationTask;
 use crate::collections::BTreeMap;
-use crate::{Anchor, BlockId, CanonicalView, ChainOracle, Merge};
+use crate::{BlockId, ChainOracle, Merge};
 use bdk_core::{ChainQuery, ToBlockHash};
 pub use bdk_core::{CheckPoint, CheckPointIter};
 use bitcoin::block::Header;
@@ -129,8 +128,8 @@ impl LocalChain<BlockHash> {
 
     /// Canonicalize a transaction graph using this chain.
     ///
-    /// This method processes a [`CanonicalizationTask`], handling all its requests
-    /// to determine which transactions are canonical, and returns a [`CanonicalView`].
+    /// This method processes any type implementing [`ChainQuery`], handling all its requests
+    /// to determine which transactions are canonical, and returns the query's output.
     ///
     /// # Example
     ///
@@ -144,10 +143,10 @@ impl LocalChain<BlockHash> {
     /// let task = CanonicalizationTask::new(&tx_graph, chain_tip, CanonicalizationParams::default());
     /// let view = chain.canonicalize(task);
     /// ```
-    pub fn canonicalize<A: Anchor>(
-        &self,
-        mut task: CanonicalizationTask<'_, A>,
-    ) -> CanonicalView<A> {
+    pub fn canonicalize<Q>(&self, mut task: Q) -> Q::Output
+    where
+        Q: ChainQuery<BlockId>,
+    {
         // Process all requests from the task
         while let Some(request) = task.next_query() {
             let chain_tip = request.chain_tip;
