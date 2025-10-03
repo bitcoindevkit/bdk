@@ -342,30 +342,31 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
             for txid in undo_not_canonical {
                 self.not_canonical.remove(&txid);
             }
-        } else {
-            // Add to canonical order
-            for (txid, tx, reason) in &staged_canonical {
-                self.canonical_order.push(*txid);
+            return;
+        }
 
-                // If this was marked transitively, check if it has anchors to verify
-                let is_transitive = matches!(
-                    reason,
-                    CanonicalReason::Anchor {
-                        descendant: Some(_),
-                        ..
-                    } | CanonicalReason::Assumed {
-                        descendant: Some(_),
-                        ..
-                    }
-                );
+        // Add to canonical order
+        for (txid, tx, reason) in &staged_canonical {
+            self.canonical_order.push(*txid);
 
-                if is_transitive {
-                    if let Some(anchors) = self.tx_graph.all_anchors().get(txid) {
-                        // only check anchors we haven't already confirmed
-                        if !self.confirmed_anchors.contains_key(txid) {
-                            self.unprocessed_anchored_txs
-                                .push_back((*txid, tx.clone(), anchors));
-                        }
+            // If this was marked transitively, check if it has anchors to verify
+            let is_transitive = matches!(
+                reason,
+                CanonicalReason::Anchor {
+                    descendant: Some(_),
+                    ..
+                } | CanonicalReason::Assumed {
+                    descendant: Some(_),
+                    ..
+                }
+            );
+
+            if is_transitive {
+                if let Some(anchors) = self.tx_graph.all_anchors().get(txid) {
+                    // only check anchors we haven't already confirmed
+                    if !self.confirmed_anchors.contains_key(txid) {
+                        self.unprocessed_anchored_txs
+                            .push_back((*txid, tx.clone(), anchors));
                     }
                 }
             }
