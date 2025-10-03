@@ -11,6 +11,21 @@ use bitcoin::{Transaction, Txid};
 type CanonicalMap<A> = HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>;
 type NotCanonicalSet = HashSet<Txid>;
 
+/// Represents the current stage of canonicalization processing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CanonicalStage {
+    /// Processing directly anchored transactions.
+    AnchoredTxs,
+    /// Processing transactions seen in mempool.
+    SeenTxs,
+    /// Processing leftover transactions.
+    LeftOverTxs,
+    /// Processing transitively anchored transactions.
+    TransitivelyAnchoredTxs,
+    /// All processing is complete.
+    Finished,
+}
+
 /// Modifies the canonicalization algorithm.
 #[derive(Debug, Default, Clone)]
 pub struct CanonicalizationParams {
@@ -30,6 +45,7 @@ pub struct CanonicalizationTask<'g, A> {
     unprocessed_anchored_txs: VecDeque<(Txid, Arc<Transaction>, &'g BTreeSet<A>)>,
     unprocessed_seen_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>, u64)> + 'g>,
     unprocessed_leftover_txs: VecDeque<(Txid, Arc<Transaction>, u32)>,
+    unprocessed_transitively_anchored_txs: VecDeque<(Txid, Arc<Transaction>, &'g BTreeSet<A>)>,
 
     canonical: CanonicalMap<A>,
     not_canonical: NotCanonicalSet,
@@ -37,79 +53,139 @@ pub struct CanonicalizationTask<'g, A> {
     // Store canonical transactions in order
     canonical_order: Vec<Txid>,
 
-    // Track which transactions have confirmed anchors
-    confirmed_anchors: HashMap<Txid, A>,
+    // Track which transactions have direct anchors (not transitive)
+    direct_anchors: HashMap<Txid, A>,
+
+    // Track the current stage of processing
+    current_stage: CanonicalStage,
 }
 
 impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
     type Output = CanonicalView<A>;
 
     fn next_query(&mut self) -> Option<ChainRequest> {
-        // Find the next non-canonicalized transaction to query
-        if let Some((_txid, _, anchors)) = self.unprocessed_anchored_txs.front() {
-            // if !self.is_canonicalized(*txid) {
-            //     // Build query for this transaction
-            //     let block_ids = anchors.iter().map(|anchor| anchor.anchor_block()).collect();
-            //     return Some(ChainRequest {
-            //         chain_tip: self.chain_tip,
-            //         block_ids,
-            //     });
-            // }
-            // // Skip already canonicalized transaction
-            // self.unprocessed_anchored_txs.pop_front();
-            // Build query for this transaction
-            let block_ids = anchors.iter().map(|anchor| anchor.anchor_block()).collect();
-            return Some(ChainRequest {
-                chain_tip: self.chain_tip,
-                block_ids,
-            });
+        // Try to advance to the next stage if needed
+        self.try_advance();
+
+        match self.current_stage {
+            CanonicalStage::AnchoredTxs => {
+                // Process directly anchored transactions first
+                if let Some((_txid, _, anchors)) = self.unprocessed_anchored_txs.front() {
+                    let block_ids = anchors.iter().map(|anchor| anchor.anchor_block()).collect();
+                    return Some(ChainRequest {
+                        chain_tip: self.chain_tip,
+                        block_ids,
+                    });
+                }
+                None
+            }
+            CanonicalStage::TransitivelyAnchoredTxs => {
+                // Process transitively anchored transactions last
+                if let Some((_txid, _, anchors)) =
+                    self.unprocessed_transitively_anchored_txs.front()
+                {
+                    let block_ids = anchors.iter().map(|anchor| anchor.anchor_block()).collect();
+                    return Some(ChainRequest {
+                        chain_tip: self.chain_tip,
+                        block_ids,
+                    });
+                }
+                None
+            }
+            CanonicalStage::SeenTxs | CanonicalStage::LeftOverTxs | CanonicalStage::Finished => {
+                // These stages don't need queries
+                None
+            }
         }
-        None
     }
 
     fn resolve_query(&mut self, response: ChainResponse) {
-        if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.pop_front() {
-            // Find the anchor that matches the confirmed BlockId
-            let best_anchor = response.and_then(|block_id| {
-                anchors
-                    .iter()
-                    .find(|anchor| anchor.anchor_block() == block_id)
-                    .cloned()
-            });
+        // Only AnchoredTxs and TransitivelyAnchoredTxs stages should receive query
+        // responses Other stages don't generate queries and thus shouldn't call
+        // resolve_query
+        match self.current_stage {
+            CanonicalStage::AnchoredTxs => {
+                // Process directly anchored transaction response
+                if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.pop_front() {
+                    // Find the anchor that matches the confirmed BlockId
+                    let best_anchor = response.and_then(|block_id| {
+                        anchors
+                            .iter()
+                            .find(|anchor| anchor.anchor_block() == block_id)
+                            .cloned()
+                    });
 
-            match best_anchor {
-                Some(best_anchor) => {
-                    self.confirmed_anchors.insert(txid, best_anchor.clone());
-                    if !self.is_canonicalized(txid) {
-                        self.mark_canonical(txid, tx, CanonicalReason::from_anchor(best_anchor));
+                    match best_anchor {
+                        Some(best_anchor) => {
+                            // Transaction has a confirmed anchor
+                            self.direct_anchors.insert(txid, best_anchor.clone());
+                            if !self.is_canonicalized(txid) {
+                                self.mark_canonical(
+                                    txid,
+                                    tx,
+                                    CanonicalReason::from_anchor(best_anchor),
+                                );
+                            }
+                        }
+                        None => {
+                            // No confirmed anchor found, add to leftover transactions for later
+                            // processing
+                            self.unprocessed_leftover_txs.push_back((
+                                txid,
+                                tx,
+                                anchors
+                                    .iter()
+                                    .last()
+                                    .expect(
+                                        "tx taken from `unprocessed_anchored_txs` so it must have at least one anchor",
+                                    )
+                                    .confirmation_height_upper_bound(),
+                            ))
+                        }
                     }
                 }
-                None => {
-                    self.unprocessed_leftover_txs.push_back((
-                            txid,
-                            tx,
-                            anchors
-                                .iter()
-                                .last()
-                                .expect(
-                                    "tx taken from `unprocessed_txs_with_anchors` so it must at least have an anchor",
-                                )
-                                .confirmation_height_upper_bound(),
-                        ))
+            }
+            CanonicalStage::TransitivelyAnchoredTxs => {
+                // Process transitively anchored transaction response
+                if let Some((txid, _tx, anchors)) =
+                    self.unprocessed_transitively_anchored_txs.pop_front()
+                {
+                    // Find the anchor that matches the confirmed BlockId
+                    let best_anchor = response.and_then(|block_id| {
+                        anchors
+                            .iter()
+                            .find(|anchor| anchor.anchor_block() == block_id)
+                            .cloned()
+                    });
+
+                    if let Some(best_anchor) = best_anchor {
+                        // Found a confirmed anchor for this transitively anchored transaction
+                        self.direct_anchors.insert(txid, best_anchor.clone());
+                        // Note: We don't re-mark as canonical since it's already marked
+                        // from being transitively anchored by its descendant
+                    }
+                    // If no confirmed anchor, we keep the transitive canonicalization status
                 }
+            }
+            CanonicalStage::SeenTxs | CanonicalStage::LeftOverTxs | CanonicalStage::Finished => {
+                // These stages don't generate queries and shouldn't receive responses
+                debug_assert!(
+                    false,
+                    "resolve_query called for stage {:?} which doesn't generate queries",
+                    self.current_stage
+                );
             }
         }
     }
 
     fn is_finished(&mut self) -> bool {
-        self.unprocessed_anchored_txs.is_empty()
+        // Try to advance stages first
+        self.try_advance();
+        // Check if we've reached the Finished stage
+        self.current_stage == CanonicalStage::Finished
     }
 
-    fn finish(mut self) -> Self::Output {
-        // Process remaining transactions (seen and leftover)
-        self.process_seen_txs();
-        self.process_leftover_txs();
-
+    fn finish(self) -> Self::Output {
         // Build the canonical view
         let mut view_order = Vec::new();
         let mut view_txs = HashMap::new();
@@ -138,7 +214,7 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
                 // Determine chain position based on reason
                 let chain_position = match reason {
                     CanonicalReason::Assumed { descendant } => match descendant {
-                        Some(_) => match self.confirmed_anchors.get(txid) {
+                        Some(_) => match self.direct_anchors.get(txid) {
                             Some(confirmed_anchor) => ChainPosition::Confirmed {
                                 anchor: confirmed_anchor,
                                 transitively: None,
@@ -154,7 +230,7 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
                         },
                     },
                     CanonicalReason::Anchor { anchor, descendant } => match descendant {
-                        Some(_) => match self.confirmed_anchors.get(txid) {
+                        Some(_) => match self.direct_anchors.get(txid) {
                             Some(confirmed_anchor) => ChainPosition::Confirmed {
                                 anchor: confirmed_anchor,
                                 transitively: None,
@@ -190,6 +266,49 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
 }
 
 impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
+    /// Try to advance to the next stage if the current stage is complete.
+    /// The loop continues through stages that process all their transactions at once
+    /// (SeenTxs and LeftOverTxs) to avoid needing multiple calls.
+    fn try_advance(&mut self) {
+        loop {
+            let advanced = match self.current_stage {
+                CanonicalStage::AnchoredTxs => {
+                    if self.unprocessed_anchored_txs.is_empty() {
+                        self.current_stage = CanonicalStage::SeenTxs;
+                        true // Continue to process SeenTxs immediately
+                    } else {
+                        false // Still have work, stop advancing
+                    }
+                }
+                CanonicalStage::SeenTxs => {
+                    // Process all seen transactions at once
+                    self.process_seen_txs();
+                    self.current_stage = CanonicalStage::LeftOverTxs;
+                    true // Continue to process LeftOverTxs immediately
+                }
+                CanonicalStage::LeftOverTxs => {
+                    // Process all leftover transactions at once
+                    self.process_leftover_txs();
+                    self.current_stage = CanonicalStage::TransitivelyAnchoredTxs;
+                    false // Stop here - TransitivelyAnchoredTxs need queries
+                }
+                CanonicalStage::TransitivelyAnchoredTxs => {
+                    if self.unprocessed_transitively_anchored_txs.is_empty() {
+                        self.current_stage = CanonicalStage::Finished;
+                    }
+                    false // Stop advancing
+                }
+                CanonicalStage::Finished => {
+                    false // Already finished, nothing to do
+                }
+            };
+
+            if !advanced {
+                break;
+            }
+        }
+    }
+
     /// Creates a new canonicalization task.
     pub fn new(
         tx_graph: &'g TxGraph<A>,
@@ -222,12 +341,14 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
             unprocessed_anchored_txs,
             unprocessed_seen_txs,
             unprocessed_leftover_txs: VecDeque::new(),
+            unprocessed_transitively_anchored_txs: VecDeque::new(),
 
             canonical: HashMap::new(),
             not_canonical: HashSet::new(),
 
             canonical_order: Vec::new(),
-            confirmed_anchors: HashMap::new(),
+            direct_anchors: HashMap::new(),
+            current_stage: CanonicalStage::AnchoredTxs,
         };
 
         // process assumed transactions first (they don't need queries)
@@ -342,30 +463,28 @@ impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
             for txid in undo_not_canonical {
                 self.not_canonical.remove(&txid);
             }
-        } else {
-            // Add to canonical order
-            for (txid, tx, reason) in &staged_canonical {
-                self.canonical_order.push(*txid);
+            return;
+        }
 
-                // If this was marked transitively, check if it has anchors to verify
-                let is_transitive = matches!(
-                    reason,
-                    CanonicalReason::Anchor {
-                        descendant: Some(_),
-                        ..
-                    } | CanonicalReason::Assumed {
-                        descendant: Some(_),
-                        ..
-                    }
-                );
+        // Add to canonical order
+        for (txid, tx, reason) in &staged_canonical {
+            self.canonical_order.push(*txid);
 
-                if is_transitive {
-                    if let Some(anchors) = self.tx_graph.all_anchors().get(txid) {
-                        // only check anchors we haven't already confirmed
-                        if !self.confirmed_anchors.contains_key(txid) {
-                            self.unprocessed_anchored_txs
-                                .push_back((*txid, tx.clone(), anchors));
-                        }
+            // ObservedIn transactions don't need anchor verification
+            if matches!(reason, CanonicalReason::ObservedIn { .. }) {
+                continue;
+            }
+
+            // Check if this transaction was marked transitively and needs its own anchors verified
+            if reason.is_transitive() {
+                if let Some(anchors) = self.tx_graph.all_anchors().get(txid) {
+                    // only check anchors we haven't already confirmed
+                    if !self.direct_anchors.contains_key(txid) {
+                        self.unprocessed_transitively_anchored_txs.push_back((
+                            *txid,
+                            tx.clone(),
+                            anchors,
+                        ));
                     }
                 }
             }
@@ -459,6 +578,12 @@ impl<A: Clone> CanonicalReason<A> {
             CanonicalReason::Anchor { descendant, .. } => descendant,
             CanonicalReason::ObservedIn { descendant, .. } => descendant,
         }
+    }
+
+    /// Returns true if this reason represents a transitive canonicalization
+    /// (i.e., the transaction is canonical because of its descendant).
+    pub fn is_transitive(&self) -> bool {
+        self.descendant().is_some()
     }
 }
 
