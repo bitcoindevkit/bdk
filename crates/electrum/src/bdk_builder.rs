@@ -146,7 +146,6 @@ where
         for (keychain_id, spk_iter) in self.wallet.all_unbounded_spk_iters() {
             builder = builder.spks_for_keychain(keychain_id, spk_iter);
         }
-
         builder.build()
     }
 }
