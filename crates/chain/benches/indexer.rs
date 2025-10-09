@@ -8,7 +8,7 @@ use bitcoin::{
     absolute, constants, hashes::Hash, key::Secp256k1, transaction, Amount, BlockHash, Network,
     Transaction, TxIn, TxOut,
 };
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use miniscript::Descriptor;
 use std::sync::Arc;
 
@@ -91,7 +91,7 @@ fn do_bench(indexed_tx_graph: &KeychainTxGraph, chain: &LocalChain) {
 }
 
 pub fn reindex_tx_graph(c: &mut Criterion) {
-    let (graph, chain) = black_box(setup(|graph, _chain| {
+    let (graph, chain) = std::hint::black_box(setup(|graph, _chain| {
         // Add relevant txs to graph
         for i in 0..TX_CT {
             let script_pubkey = graph.index.reveal_next_spk(()).unwrap().0 .1;
