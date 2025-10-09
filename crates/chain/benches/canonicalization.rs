@@ -7,7 +7,7 @@ use bitcoin::{
     absolute, constants, hashes::Hash, key::Secp256k1, transaction, Amount, BlockHash, Network,
     OutPoint, ScriptBuf, Transaction, TxIn, TxOut,
 };
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use miniscript::{Descriptor, DescriptorPublicKey};
 use std::sync::Arc;
 
@@ -126,7 +126,7 @@ fn run_filter_chain_unspents(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp
 
 pub fn many_conflicting_unconfirmed(c: &mut Criterion) {
     const CONFLICTING_TX_COUNT: u32 = 2100;
-    let (tx_graph, chain) = black_box(setup(|tx_graph, _chain| {
+    let (tx_graph, chain) = std::hint::black_box(setup(|tx_graph, _chain| {
         let previous_output = add_ancestor_tx(tx_graph, tip_block_id(), 0);
         // Create conflicting txs that spend from `previous_output`.
         let spk_1 = spk_at_index(&tx_graph.index, 1);
@@ -164,7 +164,7 @@ pub fn many_conflicting_unconfirmed(c: &mut Criterion) {
 
 pub fn many_chained_unconfirmed(c: &mut Criterion) {
     const TX_CHAIN_COUNT: u32 = 2100;
-    let (tx_graph, chain) = black_box(setup(|tx_graph, _chain| {
+    let (tx_graph, chain) = std::hint::black_box(setup(|tx_graph, _chain| {
         let mut previous_output = add_ancestor_tx(tx_graph, tip_block_id(), 0);
         // Create a chain of unconfirmed txs where each subsequent tx spends the output of the
         // previous one.
@@ -203,7 +203,7 @@ pub fn many_chained_unconfirmed(c: &mut Criterion) {
 pub fn nested_conflicts(c: &mut Criterion) {
     const CONFLICTS_PER_OUTPUT: usize = 3;
     const GRAPH_DEPTH: usize = 7;
-    let (tx_graph, chain) = black_box(setup(|tx_graph, _chain| {
+    let (tx_graph, chain) = std::hint::black_box(setup(|tx_graph, _chain| {
         let mut prev_ops = core::iter::once(add_ancestor_tx(tx_graph, tip_block_id(), 0))
             .collect::<Vec<OutPoint>>();
         for depth in 1..GRAPH_DEPTH {
