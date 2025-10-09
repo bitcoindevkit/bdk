@@ -17,7 +17,7 @@ bdk_core = { path = "../core", version = "0.6.1" }
 electrum-client = { version = "0.24.0", features = [ "proxy" ], default-features = false }
 
 [dev-dependencies]
-bdk_testenv = { path = "../testenv" }
+bdk_testenv = { path = "../testenv", features = ["download"]}
 bdk_chain = { path = "../chain" }
 criterion = { version = "0.2" }
 

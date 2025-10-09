@@ -295,6 +295,13 @@ mod test {
     const TEST_MAGIC_BYTES: [u8; TEST_MAGIC_BYTES_LEN] =
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
 
+    use bdk_chain::{keychain_txout, local_chain, tx_graph, ConfirmationBlockTime};
+    use bdk_testenv::persist_test_utils::{
+        persist_anchors, persist_first_seen, persist_indexer_changeset, persist_last_evicted,
+        persist_last_revealed, persist_last_seen, persist_local_chain_changeset, persist_spk_cache,
+        persist_txgraph_changeset, persist_txouts, persist_txs,
+    };
+
     type TestChangeSet = BTreeSet<String>;
 
     /// Check behavior of [`Store::create`] and [`Store::load`].
@@ -598,5 +605,115 @@ mod test {
 
         // current position matches EOF
         assert_eq!(current_pointer, expected_pointer);
+    }
+
+    #[test]
+    fn txgraph_is_persisted() {
+        persist_txgraph_changeset::<Store<tx_graph::ChangeSet<ConfirmationBlockTime>>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn indexer_is_persisted() {
+        persist_indexer_changeset::<Store<keychain_txout::ChangeSet>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn local_chain_is_persisted() {
+        persist_local_chain_changeset::<Store<local_chain::ChangeSet>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn txouts_are_persisted() {
+        persist_txouts::<Store<tx_graph::ChangeSet<ConfirmationBlockTime>>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn txs_are_persisted() {
+        persist_txs::<Store<tx_graph::ChangeSet<ConfirmationBlockTime>>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn anchors_are_persisted() {
+        persist_anchors::<Store<tx_graph::ChangeSet<ConfirmationBlockTime>>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn last_seen_is_persisted() {
+        persist_last_seen::<Store<tx_graph::ChangeSet<ConfirmationBlockTime>>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn last_evicted_is_persisted() {
+        persist_last_evicted::<Store<tx_graph::ChangeSet<ConfirmationBlockTime>>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn first_seen_is_persisted() {
+        persist_first_seen::<Store<tx_graph::ChangeSet<ConfirmationBlockTime>>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn last_revealed_is_persisted() {
+        persist_last_revealed::<Store<keychain_txout::ChangeSet>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
+    }
+
+    #[test]
+    fn spk_cache_is_persisted() {
+        persist_spk_cache::<Store<keychain_txout::ChangeSet>, _, _, _>(
+            "wallet.db",
+            |path| Ok(Store::create(&TEST_MAGIC_BYTES, path)?),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+        );
     }
 }

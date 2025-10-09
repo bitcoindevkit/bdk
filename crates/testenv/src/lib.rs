@@ -1,5 +1,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[cfg(feature = "default")]
+pub mod persist_test_utils;
 pub mod utils;
 
 use bdk_chain::{

@@ -22,7 +22,7 @@ bdk_core = { path = "../core", version = "0.6.1", default-features = false }
 
 [dev-dependencies]
 bdk_bitcoind_rpc = { path = "." }
-bdk_testenv = { path = "../testenv" }
+bdk_testenv = { path = "../testenv", features = ["download"]}
 bdk_chain = { path = "../chain" }
 
 [features]
