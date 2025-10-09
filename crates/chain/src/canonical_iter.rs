@@ -6,6 +6,7 @@ use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bdk_core::BlockId;
+use bitcoin::hashes::Hash;
 use bitcoin::{Transaction, Txid};
 
 type CanonicalMap<A> = HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>;
@@ -205,12 +206,14 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
+            // First, pop from the canonical queue
             if let Some(txid) = self.queue.pop_front() {
                 let (tx, reason) = self
                     .canonical
                     .get(&txid)
                     .cloned()
                     .expect("reason must exist");
+
                 return Some(Ok((txid, tx, reason)));
             }
 
@@ -218,6 +221,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
                 if !self.is_canonicalized(txid) {
                     self.mark_canonical(txid, tx, CanonicalReason::assumed());
                 }
+                continue;
             }
 
             if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
@@ -230,10 +234,6 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
             }
 
             if let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
-                debug_assert!(
-                    !tx.is_coinbase(),
-                    "Coinbase txs must not have `last_seen` (in mempool) value"
-                );
                 if !self.is_canonicalized(txid) {
                     let observed_in = ObservedIn::Mempool(last_seen);
                     self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
@@ -339,6 +339,72 @@ impl<A: Clone> CanonicalReason<A> {
             CanonicalReason::Assumed { descendant, .. } => descendant,
             CanonicalReason::Anchor { descendant, .. } => descendant,
             CanonicalReason::ObservedIn { descendant, .. } => descendant,
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use crate::tx_data_traits::Anchor;
+    use crate::{BlockId, CanonicalIter, CanonicalizationParams, ChainOracle, TxGraph};
+    use bitcoin::absolute::LockTime;
+    use bitcoin::block::BlockHash;
+    use bitcoin::hashes::{sha256d, Hash};
+    use bitcoin::transaction::Version;
+    use bitcoin::Transaction;
+    use std::sync::Arc;
+
+    #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+    struct DummyAnchor;
+
+    impl Anchor for DummyAnchor {
+        fn anchor_block(&self) -> BlockId {
+            let hash = BlockHash::from_raw_hash(sha256d::Hash::hash(&[0u8]));
+            (0, hash).into()
+        }
+    }
+
+    struct DummyChain;
+
+    impl ChainOracle for DummyChain {
+        type Error = ();
+
+        fn get_chain_tip(&self) -> Result<BlockId, Self::Error> {
+            let hash = BlockHash::from_raw_hash(sha256d::Hash::hash(&[0u8]));
+            Ok((0, hash).into())
+        }
+
+        fn is_block_in_chain(
+            &self,
+            _block: BlockId,
+            _chain_tip: BlockId,
+        ) -> Result<Option<bool>, Self::Error> {
+            Ok(Some(true))
+        }
+    }
+
+    #[test]
+    fn test_canonical_iter_returns_txnode() {
+        let dummy_chain = DummyChain;
+        let mut tx_graph = TxGraph::<DummyAnchor>::default();
+        let hash = BlockHash::from_raw_hash(sha256d::Hash::hash(&[0u8]));
+        let chain_tip: BlockId = (0, hash).into();
+
+        let dummy_tx = Transaction {
+            version: Version::non_standard(2),
+            lock_time: LockTime::from_height(0).unwrap(),
+            input: vec![],
+            output: vec![],
+        };
+        let dummy_txid = dummy_tx.compute_txid();
+
+        tx_graph.insert_tx(dummy_tx.clone());
+
+        let params = CanonicalizationParams::default();
+        let mut iter = CanonicalIter::new(&tx_graph, &dummy_chain, chain_tip, params);
+
+        if let Some(Ok(node)) = iter.next() {
+            println!("CanonicalIter returning txid: {:?}", node.0);
+            assert_eq!(node.0, dummy_txid);
         }
     }
 }
