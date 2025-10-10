@@ -99,6 +99,15 @@ fn run_list_canonical_txs(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_tx
     assert_eq!(txs.count(), exp_txs);
 }
 
+fn run_list_ordered_canonical_txs(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txs: usize) {
+    let txs = tx_graph.graph().list_ordered_canonical_txs(
+        chain,
+        chain.tip().block_id(),
+        CanonicalizationParams::default(),
+    );
+    assert_eq!(txs.count(), exp_txs);
+}
+
 fn run_filter_chain_txouts(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txos: usize) {
     let utxos = tx_graph.graph().filter_chain_txouts(
         chain,
@@ -147,6 +156,13 @@ pub fn many_conflicting_unconfirmed(c: &mut Criterion) {
         let (tx_graph, chain) = (tx_graph.clone(), chain.clone());
         move |b| b.iter(|| run_list_canonical_txs(&tx_graph, &chain, 2))
     });
+    c.bench_function(
+        "many_conflicting_unconfirmed::list_ordered_canonical_txs",
+        {
+            let (tx_graph, chain) = (tx_graph.clone(), chain.clone());
+            move |b| b.iter(|| run_list_ordered_canonical_txs(&tx_graph, &chain, 2))
+        },
+    );
     c.bench_function("many_conflicting_unconfirmed::filter_chain_txouts", {
         let (tx_graph, chain) = (tx_graph.clone(), chain.clone());
         move |b| b.iter(|| run_filter_chain_txouts(&tx_graph, &chain, 2))
@@ -184,6 +200,10 @@ pub fn many_chained_unconfirmed(c: &mut Criterion) {
     c.bench_function("many_chained_unconfirmed::list_canonical_txs", {
         let (tx_graph, chain) = (tx_graph.clone(), chain.clone());
         move |b| b.iter(|| run_list_canonical_txs(&tx_graph, &chain, 2101))
+    });
+    c.bench_function("many_chained_unconfirmed::list_ordered_canonical_txs", {
+        let (tx_graph, chain) = (tx_graph.clone(), chain.clone());
+        move |b| b.iter(|| run_list_ordered_canonical_txs(&tx_graph, &chain, 2101))
     });
     c.bench_function("many_chained_unconfirmed::filter_chain_txouts", {
         let (tx_graph, chain) = (tx_graph.clone(), chain.clone());
@@ -234,6 +254,13 @@ pub fn nested_conflicts(c: &mut Criterion) {
         let (tx_graph, chain) = (tx_graph.clone(), chain.clone());
         move |b| b.iter(|| run_list_canonical_txs(&tx_graph, &chain, GRAPH_DEPTH))
     });
+    c.bench_function(
+        "nested_conflicts_unconfirmed::list_ordered_canonical_txs",
+        {
+            let (tx_graph, chain) = (tx_graph.clone(), chain.clone());
+            move |b| b.iter(|| run_list_ordered_canonical_txs(&tx_graph, &chain, GRAPH_DEPTH))
+        },
+    );
     c.bench_function("nested_conflicts_unconfirmed::filter_chain_txouts", {
         let (tx_graph, chain) = (tx_graph.clone(), chain.clone());
         move |b| b.iter(|| run_filter_chain_txouts(&tx_graph, &chain, GRAPH_DEPTH))
