@@ -27,7 +27,6 @@ jobs:
       matrix:
         rust:
           - version: ${{ needs.prepare.outputs.rust_version }}
-            clippy: true
           - version: 1.85.0 # MSRV
         features:
           - --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
