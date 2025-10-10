@@ -49,6 +49,8 @@ pub use canonical_iter::*;
 mod canonical_view;
 pub use canonical_view::*;
 
+pub use tx_graph::TxNode;
+
 #[doc(hidden)]
 pub mod example_utils;
 
