@@ -117,6 +117,7 @@ jobs:
         with:
             toolchain: nightly
             override: true
+            cache: true
             components: rustfmt
       - name: Check fmt
         run: cargo fmt --all --check
