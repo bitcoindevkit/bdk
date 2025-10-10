@@ -138,11 +138,8 @@ jobs:
             components: clippy
             override: true
             cache: true
-      - uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          name: Clippy Results
-          args: --all-features --all-targets -- -D warnings
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
 
   build-examples:
     needs: prepare
