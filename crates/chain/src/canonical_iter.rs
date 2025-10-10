@@ -8,6 +8,21 @@ use alloc::vec::Vec;
 use bdk_core::BlockId;
 use bitcoin::{Transaction, Txid};
 
+
+#[derive(Debug, Clone)]
+pub struct CanonicalTxNode<A> {
+    pub txid: Txid,
+    pub tx: Arc<Transaction>,
+    pub reason: CanonicalReason<A>,
+}
+
+impl<A> CanonicalTxNode<A> {
+    pub fn new(txid: Txid, tx: Arc<Transaction>, reason: CanonicalReason<A>) -> Self {
+        CanonicalTxNode { txid, tx, reason }
+    }
+}
+
+
 type CanonicalMap<A> = HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>;
 type NotCanonicalSet = HashSet<Txid>;
 
@@ -200,8 +215,9 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
     }
 }
 
-impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
-    type Item = Result<(Txid, Arc<Transaction>, CanonicalReason<A>), C::Error>;
+impl<'g,A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'g, A, C> {
+    type Item = Result<CanonicalTxNode<A>, C::Error>;
+
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -211,7 +227,9 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
                     .get(&txid)
                     .cloned()
                     .expect("reason must exist");
-                return Some(Ok((txid, tx, reason)));
+                    println!("Yielding CanonicalTxNode: {:?}", CanonicalTxNode::new(txid.clone(), tx.clone(), reason.clone()));
+               return Some(Ok(CanonicalTxNode::new(txid, tx, reason)));
+
             }
 
             if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {

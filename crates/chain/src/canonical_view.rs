@@ -20,6 +20,7 @@
 //!     println!("Transaction {}: {:?}", tx.txid, tx.pos);
 //! }
 //! ```
+use crate::canonical_iter::CanonicalTxNode;
 
 use crate::collections::HashMap;
 use alloc::sync::Arc;
@@ -119,7 +120,9 @@ impl<A: Anchor> CanonicalView<A> {
         };
 
         for r in CanonicalIter::new(tx_graph, chain, chain_tip, params) {
-            let (txid, tx, why) = r?;
+            let CanonicalTxNode { txid, tx, reason: why, .. } = r?;
+
+
 
             let tx_node = match tx_graph.get_tx_node(txid) {
                 Some(tx_node) => tx_node,
