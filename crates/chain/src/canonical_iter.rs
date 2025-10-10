@@ -227,7 +227,6 @@ impl<'g,A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'g, A, C> {
                     .get(&txid)
                     .cloned()
                     .expect("reason must exist");
-                    println!("Yielding CanonicalTxNode: {:?}", CanonicalTxNode::new(txid.clone(), tx.clone(), reason.clone()));
                return Some(Ok(CanonicalTxNode::new(txid, tx, reason)));
 
             }
