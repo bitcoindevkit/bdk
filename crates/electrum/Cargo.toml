@@ -2,6 +2,7 @@
 name = "bdk_electrum"
 version = "0.23.2"
 edition = "2021"
+rust-version = "1.85.0"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk_electrum"
@@ -19,7 +20,7 @@ electrum-client = { version = "0.24.0", features = [ "proxy" ], default-features
 [dev-dependencies]
 bdk_testenv = { path = "../testenv" }
 bdk_chain = { path = "../chain" }
-criterion = { version = "0.2" }
+criterion = { version = "0.7" }
 
 [features]
 default = ["use-rustls"]

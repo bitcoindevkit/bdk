@@ -27,9 +27,7 @@ jobs:
       matrix:
         rust:
           - version: ${{ needs.prepare.outputs.rust_version }}
-            clippy: true
-          - version: 1.63.0 # Overall MSRV
-          - version: 1.75.0 # Specific MSRV for `bdk_electrum`
+          - version: 1.85.0 # MSRV
         features:
           - --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
           - --all-features
@@ -39,38 +37,20 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
             toolchain: ${{ matrix.rust.version }}
             override: true
-            profile: minimal
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.7.8
-      - name: Pin dependencies for 1.75
-        if: matrix.rust.version == '1.75.0'
-        run: |
-          cargo update -p home --precise "0.5.9"
-          cargo update -p native-tls --precise "0.2.13"
-          cargo update -p idna_adapter --precise "1.1.0"
-          cargo update -p base64ct --precise "1.6.0"
-          cargo update -p minreq --precise "2.13.2"
-          cargo update -p rayon --precise "1.10.0"
-          cargo update -p rayon-core --precise "1.12.1"
-          cargo update -p time --precise "0.3.41"
+            cache: true
       - name: Pin dependencies for MSRV
-        if: matrix.rust.version == '1.63.0'
+        if: matrix.rust.version == '1.85.0'
         run: ./ci/pin-msrv.sh
       - name: Build + Test
         env:
           MATRIX_RUST_VERSION: ${{ matrix.rust.version }}
         run: |
-          if [ $MATRIX_RUST_VERSION = '1.63.0' ]; then
-            cargo build --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
-            cargo test --workspace --exclude 'example_*' --exclude 'bdk_electrum' ${{ matrix.features }}
-          else
             cargo build --workspace --exclude 'example_*' ${{ matrix.features }}
             cargo test --workspace --exclude 'example_*' ${{ matrix.features }}
-          fi
 
   check-no-std:
     needs: prepare
@@ -82,14 +62,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           override: true
-          profile: minimal
+          cache: true
           # target: "thumbv6m-none-eabi"
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.7.8
       - name: Check bdk_chain
         working-directory: ./crates/chain
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
@@ -116,14 +94,12 @@ jobs:
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-14-dev clang-14 libc6-dev-i386 || exit 1
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
             toolchain: ${{ needs.prepare.outputs.rust_version }}
             override: true
-            profile: minimal
+            cache: true
             target: "wasm32-unknown-unknown"
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.7.8
       - name: Check esplora
         working-directory: ./crates/esplora
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features bdk_core/hashbrown,async
@@ -137,11 +113,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
             toolchain: nightly
             override: true
-            profile: minimal
+            cache: true
             components: rustfmt
       - name: Check fmt
         run: cargo fmt --all --check
@@ -156,18 +132,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions-rs/toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
             toolchain: ${{ needs.prepare.outputs.rust_version }}
             components: clippy
             override: true
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.7.8
-      - uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          name: Clippy Results
-          args: --all-features --all-targets -- -D warnings
+            cache: true
+      - name: Clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
 
   build-examples:
     needs: prepare
@@ -186,13 +158,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           override: true
-          profile: minimal
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.7.8
+          cache: true
       - name: Build
         working-directory: examples/${{ matrix.example-dir }}
         run: cargo build

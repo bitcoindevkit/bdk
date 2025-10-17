@@ -2,7 +2,7 @@
 name = "bdk_bitcoind_rpc"
 version = "0.22.0"
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.85.0"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
 documentation = "https://docs.rs/bdk_bitcoind_rpc"
