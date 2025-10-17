@@ -247,38 +247,7 @@ impl<D> CheckPoint<D> {
     ///
     /// Returns `None` if no checkpoint exists at or below the given height.
     pub fn floor_at(&self, height: u32) -> Option<Self> {
-        // Quick path for current height or higher
-        if self.height() <= height {
-            return Some(self.clone());
-        }
-
-        // Use skip pointers for efficient traversal
-        let mut current = self.clone();
-
-        while current.height() > height {
-            // Try to use skip pointer if it won't undershoot
-            if let Some(skip_cp) = current.skip() {
-                if skip_cp.height() > height {
-                    current = skip_cp;
-                    continue;
-                }
-            }
-
-            // Fall back to regular traversal
-            match current.prev() {
-                Some(prev) => {
-                    // If prev is at or below height, we've found our floor
-                    if prev.height() <= height {
-                        return Some(prev);
-                    }
-                    current = prev;
-                }
-                None => return None,
-            }
-        }
-
-        // Current is at or below height
-        Some(current)
+        self.range(..=height).next()
     }
 
     /// Returns the checkpoint located a number of heights below this one.
