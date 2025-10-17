@@ -73,21 +73,47 @@ fn bench_checkpoint_floor_at(c: &mut Criterion) {
 
 /// Benchmark range() iteration
 fn bench_checkpoint_range(c: &mut Criterion) {
-    c.bench_function("range_1000_20pct", |b: &mut Bencher| {
+    // Small range in middle (tests skip pointer efficiency)
+    c.bench_function("range_1000_middle_10pct", |b: &mut Bencher| {
         let cp = create_checkpoint_chain(1000);
-        let start = 400;
-        let end = 600;
         b.iter(|| {
-            let range: Vec<_> = cp.range(start..=end).collect();
+            let range: Vec<_> = cp.range(450..=550).collect();
             black_box(range);
         });
     });
 
-    c.bench_function("range_10000_to_end", |b: &mut Bencher| {
+    // Large range (tests iteration performance)
+    c.bench_function("range_10000_large_50pct", |b: &mut Bencher| {
         let cp = create_checkpoint_chain(10000);
-        let from = 5000;
         b.iter(|| {
-            let range: Vec<_> = cp.range(from..).collect();
+            let range: Vec<_> = cp.range(2500..=7500).collect();
+            black_box(range);
+        });
+    });
+
+    // Range from start (tests early termination)
+    c.bench_function("range_10000_from_start", |b: &mut Bencher| {
+        let cp = create_checkpoint_chain(10000);
+        b.iter(|| {
+            let range: Vec<_> = cp.range(..=100).collect();
+            black_box(range);
+        });
+    });
+
+    // Range near tip (minimal skip pointer usage)
+    c.bench_function("range_10000_near_tip", |b: &mut Bencher| {
+        let cp = create_checkpoint_chain(10000);
+        b.iter(|| {
+            let range: Vec<_> = cp.range(9900..).collect();
+            black_box(range);
+        });
+    });
+
+    // Single element range (edge case)
+    c.bench_function("range_single_element", |b: &mut Bencher| {
+        let cp = create_checkpoint_chain(10000);
+        b.iter(|| {
+            let range: Vec<_> = cp.range(5000..=5000).collect();
             black_box(range);
         });
     });
