@@ -206,36 +206,33 @@ impl<D> CheckPoint<D> {
         let start_bound = range.start_bound().cloned();
         let end_bound = range.end_bound().cloned();
 
-        // Fast-path to find starting point using skip pointers
+        let is_above_bound = |height: u32| match end_bound {
+            core::ops::Bound::Included(inc_bound) => height > inc_bound,
+            core::ops::Bound::Excluded(exc_bound) => height >= exc_bound,
+            core::ops::Bound::Unbounded => false,
+        };
+
         let mut current = self.clone();
 
-        // Skip past checkpoints that are above the end bound
-        while match end_bound {
-            core::ops::Bound::Included(inc_bound) => current.height() > inc_bound,
-            core::ops::Bound::Excluded(exc_bound) => current.height() >= exc_bound,
-            core::ops::Bound::Unbounded => false,
-        } {
-            // Try to use skip pointer if it won't overshoot
-            if let Some(skip_cp) = current.skip() {
-                let use_skip = match end_bound {
-                    core::ops::Bound::Included(inc_bound) => skip_cp.height() > inc_bound,
-                    core::ops::Bound::Excluded(exc_bound) => skip_cp.height() >= exc_bound,
-                    core::ops::Bound::Unbounded => false,
-                };
-                if use_skip {
+        // Use skip pointers to jump close to target
+        while is_above_bound(current.height()) {
+            match current.skip() {
+                Some(skip_cp) if is_above_bound(skip_cp.height()) => {
                     current = skip_cp;
-                    continue;
                 }
+                _ => break, // Skip would undershoot or doesn't exist
             }
+        }
 
-            // Fall back to regular traversal
+        // Linear search to exact position
+        while is_above_bound(current.height()) {
             match current.prev() {
                 Some(prev) => current = prev,
                 None => break,
             }
         }
 
-        // Now iterate normally from the found starting point
+        // Iterate from start point
         current.into_iter().take_while(move |cp| match start_bound {
             core::ops::Bound::Included(inc_bound) => cp.height() >= inc_bound,
             core::ops::Bound::Excluded(exc_bound) => cp.height() > exc_bound,

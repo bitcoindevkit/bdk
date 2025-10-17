@@ -194,3 +194,51 @@ fn test_skiplist_range_uses_skip_pointers() {
     assert_eq!(range_items.first().unwrap().height(), 500);
     assert_eq!(range_items.last().unwrap().height(), 450);
 }
+
+#[test]
+fn test_range_edge_cases() {
+    let mut cp = CheckPoint::new(0, BlockHash::all_zeros());
+
+    // Create sparse chain: 0, 100, 200, 300, 400, 500
+    for i in 1..=5 {
+        let height = i * 100;
+        let hash = BlockHash::from_byte_array([i as u8; 32]);
+        cp = cp.push(height, hash).unwrap();
+    }
+
+    // Empty range (start > end)
+    let empty: Vec<_> = cp.range(300..200).collect();
+    assert!(empty.is_empty());
+
+    // Single element range
+    let single: Vec<_> = cp.range(300..=300).collect();
+    assert_eq!(single.len(), 1);
+    assert_eq!(single[0].height(), 300);
+
+    // Range with non-existent bounds (150..250)
+    let partial: Vec<_> = cp.range(150..250).collect();
+    assert_eq!(partial.len(), 1);
+    assert_eq!(partial[0].height(), 200);
+
+    // Exclusive end bound (100..300 includes 100 and 200, but not 300)
+    let exclusive: Vec<_> = cp.range(100..300).collect();
+    assert_eq!(exclusive.len(), 2);
+    assert_eq!(exclusive[0].height(), 200);
+    assert_eq!(exclusive[1].height(), 100);
+
+    // Unbounded range (..)
+    let all: Vec<_> = cp.range(..).collect();
+    assert_eq!(all.len(), 6);
+    assert_eq!(all.first().unwrap().height(), 500);
+    assert_eq!(all.last().unwrap().height(), 0);
+
+    // Range beyond chain bounds
+    let beyond: Vec<_> = cp.range(600..700).collect();
+    assert!(beyond.is_empty());
+
+    // Range from genesis
+    let from_genesis: Vec<_> = cp.range(0..=200).collect();
+    assert_eq!(from_genesis.len(), 3);
+    assert_eq!(from_genesis[0].height(), 200);
+    assert_eq!(from_genesis[2].height(), 0);
+}
