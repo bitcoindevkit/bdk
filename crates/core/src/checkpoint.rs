@@ -162,47 +162,37 @@ impl<D> CheckPoint<D> {
     ///
     /// Returns `None` if checkpoint at `height` does not exist`.
     pub fn get(&self, height: u32) -> Option<Self> {
-        // Quick path for current height
-        if self.height() == height {
-            return Some(self.clone());
-        }
-
-        // Use skip pointers for efficient traversal
         let mut current = self.clone();
 
-        // First, use skip pointers to get close
-        while current.height() > height {
-            // Try to use skip pointer if it won't overshoot
-            if let Some(skip_cp) = current.skip() {
-                if skip_cp.height() >= height {
-                    current = skip_cp;
-                    continue;
-                }
-            }
-
-            // Fall back to regular traversal
-            match current.prev() {
-                Some(prev) => {
-                    if prev.height() < height {
-                        // Height doesn't exist in the chain
-                        return None;
-                    }
-                    current = prev;
-                }
-                None => return None,
-            }
-
-            if current.height() == height {
-                return Some(current);
-            }
-        }
-
-        // Check if we found the height after the loop
         if current.height() == height {
-            Some(current)
-        } else {
-            None
+            return Some(current);
         }
+
+        // Use skip pointers to jump close to target
+        while current.height() > height {
+            match current.skip() {
+                Some(skip_cp) => match skip_cp.height().cmp(&height) {
+                    core::cmp::Ordering::Greater => current = skip_cp,
+                    core::cmp::Ordering::Equal => return Some(skip_cp),
+                    core::cmp::Ordering::Less => break, // Skip would undershoot
+                },
+                None => break, // No more skip pointers
+            }
+        }
+
+        // Linear search for exact height
+        while current.height() > height {
+            match current.prev() {
+                Some(prev_cp) => match prev_cp.height().cmp(&height) {
+                    core::cmp::Ordering::Greater => current = prev_cp,
+                    core::cmp::Ordering::Equal => return Some(prev_cp),
+                    core::cmp::Ordering::Less => break, // Height doesn't exist
+                },
+                None => break, // End of chain
+            }
+        }
+
+        None
     }
 
     /// Iterate checkpoints over a height range.
