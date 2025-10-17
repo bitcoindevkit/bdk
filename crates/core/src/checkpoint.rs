@@ -395,49 +395,41 @@ where
     /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the
     /// one you are pushing on to.
     pub fn push(self, height: u32, data: D) -> Result<Self, Self> {
-        if self.height() < height {
-            let new_index = self.0.index + 1;
-
-            // Calculate skip pointer
-            let skip = if new_index >= CHECKPOINT_SKIP_INTERVAL
-                && new_index % CHECKPOINT_SKIP_INTERVAL == 0
-            {
-                // Navigate back CHECKPOINT_SKIP_INTERVAL checkpoints
-                let mut current = Some(self.0.clone());
-                let mut steps = 0;
-                loop {
-                    match current {
-                        Some(ref cp) if cp.index == new_index - CHECKPOINT_SKIP_INTERVAL => break,
-                        Some(ref cp) => {
-                            current = cp.prev.clone();
-                            steps += 1;
-                            // Safety check to avoid infinite loop
-                            if steps > CHECKPOINT_SKIP_INTERVAL {
-                                current = None;
-                                break;
-                            }
-                        }
-                        None => break,
-                    }
-                }
-                current
-            } else {
-                None
-            };
-
-            Ok(Self(Arc::new(CPInner {
-                block_id: BlockId {
-                    height,
-                    hash: data.to_blockhash(),
-                },
-                data,
-                prev: Some(self.0),
-                skip,
-                index: new_index,
-            })))
-        } else {
-            Err(self)
+        if self.height() >= height {
+            return Err(self);
         }
+
+        let new_index = self.0.index + 1;
+
+        // Skip pointers are added every CHECKPOINT_SKIP_INTERVAL (100) checkpoints
+        // e.g., checkpoints at index 100, 200, 300, etc. have skip pointers
+        let needs_skip_pointer =
+            new_index >= CHECKPOINT_SKIP_INTERVAL && new_index % CHECKPOINT_SKIP_INTERVAL == 0;
+
+        let skip = if needs_skip_pointer {
+            // Skip pointer points back CHECKPOINT_SKIP_INTERVAL positions
+            // e.g., checkpoint at index 200 points to checkpoint at index 100
+            // We walk back CHECKPOINT_SKIP_INTERVAL - 1 steps since we start from self (index new_index - 1)
+            let mut current = self.0.clone();
+            for _ in 0..(CHECKPOINT_SKIP_INTERVAL - 1) {
+                // This is safe: if we're at index >= 100, we must have at least 99 predecessors
+                current = current.prev.clone().expect("chain has enough checkpoints");
+            }
+            Some(current)
+        } else {
+            None
+        };
+
+        Ok(Self(Arc::new(CPInner {
+            block_id: BlockId {
+                height,
+                hash: data.to_blockhash(),
+            },
+            data,
+            prev: Some(self.0),
+            skip,
+            index: new_index,
+        })))
     }
 }
 
