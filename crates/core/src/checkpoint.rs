@@ -385,69 +385,9 @@ where
             cp = cp.prev().expect("will break before genesis block");
         };
 
-        // Rebuild the chain with proper indices
-        let mut result = base.clone();
-        let base_index = result.index();
-
-        // First insert the new block
-        result = result
-            .push_with_index(height, data, base_index + 1)
-            .expect("height is valid");
-
-        // Then re-add all the tail blocks with updated indices
-        let mut current_index = base_index + 2;
-        for (h, d) in tail.into_iter().rev() {
-            result = result
-                .push_with_index(h, d, current_index)
-                .expect("tail is in order");
-            current_index += 1;
-        }
-
-        result
-    }
-
-    // Helper method to push with a specific index (internal use)
-    fn push_with_index(self, height: u32, data: D, new_index: u32) -> Result<Self, Self> {
-        if self.height() < height {
-            // Calculate skip pointer
-            let skip = if new_index >= CHECKPOINT_SKIP_INTERVAL
-                && new_index % CHECKPOINT_SKIP_INTERVAL == 0
-            {
-                // Navigate back CHECKPOINT_SKIP_INTERVAL checkpoints
-                let target_index = new_index - CHECKPOINT_SKIP_INTERVAL;
-                let mut current = Some(self.0.clone());
-                loop {
-                    match current {
-                        Some(ref cp) if cp.index == target_index => break,
-                        Some(ref cp) if cp.index < target_index => {
-                            // We've gone too far back, skip pointer not available
-                            current = None;
-                            break;
-                        }
-                        Some(ref cp) => {
-                            current = cp.prev.clone();
-                        }
-                        None => break,
-                    }
-                }
-                current
-            } else {
-                None
-            };
-
-            Ok(Self(Arc::new(CPInner {
-                block_id: BlockId {
-                    height,
-                    hash: data.to_blockhash(),
-                },
-                data,
-                prev: Some(self.0),
-                skip,
-                index: new_index,
-            })))
-        } else {
-            Err(self)
-        }
+        // Rebuild the chain: base -> new block -> tail
+        base.extend(core::iter::once((height, data)).chain(tail.into_iter().rev()))
+            .expect("tail is in order")
     }
 
     /// Puts another checkpoint onto the linked list representing the blockchain.
