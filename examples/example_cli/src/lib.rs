@@ -12,7 +12,7 @@ use anyhow::Context;
 use bdk_chain::bitcoin::{
     absolute, address::NetworkUnchecked, bip32, consensus, constants, hex::DisplayHex, relative,
     secp256k1::Secp256k1, transaction, Address, Amount, Network, NetworkKind, PrivateKey, Psbt,
-    PublicKey, Sequence, Transaction, TxIn, TxOut,
+    PublicKey, Sequence, Transaction, TxIn, TxOut, WitnessVersion,
 };
 use bdk_chain::miniscript::{
     descriptor::{DescriptorSecretKey, SinglePubKey},
@@ -308,16 +308,12 @@ where
         script_pubkey: address.script_pubkey(),
     }];
 
-    let (change_keychain, _) = graph
-        .index
-        .keychains()
-        .last()
-        .expect("must have a keychain");
+    let change_keychain = Keychain::Internal;
 
     let ((change_index, change_script), index_changeset) = graph
         .index
         .next_unused_spk(change_keychain)
-        .expect("Must exist");
+        .context("no change descriptor configured; cannot create change")?;
     changeset.merge(index_changeset);
 
     let mut change_output = TxOut {
@@ -346,9 +342,16 @@ where
         },
     };
 
+    let drain_weights = match change_desc.witness_version() {
+        Some(WitnessVersion::V1) => DrainWeights::TR_KEYSPEND,
+        Some(WitnessVersion::V0) => DrainWeights::WITNESS_V0_KEYSPEND,
+        None => DrainWeights::LEGACY_KEYSPEND,
+        _ => DrainWeights::TR_KEYSPEND,
+    };
+
     let change_policy = ChangePolicy {
         min_value: min_drain_value,
-        drain_weights: DrainWeights::TR_KEYSPEND,
+        drain_weights,
     };
 
     // run coin selection
@@ -379,7 +382,7 @@ where
     // output
     let mut change_info = Option::<ChangeInfo>::None;
     let drain = selector.drain(target, change_policy);
-    if drain.value > min_drain_value {
+    if drain.value >= min_drain_value {
         change_output.value = Amount::from_sat(drain.value);
         outputs.push(change_output);
         change_info = Some(ChangeInfo {
