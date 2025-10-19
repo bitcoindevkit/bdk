@@ -207,6 +207,7 @@ fn test_range_edge_cases() {
     }
 
     // Empty range (start > end)
+    #[allow(clippy::reversed_empty_ranges)]
     let empty: Vec<_> = cp.range(300..200).collect();
     assert!(empty.is_empty());
 
