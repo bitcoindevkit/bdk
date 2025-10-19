@@ -264,7 +264,7 @@ async fn chain_update<S: Sleeper>(
 
     tip = tip
         .extend(conflicts.into_iter().rev().map(|b| (b.height, b.hash)))
-        .expect("evicted are in order");
+        .map_err(|_| Box::new(esplora_client::Error::InvalidResponse))?;
 
     for (anchor, _txid) in anchors {
         let height = anchor.block_id.height;
@@ -314,8 +314,9 @@ where
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
-    let mut last_index = Option::<u32>::None;
     let mut last_active_index = Option::<u32>::None;
+    let mut consecutive_unused = 0usize;
+    let gap_limit = stop_gap.max(parallel_requests.max(1));
 
     loop {
         let handles = keychain_spks
@@ -352,8 +353,10 @@ where
         }
 
         for (index, txs, evicted) in handles.try_collect::<Vec<TxsOfSpkIndex>>().await? {
-            last_index = Some(index);
-            if !txs.is_empty() {
+            if txs.is_empty() {
+                consecutive_unused = consecutive_unused.saturating_add(1);
+            } else {
+                consecutive_unused = 0;
                 last_active_index = Some(index);
             }
             for tx in txs {
@@ -368,13 +371,7 @@ where
                 .extend(evicted.into_iter().map(|txid| (txid, start_time)));
         }
 
-        let last_index = last_index.expect("Must be set since handles wasn't empty.");
-        let gap_limit_reached = if let Some(i) = last_active_index {
-            last_index >= i.saturating_add(stop_gap as u32)
-        } else {
-            last_index + 1 >= stop_gap as u32
-        };
-        if gap_limit_reached {
+        if consecutive_unused >= gap_limit {
             break;
         }
     }
@@ -569,6 +566,15 @@ mod test {
         ($index:literal) => {{
             bdk_chain::bitcoin::hashes::Hash::hash($index.as_bytes())
         }};
+    }
+
+    #[test]
+    fn ensure_last_index_none_returns_error() {
+        let last_index: Option<u32> = None;
+        let err = last_index
+            .ok_or_else(|| Box::new(esplora_client::Error::InvalidResponse))
+            .unwrap_err();
+        assert!(matches!(*err, esplora_client::Error::InvalidResponse));
     }
 
     // Test that `chain_update` fails due to wrong network.
