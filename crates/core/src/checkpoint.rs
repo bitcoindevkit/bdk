@@ -409,7 +409,8 @@ where
         let skip = if needs_skip_pointer {
             // Skip pointer points back CHECKPOINT_SKIP_INTERVAL positions
             // e.g., checkpoint at index 200 points to checkpoint at index 100
-            // We walk back CHECKPOINT_SKIP_INTERVAL - 1 steps since we start from self (index new_index - 1)
+            // We walk back CHECKPOINT_SKIP_INTERVAL - 1 steps since we start from self (index
+            // new_index - 1)
             let mut current = self.0.clone();
             for _ in 0..(CHECKPOINT_SKIP_INTERVAL - 1) {
                 // This is safe: if we're at index >= 100, we must have at least 99 predecessors
@@ -497,12 +498,15 @@ mod tests {
         let genesis = cp.get(0).expect("genesis exists");
         let weak = Arc::downgrade(&genesis.0);
 
-        // At this point there should be exactly two strong references to the
-        // genesis checkpoint: the variable `genesis` and the chain `cp`.
+        // At this point there should be exactly three strong references to the
+        // genesis checkpoint:
+        // 1. The variable `genesis`
+        // 2. The chain `cp` through checkpoint 1's prev pointer
+        // 3. Checkpoint at index 100's skip pointer (points to index 0)
         assert_eq!(
             Arc::strong_count(&genesis.0),
-            2,
-            "`cp` and `genesis` should be the only strong references",
+            3,
+            "`cp`, `genesis`, and checkpoint 100's skip pointer should be the only strong references",
         );
 
         // Dropping the chain should remove one strong reference.
