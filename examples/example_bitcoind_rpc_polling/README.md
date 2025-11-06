@@ -34,35 +34,34 @@
 7. Set descriptor env and get address from RPC CLI wallet.
    ```
    export DESCRIPTOR="wpkh(tprv8ZgxMBicQKsPfK9BTf82oQkHhawtZv19CorqQKPFeaHDMA4dXYX6eWsJGNJ7VTQXWmoHdrfjCYuDijcRmNFwSKcVhswzqs4fugE8turndGc/1/*)"
-   cargo run -- --network regtest address next
+   cargo run -- init --network regtest
+   cargo run -- address next
    ```
-8. Send 5 test bitcoin to RPC CLI wallet.
+8. Send 0.05 test bitcoin to RPC CLI wallet.
    ```
-   bitcoin-cli -rpcwallet="test" -datadir=/tmp/regtest/bitcoind -regtest -rpcuser=<your-rpc-username> -rpcpassword=<your-rpc-password> sendtoaddress <address> 5
+   bitcoin-cli -rpcwallet="test" -datadir=/tmp/regtest/bitcoind -regtest -rpcuser=<your-rpc-username> -rpcpassword=<your-rpc-password> sendtoaddress <address> 0.05
    ```
 9. Sync blockchain with RPC CLI wallet.
    ```
-   cargo run -- --network regtest sync
-   <CNTRL-C to stop syncing>
+   cargo run -- sync
    ```
 10. Get RPC CLI wallet unconfirmed balances.
    ```
-   cargo run -- --network regtest balance
+   cargo run -- balance
    ```
 11. Generate 1 block with reward to test bitcoind wallet address.
    ```
-   bitcoin-cli -datadir=/tmp/regtest/bitcoind -rpcuser=<your-rpc-username> -rpcpassword=<your-rpc-password> -regtest generatetoaddress 10 $BITCOIND_ADDRESS
+   bitcoin-cli -datadir=/tmp/regtest/bitcoind -rpcuser=<your-rpc-username> -rpcpassword=<your-rpc-password> -regtest generatetoaddress 1 $BITCOIND_ADDRESS
    ```
 12. Sync the blockchain with RPC CLI wallet.
    ```
-   cargo run -- --network regtest sync
-   <CNTRL-C to stop syncing>
+   cargo run -- sync
    ```
 13. Get RPC CLI wallet confirmed balances.
    ```
-   cargo run -- --network regtest balance
+   cargo run -- balance
    ```
 14. Get RPC CLI wallet transactions.
    ```
-   cargo run -- --network regtest txout list
+   cargo run -- txout list
    ```
