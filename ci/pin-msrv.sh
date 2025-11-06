@@ -9,3 +9,5 @@ set -euo pipefail
 
 # cargo clean
 # rustup override set 1.85.0
+
+cargo update -p home --precise "0.5.11"
