@@ -5,7 +5,7 @@ use crate::Anchor;
 /// Represents the observed position of some chain data.
 ///
 /// The generic `A` should be a [`Anchor`] implementation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, core::hash::Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, core::hash::Hash)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Deserialize, serde::Serialize),
@@ -85,8 +85,86 @@ impl<A: Anchor> ChainPosition<A> {
     }
 }
 
+/// Ordering for `ChainPosition`:
+///
+/// 1. Confirmed transactions come before unconfirmed
+/// 2. Confirmed transactions are ordered by anchor (lower height = earlier)
+/// 3. At equal anchor height, transitive confirmations come before direct
+/// 4. Unconfirmed transactions with mempool timestamps come before those without
+/// 5. Unconfirmed transactions are ordered by `first_seen`, then `last_seen`
+impl<A: Ord> Ord for ChainPosition<A> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        use core::cmp::Ordering;
+
+        match (self, other) {
+            // Both confirmed: compare by anchor first
+            (
+                ChainPosition::Confirmed {
+                    anchor: a1,
+                    transitively: t1,
+                },
+                ChainPosition::Confirmed {
+                    anchor: a2,
+                    transitively: t2,
+                },
+            ) => {
+                // First compare anchors
+                match a1.cmp(a2) {
+                    Ordering::Equal => {
+                        // Same anchor: transitive before direct (may be earlier)
+                        match (t1, t2) {
+                            (None, None) => Ordering::Equal,
+                            (None, Some(_)) => Ordering::Greater, // Direct comes after transitive
+                            (Some(_), None) => Ordering::Less,    // Transitive comes before direct
+                            // Both transitive: txid tiebreaker
+                            (Some(tx1), Some(tx2)) => tx1.cmp(tx2),
+                        }
+                    }
+                    other => other,
+                }
+            }
+
+            // Both unconfirmed: special handling for None values
+            (
+                ChainPosition::Unconfirmed {
+                    first_seen: f1,
+                    last_seen: l1,
+                },
+                ChainPosition::Unconfirmed {
+                    first_seen: f2,
+                    last_seen: l2,
+                },
+            ) => {
+                // Never-in-mempool (None, None) ordered last
+                match (f1.or(*l1), f2.or(*l2)) {
+                    (None, None) => Ordering::Equal,
+                    (None, Some(_)) => Ordering::Greater, // Never-seen after seen
+                    (Some(_), None) => Ordering::Less,    // Seen before never-seen
+                    (Some(_), Some(_)) => {
+                        // Both seen: compare first_seen, then last_seen
+                        f1.cmp(f2).then_with(|| l1.cmp(l2))
+                    }
+                }
+            }
+
+            // Confirmed always comes before unconfirmed
+            (ChainPosition::Confirmed { .. }, ChainPosition::Unconfirmed { .. }) => Ordering::Less,
+            (ChainPosition::Unconfirmed { .. }, ChainPosition::Confirmed { .. }) => {
+                Ordering::Greater
+            }
+        }
+    }
+}
+
+/// Partial ordering for `ChainPosition` - delegates to `Ord` implementation.
+impl<A: Ord> PartialOrd for ChainPosition<A> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// A `TxOut` with as much data as we can retrieve about it
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FullTxOut<A> {
     /// The position of the transaction in `outpoint` in the overall chain.
     pub chain_position: ChainPosition<A>,
@@ -98,6 +176,22 @@ pub struct FullTxOut<A> {
     pub spent_by: Option<(ChainPosition<A>, Txid)>,
     /// Whether this output is on a coinbase transaction.
     pub is_on_coinbase: bool,
+}
+
+impl<A: Ord> Ord for FullTxOut<A> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.chain_position
+            .cmp(&other.chain_position)
+            // Tie-break with `outpoint` and `spent_by`.
+            .then_with(|| self.outpoint.cmp(&other.outpoint))
+            .then_with(|| self.spent_by.cmp(&other.spent_by))
+    }
+}
+
+impl<A: Ord> PartialOrd for FullTxOut<A> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl<A: Anchor> FullTxOut<A> {
@@ -167,6 +261,7 @@ impl<A: Anchor> FullTxOut<A> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use bdk_core::ConfirmationBlockTime;
+    use bitcoin::hashes::Hash;
 
     use crate::BlockId;
 
@@ -174,15 +269,8 @@ mod test {
 
     #[test]
     fn chain_position_ord() {
-        let unconf1 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
-            last_seen: Some(10),
-            first_seen: Some(10),
-        };
-        let unconf2 = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
-            last_seen: Some(20),
-            first_seen: Some(20),
-        };
-        let conf1 = ChainPosition::Confirmed {
+        // Create test positions
+        let conf_deep = ChainPosition::Confirmed {
             anchor: ConfirmationBlockTime {
                 confirmation_time: 20,
                 block_id: BlockId {
@@ -192,7 +280,17 @@ mod test {
             },
             transitively: None,
         };
-        let conf2 = ChainPosition::Confirmed {
+        let conf_deep_transitive = ChainPosition::Confirmed {
+            anchor: ConfirmationBlockTime {
+                confirmation_time: 20,
+                block_id: BlockId {
+                    height: 9,
+                    ..Default::default()
+                },
+            },
+            transitively: Some(Txid::all_zeros()),
+        };
+        let conf_shallow = ChainPosition::Confirmed {
             anchor: ConfirmationBlockTime {
                 confirmation_time: 15,
                 block_id: BlockId {
@@ -202,12 +300,78 @@ mod test {
             },
             transitively: None,
         };
+        let unconf_seen_early = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+            first_seen: Some(10),
+            last_seen: Some(10),
+        };
+        let unconf_seen_late = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+            first_seen: Some(20),
+            last_seen: Some(20),
+        };
+        let unconf_never_seen = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+            first_seen: None,
+            last_seen: None,
+        };
 
-        assert!(unconf2 > unconf1, "higher last_seen means higher ord");
-        assert!(unconf1 > conf1, "unconfirmed is higher ord than confirmed");
+        // Test ordering: confirmed < unconfirmed
         assert!(
-            conf2 > conf1,
-            "confirmation_height is higher then it should be higher ord"
+            conf_deep < unconf_seen_early,
+            "confirmed comes before unconfirmed"
+        );
+        assert!(
+            conf_shallow < unconf_seen_early,
+            "confirmed comes before unconfirmed"
+        );
+
+        // Test ordering within confirmed: lower height (more confirmations) comes first
+        assert!(
+            conf_deep < conf_shallow,
+            "deeper blocks (lower height) come first"
+        );
+
+        // Test ordering within confirmed at same height: transitive comes before direct
+        assert!(
+            conf_deep_transitive < conf_deep,
+            "transitive confirmation comes before direct at same height"
+        );
+
+        // Test ordering within unconfirmed: earlier first_seen comes first
+        assert!(
+            unconf_seen_early < unconf_seen_late,
+            "earlier first_seen comes first"
+        );
+
+        // Test ordering: never seen in mempool comes last
+        assert!(
+            unconf_seen_early < unconf_never_seen,
+            "seen in mempool comes before never seen"
+        );
+        assert!(
+            unconf_seen_late < unconf_never_seen,
+            "seen in mempool comes before never seen"
+        );
+
+        // Full ordering test: most confirmed -> least confirmed -> unconfirmed seen -> unconfirmed
+        // never seen
+        let mut positions = vec![
+            unconf_never_seen,
+            unconf_seen_late,
+            conf_shallow,
+            unconf_seen_early,
+            conf_deep,
+            conf_deep_transitive,
+        ];
+        positions.sort();
+        assert_eq!(
+            positions,
+            vec![
+                conf_deep_transitive, // Most confirmed (potentially)
+                conf_deep,            // Deep confirmation
+                conf_shallow,         // Shallow confirmation
+                unconf_seen_early,    // Unconfirmed, seen early
+                unconf_seen_late,     // Unconfirmed, seen late
+                unconf_never_seen,    // Never in mempool
+            ]
         );
     }
 
