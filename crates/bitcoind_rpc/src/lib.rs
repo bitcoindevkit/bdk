@@ -399,7 +399,7 @@ impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use crate::{bitcoincore_rpc::RpcApi, Emitter, NO_EXPECTED_MEMPOOL_TXS};
+    use crate::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
     use bdk_chain::local_chain::LocalChain;
     use bdk_testenv::{anyhow, TestEnv};
     use bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash};
@@ -408,10 +408,17 @@ mod test {
     #[test]
     fn test_expected_mempool_txids_accumulate_and_remove() -> anyhow::Result<()> {
         let env = TestEnv::new()?;
-        let chain = LocalChain::from_genesis(env.rpc_client().get_block_hash(0)?).0;
+        let (chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
         let chain_tip = chain.tip();
+
+        // TODO: (@oleonardolima) We should use the `ClientExt` trait instead.
+        let mut bitcoincore_rpc_client = bitcoincore_rpc::Client::new(
+            &env.bitcoind.rpc_url(),
+            bitcoincore_rpc::Auth::CookieFile(env.bitcoind.workdir().join("regtest/.cookie")),
+        )?;
+
         let mut emitter = Emitter::new(
-            env.rpc_client(),
+            &mut bitcoincore_rpc_client,
             chain_tip.clone(),
             1,
             NO_EXPECTED_MEMPOOL_TXS,
