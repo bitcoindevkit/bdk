@@ -438,8 +438,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     );
 
     // mine blocks and sync up emitter
-    let addr = env
-        .rpc_client()
+    let addr = env.rpc_client()
         .get_new_address(None, None)?
         .address()?
         .assume_checked();
@@ -666,8 +665,7 @@ fn detect_new_mempool_txs() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     env.mine_blocks(101, None)?;
 
-    let addr = env
-        .rpc_client()
+    let addr = env.rpc_client()
         .get_new_address(None, None)?
         .address()?
         .require_network(Network::Regtest)?;
