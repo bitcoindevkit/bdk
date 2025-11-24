@@ -238,6 +238,7 @@ fn main() -> anyhow::Result<()> {
                         .map(|(_, utxo)| utxo.outpoint),
                 );
             };
+
             if unconfirmed {
                 request = request.txids(
                     graph

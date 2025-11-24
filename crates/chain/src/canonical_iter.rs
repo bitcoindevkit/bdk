@@ -1,5 +1,5 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
-use crate::tx_graph::{TxAncestors, TxDescendants};
+use crate::tx_graph::{CanonicalTx, TxAncestors, TxDescendants};
 use crate::{Anchor, ChainOracle, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
@@ -14,7 +14,7 @@ type NotCanonicalSet = HashSet<Txid>;
 /// Modifies the canonicalization algorithm.
 #[derive(Debug, Default, Clone)]
 pub struct CanonicalizationParams {
-    /// Transactions that will supercede all other transactions.
+    /// Transactions that will supersede all other transactions.
     ///
     /// In case of conflicting transactions within `assume_canonical`, transactions that appear
     /// later in the list (have higher index) have precedence.
@@ -108,7 +108,7 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
                 .iter()
                 .last()
                 .expect(
-                    "tx taken from `unprocessed_txs_with_anchors` so it must atleast have an anchor",
+                    "tx taken from `unprocessed_txs_with_anchors` so it must at least have an anchor",
                 )
                 .confirmation_height_upper_bound(),
         ));
@@ -266,7 +266,7 @@ pub enum ObservedIn {
 /// The reason why a transaction is canonical.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalReason<A> {
-    /// This transaction is explicitly assumed to be canonical by the caller, superceding all other
+    /// This transaction is explicitly assumed to be canonical by the caller, superseding all other
     /// canonicalization rules.
     Assumed {
         /// Whether it is a descendant that is assumed to be canonical.
@@ -290,7 +290,7 @@ pub enum CanonicalReason<A> {
 }
 
 impl<A: Clone> CanonicalReason<A> {
-    /// Constructs a [`CanonicalReason`] for a transaction that is assumed to supercede all other
+    /// Constructs a [`CanonicalReason`] for a transaction that is assumed to supersede all other
     /// transactions.
     pub fn assumed() -> Self {
         Self::Assumed { descendant: None }
@@ -312,7 +312,7 @@ impl<A: Clone> CanonicalReason<A> {
         }
     }
 
-    /// Contruct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
+    /// Construct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
     ///
     /// This signals that either the [`ObservedIn`] or [`Anchor`] value belongs to the transaction's
     /// descendant, but is transitively relevant.
@@ -340,5 +340,159 @@ impl<A: Clone> CanonicalReason<A> {
             CanonicalReason::Anchor { descendant, .. } => descendant,
             CanonicalReason::ObservedIn { descendant, .. } => descendant,
         }
+    }
+}
+
+/// Iterator based on the Kahn's Algorithm, that yields transactions in topological spending order
+/// in depth, and properly sorted with level.
+///
+/// NOTE: Please refer to the Kahn's Algorithm reference: https://dl.acm.org/doi/pdf/10.1145/368996.369025
+pub(crate) struct TopologicalIterator<'a, A> {
+    /// Map of txid to its canonical transaction
+    canonical_txs: HashMap<Txid, CanonicalTx<'a, Arc<Transaction>, A>>,
+
+    /// Current level of transactions to process
+    current_level: Vec<Txid>,
+    /// Next level of transactions to process
+    next_level: Vec<Txid>,
+
+    /// Adjacency list: parent txid -> list of children txids
+    children_map: HashMap<Txid, Vec<Txid>>,
+    /// Number of unprocessed parents for each transaction
+    parent_count: HashMap<Txid, usize>,
+
+    /// Current index in the current level
+    current_index: usize,
+}
+
+impl<'a, A: Clone + Anchor> TopologicalIterator<'a, A> {
+    /// Constructs [`TopologicalIterator`] from a list of `canonical_txs` (e.g [`CanonicalIter`]),
+    /// in order to handle all the graph building internally.
+    pub(crate) fn new(
+        canonical_txs: impl Iterator<Item = CanonicalTx<'a, Arc<Transaction>, A>>,
+    ) -> Self {
+        // Build a map from txid to canonical tx for quick lookup
+        let mut tx_map: HashMap<Txid, CanonicalTx<'a, Arc<Transaction>, A>> = HashMap::new();
+        let mut canonical_set: HashSet<Txid> = HashSet::new();
+
+        for canonical_tx in canonical_txs {
+            let txid = canonical_tx.tx_node.txid;
+            canonical_set.insert(txid);
+            tx_map.insert(txid, canonical_tx);
+        }
+
+        // Build the dependency graph (txid -> parents it depends on)
+        let mut dependencies: HashMap<Txid, Vec<Txid>> = HashMap::new();
+        let mut has_parents: HashSet<Txid> = HashSet::new();
+
+        for &txid in canonical_set.iter() {
+            let canonical_tx = tx_map.get(&txid).expect("txid must exist in map");
+            let tx = &canonical_tx.tx_node.tx;
+
+            // Find all parents (transactions this one depends on)
+            let mut parents = Vec::new();
+            if !tx.is_coinbase() {
+                for txin in &tx.input {
+                    let parent_txid = txin.previous_output.txid;
+                    // Only include if the parent is also canonical
+                    if canonical_set.contains(&parent_txid) {
+                        parents.push(parent_txid);
+                        has_parents.insert(txid);
+                    }
+                }
+            }
+
+            if !parents.is_empty() {
+                dependencies.insert(txid, parents);
+            }
+        }
+
+        // Build adjacency list and parent counts for traversal
+        let mut parent_count = HashMap::new();
+        let mut children_map: HashMap<Txid, Vec<Txid>> = HashMap::new();
+
+        for (txid, parents) in &dependencies {
+            for parent_txid in parents {
+                children_map.entry(*parent_txid).or_default().push(*txid);
+                *parent_count.entry(*txid).or_insert(0) += 1;
+            }
+        }
+
+        // Find root transactions (those with no parents in the canonical set)
+        let roots: Vec<Txid> = canonical_set
+            .iter()
+            .filter(|&&txid| !has_parents.contains(&txid))
+            .copied()
+            .collect();
+
+        // Sort the initial level
+        let mut current_level = roots;
+        Self::sort_level_by_chain_position(&mut current_level, &tx_map);
+
+        Self {
+            canonical_txs: tx_map,
+            current_level,
+            next_level: Vec::new(),
+            children_map,
+            parent_count,
+            current_index: 0,
+        }
+    }
+
+    /// Sort transactions within a level by their chain position
+    /// Confirmed transactions come first (sorted by height), then unconfirmed (sorted by last_seen)
+    fn sort_level_by_chain_position(
+        level: &mut [Txid],
+        canonical_txs: &HashMap<Txid, CanonicalTx<'a, Arc<Transaction>, A>>,
+    ) {
+        level.sort_by(|&a_txid, &b_txid| {
+            let a_tx = canonical_txs.get(&a_txid).expect("txid must exist");
+            let b_tx = canonical_txs.get(&b_txid).expect("txid must exist");
+
+            a_tx.cmp(b_tx)
+        });
+    }
+
+    fn advance_to_next_level(&mut self) {
+        self.current_level = core::mem::take(&mut self.next_level);
+        Self::sort_level_by_chain_position(&mut self.current_level, &self.canonical_txs);
+        self.current_index = 0;
+    }
+}
+
+impl<'a, A: Clone + Anchor> Iterator for TopologicalIterator<'a, A> {
+    type Item = CanonicalTx<'a, Arc<Transaction>, A>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // If we've exhausted the current level, move to next
+        if self.current_index >= self.current_level.len() {
+            if self.next_level.is_empty() {
+                return None;
+            }
+            self.advance_to_next_level();
+        }
+
+        let current_txid = self.current_level[self.current_index];
+        self.current_index += 1;
+
+        // If this is the last item in current level, prepare dependents for next level
+        if self.current_index == self.current_level.len() {
+            // Process all dependents of all transactions in current level
+            for &tx in &self.current_level {
+                if let Some(children) = self.children_map.get(&tx) {
+                    for &child in children {
+                        if let Some(count) = self.parent_count.get_mut(&child) {
+                            *count -= 1;
+                            if *count == 0 {
+                                self.next_level.push(child);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Return the CanonicalTx for the current txid
+        self.canonical_txs.get(&current_txid).cloned()
     }
 }
