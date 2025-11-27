@@ -10,6 +10,7 @@ members = [
     "crates/testenv",
     "examples/example_cli",
     "examples/example_electrum",
+    "examples/example_electrum_sync",
     "examples/example_esplora",
     "examples/example_bitcoind_rpc_polling",
 ]
