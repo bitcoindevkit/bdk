@@ -3,10 +3,7 @@
 #[macro_use]
 mod common;
 
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-};
+use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
 use bdk_chain::{
     indexed_tx_graph::{self, IndexedTxGraph},
@@ -18,8 +15,9 @@ use bdk_chain::{
 };
 use bdk_testenv::{
     anyhow::{self},
-    bitcoincore_rpc::{json::CreateRawTransactionInput, RpcApi},
-    block_id, hash,
+    block_id,
+    corepc_node::{Input, Output},
+    hash,
     utils::{new_tx, DESCRIPTORS},
     TestEnv,
 };
@@ -67,6 +65,7 @@ fn relevant_conflicts() -> anyhow::Result<()> {
 
             let sender_addr = client
                 .get_new_address(None, None)?
+                .address()?
                 .require_network(Network::Regtest)?;
 
             let recv_spk = gen_spk();
@@ -79,30 +78,37 @@ fn relevant_conflicts() -> anyhow::Result<()> {
             env.mine_blocks(101, None)?;
 
             let tx_input = client
-                .list_unspent(None, None, None, None, None)?
+                .list_unspent()?
+                .0
                 .into_iter()
                 .take(1)
-                .map(|r| CreateRawTransactionInput {
-                    txid: r.txid,
-                    vout: r.vout,
+                .map(|r| Input {
+                    txid: Txid::from_str(&r.txid).expect("should successfully parse the `Txid`"),
+                    vout: r.vout as u64,
                     sequence: None,
                 })
                 .collect::<Vec<_>>();
             let tx_send = {
-                let outputs =
-                    HashMap::from([(recv_addr.to_string(), Amount::from_btc(49.999_99)?)]);
-                let tx = client.create_raw_transaction(&tx_input, &outputs, None, Some(true))?;
+                let outputs = [Output::new(recv_addr, Amount::from_btc(49.999_99)?)];
+                let tx = client
+                    .create_raw_transaction(&tx_input, &outputs)?
+                    .into_model()?
+                    .0;
                 client
-                    .sign_raw_transaction_with_wallet(&tx, None, None)?
-                    .transaction()?
+                    .sign_raw_transaction_with_wallet(&tx)?
+                    .into_model()?
+                    .tx
             };
             let tx_cancel = {
-                let outputs =
-                    HashMap::from([(sender_addr.to_string(), Amount::from_btc(49.999_98)?)]);
-                let tx = client.create_raw_transaction(&tx_input, &outputs, None, Some(true))?;
+                let outputs = [Output::new(sender_addr, Amount::from_btc(49.999_98)?)];
+                let tx = client
+                    .create_raw_transaction(&tx_input, &outputs)?
+                    .into_model()?
+                    .0;
                 client
-                    .sign_raw_transaction_with_wallet(&tx, None, None)?
-                    .transaction()?
+                    .sign_raw_transaction_with_wallet(&tx)?
+                    .into_model()?
+                    .tx
             };
 
             Ok(Self {
@@ -118,31 +124,36 @@ fn relevant_conflicts() -> anyhow::Result<()> {
         /// Scans through all transactions in the blockchain + mempool.
         fn sync(&mut self) -> anyhow::Result<()> {
             let client = self.env.rpc_client();
-            for height in 0..=client.get_block_count()? {
-                let hash = client.get_block_hash(height)?;
-                let block = client.get_block(&hash)?;
+            for height in 0..=client.get_block_count()?.into_model().0 {
+                let hash = client.get_block_hash(height)?.block_hash()?;
+                let block = client.get_block(hash)?;
                 let _ = self.graph.apply_block_relevant(&block, height as _);
             }
-            let _ = self.graph.batch_insert_relevant_unconfirmed(
-                client
-                    .get_raw_mempool()?
-                    .into_iter()
-                    .map(|txid| client.get_raw_transaction(&txid, None).map(|tx| (tx, 0)))
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
+
+            let mempool_txids = client.get_raw_mempool()?.into_model()?.0;
+            let unconfirmed_txs: Vec<(Transaction, u64)> = mempool_txids
+                .iter()
+                .map(|txid| -> anyhow::Result<_> {
+                    let tx = client.get_raw_transaction(*txid)?.transaction()?;
+                    Ok((tx, 0))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let _ = self
+                .graph
+                .batch_insert_relevant_unconfirmed(unconfirmed_txs);
             Ok(())
         }
 
         /// Broadcast the original sending transaction.
         fn broadcast_send(&self) -> anyhow::Result<Txid> {
             let client = self.env.rpc_client();
-            Ok(client.send_raw_transaction(&self.tx_send)?)
+            Ok(client.send_raw_transaction(&self.tx_send)?.txid()?)
         }
 
         /// Broadcast the cancellation transaction.
         fn broadcast_cancel(&self) -> anyhow::Result<Txid> {
             let client = self.env.rpc_client();
-            Ok(client.send_raw_transaction(&self.tx_cancel)?)
+            Ok(client.send_raw_transaction(&self.tx_cancel)?.txid()?)
         }
     }
 
