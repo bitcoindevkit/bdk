@@ -77,6 +77,7 @@ fn relevant_conflicts() -> anyhow::Result<()> {
             env.mine_blocks(1, Some(sender_addr.clone()))?;
             env.mine_blocks(101, None)?;
 
+            // TODO: (@oleonardolima) remove unwraps
             let tx_input = client
                 .list_unspent()?
                 .0
