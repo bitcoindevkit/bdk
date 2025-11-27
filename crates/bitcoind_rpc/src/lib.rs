@@ -414,7 +414,7 @@ mod test {
         // TODO: (@oleonardolima) We should use the `ClientExt` trait instead.
         let mut bitcoincore_rpc_client = bitcoincore_rpc::Client::new(
             &env.bitcoind.rpc_url(),
-            bitcoincore_rpc::Auth::CookieFile(env.bitcoind.workdir().join("regtest/.cookie")),
+            bitcoincore_rpc::Auth::CookieFile(env.bitcoind.params.cookie_file.clone()),
         )?;
 
         let mut emitter = Emitter::new(
