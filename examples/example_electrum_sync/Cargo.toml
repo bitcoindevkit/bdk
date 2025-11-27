@@ -1,0 +1,11 @@
+[package]
+name = "example_electrum_sync"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bdk_core = { path = "../../crates/core" }
+bdk_chain = { path = "../../crates/chain" }
+bdk_electrum = { path = "../../crates/electrum" }
+electrum-client = "0.24.0"
+anyhow = "1.0"
