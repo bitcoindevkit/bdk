@@ -9,6 +9,8 @@ use crate::{
 };
 use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 
+use alloc::vec::Vec;
+
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
 /// The basic idea is that you insert script pubkeys you care about into the index with
@@ -311,6 +313,74 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
             if let Some(index) = self.index_of_spk(txout.script_pubkey.as_script()) {
                 if range.contains(index) {
                     received += txout.value;
+                }
+            }
+        }
+
+        (sent, received)
+    }
+
+    /// Collects the sent and received [`TxOut`]s for `tx` on the script pubkeys in `range`.
+    /// TxOuts are *sent* when a script pubkey in the `range` is on an input and *received* when
+    /// it is on an output. For `sent` to be computed correctly, the index must have already
+    /// scanned the output being spent. Calculating received just uses the [`Transaction`]
+    /// outputs directly, so it will be correct even if it has not been scanned.
+    ///
+    /// Returns a tuple of (sent_txouts, received_txouts).
+    ///
+    /// # Example
+    /// Shows the addresses of the TxOut sent from or received by a Transaction relevant to all spks
+    /// in this index.
+    ///
+    /// ```rust
+    /// # use bdk_chain::spk_txout::SpkTxOutIndex;
+    /// # use bitcoin::{Address, Network, Transaction};
+    /// # use std::str::FromStr;
+    /// #
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut index = SpkTxOutIndex::<u32>::default();
+    ///
+    /// // ... scan transactions to populate the index ...
+    /// # let tx = Transaction { version: bitcoin::transaction::Version::TWO, lock_time: bitcoin::locktime::absolute::LockTime::ZERO, input: vec![], output: vec![] };
+    ///
+    /// // Get sent and received txouts for a transaction across all tracked addresses
+    /// let (sent_txouts, received_txouts) = index.sent_and_received_txouts(&tx, ..);
+    ///
+    /// // Display addresses and amounts
+    /// println!("Sent:");
+    /// for txout in sent_txouts {
+    ///     let address = Address::from_script(&txout.script_pubkey, Network::Bitcoin)?;
+    ///     println!(" from {} - {} sats", address, txout.value.to_sat());
+    /// }
+    ///
+    /// println!("Received:");
+    /// for txout in received_txouts {
+    ///     let address = Address::from_script(&txout.script_pubkey, Network::Bitcoin)?;
+    ///     println!(" to {} - {} sats", address, txout.value.to_sat());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn sent_and_received_txouts(
+        &self,
+        tx: &Transaction,
+        range: impl RangeBounds<I>,
+    ) -> (Vec<TxOut>, Vec<TxOut>) {
+        let mut sent = Vec::new();
+        let mut received = Vec::new();
+
+        for txin in &tx.input {
+            if let Some((index, txout)) = self.txout(txin.previous_output) {
+                if range.contains(index) {
+                    sent.push(txout.clone());
+                }
+            }
+        }
+
+        for txout in &tx.output {
+            if let Some(index) = self.index_of_spk(txout.script_pubkey.clone()) {
+                if range.contains(index) {
+                    received.push(txout.clone());
                 }
             }
         }

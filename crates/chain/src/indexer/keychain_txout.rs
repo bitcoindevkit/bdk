@@ -418,6 +418,21 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .sent_and_received(tx, self.map_to_inner_bounds(range))
     }
 
+    /// Returns the sent and received [`TxOut`]s for this `tx` relative to the script pubkeys
+    /// belonging to the keychains in `range`. A TxOut is *sent* when a script pubkey in the
+    /// `range` is on an input and *received* when it is on an output. For `sent` to be computed
+    /// correctly, the index must have already scanned the output being spent. Calculating
+    /// received just uses the [`Transaction`] outputs directly, so it will be correct even if
+    /// it has not been scanned.
+    pub fn sent_and_received_txouts(
+        &self,
+        tx: &Transaction,
+        range: impl RangeBounds<K>,
+    ) -> (Vec<TxOut>, Vec<TxOut>) {
+        self.inner
+            .sent_and_received_txouts(tx, self.map_to_inner_bounds(range))
+    }
+
     /// Computes the net value that this transaction gives to the script pubkeys in the index and
     /// *takes* from the transaction outputs in the index. Shorthand for calling
     /// [`sent_and_received`] and subtracting sent from received.
