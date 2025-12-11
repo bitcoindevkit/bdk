@@ -215,8 +215,20 @@ fn main() -> anyhow::Result<()> {
                     .chain_tip(local_tip.clone())
                     .inspect(|item, progress| {
                         let pc = (100 * progress.consumed()) as f32 / progress.total() as f32;
-                        eprintln!("[ SCANNING {pc:03.0}% ] {item}");
-                        // Flush early to ensure we print at every iteration.
+                        match item {
+                            bdk_chain::spk_client::SyncItem::Spk((keychain, index), spk) => {
+                                eprintln!(
+                                    "[ SCANNING {pc:3.0}% ] script {} {} {}",
+                                    keychain, index, spk
+                                );
+                            }
+                            bdk_chain::spk_client::SyncItem::Txid(txid) => {
+                                eprintln!("[ SCANNING {pc:3.0}% ] txid {}", txid);
+                            }
+                            bdk_chain::spk_client::SyncItem::OutPoint(op) => {
+                                eprintln!("[ SCANNING {pc:3.0}% ] outpoint {}", op);
+                            }
+                        }
                         let _ = io::stderr().flush();
                     });
 
