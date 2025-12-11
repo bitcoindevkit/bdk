@@ -8,7 +8,7 @@ use crate::{
     spk_client::{FullScanRequestBuilder, SyncRequestBuilder},
     spk_iter::BIP32_MAX_INDEX,
     spk_txout::SpkTxOutIndex,
-    DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
+    DescriptorExt, DescriptorId, Indexed, IndexedTxOuts, Indexer, KeychainIndexed, SpkIterator,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
 use bitcoin::{
@@ -428,7 +428,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         &self,
         tx: &Transaction,
         range: impl RangeBounds<K>,
-    ) -> (Vec<TxOut>, Vec<TxOut>) {
+    ) -> (IndexedTxOuts, IndexedTxOuts) {
         self.inner
             .sent_and_received_txouts(tx, self.map_to_inner_bounds(range))
     }

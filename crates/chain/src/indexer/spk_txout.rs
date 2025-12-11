@@ -5,7 +5,7 @@ use core::ops::RangeBounds;
 
 use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
-    Indexer,
+    IndexedTxOuts, Indexer,
 };
 use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
 
@@ -348,15 +348,15 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     ///
     /// // Display addresses and amounts
     /// println!("Sent:");
-    /// for txout in sent_txouts {
+    /// for (i, txout) in sent_txouts {
     ///     let address = Address::from_script(&txout.script_pubkey, Network::Bitcoin)?;
-    ///     println!(" from {} - {} sats", address, txout.value.to_sat());
+    ///     println!("input {}: from {} - {} sats", i, address, txout.value.to_sat());
     /// }
     ///
     /// println!("Received:");
-    /// for txout in received_txouts {
+    /// for (i, txout) in received_txouts {
     ///     let address = Address::from_script(&txout.script_pubkey, Network::Bitcoin)?;
-    ///     println!(" to {} - {} sats", address, txout.value.to_sat());
+    ///     println!("output {}: to {} + {} sats", i, address, txout.value.to_sat());
     /// }
     /// # Ok(())
     /// # }
@@ -365,22 +365,22 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
         &self,
         tx: &Transaction,
         range: impl RangeBounds<I>,
-    ) -> (Vec<TxOut>, Vec<TxOut>) {
+    ) -> (IndexedTxOuts, IndexedTxOuts) {
         let mut sent = Vec::new();
         let mut received = Vec::new();
 
-        for txin in &tx.input {
+        for (i, txin) in tx.input.iter().enumerate() {
             if let Some((index, txout)) = self.txout(txin.previous_output) {
                 if range.contains(index) {
-                    sent.push(txout.clone());
+                    sent.push((i, txout.clone()));
                 }
             }
         }
 
-        for txout in &tx.output {
+        for (i, txout) in tx.output.iter().enumerate() {
             if let Some(index) = self.index_of_spk(txout.script_pubkey.clone()) {
                 if range.contains(index) {
-                    received.push(txout.clone());
+                    received.push((i, txout.clone()));
                 }
             }
         }

@@ -98,24 +98,29 @@ fn spk_txout_sent_and_received_txouts() {
             script_pubkey: spk1.clone(),
         }],
     };
-
     let (sent_txouts, received_txouts) = index.sent_and_received_txouts(&tx1, ..);
     assert!(sent_txouts.is_empty());
     assert_eq!(
         received_txouts,
-        vec![TxOut {
-            value: Amount::from_sat(42_000),
-            script_pubkey: spk1.clone(),
-        }]
+        vec![(
+            0,
+            TxOut {
+                value: Amount::from_sat(42_000),
+                script_pubkey: spk1.clone(),
+            }
+        )]
     );
     let (sent_txouts, received_txouts) = index.sent_and_received_txouts(&tx1, ..1);
     assert!(sent_txouts.is_empty());
     assert_eq!(
         received_txouts,
-        vec![TxOut {
-            value: Amount::from_sat(42_000),
-            script_pubkey: spk1.clone(),
-        }]
+        vec![(
+            0,
+            TxOut {
+                value: Amount::from_sat(42_000),
+                script_pubkey: spk1.clone(),
+            }
+        )]
     );
     let (sent_txouts, received_txouts) = index.sent_and_received_txouts(&tx1, 1..);
     assert!(sent_txouts.is_empty() && received_txouts.is_empty());
@@ -147,49 +152,67 @@ fn spk_txout_sent_and_received_txouts() {
     let (sent_txouts, received_txouts) = index.sent_and_received_txouts(&tx2, ..);
     assert_eq!(
         sent_txouts,
-        vec![TxOut {
-            value: Amount::from_sat(42_000),
-            script_pubkey: spk1.clone(),
-        }]
+        vec![(
+            0,
+            TxOut {
+                value: Amount::from_sat(42_000),
+                script_pubkey: spk1.clone(),
+            }
+        )]
     );
     assert_eq!(
         received_txouts,
         vec![
-            TxOut {
-                value: Amount::from_sat(20_000),
-                script_pubkey: spk2.clone(),
-            },
-            TxOut {
-                value: Amount::from_sat(30_000),
-                script_pubkey: spk1.clone(),
-            }
+            (
+                0,
+                TxOut {
+                    value: Amount::from_sat(20_000),
+                    script_pubkey: spk2.clone(),
+                }
+            ),
+            (
+                1,
+                TxOut {
+                    value: Amount::from_sat(30_000),
+                    script_pubkey: spk1.clone(),
+                }
+            )
         ]
     );
 
     let (sent_txouts, received_txouts) = index.sent_and_received_txouts(&tx2, ..1);
     assert_eq!(
         sent_txouts,
-        vec![TxOut {
-            value: Amount::from_sat(42_000),
-            script_pubkey: spk1.clone(),
-        }]
+        vec![(
+            0,
+            TxOut {
+                value: Amount::from_sat(42_000),
+                script_pubkey: spk1.clone(),
+            }
+        )]
     );
     assert_eq!(
         received_txouts,
-        vec![TxOut {
-            value: Amount::from_sat(30_000),
-            script_pubkey: spk1.clone(),
-        }]
+        vec![(
+            1,
+            TxOut {
+                value: Amount::from_sat(30_000),
+                script_pubkey: spk1.clone(),
+            }
+        )]
     );
 
     let (sent_txouts, received_txouts) = index.sent_and_received_txouts(&tx2, 1..);
     assert!(sent_txouts.is_empty());
     assert_eq!(
         received_txouts,
-        vec![TxOut {
-            value: Amount::from_sat(20_000),
-            script_pubkey: spk2.clone(),
-        }]
+        vec![(
+            0,
+            TxOut {
+                value: Amount::from_sat(20_000),
+                script_pubkey: spk2.clone(),
+            }
+        )]
     );
 }
 
