@@ -1,10 +1,17 @@
 //! [`Indexer`] provides utilities for indexing transaction data.
 
+use alloc::vec::Vec;
 use bitcoin::{OutPoint, Transaction, TxOut};
 
 #[cfg(feature = "miniscript")]
 pub mod keychain_txout;
 pub mod spk_txout;
+
+/// Type alias for a list of indexed transaction outputs.
+///
+/// Each element is a tuple of `(index, TxOut)` where index is the index of the input or output in
+/// the original [`Transaction`].
+pub type IndexedTxOuts = Vec<(usize, TxOut)>;
 
 /// Utilities for indexing transaction data.
 ///
