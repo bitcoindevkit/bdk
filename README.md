@@ -71,6 +71,14 @@ The following BDK crates maintains a MSRV of 1.85.0. To build these crates with 
 
 This project has a [`justfile`](/justfile) for easy command running. You must have [`just`](https://github.com/casey/just) installed.
 
+After forking and cloning this project with `git clone https://github.com/YOUR_USER/bdk.git`, you should build it and run the tests, just makes this process easier.
+
+### Usage examples:
+
+To build the project, run: `just b`
+
+To run all tests, run: `just t`
+
 To see a list of available recipes: `just`
 
 ## License
