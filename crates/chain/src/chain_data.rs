@@ -96,6 +96,16 @@ impl<A: Ord> Ord for ChainPosition<A> {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         use core::cmp::Ordering;
 
+        /// Compares options where `None` is greater than `Some` (sorts last).
+        fn cmp_none_last<T: Ord>(t1: &Option<T>, t2: &Option<T>) -> Ordering {
+            match (t1, t2) {
+                (None, None) => Ordering::Equal,
+                (None, Some(_)) => Ordering::Greater,
+                (Some(_), None) => Ordering::Less,
+                (Some(t1), Some(t2)) => t1.cmp(t2),
+            }
+        }
+
         match (self, other) {
             // Both confirmed: compare by anchor first
             (
@@ -110,16 +120,8 @@ impl<A: Ord> Ord for ChainPosition<A> {
             ) => {
                 // First compare anchors
                 match a1.cmp(a2) {
-                    Ordering::Equal => {
-                        // Same anchor: transitive before direct (may be earlier)
-                        match (t1, t2) {
-                            (None, None) => Ordering::Equal,
-                            (None, Some(_)) => Ordering::Greater, // Direct comes after transitive
-                            (Some(_), None) => Ordering::Less,    // Transitive comes before direct
-                            // Both transitive: txid tiebreaker
-                            (Some(tx1), Some(tx2)) => tx1.cmp(tx2),
-                        }
-                    }
+                    // Same anchor: transitive before direct, tiebreak with txid
+                    Ordering::Equal => cmp_none_last(t1, t2),
                     other => other,
                 }
             }
@@ -136,14 +138,10 @@ impl<A: Ord> Ord for ChainPosition<A> {
                 },
             ) => {
                 // Never-in-mempool (None, None) ordered last
-                match (f1.or(*l1), f2.or(*l2)) {
-                    (None, None) => Ordering::Equal,
-                    (None, Some(_)) => Ordering::Greater, // Never-seen after seen
-                    (Some(_), None) => Ordering::Less,    // Seen before never-seen
-                    (Some(_), Some(_)) => {
-                        // Both seen: compare first_seen, then last_seen
-                        f1.cmp(f2).then_with(|| l1.cmp(l2))
-                    }
+                // Compare by first_seen, tie-break with last_seen
+                match cmp_none_last(f1, f2) {
+                    Ordering::Equal => cmp_none_last(l1, l2),
+                    other => other,
                 }
             }
 
@@ -308,6 +306,10 @@ mod test {
             first_seen: Some(20),
             last_seen: Some(20),
         };
+        let unconf_seen_early_and_late = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+            first_seen: Some(10),
+            last_seen: Some(20),
+        };
         let unconf_never_seen = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
             first_seen: None,
             last_seen: None,
@@ -335,10 +337,15 @@ mod test {
             "transitive confirmation comes before direct at same height"
         );
 
-        // Test ordering within unconfirmed: earlier first_seen comes first
+        // Test ordering within unconfirmed: earlier first_seen comes first, tie_break with
+        // last_seen
         assert!(
             unconf_seen_early < unconf_seen_late,
             "earlier first_seen comes first"
+        );
+        assert!(
+            unconf_seen_early < unconf_seen_early_and_late,
+            "if first_seen is equal, tiebreak with last_seen"
         );
 
         // Test ordering: never seen in mempool comes last
@@ -360,17 +367,19 @@ mod test {
             unconf_seen_early,
             conf_deep,
             conf_deep_transitive,
+            unconf_seen_early_and_late,
         ];
         positions.sort();
         assert_eq!(
             positions,
             vec![
-                conf_deep_transitive, // Most confirmed (potentially)
-                conf_deep,            // Deep confirmation
-                conf_shallow,         // Shallow confirmation
-                unconf_seen_early,    // Unconfirmed, seen early
-                unconf_seen_late,     // Unconfirmed, seen late
-                unconf_never_seen,    // Never in mempool
+                conf_deep_transitive,       // Most confirmed (potentially)
+                conf_deep,                  // Deep confirmation
+                conf_shallow,               // Shallow confirmation
+                unconf_seen_early,          // Unconfirmed, seen early
+                unconf_seen_early_and_late, // Unconfirmed, seen early and late
+                unconf_seen_late,           // Unconfirmed, seen late
+                unconf_never_seen,          // Never in mempool
             ]
         );
     }
