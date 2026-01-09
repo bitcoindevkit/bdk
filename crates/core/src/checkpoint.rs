@@ -64,6 +64,11 @@ impl<D> Drop for CPInner<D> {
 pub trait ToBlockHash {
     /// Returns the [`BlockHash`] for the associated [`CheckPoint`] `data` type.
     fn to_blockhash(&self) -> BlockHash;
+
+    /// Returns `None` if the type has no knowledge of the previous [`BlockHash`].
+    fn prev_blockhash(&self) -> Option<BlockHash> {
+        None
+    }
 }
 
 impl ToBlockHash for BlockHash {
@@ -75,6 +80,10 @@ impl ToBlockHash for BlockHash {
 impl ToBlockHash for Header {
     fn to_blockhash(&self) -> BlockHash {
         self.block_hash()
+    }
+
+    fn prev_blockhash(&self) -> Option<BlockHash> {
+        Some(self.prev_blockhash)
     }
 }
 
