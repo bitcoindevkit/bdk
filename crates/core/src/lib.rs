@@ -65,6 +65,9 @@ pub use block_id::*;
 mod checkpoint;
 pub use checkpoint::*;
 
+mod checkpoint_entry;
+pub use checkpoint_entry::*;
+
 mod tx_update;
 pub use tx_update::*;
 
