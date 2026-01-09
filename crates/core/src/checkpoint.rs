@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitcoin::{block::Header, BlockHash};
 
-use crate::BlockId;
+use crate::{BlockId, CheckPointEntry, CheckPointEntryIter};
 
 /// A checkpoint is a node of a reference-counted linked list of [`BlockId`]s.
 ///
@@ -210,6 +210,26 @@ impl<D> CheckPoint<D> {
     }
 }
 
+impl<D> CheckPoint<D>
+where
+    D: ToBlockHash,
+{
+    /// Iterate entries from this checkpoint in descending height.
+    pub fn entry_iter(&self) -> CheckPointEntryIter<D> {
+        self.to_entry().into_iter()
+    }
+
+    /// Transforms this checkpoint into a [`CheckPointEntry`].
+    pub fn into_entry(self) -> CheckPointEntry<D> {
+        CheckPointEntry::Occupied(self)
+    }
+
+    /// Creates a [`CheckPointEntry`].
+    pub fn to_entry(&self) -> CheckPointEntry<D> {
+        CheckPointEntry::Occupied(self.clone())
+    }
+}
+
 // Methods where `D: ToBlockHash`
 impl<D> CheckPoint<D>
 where
@@ -349,15 +369,15 @@ where
 
 /// Iterates over checkpoints backwards.
 pub struct CheckPointIter<D> {
-    current: Option<Arc<CPInner<D>>>,
+    next: Option<Arc<CPInner<D>>>,
 }
 
 impl<D> Iterator for CheckPointIter<D> {
     type Item = CheckPoint<D>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current = self.current.clone()?;
-        self.current.clone_from(&current.prev);
+        let current = self.next.clone()?;
+        self.next.clone_from(&current.prev);
         Some(CheckPoint(current))
     }
 }
@@ -367,9 +387,7 @@ impl<D> IntoIterator for CheckPoint<D> {
     type IntoIter = CheckPointIter<D>;
 
     fn into_iter(self) -> Self::IntoIter {
-        CheckPointIter {
-            current: Some(self.0),
-        }
+        CheckPointIter { next: Some(self.0) }
     }
 }
 
