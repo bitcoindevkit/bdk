@@ -189,7 +189,7 @@ impl<D> CheckPoint<D> {
 // Methods where `D: ToBlockHash`
 impl<D> CheckPoint<D>
 where
-    D: ToBlockHash + fmt::Debug + Copy,
+    D: ToBlockHash + fmt::Debug + Clone,
 {
     /// Construct a new base [`CheckPoint`] from given `height` and `data` at the front of a linked
     /// list.
