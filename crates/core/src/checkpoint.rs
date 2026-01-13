@@ -1,8 +1,8 @@
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use bitcoin::{block::Header, BlockHash};
 use core::fmt;
 use core::ops::RangeBounds;
-
-use alloc::sync::Arc;
-use bitcoin::{block::Header, BlockHash};
 
 use crate::{BlockId, CheckPointEntry, CheckPointEntryIter};
 
@@ -272,30 +272,77 @@ where
     /// This panics if called with a genesis block that differs from that of `self`.
     #[must_use]
     pub fn insert(self, height: u32, data: D) -> Self {
-        let mut cp = self.clone();
-        let mut tail = vec![];
-        let base = loop {
-            if cp.height() == height {
-                if cp.hash() == data.to_blockhash() {
-                    return self;
+        // Step 1: Split chain into base (everything below height) and tail (height and above).
+        // We collect the tail to re-insert after placing in our new `data`.
+        let mut base_opt = Some(self.clone());
+        let mut tail = Vec::<Self>::new();
+        for cp in self.iter().take_while(|cp| cp.height() > height) {
+            base_opt = cp.prev();
+            tail.push(cp);
+        }
+        // Insert the new `data`.
+        let index = tail.partition_point(|cp| cp.height() > height);
+        tail.insert(index, CheckPoint::new(height, data));
+
+        // Step 2: Rebuild the chain by pushing each element from tail onto base.
+        // This process handles conflicts automatically through push's validation.
+        while let Some(tail_cp) = tail.pop() {
+            let base = match base_opt {
+                Some(base) => base,
+                None => {
+                    // We need a base to push stuff on.
+                    base_opt = Some(tail_cp);
+                    continue;
                 }
-                assert_ne!(cp.height(), 0, "cannot replace genesis block");
-                // If we have a conflict we just return the inserted data because the tail is by
-                // implication invalid.
-                tail = vec![];
-                break cp.prev().expect("can't be called on genesis block");
+            };
+
+            match base.push(tail_cp.height(), tail_cp.data()) {
+                Ok(new_base) => {
+                    base_opt = Some(new_base);
+                    continue;
+                }
+                Err(base) => {
+                    // Is this the height of insertion?
+                    if tail_cp.height() == height {
+                        // Failed due to prev_blockhash conflict.
+                        if base.height() + 1 == tail_cp.height() {
+                            // Displace the conflicting cp with the new cp.
+                            // Clear tail as those are now orphaned.
+                            base_opt = base.prev();
+                            tail.clear();
+                            tail.push(tail_cp);
+                            continue;
+                        }
+
+                        // Failed because height already exists.
+                        if tail_cp.height() == base.height() {
+                            base_opt = base.prev();
+                            if base.hash() == tail_cp.hash() {
+                                // If hash matches, this `insert` is a noop.
+                                return self;
+                            }
+                            // Hash conflicts: purge everything above.
+                            tail.clear();
+                            tail.push(tail_cp);
+                            continue;
+                        }
+                    }
+
+                    if tail_cp.height() > height {
+                        // Push failed for checkpoint above our insertion.
+                        // This means the data above our insertion got orphaned.
+                        base_opt = Some(base);
+                        break;
+                    }
+
+                    unreachable!(
+                        "fail cannot be a result of pushing something that was part of `self`"
+                    );
+                }
             }
+        }
 
-            if cp.height() < height {
-                break cp;
-            }
-
-            tail.push((cp.height(), cp.data()));
-            cp = cp.prev().expect("will break before genesis block");
-        };
-
-        base.extend(core::iter::once((height, data)).chain(tail.into_iter().rev()))
-            .expect("tail is in order")
+        base_opt.expect("must have atleast one checkpoint")
     }
 
     /// Puts another checkpoint onto the linked list representing the blockchain.
