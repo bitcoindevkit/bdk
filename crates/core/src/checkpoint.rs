@@ -349,21 +349,30 @@ where
 
     /// Puts another checkpoint onto the linked list representing the blockchain.
     ///
-    /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the
-    /// one you are pushing on to.
+    /// Returns an `Err(self)` if:
+    /// * The block you are pushing on is not at a greater height that the one you are pushing on to.
+    /// * The `prev_blockhash` does not match.
     pub fn push(self, height: u32, data: D) -> Result<Self, Self> {
-        if self.height() < height {
-            Ok(Self(Arc::new(CPInner {
-                block_id: BlockId {
-                    height,
-                    hash: data.to_blockhash(),
-                },
-                data,
-                prev: Some(self.0),
-            })))
-        } else {
-            Err(self)
+        // Reject if trying to push at or below current height - chain must grow forward.
+        if height <= self.height() {
+            return Err(self);
         }
+
+        // For contiguous height, ensure prev_blockhash does not conflict.
+        if let Some(prev_blockhash) = data.prev_blockhash() {
+            if self.height() + 1 == height && self.hash() != prev_blockhash {
+                return Err(self);
+            }
+        }
+
+        Ok(Self(Arc::new(CPInner {
+            block_id: BlockId {
+                height,
+                hash: data.to_blockhash(),
+            },
+            data,
+            prev: Some(self.0),
+        })))
     }
 }
 
