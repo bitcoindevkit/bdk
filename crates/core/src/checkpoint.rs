@@ -1,9 +1,8 @@
-use core::fmt;
-use core::ops::RangeBounds;
-
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitcoin::{block::Header, BlockHash};
+use core::fmt;
+use core::ops::RangeBounds;
 
 use crate::{BlockId, CheckPointEntry, CheckPointEntryIter};
 
@@ -233,7 +232,7 @@ where
 // Methods where `D: ToBlockHash`
 impl<D> CheckPoint<D>
 where
-    D: ToBlockHash + fmt::Debug + Copy,
+    D: ToBlockHash + fmt::Debug + Clone,
 {
     const MTP_BLOCK_COUNT: u32 = 11;
 
@@ -298,8 +297,9 @@ where
 
     /// Extends the checkpoint linked list by a iterator containing `height` and `data`.
     ///
-    /// Returns an `Err(self)` if there is block which does not have a greater height than the
-    /// previous one.
+    /// Returns an `Err(self)` if there is a block which does not have a greater height than the
+    /// previous one, or doesn't properly link to an adjacent block via its `prev_blockhash`.
+    /// See docs for [`CheckPoint::push`].
     pub fn extend(self, blockdata: impl IntoIterator<Item = (u32, D)>) -> Result<Self, Self> {
         let mut cp = self.clone();
         for (height, data) in blockdata {
@@ -310,41 +310,76 @@ where
 
     /// Inserts `data` at its `height` within the chain.
     ///
-    /// The effect of `insert` depends on whether a height already exists. If it doesn't, the data
-    /// we inserted and all pre-existing entries higher than it will be re-inserted after it. If the
-    /// height already existed and has a conflicting block hash then it will be purged along with
-    /// all entries following it. The returned chain will have a tip of the data passed in. Of
-    /// course, if the data was already present then this just returns `self`.
+    /// If a checkpoint already exists at `height` with a matching hash, returns `self` unchanged.
+    /// If a checkpoint exists at `height` with a different hash, or if `prev_blockhash` conflicts
+    /// occur, the conflicting checkpoint and all checkpoints above it are removed.
     ///
     /// # Panics
     ///
-    /// This panics if called with a genesis block that differs from that of `self`.
+    /// Panics if the insertion would replace (or omit) the checkpoint at height 0 (a.k.a
+    /// "genesis"). Although [`CheckPoint`] isn't structurally required to contain a genesis
+    /// block, if one is present, it stays immutable and can't be replaced.
     #[must_use]
     pub fn insert(self, height: u32, data: D) -> Self {
         let mut cp = self.clone();
         let mut tail = vec![];
+
+        // Traverse from tip to base, looking for where to insert.
         let base = loop {
-            if cp.height() == height {
+            // Genesis (height 0) must remain immutable.
+            if cp.height() == 0 {
+                let implied_genesis = match height {
+                    0 => Some(data.to_blockhash()),
+                    1 => data.prev_blockhash(),
+                    _ => None,
+                };
+                if let Some(hash) = implied_genesis {
+                    assert_eq!(hash, cp.hash(), "inserted data implies different genesis");
+                }
+            }
+
+            // Above insertion: collect for potential re-insertion later.
+            // No need to check data.prev_blockhash here since that points below insertion. The
+            // reverse relationship (cp.prev_blockhash vs data.hash) is validated during rebuild.
+            if cp.height() > height {
+                tail.push((cp.height(), cp.data()));
+
+            // At insertion: determine whether we need to clear tail, or early return.
+            } else if cp.height() == height {
                 if cp.hash() == data.to_blockhash() {
                     return self;
                 }
-                assert_ne!(cp.height(), 0, "cannot replace genesis block");
-                // If we have a conflict we just return the inserted data because the tail is by
-                // implication invalid.
-                tail = vec![];
-                break cp.prev().expect("can't be called on genesis block");
+                tail.clear();
+
+            // Displacement: data's prev_blockhash conflicts with this checkpoint,
+            // so skip it and invalidate everything above.
+            } else if cp.height() + 1 == height
+                && data.prev_blockhash().is_some_and(|h| h != cp.hash())
+            {
+                tail.clear();
+
+            // Below insertion: this is our base (since data's prev_blockhash does not conflict).
+            } else if cp.height() < height {
+                break Some(cp);
             }
 
-            if cp.height() < height {
-                break cp;
+            // Continue traversing down (if possible).
+            match cp.prev() {
+                Some(prev) => cp = prev,
+                None => break None,
             }
-
-            tail.push((cp.height(), cp.data()));
-            cp = cp.prev().expect("will break before genesis block");
         };
 
-        base.extend(core::iter::once((height, data)).chain(tail.into_iter().rev()))
-            .expect("tail is in order")
+        tail.push((height, data));
+        let tail = tail.into_iter().rev();
+
+        // Reconstruct the chain: If a block above insertion has a prev_blockhash that doesn't match
+        // the inserted data's hash, that block and everything above it are evicted.
+        let (Ok(cp) | Err(cp)) = match base {
+            Some(base_cp) => base_cp.extend(tail),
+            None => CheckPoint::from_blocks(tail).map_err(|err| err.expect("tail is non-empty")),
+        };
+        cp
     }
 
     /// Puts another checkpoint onto the linked list representing the blockchain.
