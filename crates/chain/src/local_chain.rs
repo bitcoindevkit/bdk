@@ -6,7 +6,7 @@ use core::ops::RangeBounds;
 
 use crate::collections::BTreeMap;
 use crate::{BlockId, ChainOracle, Merge};
-use bdk_core::ToBlockHash;
+use bdk_core::{CheckPointEntry, ToBlockHash};
 pub use bdk_core::{CheckPoint, CheckPointIter};
 use bitcoin::block::Header;
 use bitcoin::BlockHash;
@@ -598,14 +598,14 @@ where
 {
     let mut changeset = ChangeSet::<D>::default();
 
-    let mut orig = original_tip.iter();
-    let mut update = update_tip.iter();
+    let mut orig = original_tip.entry_iter();
+    let mut update = update_tip.entry_iter();
 
     let mut curr_orig = None;
     let mut curr_update = None;
 
-    let mut prev_orig: Option<CheckPoint<D>> = None;
-    let mut prev_update: Option<CheckPoint<D>> = None;
+    let mut prev_orig: Option<CheckPointEntry<D>> = None;
+    let mut prev_update: Option<CheckPointEntry<D>> = None;
 
     let mut point_of_agreement_found = false;
 
@@ -634,13 +634,18 @@ where
         match (curr_orig.as_ref(), curr_update.as_ref()) {
             // Update block that doesn't exist in the original chain
             (o, Some(u)) if Some(u.height()) > o.map(|o| o.height()) => {
-                changeset.blocks.insert(u.height(), Some(u.data()));
+                // Only append to `ChangeSet` when this is an actual checkpoint.
+                if let Some(data) = u.data() {
+                    changeset.blocks.insert(u.height(), Some(data));
+                }
                 prev_update = curr_update.take();
             }
             // Original block that isn't in the update
             (Some(o), u) if Some(o.height()) > u.map(|u| u.height()) => {
-                // this block might be gone if an earlier block gets invalidated
-                potentially_invalidated_heights.push(o.height());
+                if matches!(o, CheckPointEntry::Occupied(_)) {
+                    // this block might be gone if an earlier block gets invalidated
+                    potentially_invalidated_heights.push(o.height());
+                }
                 prev_orig_was_invalidated = false;
                 prev_orig = curr_orig.take();
 
@@ -671,7 +676,8 @@ where
                     prev_orig_was_invalidated = false;
                     // OPTIMIZATION 2 -- if we have the same underlying pointer at this point, we
                     // can guarantee that no older blocks are introduced.
-                    if o.eq_ptr(u) {
+                    // TODO: Ensure this is correct!
+                    if o.backing_checkpoint().eq_ptr(&u.backing_checkpoint()) {
                         if is_update_height_superset_of_original {
                             return Ok((update_tip, changeset));
                         } else {
@@ -685,7 +691,7 @@ where
                 } else {
                     // We have an invalidation height so we set the height to the updated hash and
                     // also purge all the original chain block hashes above this block.
-                    changeset.blocks.insert(u.height(), Some(u.data()));
+                    changeset.blocks.insert(u.height(), u.data());
                     for invalidated_height in potentially_invalidated_heights.drain(..) {
                         changeset.blocks.insert(invalidated_height, None);
                     }
