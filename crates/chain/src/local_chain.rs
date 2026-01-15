@@ -62,6 +62,7 @@ where
 /// This is a local implementation of [`ChainOracle`].
 #[derive(Debug, Clone)]
 pub struct LocalChain<D = BlockHash> {
+    genesis_hash: BlockHash,
     tip: CheckPoint<D>,
 }
 
@@ -200,7 +201,7 @@ impl<D> LocalChain<D> {
 
     /// Get the genesis hash.
     pub fn genesis_hash(&self) -> BlockHash {
-        self.tip.get(0).expect("genesis must exist").block_id().hash
+        self.genesis_hash
     }
 
     /// Iterate over checkpoints in descending height order.
@@ -242,6 +243,7 @@ where
     pub fn from_genesis(data: D) -> (Self, ChangeSet<D>) {
         let height = 0;
         let chain = Self {
+            genesis_hash: data.to_blockhash(),
             tip: CheckPoint::new(height, data),
         };
         let changeset = chain.initial_changeset();
@@ -254,11 +256,13 @@ where
     /// The [`BTreeMap`] enforces the height order. However, the caller must ensure the blocks are
     /// all of the same chain.
     pub fn from_blocks(blocks: BTreeMap<u32, D>) -> Result<Self, MissingGenesisError> {
-        if !blocks.contains_key(&0) {
-            return Err(MissingGenesisError);
-        }
+        let genesis_hash = blocks
+            .get(&0)
+            .map(ToBlockHash::to_blockhash)
+            .ok_or(MissingGenesisError)?;
 
         Ok(Self {
+            genesis_hash,
             tip: CheckPoint::from_blocks(blocks).expect("blocks must be in order"),
         })
     }
@@ -283,8 +287,9 @@ where
         if genesis_cp.height() != 0 {
             return Err(MissingGenesisError);
         }
+        let genesis_hash = genesis_cp.hash();
 
-        Ok(Self { tip })
+        Ok(Self { genesis_hash, tip })
     }
 
     /// Applies the given `update` to the chain.
@@ -600,7 +605,6 @@ where
         &mut self,
         update_tip: CheckPoint<D>,
     ) -> Result<(CheckPoint<D>, ChangeSet<D>), CannotConnectError> {
-        let genesis_hash = self.genesis_hash();
         let mut original_iter = self.tip().iter().peekable();
         let mut update_iter = update_tip.iter().peekable();
 
@@ -615,7 +619,7 @@ where
         loop {
             match (original_iter.peek(), update_iter.peek()) {
                 // Error if attempting to change the genesis block.
-                (_, Some(update)) if update.height() == 0 && update.hash() != genesis_hash => {
+                (_, Some(update)) if update.height() == 0 && update.hash() != self.genesis_hash => {
                     return Err(CannotConnectError {
                         try_include_height: 0,
                     });
