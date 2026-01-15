@@ -218,9 +218,9 @@ where
 
     /// Construct from an iterator of block data.
     ///
-    /// Returns `Err(None)` if `blocks` doesn't yield any data. If the blocks are not in ascending
-    /// height order, then returns an `Err(..)` containing the last checkpoint that would have been
-    /// extended.
+    /// Returns `Err(None)` if `blocks` doesn't yield any data. If the blocks are inconsistent
+    /// or are not in ascending height order, then returns an `Err(..)` containing the last
+    /// checkpoint that would have been extended.
     pub fn from_blocks(blocks: impl IntoIterator<Item = (u32, D)>) -> Result<Self, Option<Self>> {
         let mut blocks = blocks.into_iter();
         let (height, data) = blocks.next().ok_or(None)?;
@@ -232,8 +232,9 @@ where
 
     /// Extends the checkpoint linked list by a iterator containing `height` and `data`.
     ///
-    /// Returns an `Err(self)` if there is block which does not have a greater height than the
-    /// previous one.
+    /// Returns an `Err(self)` if there is a block which does not have a greater height than the
+    /// previous one, or doesn't properly link to an adjacent block via its `prev_blockhash`.
+    /// See docs for [`CheckPoint::push`].
     pub fn extend(self, blockdata: impl IntoIterator<Item = (u32, D)>) -> Result<Self, Self> {
         let mut cp = self.clone();
         for (height, data) in blockdata {

@@ -13,11 +13,22 @@ pub use bdk_core::{CheckPoint, CheckPointIter};
 use bitcoin::block::Header;
 use bitcoin::BlockHash;
 
+/// Error for `apply_changeset_to_checkpoint`.
+#[derive(Debug)]
+struct ApplyChangeSetError<D> {
+    cp: CheckPoint<D>,
+}
+
 /// Apply `changeset` to the checkpoint.
+///
+/// # Errors
+///
+/// - If constructing the new chain from the provided `changeset` fails, then a
+///   [`ApplyChangeSetError`] is returned.
 fn apply_changeset_to_checkpoint<D>(
     mut init_cp: CheckPoint<D>,
     changeset: &ChangeSet<D>,
-) -> Result<CheckPoint<D>, MissingGenesisError>
+) -> Result<CheckPoint<D>, ApplyChangeSetError<D>>
 where
     D: ToBlockHash + fmt::Debug + Clone,
 {
@@ -50,8 +61,12 @@ where
         let new_tip = match base {
             Some(base) => base
                 .extend(extension)
-                .expect("extension is strictly greater than base"),
-            None => LocalChain::from_blocks(extension)?.tip(),
+                .map_err(|cp| ApplyChangeSetError { cp })?,
+            None => match CheckPoint::from_blocks(extension) {
+                Ok(cp) => cp,
+                Err(None) => init_cp,
+                Err(Some(cp)) => return Err(ApplyChangeSetError { cp }),
+            },
         };
         init_cp = new_tip;
     }
@@ -255,26 +270,34 @@ where
     ///
     /// The [`BTreeMap`] enforces the height order. However, the caller must ensure the blocks are
     /// all of the same chain.
-    pub fn from_blocks(blocks: BTreeMap<u32, D>) -> Result<Self, MissingGenesisError> {
-        let genesis_hash = blocks
-            .get(&0)
-            .map(ToBlockHash::to_blockhash)
-            .ok_or(MissingGenesisError)?;
-
-        Ok(Self {
-            genesis_hash,
-            tip: CheckPoint::from_blocks(blocks).expect("blocks must be in order"),
-        })
+    ///
+    /// If `blocks` doesn't contain a value at height `0`, a.k.a. "genesis" block, or contains
+    /// inconsistent or invalid data, then returns a [`CannotConnectError`]. See also
+    /// [`LocalChain::from_changeset`].
+    pub fn from_blocks(blocks: BTreeMap<u32, D>) -> Result<Self, CannotConnectError> {
+        let changeset = ChangeSet {
+            blocks: blocks
+                .into_iter()
+                .map(|(height, data)| (height, Some(data)))
+                .collect(),
+        };
+        Self::from_changeset(changeset)
     }
 
     /// Construct a [`LocalChain`] from an initial `changeset`.
-    pub fn from_changeset(changeset: ChangeSet<D>) -> Result<Self, MissingGenesisError> {
-        let genesis_entry = changeset.blocks.get(&0).cloned().flatten();
-        let genesis_data = match genesis_entry {
+    ///
+    /// If `blocks` doesn't contain a value at height `0`, a.k.a. "genesis" block, or contains
+    /// inconsistent or invalid data, then returns a [`CannotConnectError`].
+    /// Otherwise returns a new [`LocalChain`] with the changeset applied.
+    pub fn from_changeset(changeset: ChangeSet<D>) -> Result<Self, CannotConnectError> {
+        let genesis_data = match changeset.blocks.get(&0).cloned().flatten() {
             Some(data) => data,
-            None => return Err(MissingGenesisError),
+            None => {
+                return Err(CannotConnectError {
+                    try_include_height: 0,
+                })
+            }
         };
-
         let (mut chain, _) = Self::from_genesis(genesis_data);
         chain.apply_changeset(&changeset)?;
         debug_assert!(chain._check_changeset_is_applied(&changeset));
@@ -317,9 +340,12 @@ where
     }
 
     /// Apply the given `changeset`.
-    pub fn apply_changeset(&mut self, changeset: &ChangeSet<D>) -> Result<(), MissingGenesisError> {
+    pub fn apply_changeset(&mut self, changeset: &ChangeSet<D>) -> Result<(), CannotConnectError> {
         let old_tip = self.tip.clone();
-        let new_tip = apply_changeset_to_checkpoint(old_tip, changeset)?;
+        let new_tip =
+            apply_changeset_to_checkpoint(old_tip, changeset).map_err(|e| CannotConnectError {
+                try_include_height: e.cp.height(),
+            })?;
         self.tip = new_tip;
         debug_assert!(self._check_changeset_is_applied(changeset));
         Ok(())
@@ -414,6 +440,7 @@ where
     }
 
     fn _check_changeset_is_applied(&self, changeset: &ChangeSet<D>) -> bool {
+        // Check changeset is applied
         let mut cur = self.tip.clone();
         for (&exp_height, exp_data) in changeset.blocks.iter().rev() {
             match cur.get(exp_height) {
@@ -432,7 +459,8 @@ where
                 }
             }
         }
-        true
+        // Check genesis is unchanged
+        self.get(0).is_some_and(|cp| cp.hash() == self.genesis_hash)
     }
 }
 
@@ -702,9 +730,9 @@ where
         }
 
         // Apply changeset to tip.
-        let new_tip = apply_changeset_to_checkpoint(self.tip(), &changeset).map_err(|_| {
+        let new_tip = apply_changeset_to_checkpoint(self.tip(), &changeset).map_err(|e| {
             CannotConnectError {
-                try_include_height: 0,
+                try_include_height: e.cp.height(),
             }
         })?;
 
