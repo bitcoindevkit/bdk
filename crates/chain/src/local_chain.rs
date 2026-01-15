@@ -1,5 +1,7 @@
 //! The [`LocalChain`] is a local implementation of [`ChainOracle`].
 
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 use core::convert::Infallible;
 use core::fmt;
 use core::ops::RangeBounds;
@@ -303,7 +305,7 @@ where
         &mut self,
         update: CheckPoint<D>,
     ) -> Result<ChangeSet<D>, CannotConnectError> {
-        let (new_tip, changeset) = merge_chains(self.tip.clone(), update)?;
+        let (new_tip, changeset) = self.merge_chains(update)?;
         self.tip = new_tip;
         debug_assert!(self._check_changeset_is_applied(&changeset));
         Ok(changeset)
@@ -576,148 +578,132 @@ impl core::fmt::Display for ApplyHeaderError {
 #[cfg(feature = "std")]
 impl std::error::Error for ApplyHeaderError {}
 
-/// Applies `update_tip` onto `original_tip`.
-///
-/// On success, a tuple is returned ([`CheckPoint`], [`ChangeSet`]).
-///
-/// # Errors
-///
-/// [`CannotConnectError`] occurs when the `original_tip` and `update_tip` chains are disjoint:
-///
-/// - If no point of agreement is found between the update and original chains.
-/// - A point of agreement is found but the update is ambiguous above the point of agreement (a.k.a.
-///   the update and original chain both have a block above the point of agreement, but their
-///   heights do not overlap).
-/// - The update attempts to replace the genesis block of the original chain.
-fn merge_chains<D>(
-    original_tip: CheckPoint<D>,
-    update_tip: CheckPoint<D>,
-) -> Result<(CheckPoint<D>, ChangeSet<D>), CannotConnectError>
+impl<D> LocalChain<D>
 where
     D: ToBlockHash + fmt::Debug + Copy,
 {
-    let mut changeset = ChangeSet::<D>::default();
+    /// Applies `update_tip` onto `self`.
+    ///
+    /// On success, a tuple is returned ([`CheckPoint`], [`ChangeSet`]).
+    ///
+    /// # Errors
+    ///
+    /// [`CannotConnectError`] occurs when the original and `update_tip` chains are disjoint:
+    ///
+    /// - If no point of agreement is found between the update and original chains, and no explicit
+    ///   invalidation occurred.
+    /// - A point of agreement is found but the update is ambiguous above the point of agreement
+    ///   (a.k.a. the update and original chain both have a block above the point of agreement, but
+    ///   their heights do not overlap).
+    /// - The update attempts to replace the genesis block of the original chain.
+    fn merge_chains(
+        &mut self,
+        update_tip: CheckPoint<D>,
+    ) -> Result<(CheckPoint<D>, ChangeSet<D>), CannotConnectError> {
+        let genesis_hash = self.genesis_hash();
+        let mut original_iter = self.tip().iter().peekable();
+        let mut update_iter = update_tip.iter().peekable();
 
-    let mut orig = original_tip.iter();
-    let mut update = update_tip.iter();
+        let mut point_of_agreement = Option::<u32>::None;
+        let mut previous_original_height = Option::<u32>::None;
+        let mut previous_update_height = Option::<u32>::None;
+        let mut is_update_height_superset_of_original = true;
+        let mut potentially_invalid_block_ids = Vec::<BlockId>::new();
+        let mut is_previous_original_invalid = false;
+        let mut changeset = ChangeSet::<D>::default();
 
-    let mut curr_orig = None;
-    let mut curr_update = None;
-
-    let mut prev_orig: Option<CheckPoint<D>> = None;
-    let mut prev_update: Option<CheckPoint<D>> = None;
-
-    let mut point_of_agreement_found = false;
-
-    let mut prev_orig_was_invalidated = false;
-
-    let mut potentially_invalidated_heights = vec![];
-
-    // If we can, we want to return the update tip as the new tip because this allows checkpoints
-    // in multiple locations to keep the same `Arc` pointers when they are being updated from each
-    // other using this function. We can do this as long as the update contains every
-    // block's height of the original chain.
-    let mut is_update_height_superset_of_original = true;
-
-    // To find the difference between the new chain and the original we iterate over both of them
-    // from the tip backwards in tandem. We are always dealing with the highest one from either
-    // chain first and move to the next highest. The crucial logic is applied when they have
-    // blocks at the same height.
-    loop {
-        if curr_orig.is_none() {
-            curr_orig = orig.next();
-        }
-        if curr_update.is_none() {
-            curr_update = update.next();
-        }
-
-        match (curr_orig.as_ref(), curr_update.as_ref()) {
-            // Update block that doesn't exist in the original chain
-            (o, Some(u)) if Some(u.height()) > o.map(|o| o.height()) => {
-                changeset.blocks.insert(u.height(), Some(u.data()));
-                prev_update = curr_update.take();
-            }
-            // Original block that isn't in the update
-            (Some(o), u) if Some(o.height()) > u.map(|u| u.height()) => {
-                // this block might be gone if an earlier block gets invalidated
-                potentially_invalidated_heights.push(o.height());
-                prev_orig_was_invalidated = false;
-                prev_orig = curr_orig.take();
-
-                is_update_height_superset_of_original = false;
-
-                // OPTIMIZATION: we have run out of update blocks so we don't need to continue
-                // iterating because there's no possibility of adding anything to changeset.
-                if u.is_none() {
-                    break;
+        loop {
+            match (original_iter.peek(), update_iter.peek()) {
+                // Error if attempting to change the genesis block.
+                (_, Some(update)) if update.height() == 0 && update.hash() != genesis_hash => {
+                    return Err(CannotConnectError {
+                        try_include_height: 0,
+                    });
                 }
-            }
-            (Some(o), Some(u)) => {
-                if o.hash() == u.hash() {
-                    // We have found our point of agreement 🎉 -- we require that the previous (i.e.
-                    // higher because we are iterating backwards) block in the original chain was
-                    // invalidated (if it exists). This ensures that there is an unambiguous point
-                    // of connection to the original chain from the update chain
-                    // (i.e. we know the precisely which original blocks are
-                    // invalid).
-                    if !prev_orig_was_invalidated && !point_of_agreement_found {
-                        if let (Some(prev_orig), Some(_prev_update)) = (&prev_orig, &prev_update) {
-                            return Err(CannotConnectError {
-                                try_include_height: prev_orig.height(),
-                            });
+                // We're done when all updates are processed.
+                (_, None) => break,
+                (Some(original), Some(update)) => {
+                    // First compare heights. For any updates that aren't in the original
+                    // chain add them to the changeset. Retain block IDs of the original chain
+                    // that are not in the update, in case we need to invalidate them.
+                    // We only advance each iterator on the higher of the two chains, or both
+                    // if equal height, and update the previously seen height on each turn.
+                    match update.height().cmp(&original.height()) {
+                        // Update height not in original.
+                        Ordering::Greater => {
+                            changeset
+                                .blocks
+                                .insert(update.height(), Some(update.data()));
+                            previous_update_height = Some(update.height());
+                            update_iter.next();
+                        }
+                        // Original height not in update.
+                        Ordering::Less => {
+                            potentially_invalid_block_ids.push(original.block_id());
+                            is_previous_original_invalid = false;
+                            previous_original_height = Some(original.height());
+                            is_update_height_superset_of_original = false;
+                            original_iter.next();
+                        }
+                        // Compare hashes.
+                        Ordering::Equal => {
+                            if update.hash() == original.hash() {
+                                // Reached a point of agreement but the chains are disjoint
+                                if !is_previous_original_invalid && point_of_agreement.is_none() {
+                                    if let (Some(previous_original_height), Some(..)) =
+                                        (previous_original_height, previous_update_height)
+                                    {
+                                        return Err(CannotConnectError {
+                                            try_include_height: previous_original_height,
+                                        });
+                                    }
+                                }
+                                point_of_agreement = Some(original.height());
+                                is_previous_original_invalid = false;
+                                // OPTIMIZATION: If we have the same underlying pointer, we can
+                                // return the new tip as it's guaranteed to connect.
+                                if update.eq_ptr(original) && is_update_height_superset_of_original
+                                {
+                                    return Ok((update_tip, changeset));
+                                }
+                            // We have an explicit invalidation, so we need to mark all previously
+                            // seen blocks of the original tip invalid.
+                            } else {
+                                for block_id in potentially_invalid_block_ids.drain(..) {
+                                    changeset.blocks.insert(block_id.height, None);
+                                }
+                                is_previous_original_invalid = true;
+                                changeset
+                                    .blocks
+                                    .insert(update.height(), Some(update.data()));
+                            }
+                            previous_update_height = Some(update.height());
+                            previous_original_height = Some(original.height());
+                            update_iter.next();
+                            original_iter.next();
                         }
                     }
-                    point_of_agreement_found = true;
-                    prev_orig_was_invalidated = false;
-                    // OPTIMIZATION 2 -- if we have the same underlying pointer at this point, we
-                    // can guarantee that no older blocks are introduced.
-                    if o.eq_ptr(u) {
-                        if is_update_height_superset_of_original {
-                            return Ok((update_tip, changeset));
-                        } else {
-                            let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset)
-                                .map_err(|_| CannotConnectError {
-                                try_include_height: 0,
-                            })?;
-                            return Ok((new_tip, changeset));
-                        }
-                    }
-                } else {
-                    // We have an invalidation height so we set the height to the updated hash and
-                    // also purge all the original chain block hashes above this block.
-                    changeset.blocks.insert(u.height(), Some(u.data()));
-                    for invalidated_height in potentially_invalidated_heights.drain(..) {
-                        changeset.blocks.insert(invalidated_height, None);
-                    }
-                    prev_orig_was_invalidated = true;
                 }
-                prev_update = curr_update.take();
-                prev_orig = curr_orig.take();
-            }
-            (None, None) => {
-                break;
-            }
-            _ => {
-                unreachable!("compiler cannot tell that everything has been covered")
+                (None, Some(..)) => unreachable!("Original can't be exhausted before update"),
             }
         }
-    }
 
-    // When we don't have a point of agreement you can imagine it is implicitly the
-    // genesis block so we need to do the final connectivity check which in this case
-    // just means making sure the entire original chain was invalidated.
-    if !prev_orig_was_invalidated && !point_of_agreement_found {
-        if let Some(prev_orig) = prev_orig {
-            return Err(CannotConnectError {
-                try_include_height: prev_orig.height(),
-            });
+        // Fail if no point of agreement is found, and no explicit invalidation occurred.
+        if !is_previous_original_invalid && point_of_agreement.is_none() {
+            if let Some(previous_original_height) = previous_original_height {
+                return Err(CannotConnectError {
+                    try_include_height: previous_original_height,
+                });
+            }
         }
-    }
 
-    let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset).map_err(|_| {
-        CannotConnectError {
-            try_include_height: 0,
-        }
-    })?;
-    Ok((new_tip, changeset))
+        // Apply changeset to tip.
+        let new_tip = apply_changeset_to_checkpoint(self.tip(), &changeset).map_err(|_| {
+            CannotConnectError {
+                try_include_height: 0,
+            }
+        })?;
+
+        Ok((new_tip, changeset))
+    }
 }

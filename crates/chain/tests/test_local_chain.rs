@@ -1,5 +1,4 @@
 #![cfg(feature = "miniscript")]
-
 use std::collections::BTreeMap;
 use std::ops::{Bound, RangeBounds};
 
@@ -76,7 +75,7 @@ impl TestLocalChain<'_> {
 fn update_local_chain() {
     [
         TestLocalChain {
-            name: "add first tip",
+            name: "No change",
             chain: local_chain![(0, hash!("A"))],
             update: chain_update![(0, hash!("A"))],
             exp: ExpectedResult::Ok {
@@ -85,38 +84,37 @@ fn update_local_chain() {
             },
         },
         TestLocalChain {
-            name: "add second tip",
-            chain: local_chain![(0, hash!("A"))],
-            update: chain_update![(0, hash!("A")), (1, hash!("B"))],
+            name: "Add first tip",
+            chain: local_chain![(0, hash!("_"))],
+            update: chain_update!((0, hash!("_")), (1, hash!("A"))),
             exp: ExpectedResult::Ok {
-                changeset: &[(1, Some(hash!("B")))],
-                init_changeset: &[(0, Some(hash!("A"))), (1, Some(hash!("B")))],
+                changeset: &[(1, Some(hash!("A")))],
+                init_changeset: &[(0, Some(hash!("_"))), (1, Some(hash!("A")))],
             },
         },
+        // Two disjoint chains can't merge
+        //        | 0 | 1 | 2 | 3
+        // chain  | _       B
+        // update |     A       C
         TestLocalChain {
             name: "two disjoint chains cannot merge",
-            chain: local_chain![(0, hash!("_")), (1, hash!("A"))],
-            update: chain_update![(0, hash!("_")), (2, hash!("B"))],
-            exp: ExpectedResult::Err(CannotConnectError {
-                try_include_height: 1,
-            }),
-        },
-        TestLocalChain {
-            name: "two disjoint chains cannot merge (existing chain longer)",
-            chain: local_chain![(0, hash!("_")), (2, hash!("A"))],
-            update: chain_update![(0, hash!("_")), (1, hash!("B"))],
+            chain: local_chain![(0, hash!("_")), (2, hash!("B"))],
+            update: chain_update![(1, hash!("A")), (3, hash!("C"))],
             exp: ExpectedResult::Err(CannotConnectError {
                 try_include_height: 2,
             }),
         },
+        // Two disjoint chains can't merge (existing longer)
+        //        | 0 | 1 | 2 | 3
+        // chain  | _       B
+        // update |     A
         TestLocalChain {
-            name: "duplicate chains should merge",
-            chain: local_chain![(0, hash!("A"))],
-            update: chain_update![(0, hash!("A"))],
-            exp: ExpectedResult::Ok {
-                changeset: &[],
-                init_changeset: &[(0, Some(hash!("A")))],
-            },
+            name: "two disjoint chains cannot merge (existing chain longer)",
+            chain: local_chain![(0, hash!("_")), (2, hash!("B"))],
+            update: chain_update![(1, hash!("A"))],
+            exp: ExpectedResult::Err(CannotConnectError {
+                try_include_height: 2,
+            }),
         },
         // Introduce an older checkpoint (B)
         //        | 0 | 1 | 2 | 3
@@ -170,14 +168,34 @@ fn update_local_chain() {
                 init_changeset: &[(0, Some(hash!("_"))), (1, Some(hash!("A"))), (2, Some(hash!("B"))), (3, Some(hash!("C")))],
             },
         },
+        // Reorganize chain by switching forks
+        //        | 0 | 1 | 2 |
+        // chain  | _   A
+        // update |     A'  B'
         TestLocalChain {
-            name: "fix blockhash before agreement point",
-            chain: local_chain![(0, hash!("im-wrong")), (1, hash!("we-agree"))],
-            update: chain_update![(0, hash!("fix")), (1, hash!("we-agree"))],
+            name: "invalidate tip and extend chain",
+            chain: local_chain![(0, hash!("_")), (1, hash!("A"))],
+            update: chain_update![(1, hash!("A'")), (2, hash!("B'"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(0, Some(hash!("fix")))],
-                init_changeset: &[(0, Some(hash!("fix"))), (1, Some(hash!("we-agree")))],
+                changeset: &[(1, Some(hash!("A'"))), (2, Some(hash!("B'")))],
+                init_changeset: &[
+                    (0, Some(hash!("_"))),
+                    (1, Some(hash!("A'"))),
+                    (2, Some(hash!("B'"))),
+                ],
             },
+        },
+        // Cannot update the genesis block
+        //        | 0 | 1 | 2
+        // chain  | _   A
+        // update | _'  A
+        TestLocalChain {
+            name: "cannot replace the genesis hash",
+            chain: local_chain![(0, hash!("G")), (1, hash!("A"))],
+            update: chain_update![(0, hash!("g")), (1, hash!("A"))],
+            exp: ExpectedResult::Err(CannotConnectError {
+                try_include_height: 0,
+            }),
         },
         // B and C are in both chain and update
         //        | 0 | 1 | 2 | 3 | 4
@@ -212,11 +230,11 @@ fn update_local_chain() {
                 try_include_height: 3,
             }),
         },
-        // Transient invalidation:
+        // Transitive invalidation:
         //        | 0 | 1 | 2 | 3 | 4 | 5
         // chain  | _       B   C       E
         // update | _       B'  C'  D
-        // This should succeed and invalidate B,C and E with point of agreement being A.
+        // This should succeed and invalidate B,C and E with point of agreement 0.
         TestLocalChain {
             name: "transitive invalidation applies to checkpoints higher than invalidation",
             chain: local_chain![(0, hash!("_")), (2, hash!("B")), (3, hash!("C")), (5, hash!("E"))],
@@ -236,11 +254,11 @@ fn update_local_chain() {
                 ],
             },
         },
-        // Transient invalidation:
+        // Transitive invalidation:
         //        | 0 | 1 | 2 | 3 | 4
         // chain  | _   B   C       E
         // update | _   B'  C'  D
-        // This should succeed and invalidate B, C and E with no point of agreement
+        // This should succeed and invalidate B, C and E with point of agreement 0
         TestLocalChain {
             name: "transitive invalidation applies to checkpoints higher than invalidation no point of agreement",
             chain: local_chain![(0, hash!("_")), (1, hash!("B")), (2, hash!("C")), (4, hash!("E"))],
@@ -260,7 +278,7 @@ fn update_local_chain() {
                 ],
             },
         },
-        // Transient invalidation:
+        // Partial invalidation, no connection.
         //        | 0 | 1 | 2 | 3 | 4 | 5
         // chain  | _   A   B   C       E
         // update | _       B'  C'  D
