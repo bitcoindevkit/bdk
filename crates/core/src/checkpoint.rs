@@ -244,60 +244,151 @@ where
 
     /// Inserts `data` at its `height` within the chain.
     ///
-    /// The effect of `insert` depends on whether a height already exists. If it doesn't, the data
-    /// we inserted and all pre-existing entries higher than it will be re-inserted after it. If the
-    /// height already existed and has a conflicting block hash then it will be purged along with
-    /// all entries following it. The returned chain will have a tip of the data passed in. Of
-    /// course, if the data was already present then this just returns `self`.
+    /// This method always returns a valid [`CheckPoint`], handling conflicts through displacement
+    /// and eviction:
+    ///
+    /// ## Rules
+    ///
+    /// ### No Conflict
+    /// If the inserted `data` doesn't conflict with existing checkpoints, it's inserted normally
+    /// into the chain. The new checkpoint is added at the specified height and all existing
+    /// checkpoints remain unchanged. If a node exists at the specified height and the inserted
+    /// data's `to_blockhash` matches the existing node's hash, then no change occurs and this
+    /// function returns `self`. That assumes that equality of block hashes implies equality
+    /// of the block data.
+    ///
+    /// ### Displacement
+    /// When `data.prev_blockhash()` conflicts with a checkpoint's hash, that checkpoint is
+    /// omitted from the new chain. This happens when the inserted block references
+    /// a different previous block than what exists in the chain.
+    ///
+    /// ### Eviction
+    /// When the inserted `data.to_blockhash()` conflicts with a higher checkpoint's
+    /// `prev_blockhash`, that checkpoint and all checkpoints above it are removed.
+    /// This occurs when the new block's hash doesn't match what higher blocks expect as their
+    /// previous block, making those higher blocks invalid.
+    ///
+    /// ### Combined Displacement and Eviction
+    /// Both displacement and eviction can occur when inserting a block that conflicts with
+    /// both lower and higher checkpoints in the chain. The lower conflicting checkpoint gets
+    /// displaced while higher conflicting checkpoints get purged.
+    ///
+    /// # Parameters
+    ///
+    /// - `height`: The block height where `data` should be inserted
+    /// - `data`: The block data to insert (must implement [`ToBlockHash`])
     ///
     /// # Panics
     ///
-    /// This panics if called with a genesis block that differs from that of `self`.
+    /// Panics if the insertion would replace (or omit) the checkpoint at height 0 (a.k.a
+    /// "genesis"). Although [`CheckPoint`] isn't structurally required to contain a genesis
+    /// block, if one is present, it stays immutable and can't be replaced.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use bdk_core::CheckPoint;
+    /// # use bitcoin::hashes::Hash;
+    /// # use bitcoin::BlockHash;
+    /// let cp = CheckPoint::new(100, BlockHash::all_zeros());
+    ///
+    /// // Insert at new height - no conflicts
+    /// let cp = cp.insert(101, BlockHash::all_zeros());
+    /// assert_eq!(cp.height(), 101);
+    ///
+    /// // Insert at existing height with same data - no change
+    /// let cp2 = cp.clone().insert(100, BlockHash::all_zeros());
+    /// assert_eq!(cp2, cp);
+    ///
+    /// // Replace the data at height 100 - higher nodes are evicted
+    /// let cp = cp.insert(100, Hash::hash(b"block_100_new"));
+    /// assert_eq!(cp.height(), 100);
+    /// ```
     #[must_use]
     pub fn insert(self, height: u32, data: D) -> Self {
         let mut cp = self.clone();
         let mut tail = vec![];
-        let base = loop {
+        let mut new_cp = loop {
             if cp.height() == height {
                 if cp.hash() == data.to_blockhash() {
                     return self;
                 }
-                assert_ne!(cp.height(), 0, "cannot replace genesis block");
-                // If we have a conflict we just return the inserted data because the tail is by
-                // implication invalid.
-                tail = vec![];
-                break cp.prev().expect("can't be called on genesis block");
+                assert_ne!(cp.height(), 0, "cannot replace the genesis block");
+                // We're replacing an entry, so the tail must be invalid.
+                tail.clear();
             }
-
-            if cp.height() < height {
+            if cp.height() > height {
+                tail.push((cp.height(), cp.data()));
+            }
+            if cp.height() < height && !cp.is_conflicted_by_next(height, &data) {
                 break cp;
             }
-
-            tail.push((cp.height(), cp.data()));
-            cp = cp.prev().expect("will break before genesis block");
+            match cp.prev() {
+                Some(prev) => cp = prev,
+                None => {
+                    // We didnt locate a base, so start a new `CheckPoint` with the inserted
+                    // data at the front. We only require that the node at height 0
+                    // isn't wrongfully omitted.
+                    assert_ne!(cp.height(), 0, "cannot replace the genesis block");
+                    break CheckPoint::new(height, data.clone());
+                }
+            }
         };
-
-        base.extend(core::iter::once((height, data)).chain(tail.into_iter().rev()))
-            .expect("tail is in order")
+        // Reconstruct the new chain. If `push` errors, return the best non-conflicted checkpoint.
+        let base_height = new_cp.height();
+        for (height, data) in core::iter::once((height, data))
+            .chain(tail.into_iter().rev())
+            .skip_while(|(height, _)| *height <= base_height)
+        {
+            match new_cp.clone().push(height, data) {
+                Ok(cp) => new_cp = cp,
+                Err(cp) => return cp,
+            }
+        }
+        new_cp
     }
 
     /// Puts another checkpoint onto the linked list representing the blockchain.
     ///
-    /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the
-    /// one you are pushing on to.
+    /// # Errors
+    ///
+    /// - Returns an `Err(self)` if the block you are pushing on is not at a greater height that the
+    ///   one you are pushing on to.
+    /// - If this checkpoint would be conflicted by the inserted data, i.e. the hash of this
+    ///   checkpoint doesn't agree with the data's `prev_blockhash`, then returns `Err(self)`.
     pub fn push(self, height: u32, data: D) -> Result<Self, Self> {
-        if self.height() < height {
-            Ok(Self(Arc::new(CPInner {
-                block_id: BlockId {
-                    height,
-                    hash: data.to_blockhash(),
-                },
-                data,
-                prev: Some(self.0),
-            })))
-        } else {
-            Err(self)
+        // `height` must be greater than self height.
+        if self.height() >= height {
+            return Err(self);
         }
+        // The pushed data must not conflict with self.
+        if self.is_conflicted_by_next(height, &data) {
+            return Err(self);
+        }
+        Ok(Self(Arc::new(CPInner {
+            block_id: BlockId {
+                height,
+                hash: data.to_blockhash(),
+            },
+            data,
+            prev: Some(self.0),
+        })))
+    }
+
+    /// Whether `self` would be conflicted by the addition of `data` at the specfied `height`.
+    ///
+    /// If `true`, this [`CheckPoint`] must reject an attempt to extend it with the given `data`
+    /// at the target `height`.
+    ///
+    /// To be consistent the chain must have the following property:
+    ///
+    /// If the target `height` is greater by 1, then the block hash of `self` equals the data's
+    /// `prev_blockhash`, otherwise a conflict is detected.
+    fn is_conflicted_by_next(&self, height: u32, data: &D) -> bool {
+        self.height().saturating_add(1) == height
+            && data
+                .prev_blockhash()
+                .is_some_and(|prev_hash| prev_hash != self.hash())
     }
 }
 
