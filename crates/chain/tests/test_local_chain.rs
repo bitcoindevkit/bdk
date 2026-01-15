@@ -11,6 +11,7 @@ use bdk_chain::{
     BlockId,
 };
 use bdk_testenv::{chain_update, hash, local_chain};
+use bitcoin::consensus::encode::deserialize_hex;
 use bitcoin::{block::Header, hashes::Hash, BlockHash};
 use proptest::prelude::*;
 
@@ -551,6 +552,53 @@ fn local_chain_disconnect_from() {
             i, t.name
         );
     }
+}
+
+// Test that `apply_update` can connect 1 `Header` at a time
+// and fails if a `prev_blockhash` conflict is detected.
+#[test]
+fn test_apply_update_single_header() {
+    let headers: Vec<Header> = [
+        "0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4adae5494dffff7f2002000000",
+        "0000002006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f1c96cc459dbb0c7bbc722af14f913da868779290ad48ff87ee314ebb8ae08f384b166069ffff7f2001000000",
+        "0000002078ce518c7dcfd99ad5859c35bd2be15794c0e5dc8e60c1fea3b0461c45da181ca80f828504f88c645ea46cfcf93156269807e3bd409e1317271a1546d238e9b24c166069ffff7f2001000000",
+        "000000200dfd6c5af6ea3cb341a08db344f93743d94b630d122867faff855f6310e58864e6e0c859fda703d66d051b86f16f09b0cead182f3cbe13767cd91b6371ec252c4c166069ffff7f2000000000",
+    ]
+    .into_iter()
+    .map(|s| deserialize_hex::<Header>(s).expect("failed to deserialize header"))
+    .collect();
+
+    let header_0 = headers[0];
+    let header_1 = headers[1];
+    let header_2 = headers[2];
+    let header_3 = headers[3];
+
+    let (mut chain, _) = LocalChain::from_genesis(header_0);
+
+    // Apply 1 `CheckPoint<Header>` at a time
+    for (height, header) in (1..).zip([header_1, header_2, header_3]) {
+        let changeset = chain.apply_update(CheckPoint::new(height, header)).unwrap();
+        assert_eq!(
+            changeset,
+            ChangeSet {
+                blocks: [(height, Some(headers[height as usize]))].into()
+            },
+        );
+    }
+    assert_eq!(chain.tip().iter().count(), 4);
+    for height in 0..4 {
+        assert!(chain
+            .get(height)
+            .is_some_and(|cp| cp.hash() == headers[height as usize].block_hash()))
+    }
+
+    // `apply_update` should error if update does not connect.
+    // Reset chain for error test.
+    chain = LocalChain::from_blocks([(0, header_0), (1, header_1)].into()).unwrap();
+    let mut header_2_alt = header_2;
+    header_2_alt.prev_blockhash = hash!("header_1_new");
+    let result = chain.apply_update(CheckPoint::new(2, header_2_alt));
+    assert!(result.is_err(), "Failed to detect prev_blockhash conflict");
 }
 
 #[test]
