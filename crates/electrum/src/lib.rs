@@ -16,6 +16,7 @@
 //! [`example_electrum`]: https://github.com/bitcoindevkit/bdk/tree/master/examples/example_electrum
 //! [`SyncResponse`]: bdk_core::spk_client::SyncResponse
 //! [`FullScanResponse`]: bdk_core::spk_client::FullScanResponse
+//! [`AuthProvider`]: electrum_client::config::AuthProvider
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![warn(missing_docs)]
 
@@ -24,3 +25,5 @@ pub use bdk_electrum_client::*;
 
 pub use bdk_core;
 pub use electrum_client;
+
+pub use electrum_client::{Config, ConfigBuilder};

@@ -603,6 +603,20 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     }
 }
 
+/// Creates a new BDK Electrum client from a URL with custom configuration.
+/// can be used as a convenience method for creating an Electrum client with custom settings
+/// such as JWT authorization providers, timeouts, or proxy settings.
+impl BdkElectrumClient<electrum_client::Client> {
+    /// [`electrum_client::ConfigBuilder`]: crate::electrum_client::ConfigBuilder
+    pub fn from_config(
+        url: &str,
+        config: electrum_client::Config,
+    ) -> Result<Self, electrum_client::Error> {
+        let client = electrum_client::Client::from_config(url, config)?;
+        Ok(Self::new(client))
+    }
+}
+
 /// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`. The latest blocks are
 /// fetched to construct checkpoint updates with the proper [`BlockHash`] in case of re-org.
 fn fetch_tip_and_latest_blocks(
