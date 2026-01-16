@@ -96,6 +96,20 @@ impl ToSql for Impl<bitcoin::BlockHash> {
     }
 }
 
+impl FromSql for Impl<BlockId> {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        BlockId::from_str(value.as_str()?)
+            .map(Self)
+            .map_err(from_sql_error)
+    }
+}
+
+impl ToSql for Impl<BlockId> {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(self.to_string().into())
+    }
+}
+
 #[cfg(feature = "miniscript")]
 impl FromSql for Impl<DescriptorId> {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
