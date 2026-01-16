@@ -22,8 +22,7 @@
 mod bdk_electrum_client;
 pub use bdk_electrum_client::*;
 
-mod electrum_sync;
-pub use electrum_sync::*;
+
 
 pub use bdk_core;
 pub use electrum_client;
