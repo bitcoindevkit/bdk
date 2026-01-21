@@ -40,7 +40,7 @@ use crate::{
 /// This struct represents a transaction that has been determined to be canonical (not
 /// conflicted). It includes the transaction itself along with its position in the chain (confirmed
 /// or unconfirmed).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanonicalTx<A> {
     /// The position of this transaction in the chain.
     ///
@@ -51,6 +51,21 @@ pub struct CanonicalTx<A> {
     pub txid: Txid,
     /// The full transaction.
     pub tx: Arc<Transaction>,
+}
+
+impl<A: Ord> Ord for CanonicalTx<A> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.pos
+            .cmp(&other.pos)
+            // Txid tiebreaker for same position
+            .then_with(|| self.txid.cmp(&other.txid))
+    }
+}
+
+impl<A: Ord> PartialOrd for CanonicalTx<A> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// A view of canonical transactions from a [`TxGraph`].
