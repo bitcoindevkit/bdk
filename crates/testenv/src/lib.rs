@@ -24,7 +24,7 @@ pub struct TestEnv {
 /// Configuration parameters.
 #[derive(Debug)]
 pub struct Config<'a> {
-    /// [`bitcoind::Conf`]
+    /// [`corepc_node::Conf`]
     pub bitcoind: corepc_node::Conf<'a>,
     /// [`electrsd::Conf`]
     pub electrsd: electrsd::Conf<'a>,
@@ -76,7 +76,7 @@ impl TestEnv {
         &self.electrsd.client
     }
 
-    /// Exposes the [`RpcApi`] calls from [`bitcoincore_rpc`].
+    /// Exposes the RPC calls from [`corepc_client`].
     pub fn rpc_client(&self) -> &corepc_node::Client {
         &self.bitcoind.client
     }
