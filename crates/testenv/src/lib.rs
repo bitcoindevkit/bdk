@@ -2,15 +2,10 @@
 
 pub mod utils;
 
-use bdk_chain::{
-    bitcoin::{
-        address::NetworkChecked, block::Header, hash_types::TxMerkleNode, hashes::Hash,
-        secp256k1::rand::random, transaction, Address, Amount, Block, BlockHash, ScriptBuf,
-        ScriptHash, Transaction, TxIn, TxOut, Txid,
-    },
-    local_chain::CheckPoint,
-};
-use electrsd::corepc_node::{anyhow::Context, TemplateRequest, TemplateRules};
+use anyhow::Context;
+use bdk_chain::CheckPoint;
+use bitcoin::{address::NetworkChecked, Address, Amount, BlockHash, Txid};
+use std::time::Duration;
 
 pub use electrsd;
 pub use electrsd::corepc_client;
@@ -18,7 +13,6 @@ pub use electrsd::corepc_node;
 pub use electrsd::corepc_node::anyhow;
 pub use electrsd::electrum_client;
 use electrsd::electrum_client::ElectrumApi;
-use std::time::Duration;
 
 /// Struct for running a regtest environment with a single `bitcoind` node with an `electrs`
 /// instance connected to it.
@@ -126,7 +120,14 @@ impl TestEnv {
     }
 
     /// Mine a block that is guaranteed to be empty even with transactions in the mempool.
+    #[cfg(feature = "std")]
     pub fn mine_empty_block(&self) -> anyhow::Result<(usize, BlockHash)> {
+        use bitcoin::secp256k1::rand::random;
+        use bitcoin::{
+            block::Header, hashes::Hash, transaction, Block, ScriptBuf, ScriptHash, Transaction,
+            TxIn, TxMerkleNode, TxOut,
+        };
+        use corepc_node::{TemplateRequest, TemplateRules};
         let request = TemplateRequest {
             rules: vec![TemplateRules::Segwit],
         };
@@ -266,6 +267,7 @@ impl TestEnv {
     }
 
     /// Reorg with a number of empty blocks of a given size `count`.
+    #[cfg(feature = "std")]
     pub fn reorg_empty_blocks(&self, count: usize) -> anyhow::Result<Vec<(usize, BlockHash)>> {
         let start_height = self.bitcoind.client.get_block_count()?;
         self.invalidate_blocks(count)?;
