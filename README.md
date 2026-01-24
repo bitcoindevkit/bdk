@@ -88,3 +88,21 @@ Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in the work by you, as defined in the Apache-2.0
 license, shall be dual licensed as above, without any additional terms or
 conditions.
+
+## Esplora backend example
+
+BDK can be used with an Esplora backend to fetch blockchain data without running a full node.
+
+Below is a minimal example showing how to query the current blockchain height using `bdk_esplora`:
+
+```rust
+use bdk_esplora::EsploraClient;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let esplora = EsploraClient::new("https://blockstream.info/api")?;
+    let height = esplora.get_height()?;
+    println!("Current block height: {}", height);
+    Ok(())
+}
+```
+
