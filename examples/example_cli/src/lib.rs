@@ -1,7 +1,7 @@
 use bdk_chain::keychain_txout::DEFAULT_LOOKAHEAD;
+use bdk_chain::miniscript::descriptor::KeyMapWrapper;
 use serde_json::json;
 use std::cmp;
-use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::str::FromStr;
@@ -11,11 +11,10 @@ use anyhow::bail;
 use anyhow::Context;
 use bdk_chain::bitcoin::{
     absolute, address::NetworkUnchecked, bip32, consensus, constants, hex::DisplayHex, relative,
-    secp256k1::Secp256k1, transaction, Address, Amount, Network, NetworkKind, PrivateKey, Psbt,
-    PublicKey, Sequence, Transaction, TxIn, TxOut,
+    secp256k1::Secp256k1, transaction, Address, Amount, Network, NetworkKind, Psbt, Sequence,
+    Transaction, TxIn, TxOut,
 };
 use bdk_chain::miniscript::{
-    descriptor::{DescriptorSecretKey, SinglePubKey},
     plan::{Assets, Plan},
     psbt::PsbtExt,
     Descriptor, DescriptorPublicKey, ForEachKey,
@@ -696,27 +695,15 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
 
                 let secp = Secp256k1::new();
                 let (_, keymap) = Descriptor::parse_descriptor(&secp, &desc_str)?;
+
                 if keymap.is_empty() {
                     bail!("unable to sign")
                 }
 
-                // note: we're only looking at the first entry in the keymap
-                // the idea is to find something that impls `GetKey`
-                let sign_res = match keymap.iter().next().expect("not empty") {
-                    (DescriptorPublicKey::Single(single_pub), DescriptorSecretKey::Single(prv)) => {
-                        let pk = match single_pub.key {
-                            SinglePubKey::FullKey(pk) => pk,
-                            SinglePubKey::XOnly(_) => unimplemented!("single xonly pubkey"),
-                        };
-                        let keys: HashMap<PublicKey, PrivateKey> = [(pk, prv.key)].into();
-                        psbt.sign(&keys, &secp)
-                    }
-                    (_, DescriptorSecretKey::XPrv(k)) => psbt.sign(&k.xkey, &secp),
-                    _ => unimplemented!("multi xkey signer"),
-                };
-
-                let _ =
-                    sign_res.map_err(|errors| anyhow::anyhow!("failed to sign PSBT {errors:?}"))?;
+                let keymap_wrapper: KeyMapWrapper = keymap.into();
+                let _sign_res = psbt
+                    .sign(&keymap_wrapper, &secp)
+                    .map_err(|errors| anyhow::anyhow!("failed to sign PSBT {errors:?}"))?;
 
                 let mut obj = serde_json::Map::new();
                 obj.insert("psbt".to_string(), json!(psbt.to_string()));
