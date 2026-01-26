@@ -7,9 +7,16 @@ use bdk_chain::{
     spk_txout::SpkTxOutIndex,
     Balance, BlockId, CanonicalizationParams, IndexedTxGraph, Merge,
 };
-use bdk_testenv::{anyhow, TestEnv};
-use bitcoin::{hashes::Hash, Block, Network, OutPoint, ScriptBuf, WScriptHash};
-use bitcoincore_rpc::RpcApi;
+use bdk_testenv::{
+    anyhow,
+    corepc_node::{Input, Output},
+    TestEnv,
+};
+use bitcoin::{hashes::Hash, Block, Network, ScriptBuf, WScriptHash};
+
+use crate::common::ClientExt;
+
+mod common;
 
 /// Ensure that blocks are emitted in order even after reorg.
 ///
@@ -20,21 +27,18 @@ use bitcoincore_rpc::RpcApi;
 #[test]
 pub fn test_sync_local_chain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
-    let network_tip = env.rpc_client().get_block_count()?;
-    let (mut local_chain, _) = LocalChain::from_genesis(env.rpc_client().get_block_hash(0)?);
-    let mut emitter = Emitter::new(
-        env.rpc_client(),
-        local_chain.tip(),
-        0,
-        NO_EXPECTED_MEMPOOL_TXS,
-    );
+    let network_tip = env.rpc_client().get_block_count()?.into_model().0;
+    let (mut local_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
+
+    let client = ClientExt::get_rpc_client(&env)?;
+    let mut emitter = Emitter::new(&client, local_chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
 
     // Mine some blocks and return the actual block hashes.
     // Because initializing `ElectrsD` already mines some blocks, we must include those too when
     // returning block hashes.
     let exp_hashes = {
         let mut hashes = (0..=network_tip)
-            .map(|height| env.rpc_client().get_block_hash(height))
+            .map(|height| env.get_block_hash(height))
             .collect::<Result<Vec<_>, _>>()?;
         hashes.extend(env.mine_blocks(101 - network_tip as usize, None)?);
         hashes
@@ -140,19 +144,24 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     let addr_0 = env
         .rpc_client()
         .get_new_address(None, None)?
+        .address()?
         .assume_checked();
+
     let addr_1 = env
         .rpc_client()
         .get_new_address(None, None)?
+        .address()?
         .assume_checked();
+
     let addr_2 = env
         .rpc_client()
         .get_new_address(None, None)?
+        .address()?
         .assume_checked();
 
     env.mine_blocks(101, None)?;
 
-    let (mut chain, _) = LocalChain::from_genesis(env.rpc_client().get_block_hash(0)?);
+    let (mut chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
     let mut indexed_tx_graph = IndexedTxGraph::<BlockId, _>::new({
         let mut index = SpkTxOutIndex::<usize>::default();
         index.insert_spk(0, addr_0.script_pubkey());
@@ -161,7 +170,8 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         index
     });
 
-    let emitter = &mut Emitter::new(env.rpc_client(), chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
+    let client = ClientExt::get_rpc_client(&env)?;
+    let emitter = &mut Emitter::new(&client, chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
 
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
@@ -174,16 +184,11 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     let exp_txids = {
         let mut txids = BTreeSet::new();
         for _ in 0..3 {
-            txids.insert(env.rpc_client().send_to_address(
-                &addr_0,
-                Amount::from_sat(10_000),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )?);
+            txids.insert(
+                env.rpc_client()
+                    .send_to_address(&addr_0, Amount::from_sat(10_000))?
+                    .txid()?,
+            );
         }
         txids
     };
@@ -210,7 +215,10 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
     // mine a block that confirms the 3 txs
     let exp_block_hash = env.mine_blocks(1, None)?[0];
-    let exp_block_height = env.rpc_client().get_block_info(&exp_block_hash)?.height as u32;
+    let exp_block_height = env
+        .rpc_client()
+        .get_block_verbose_one(exp_block_hash)?
+        .height as u32;
     let exp_anchors = exp_txids
         .iter()
         .map({
@@ -250,9 +258,11 @@ fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
     const CHAIN_TIP_HEIGHT: usize = 110;
 
     let env = TestEnv::new()?;
+
+    let client = ClientExt::get_rpc_client(&env)?;
     let mut emitter = Emitter::new(
-        env.rpc_client(),
-        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
+        &client,
+        CheckPoint::new(0, env.genesis_hash()?),
         EMITTER_START_HEIGHT as _,
         NO_EXPECTED_MEMPOOL_TXS,
     );
@@ -325,9 +335,11 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
 
     let env = TestEnv::new()?;
+
+    let client = ClientExt::get_rpc_client(&env)?;
     let mut emitter = Emitter::new(
-        env.rpc_client(),
-        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
+        &client,
+        CheckPoint::new(0, env.genesis_hash()?),
         0,
         NO_EXPECTED_MEMPOOL_TXS,
     );
@@ -336,12 +348,13 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     let addr_to_mine = env
         .rpc_client()
         .get_new_address(None, None)?
+        .address()?
         .assume_checked();
     let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
     let addr_to_track = Address::from_script(&spk_to_track, Network::Regtest)?;
 
     // setup receiver
-    let (mut recv_chain, _) = LocalChain::from_genesis(env.rpc_client().get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
     let mut recv_graph = IndexedTxGraph::<BlockId, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -358,14 +371,16 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         // lock outputs that send to `addr_to_track`
         let outpoints_to_lock = env
             .rpc_client()
-            .get_transaction(&txid, None)?
-            .transaction()?
+            .get_transaction(txid)?
+            .into_model()?
+            .tx
             .output
             .into_iter()
             .enumerate()
             .filter(|(_, txo)| txo.script_pubkey == spk_to_track)
-            .map(|(vout, _)| OutPoint::new(txid, vout as _))
+            .map(|(vout, _)| (txid, vout as u32))
             .collect::<Vec<_>>();
+
         env.rpc_client().lock_unspent(&outpoints_to_lock)?;
 
         let _ = env.mine_blocks(1, None)?;
@@ -413,9 +428,11 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     const MEMPOOL_TX_COUNT: usize = 2;
 
     let env = TestEnv::new()?;
+
+    let client = ClientExt::get_rpc_client(&env)?;
     let mut emitter = Emitter::new(
-        env.rpc_client(),
-        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
+        &client,
+        CheckPoint::new(0, env.genesis_hash()?),
         0,
         NO_EXPECTED_MEMPOOL_TXS,
     );
@@ -424,6 +441,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     let addr = env
         .rpc_client()
         .get_new_address(None, None)?
+        .address()?
         .assume_checked();
     env.mine_blocks(BLOCKS_TO_MINE, Some(addr.clone()))?;
     while emitter.next_block()?.is_some() {}
@@ -482,10 +500,11 @@ fn no_agreement_point() -> anyhow::Result<()> {
 
     let env = TestEnv::new()?;
 
+    let client = ClientExt::get_rpc_client(&env)?;
     // start height is 99
     let mut emitter = Emitter::new(
-        env.rpc_client(),
-        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
+        &client,
+        CheckPoint::new(0, env.genesis_hash()?),
         (PREMINE_COUNT - 2) as u32,
         NO_EXPECTED_MEMPOOL_TXS,
     );
@@ -507,12 +526,12 @@ fn no_agreement_point() -> anyhow::Result<()> {
     let block_hash_100a = block_header_100a.block_hash();
 
     // get hash for block 101a
-    let block_hash_101a = env.rpc_client().get_block_hash(101)?;
+    let block_hash_101a = env.rpc_client().get_block_hash(101)?.block_hash()?;
 
     // invalidate blocks 99a, 100a, 101a
-    env.rpc_client().invalidate_block(&block_hash_99a)?;
-    env.rpc_client().invalidate_block(&block_hash_100a)?;
-    env.rpc_client().invalidate_block(&block_hash_101a)?;
+    env.rpc_client().invalidate_block(block_hash_99a)?;
+    env.rpc_client().invalidate_block(block_hash_100a)?;
+    env.rpc_client().invalidate_block(block_hash_101a)?;
 
     // mine new blocks 99b, 100b, 101b
     env.mine_blocks(3, None)?;
@@ -542,13 +561,11 @@ fn no_agreement_point() -> anyhow::Result<()> {
 #[test]
 fn test_expect_tx_evicted() -> anyhow::Result<()> {
     use bdk_bitcoind_rpc::bitcoincore_rpc::bitcoin;
-    use bdk_bitcoind_rpc::bitcoincore_rpc::bitcoincore_rpc_json::CreateRawTransactionInput;
     use bdk_chain::miniscript;
     use bdk_chain::spk_txout::SpkTxOutIndex;
     use bitcoin::constants::genesis_block;
     use bitcoin::secp256k1::Secp256k1;
     use bitcoin::Network;
-    use std::collections::HashMap;
     let env = TestEnv::new()?;
 
     let s = bdk_testenv::utils::DESCRIPTORS[0];
@@ -570,12 +587,10 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
         &Address::from_script(&spk, Network::Regtest)?,
         Amount::ONE_BTC,
     )?;
-    let tx_1 = env
-        .rpc_client()
-        .get_transaction(&txid_1, None)?
-        .transaction()?;
+    let tx_1 = env.rpc_client().get_transaction(txid_1)?.into_model()?.tx;
 
-    let mut emitter = Emitter::new(env.rpc_client(), chain.tip(), 1, core::iter::once(tx_1));
+    let client = ClientExt::get_rpc_client(&env)?;
+    let mut emitter = Emitter::new(&client, chain.tip(), 1, core::iter::once(tx_1));
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
         chain.apply_header(&emission.block.header, height)?;
@@ -592,25 +607,28 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
 
     // Get `prevout` from core.
     let core = env.rpc_client();
-    let tx1 = &core.get_raw_transaction(&txid_1, None)?;
+    let tx1 = core.get_transaction(txid_1)?.into_model()?.tx;
     let txin = &tx1.input[0];
     let op = txin.previous_output;
 
     // Create `tx1b` using the previous output from tx1.
-    let utxo = CreateRawTransactionInput {
+    let utxo = Input {
         txid: op.txid,
-        vout: op.vout,
+        vout: op.vout as u64,
         sequence: None,
     };
-    let addr = core.get_new_address(None, None)?.assume_checked();
-    let tx = core.create_raw_transaction(
-        &[utxo],
-        &HashMap::from([(addr.to_string(), Amount::from_btc(49.99)?)]),
-        None,
-        None,
-    )?;
-    let res = core.sign_raw_transaction_with_wallet(&tx, None, None)?;
-    let tx1b = res.transaction()?;
+
+    let addr = core
+        .get_new_address(None, None)?
+        .address()?
+        .assume_checked();
+
+    let outputs = [Output::new(addr, Amount::from_btc(49.99)?)];
+    let tx = core
+        .create_raw_transaction(&[utxo], &outputs)?
+        .into_model()?
+        .0;
+    let tx1b = core.sign_raw_transaction_with_wallet(&tx)?.into_model()?.tx;
 
     // Send the tx.
     let _txid_2 = core.send_raw_transaction(&tx1b)?;
@@ -651,11 +669,13 @@ fn detect_new_mempool_txs() -> anyhow::Result<()> {
     let addr = env
         .rpc_client()
         .get_new_address(None, None)?
+        .address()?
         .require_network(Network::Regtest)?;
 
+    let client = ClientExt::get_rpc_client(&env)?;
     let mut emitter = Emitter::new(
-        env.rpc_client(),
-        CheckPoint::new(0, env.rpc_client().get_block_hash(0)?),
+        &client,
+        CheckPoint::new(0, env.genesis_hash()?),
         0,
         NO_EXPECTED_MEMPOOL_TXS,
     );

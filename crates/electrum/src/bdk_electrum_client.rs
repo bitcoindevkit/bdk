@@ -702,7 +702,7 @@ mod test {
     use bdk_chain::bitcoin::{constants, Network, OutPoint, ScriptBuf, Transaction, TxIn};
     use bdk_chain::CheckPoint;
     use bdk_core::{collections::BTreeMap, spk_client::SyncRequest};
-    use bdk_testenv::{anyhow, bitcoincore_rpc::RpcApi, utils::new_tx, TestEnv};
+    use bdk_testenv::{anyhow, utils::new_tx, TestEnv};
     use core::time::Duration;
     use electrum_client::Error as ElectrumError;
     use std::sync::Arc;
@@ -786,13 +786,14 @@ mod test {
         let addr = env
             .rpc_client()
             .get_new_address(None, None)?
+            .address()?
             .assume_checked();
         let txid = env.send(&addr, Amount::from_sat(50_000))?;
 
         // Mine block that confirms transaction.
         env.mine_blocks(1, None)?;
         env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
-        let height: u32 = env.rpc_client().get_block_count()? as u32;
+        let height: u32 = env.rpc_client().get_block_count()?.into_model().0 as u32;
 
         // Add the pre-reorg block that the tx is confirmed in to the header cache.
         let header = electrum_client.inner.block_header(height as usize)?;

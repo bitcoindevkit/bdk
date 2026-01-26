@@ -8,17 +8,17 @@ use bdk_chain::{
 };
 use bdk_core::bitcoin::{
     key::{Secp256k1, UntweakedPublicKey},
-    Network,
+    Denomination,
 };
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{
     anyhow,
-    bitcoincore_rpc::{json::CreateRawTransactionInput, RawTx, RpcApi},
+    corepc_node::{Input, Output},
     TestEnv,
 };
 use core::time::Duration;
 use electrum_client::ElectrumApi;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::str::FromStr;
 
 // Batch size for `sync_with_electrum`.
@@ -89,7 +89,7 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     let client = BdkElectrumClient::new(electrum_client);
 
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new(SpkTxOutIndex::<()>::default());
-    let (chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
+    let (chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
 
     // Get receiving address.
     let receiver_spk = get_test_spk();
@@ -100,48 +100,57 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
 
     // Select a UTXO to use as an input for constructing our test transactions.
     let selected_utxo = rpc_client
-        .list_unspent(None, None, None, Some(false), None)?
+        .list_unspent()?
+        .0
         .into_iter()
         // Find a block reward tx.
-        .find(|utxo| utxo.amount == Amount::from_int_btc(50))
-        .expect("Must find a block reward UTXO");
+        .find(|utxo| utxo.amount == Amount::from_int_btc(50).to_btc())
+        .expect("Must find a block reward UTXO")
+        .into_model()?;
 
     // Derive the sender's address from the selected UTXO.
-    let sender_spk = selected_utxo.script_pub_key.clone();
+    let sender_spk = selected_utxo.script_pubkey.clone();
     let sender_addr = Address::from_script(&sender_spk, bdk_chain::bitcoin::Network::Regtest)
         .expect("Failed to derive address from UTXO");
 
     // Setup the common inputs used by both `send_tx` and `undo_send_tx`.
-    let inputs = [CreateRawTransactionInput {
+    let inputs = [Input {
         txid: selected_utxo.txid,
-        vout: selected_utxo.vout,
+        vout: selected_utxo.vout as u64,
         sequence: None,
     }];
 
     // Create and sign the `send_tx` that sends funds to the receiver address.
-    let send_tx_outputs = HashMap::from([(
-        receiver_addr.to_string(),
-        selected_utxo.amount - SEND_TX_FEE,
-    )]);
-    let send_tx = rpc_client.create_raw_transaction(&inputs, &send_tx_outputs, None, Some(true))?;
+    let send_tx_outputs = [Output::new(
+        receiver_addr,
+        selected_utxo.amount.to_unsigned()? - SEND_TX_FEE,
+    )];
     let send_tx = rpc_client
-        .sign_raw_transaction_with_wallet(send_tx.raw_hex(), None, None)?
-        .transaction()?;
+        .create_raw_transaction(&inputs, &send_tx_outputs)?
+        .into_model()?
+        .0;
+    let send_tx = rpc_client
+        .sign_raw_transaction_with_wallet(&send_tx)?
+        .into_model()?
+        .tx;
 
     // Create and sign the `undo_send_tx` transaction. This redirects funds back to the sender
     // address.
-    let undo_send_outputs = HashMap::from([(
-        sender_addr.to_string(),
-        selected_utxo.amount - UNDO_SEND_TX_FEE,
-    )]);
-    let undo_send_tx =
-        rpc_client.create_raw_transaction(&inputs, &undo_send_outputs, None, Some(true))?;
+    let undo_send_outputs = [Output::new(
+        sender_addr,
+        selected_utxo.amount.to_unsigned()? - UNDO_SEND_TX_FEE,
+    )];
     let undo_send_tx = rpc_client
-        .sign_raw_transaction_with_wallet(undo_send_tx.raw_hex(), None, None)?
-        .transaction()?;
+        .create_raw_transaction(&inputs, &undo_send_outputs)?
+        .into_model()?
+        .0;
+    let undo_send_tx = rpc_client
+        .sign_raw_transaction_with_wallet(&undo_send_tx)?
+        .into_model()?
+        .tx;
 
     // Sync after broadcasting the `send_tx`. Ensure that we detect and receive the `send_tx`.
-    let send_txid = env.rpc_client().send_raw_transaction(send_tx.raw_hex())?;
+    let send_txid = env.rpc_client().send_raw_transaction(&send_tx)?.txid()?;
     env.wait_until_electrum_sees_txid(send_txid, Duration::from_secs(6))?;
     let sync_request = SyncRequest::builder()
         .chain_tip(chain.tip())
@@ -170,7 +179,8 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     // mempool.
     let undo_send_txid = env
         .rpc_client()
-        .send_raw_transaction(undo_send_tx.raw_hex())?;
+        .send_raw_transaction(&undo_send_tx)?
+        .txid()?;
     env.wait_until_electrum_sees_txid(undo_send_txid, Duration::from_secs(6))?;
     let sync_request = SyncRequest::builder()
         .chain_tip(chain.tip())
@@ -206,43 +216,47 @@ pub fn chained_mempool_tx_sync() -> anyhow::Result<()> {
     let rpc_client = env.rpc_client();
     let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
 
-    let tracked_addr = rpc_client
-        .get_new_address(None, None)?
-        .require_network(Network::Regtest)?;
+    let tracked_addr = rpc_client.new_address()?;
 
     env.mine_blocks(100, None)?;
 
     // First unconfirmed tx.
     let txid1 = env.send(&tracked_addr, Amount::from_btc(1.0)?)?;
 
-    // Create second unconfirmed tx that spends the first.
-    let utxo = rpc_client
-        .list_unspent(None, Some(0), None, Some(true), None)?
-        .into_iter()
-        .find(|utxo| utxo.script_pub_key == tracked_addr.script_pubkey())
-        .expect("must find the newly created utxo");
-    let tx_that_spends_unconfirmed = rpc_client.create_raw_transaction(
-        &[CreateRawTransactionInput {
-            txid: utxo.txid,
-            vout: utxo.vout,
-            sequence: None,
-        }],
-        &[(
-            tracked_addr.to_string(),
-            utxo.amount - Amount::from_sat(1000),
-        )]
-        .into(),
-        None,
-        None,
-    )?;
-    let signed_tx = rpc_client
-        .sign_raw_transaction_with_wallet(tx_that_spends_unconfirmed.raw_hex(), None, None)?
+    let raw_tx = rpc_client.get_raw_transaction(txid1)?.transaction()?;
+    let (vout, utxo) = raw_tx
+        .output
+        .iter()
+        .enumerate()
+        .find(|(_, utxo)| utxo.script_pubkey == tracked_addr.script_pubkey())
+        .expect("must find the newly created UTXO");
+
+    let tx_that_spends_unconfirmed = rpc_client
+        .create_raw_transaction(
+            &[Input {
+                txid: raw_tx.compute_txid(),
+                vout: vout as u64,
+                sequence: None,
+            }],
+            &[Output::new(
+                tracked_addr.clone(),
+                utxo.value - Amount::from_sat(1000),
+            )],
+        )?
         .transaction()?;
-    let txid2 = rpc_client.send_raw_transaction(signed_tx.raw_hex())?;
+
+    let signed_tx = rpc_client
+        .sign_raw_transaction_with_wallet(&tx_that_spends_unconfirmed)?
+        .into_model()?
+        .tx;
+
+    let txid2 = rpc_client.send_raw_transaction(&signed_tx)?.txid()?;
 
     env.wait_until_electrum_sees_txid(signed_tx.compute_txid(), Duration::from_secs(6))?;
 
-    let spk_history = electrum_client.script_get_history(&tracked_addr.script_pubkey())?;
+    let spk = tracked_addr.clone().script_pubkey();
+    let script = spk.as_script();
+    let spk_history = electrum_client.script_get_history(script)?;
     assert!(
         spk_history.into_iter().any(|tx_res| tx_res.height < 0),
         "must find tx with negative height"
@@ -280,26 +294,16 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     ];
 
     let _block_hashes = env.mine_blocks(101, None)?;
-    let txid1 = env.bitcoind.client.send_to_address(
-        &receive_address1,
-        Amount::from_sat(10000),
-        None,
-        None,
-        None,
-        None,
-        Some(1),
-        None,
-    )?;
-    let txid2 = env.bitcoind.client.send_to_address(
-        &receive_address0,
-        Amount::from_sat(20000),
-        None,
-        None,
-        None,
-        None,
-        Some(1),
-        None,
-    )?;
+    let txid1 = env
+        .bitcoind
+        .client
+        .send_to_address(&receive_address1, Amount::from_sat(10000))?
+        .txid()?;
+    let txid2 = env
+        .bitcoind
+        .client
+        .send_to_address(&receive_address0, Amount::from_sat(20000))?
+        .txid()?;
     env.mine_blocks(1, None)?;
     env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
@@ -346,7 +350,8 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         let tx_fee = env
             .bitcoind
             .client
-            .get_transaction(&tx.compute_txid(), None)
+            .get_transaction(tx.compute_txid())?
+            .into_model()
             .expect("Tx must exist")
             .fee
             .expect("Fee must exist")
@@ -402,16 +407,11 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         .collect();
 
     // Then receive coins on the 4th address.
-    let txid_4th_addr = env.bitcoind.client.send_to_address(
-        &addresses[3],
-        Amount::from_sat(10000),
-        None,
-        None,
-        None,
-        None,
-        Some(1),
-        None,
-    )?;
+    let txid_4th_addr = env
+        .bitcoind
+        .client
+        .send_to_address(&addresses[3], Amount::from_sat(10000))?
+        .txid()?;
     env.mine_blocks(1, None)?;
     env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
@@ -446,16 +446,11 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     assert_eq!(full_scan_update.last_active_indices[&0], 3);
 
     // Now receive a coin on the last address.
-    let txid_last_addr = env.bitcoind.client.send_to_address(
-        &addresses[addresses.len() - 1],
-        Amount::from_sat(10000),
-        None,
-        None,
-        None,
-        None,
-        Some(1),
-        None,
-    )?;
+    let txid_last_addr = env
+        .bitcoind
+        .client
+        .send_to_address(&addresses[addresses.len() - 1], Amount::from_sat(10000))?
+        .txid()?;
     env.mine_blocks(1, None)?;
     env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 
@@ -507,16 +502,12 @@ fn test_sync() -> anyhow::Result<()> {
     let client = BdkElectrumClient::new(electrum_client);
 
     // Setup addresses.
-    let addr_to_mine = env
-        .bitcoind
-        .client
-        .get_new_address(None, None)?
-        .assume_checked();
+    let addr_to_mine = env.bitcoind.client.new_address()?;
     let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.
-    let (mut recv_chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
     let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -619,7 +610,8 @@ fn test_sync() -> anyhow::Result<()> {
         let tx_fee = env
             .bitcoind
             .client
-            .get_transaction(&tx.txid, None)
+            .get_transaction(tx.txid)?
+            .into_model()
             .expect("Tx must exist")
             .fee
             .expect("Fee must exist")
@@ -650,16 +642,12 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     let client = BdkElectrumClient::new(electrum_client);
 
     // Setup addresses.
-    let addr_to_mine = env
-        .bitcoind
-        .client
-        .get_new_address(None, None)?
-        .assume_checked();
+    let addr_to_mine = env.bitcoind.client.new_address()?;
     let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.
-    let (mut recv_chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
     let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -745,7 +733,7 @@ fn test_sync_with_coinbase() -> anyhow::Result<()> {
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.
-    let (mut recv_chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
     let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -780,7 +768,7 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
     let addr_to_track = Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
 
     // Setup receiver.
-    let (mut recv_chain, _) = LocalChain::from_genesis(env.bitcoind.client.get_block_hash(0)?);
+    let (mut recv_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
     let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
         let mut recv_index = SpkTxOutIndex::default();
         recv_index.insert_spk((), spk_to_track.clone());
@@ -792,44 +780,42 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
 
     // Send a preliminary tx such that the new utxo in Core's wallet
     // becomes the input of the next tx
-    let new_addr = env
-        .rpc_client()
-        .get_new_address(None, None)?
-        .assume_checked();
+    let new_addr = env.rpc_client().new_address()?;
     let prev_amt = SEND_AMOUNT + FEE_AMOUNT;
     env.send(&new_addr, prev_amt)?;
-    let prev_block_hash = env.mine_blocks(1, None)?.into_iter().next();
+    let _prev_block_hash = env
+        .mine_blocks(1, None)?
+        .into_iter()
+        .next()
+        .expect("should've successfully mined a block");
 
     let txid = env.send(&addr_to_track, SEND_AMOUNT)?;
 
     // Mine a block to confirm sent tx.
-    let block_hash = env.mine_blocks(1, None)?.into_iter().next();
+    let _block_hash = env
+        .mine_blocks(1, None)?
+        .into_iter()
+        .next()
+        .expect("should've successfully mined a block");
 
     // Look at the tx we just sent, it should have 1 input and 1 output
-    let tx = env
-        .rpc_client()
-        .get_raw_transaction_info(&txid, block_hash.as_ref())?;
-    assert_eq!(tx.vin.len(), 1);
-    assert_eq!(tx.vout.len(), 1);
-    let vin = &tx.vin[0];
-    let prev_txid = vin.txid.unwrap();
-    let vout = vin.vout.unwrap();
-    let outpoint = bdk_chain::bitcoin::OutPoint::new(prev_txid, vout);
+    let tx = env.rpc_client().get_transaction(txid)?.into_model()?.tx;
+    assert_eq!(tx.input.len(), 1);
+    assert_eq!(tx.output.len(), 1);
+    let outpoint = tx.input[0].previous_output;
+    let prev_txid = outpoint.txid;
 
     // Get the txout of the previous tx
     let prev_tx = env
         .rpc_client()
-        .get_raw_transaction_info(&prev_txid, prev_block_hash.as_ref())?;
+        .get_transaction(prev_txid)?
+        .into_model()?
+        .tx;
     let txout = prev_tx
-        .vout
+        .output
         .iter()
         .find(|txout| txout.value == prev_amt)
-        .unwrap();
-    let script_pubkey = ScriptBuf::from_bytes(txout.script_pub_key.hex.to_vec());
-    let txout = bdk_chain::bitcoin::TxOut {
-        value: txout.value,
-        script_pubkey,
-    };
+        .expect("should've successfully found the existing `TxOut`");
 
     // Sync up to tip.
     env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
@@ -846,7 +832,7 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
         .all_txouts()
         .find(|(_op, txout)| txout.value == prev_amt)
         .unwrap();
-    assert_eq!(graph_txout, (outpoint, &txout));
+    assert_eq!(graph_txout, (outpoint, txout));
 
     // Check to see if tx is confirmed.
     assert_eq!(
@@ -872,12 +858,13 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
         let tx_fee = env
             .bitcoind
             .client
-            .get_transaction(&tx.txid, None)
+            .get_transaction(tx.txid)
             .expect("Tx must exist")
             .fee
+            .map(|fee| Amount::from_float_in(fee.abs(), Denomination::BTC))
             .expect("Fee must exist")
-            .abs()
-            .to_sat() as u64;
+            .expect("Amount parsing should succeed")
+            .to_sat();
 
         // Check that the calculated fee matches the fee from the transaction data.
         assert_eq!(fee, Amount::from_sat(tx_fee)); // 1650sat

@@ -17,15 +17,16 @@ workspace = true
 
 [dependencies]
 bdk_chain = { path = "../chain", version = "0.23.1", default-features = false }
-electrsd = { version = "0.28.0", features = [ "legacy" ], default-features = false }
+electrsd = { version = "0.36.1", features = [ "legacy" ], default-features = false }
+bitcoin = { version = "0.32.0", default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "." }
 
 [features]
 default = ["std", "download"]
-download = ["electrsd/bitcoind_25_0", "electrsd/esplora_a33e97e1"]
-std = ["bdk_chain/std"]
+download = ["electrsd/corepc-node_28_2", "electrsd/esplora_a33e97e1"]
+std = ["bdk_chain/std", "bitcoin/rand-std"]
 serde = ["bdk_chain/serde"]
 
 [package.metadata.docs.rs]
