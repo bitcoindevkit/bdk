@@ -16,10 +16,11 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 use bdk_core::collections::{HashMap, HashSet};
-use bdk_core::{BlockId, CheckPoint};
+use bdk_core::{BlockId, CheckPoint, FromBlockHeader, ToBlockHash};
 use bitcoin::{Block, BlockHash, Transaction, Txid};
 use bitcoincore_rpc::{bitcoincore_rpc_json, RpcApi};
 use core::ops::Deref;
+use std::fmt::Debug;
 
 pub mod bip158;
 
@@ -30,13 +31,13 @@ pub use bitcoincore_rpc;
 /// Refer to [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate
-pub struct Emitter<C> {
+pub struct Emitter<C, D = BlockHash> {
     client: C,
     start_height: u32,
 
     /// The checkpoint of the last-emitted block that is in the best chain. If it is later found
     /// that the block is no longer in the best chain, it will be popped off from here.
-    last_cp: CheckPoint<BlockHash>,
+    last_cp: CheckPoint<D>,
 
     /// The block result returned from rpc of the last-emitted block. As this result contains the
     /// next block's block hash (which we use to fetch the next block), we set this to `None`
@@ -62,10 +63,11 @@ pub struct Emitter<C> {
 /// to start empty (i.e. with no unconfirmed transactions).
 pub const NO_EXPECTED_MEMPOOL_TXS: core::iter::Empty<Arc<Transaction>> = core::iter::empty();
 
-impl<C> Emitter<C>
+impl<C, D> Emitter<C, D>
 where
     C: Deref,
     C::Target: RpcApi,
+    D: ToBlockHash + Clone + Debug,
 {
     /// Construct a new [`Emitter`].
     ///
@@ -80,7 +82,7 @@ where
     /// If it is known that the wallet is empty, [`NO_EXPECTED_MEMPOOL_TXS`] can be used.
     pub fn new(
         client: C,
-        last_cp: CheckPoint<BlockHash>,
+        last_cp: CheckPoint<D>,
         start_height: u32,
         expected_mempool_txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>,
     ) -> Self {
@@ -198,9 +200,18 @@ where
         Ok(mempool_event)
     }
 
-    /// Emit the next block height and block (if any).
-    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
-        if let Some((checkpoint, block)) = poll(self, move |hash, client| client.get_block(hash))? {
+    /// Emit the next block, using `to_data` to construct checkpoint data from the block.
+    ///
+    /// This is the alternative to [`next_block`](Self::next_block) when [`FromBlockHeader`] isn't
+    /// implemented for `D`.
+    pub fn next_block_with<F>(
+        &mut self,
+        to_data: F,
+    ) -> Result<Option<BlockEvent<Block, D>>, bitcoincore_rpc::Error>
+    where
+        F: Fn(&Block) -> D,
+    {
+        if let Some((checkpoint, block)) = poll(self, to_data)? {
             // Stop tracking unconfirmed transactions that have been confirmed in this block.
             for tx in &block.txdata {
                 self.mempool_snapshot.remove(&tx.compute_txid());
@@ -208,6 +219,14 @@ where
             return Ok(Some(BlockEvent { block, checkpoint }));
         }
         Ok(None)
+    }
+
+    /// Emit the next block height and block (if any).
+    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block, D>>, bitcoincore_rpc::Error>
+    where
+        D: FromBlockHeader,
+    {
+        self.next_block_with(|block| D::from_blockheader(block.header))
     }
 }
 
@@ -223,7 +242,7 @@ pub struct MempoolEvent {
 
 /// A newly emitted block from [`Emitter`].
 #[derive(Debug)]
-pub struct BlockEvent<B> {
+pub struct BlockEvent<B = Block, D = BlockHash> {
     /// The block.
     pub block: B,
 
@@ -235,7 +254,7 @@ pub struct BlockEvent<B> {
     ///
     /// This is important as BDK structures require block-to-apply to be connected with another
     /// block in the original chain.
-    pub checkpoint: CheckPoint<BlockHash>,
+    pub checkpoint: CheckPoint<D>,
 }
 
 impl<B> BlockEvent<B> {
@@ -264,17 +283,17 @@ impl<B> BlockEvent<B> {
     }
 }
 
-enum PollResponse {
+enum PollResponse<D = BlockHash> {
     Block(bitcoincore_rpc_json::GetBlockResult),
     NoMoreBlocks,
     /// Fetched block is not in the best chain.
     BlockNotInBestChain,
-    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint<BlockHash>),
+    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint<D>),
     /// Force the genesis checkpoint down the receiver's throat.
     AgreementPointNotFound(BlockHash),
 }
 
-fn poll_once<C>(emitter: &Emitter<C>) -> Result<PollResponse, bitcoincore_rpc::Error>
+fn poll_once<C, D>(emitter: &Emitter<C, D>) -> Result<PollResponse<D>, bitcoincore_rpc::Error>
 where
     C: Deref,
     C::Target: RpcApi,
@@ -328,30 +347,32 @@ where
     Ok(PollResponse::AgreementPointNotFound(genesis_hash))
 }
 
-fn poll<C, V, F>(
-    emitter: &mut Emitter<C>,
-    get_item: F,
-) -> Result<Option<(CheckPoint<BlockHash>, V)>, bitcoincore_rpc::Error>
+fn poll<C, D, F>(
+    emitter: &mut Emitter<C, D>,
+    to_cp_data: F,
+) -> Result<Option<(CheckPoint<D>, Block)>, bitcoincore_rpc::Error>
 where
     C: Deref,
     C::Target: RpcApi,
-    F: Fn(&BlockHash, &C::Target) -> Result<V, bitcoincore_rpc::Error>,
+    D: ToBlockHash + Clone + Debug,
+    F: Fn(&Block) -> D,
 {
+    let client = &emitter.client;
     loop {
         match poll_once(emitter)? {
             PollResponse::Block(res) => {
                 let height = res.height as u32;
-                let hash = res.hash;
-                let item = get_item(&hash, &emitter.client)?;
+                let block = client.get_block(&res.hash)?;
+                let cp_data = to_cp_data(&block);
 
                 let new_cp = emitter
                     .last_cp
                     .clone()
-                    .push(height, hash)
+                    .push(height, cp_data)
                     .expect("must push");
                 emitter.last_cp = new_cp.clone();
                 emitter.last_block = Some(res);
-                return Ok(Some((new_cp, item)));
+                return Ok(Some((new_cp, block)));
             }
             PollResponse::NoMoreBlocks => {
                 emitter.last_block = None;
@@ -368,7 +389,9 @@ where
                 continue;
             }
             PollResponse::AgreementPointNotFound(genesis_hash) => {
-                emitter.last_cp = CheckPoint::new(0, genesis_hash);
+                let block = client.get_block(&genesis_hash)?;
+                let cp_data = to_cp_data(&block);
+                emitter.last_cp = CheckPoint::new(0, cp_data);
                 emitter.last_block = None;
                 continue;
             }
