@@ -4,11 +4,11 @@ use bdk_core::{
     spk_client::{
         FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
     },
-    BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
+    BlockId, CheckPoint, ConfirmationBlockTime, FromBlockHeader, ToBlockHash, TxUpdate,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
-use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
+use std::{convert::TryInto, fmt::Debug};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
@@ -111,18 +111,53 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
     /// [`Wallet.calculate_fee`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee
     /// [`Wallet.calculate_fee_rate`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
-    pub fn full_scan<K: Ord + Clone>(
+    pub fn full_scan<K, D>(
         &self,
-        request: impl Into<FullScanRequest<K>>,
+        request: impl Into<FullScanRequest<K, D>>,
         stop_gap: usize,
         batch_size: usize,
         fetch_prev_txouts: bool,
-    ) -> Result<FullScanResponse<K>, Error> {
-        let mut request: FullScanRequest<K> = request.into();
+    ) -> Result<FullScanResponse<K, ConfirmationBlockTime, D>, Error>
+    where
+        K: Ord + Clone,
+        D: ToBlockHash + FromBlockHeader + Debug + Clone,
+    {
+        self.full_scan_with(
+            request,
+            stop_gap,
+            batch_size,
+            fetch_prev_txouts,
+            D::from_blockheader,
+        )
+    }
+
+    /// Performs a full scan with a custom checkpoint data type `D`.
+    ///
+    /// This is equivalent to [`full_scan`](Self::full_scan) with an additional `to_data` closure
+    /// that you have to pass in. `to_data` should convert a block header to the checkpoint data
+    /// type.
+    pub fn full_scan_with<K, D, F>(
+        &self,
+        request: impl Into<FullScanRequest<K, D>>,
+        stop_gap: usize,
+        batch_size: usize,
+        fetch_prev_txouts: bool,
+        to_data: F,
+    ) -> Result<FullScanResponse<K, ConfirmationBlockTime, D>, Error>
+    where
+        K: Ord + Clone,
+        D: ToBlockHash + Debug + Clone,
+        F: Fn(Header) -> D,
+    {
+        let mut request: FullScanRequest<K, D> = request.into();
         let start_time = request.start_time();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(
+                &self.inner,
+                chain_tip,
+                &to_data,
+            )?),
             None => None,
         };
 
@@ -158,11 +193,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
 
         let chain_update = match tip_and_latest_blocks {
-            Some((chain_tip, latest_blocks)) => Some(chain_update(
-                chain_tip,
-                &latest_blocks,
-                tx_update.anchors.iter().cloned(),
-            )?),
+            Some((chain_tip, latest_blocks)) => {
+                let header_cache = self.block_header_cache.lock().unwrap();
+                Some(chain_update(
+                    chain_tip,
+                    &latest_blocks,
+                    &header_cache,
+                    tx_update.anchors.iter().cloned(),
+                    to_data,
+                )?)
+            }
             _ => None,
         };
 
@@ -195,17 +235,42 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
     /// [`Wallet.calculate_fee`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee
     /// [`Wallet.calculate_fee_rate`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
-    pub fn sync<I: 'static>(
+    pub fn sync<I: 'static, D>(
         &self,
-        request: impl Into<SyncRequest<I>>,
+        request: impl Into<SyncRequest<I, D>>,
         batch_size: usize,
         fetch_prev_txouts: bool,
-    ) -> Result<SyncResponse, Error> {
-        let mut request: SyncRequest<I> = request.into();
+    ) -> Result<SyncResponse<ConfirmationBlockTime, D>, Error>
+    where
+        D: ToBlockHash + FromBlockHeader + Debug + Clone,
+    {
+        self.sync_with(request, batch_size, fetch_prev_txouts, D::from_blockheader)
+    }
+
+    /// Performs a sync with a custom checkpoint data type `D`.
+    ///
+    /// This is equivalent to [`sync`](Self::sync) with an additional `to_data` closure that is
+    /// passed in. `to_data` should convert a block header to the checkpoint data type.
+    pub fn sync_with<I: 'static, D, F>(
+        &self,
+        request: impl Into<SyncRequest<I, D>>,
+        batch_size: usize,
+        fetch_prev_txouts: bool,
+        to_data: F,
+    ) -> Result<SyncResponse<ConfirmationBlockTime, D>, Error>
+    where
+        D: ToBlockHash + Debug + Clone,
+        F: Fn(Header) -> D,
+    {
+        let mut request: SyncRequest<I, D> = request.into();
         let start_time = request.start_time();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(
+                &self.inner,
+                chain_tip,
+                &to_data,
+            )?),
             None => None,
         };
 
@@ -248,11 +313,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
 
         let chain_update = match tip_and_latest_blocks {
-            Some((chain_tip, latest_blocks)) => Some(chain_update(
-                chain_tip,
-                &latest_blocks,
-                tx_update.anchors.iter().cloned(),
-            )?),
+            Some((chain_tip, latest_blocks)) => {
+                let header_cache = self.block_header_cache.lock().unwrap();
+                Some(chain_update(
+                    chain_tip,
+                    &latest_blocks,
+                    &header_cache,
+                    tx_update.anchors.iter().cloned(),
+                    to_data,
+                )?)
+            }
             None => None,
         };
 
@@ -605,10 +675,15 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
 /// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`. The latest blocks are
 /// fetched to construct checkpoint updates with the proper [`BlockHash`] in case of re-org.
-fn fetch_tip_and_latest_blocks(
+fn fetch_tip_and_latest_blocks<D, F>(
     client: &impl ElectrumApi,
-    prev_tip: CheckPoint<BlockHash>,
-) -> Result<(CheckPoint<BlockHash>, BTreeMap<u32, BlockHash>), Error> {
+    prev_tip: CheckPoint<D>,
+    to_data: F,
+) -> Result<(CheckPoint<D>, BTreeMap<u32, Header>), Error>
+where
+    D: ToBlockHash + Debug + Clone,
+    F: Fn(Header) -> D,
+{
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
     let new_tip_height = height as u32;
 
@@ -620,31 +695,29 @@ fn fetch_tip_and_latest_blocks(
 
     // Atomically fetch the latest `CHAIN_SUFFIX_LENGTH` count of blocks from Electrum. We use this
     // to construct our checkpoint update.
-    let mut new_blocks = {
+    let mut new_headers = {
         let start_height = new_tip_height.saturating_sub(CHAIN_SUFFIX_LENGTH - 1);
-        let hashes = client
+        let headers = client
             .block_headers(start_height as _, CHAIN_SUFFIX_LENGTH as _)?
-            .headers
-            .into_iter()
-            .map(|h| h.block_hash());
-        (start_height..).zip(hashes).collect::<BTreeMap<u32, _>>()
+            .headers;
+        (start_height..).zip(headers).collect::<BTreeMap<u32, _>>()
     };
 
     // Find the "point of agreement" (if any).
     let agreement_cp = {
-        let mut agreement_cp = Option::<CheckPoint<BlockHash>>::None;
+        let mut agreement_cp = Option::<CheckPoint<D>>::None;
         for cp in prev_tip.iter() {
             let cp_block = cp.block_id();
-            let hash = match new_blocks.get(&cp_block.height) {
-                Some(&hash) => hash,
+            let hash = match new_headers.get(&cp_block.height) {
+                Some(header) => header.block_hash(),
                 None => {
                     assert!(
                         new_tip_height >= cp_block.height,
                         "already checked that electrum's tip cannot be smaller"
                     );
-                    let hash = client.block_header(cp_block.height as _)?.block_hash();
-                    new_blocks.insert(cp_block.height, hash);
-                    hash
+                    let header = client.block_header(cp_block.height as _)?;
+                    new_headers.insert(cp_block.height, header);
+                    cp_block.hash
                 }
             };
             if hash == cp_block.hash {
@@ -656,38 +729,56 @@ fn fetch_tip_and_latest_blocks(
             .ok_or_else(|| Error::Message("cannot find agreement block with server".to_string()))?
     };
 
-    let extension = new_blocks
+    let extension = new_headers
         .iter()
         .filter({
             let agreement_height = agreement_cp.height();
             move |(height, _)| **height > agreement_height
         })
-        .map(|(&height, &hash)| (height, hash));
+        .map(|(&height, &header)| (height, to_data(header)));
     let new_tip = agreement_cp
         .extend(extension)
         .expect("extension heights already checked to be greater than agreement height");
 
-    Ok((new_tip, new_blocks))
+    Ok((new_tip, new_headers))
 }
 
 // Add a corresponding checkpoint per anchor height if it does not yet exist. Checkpoints should not
 // surpass `latest_blocks`.
-fn chain_update(
-    mut tip: CheckPoint<BlockHash>,
-    latest_blocks: &BTreeMap<u32, BlockHash>,
+fn chain_update<D, F>(
+    mut tip: CheckPoint<D>,
+    latest_headers: &BTreeMap<u32, Header>,
+    block_header_cache: &HashMap<u32, Header>,
     anchors: impl Iterator<Item = (ConfirmationBlockTime, Txid)>,
-) -> Result<CheckPoint<BlockHash>, Error> {
+    to_data: F,
+) -> Result<CheckPoint<D>, Error>
+where
+    D: ToBlockHash + Debug + Clone,
+    F: Fn(Header) -> D,
+{
     for (anchor, _txid) in anchors {
         let height = anchor.block_id.height;
 
         // Checkpoint uses the `BlockHash` from `latest_blocks` so that the hash will be consistent
         // in case of a re-org.
         if tip.get(height).is_none() && height <= tip.height() {
-            let hash = match latest_blocks.get(&height) {
-                Some(&hash) => hash,
-                None => anchor.block_id.hash,
+            let header = match latest_headers.get(&height) {
+                Some(header) => Some(header),
+                None => {
+                    let height = anchor.block_id.height;
+                    let anchor_blockhash = anchor.block_id.hash;
+                    block_header_cache
+                        .get(&height)
+                        // This check is necessary as `block_hash_header` is not in lockstep with
+                        // the checkpoint chain.
+                        // We assume reorg depths do not exceed `latest_blocks` so anchor
+                        // blockhashes below `latect_blocks` are always in chain.
+                        .filter(|header| header.block_hash() == anchor_blockhash)
+                }
             };
-            tip = tip.insert(height, hash);
+            if let Some(header) = header {
+                tip = tip.insert(height, to_data(*header));
+            }
         }
     }
     Ok(tip)

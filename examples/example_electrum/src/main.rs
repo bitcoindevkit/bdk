@@ -176,7 +176,7 @@ fn main() -> anyhow::Result<()> {
             };
 
             let res = client
-                .full_scan::<_>(request, stop_gap, scan_options.batch_size, false)
+                .full_scan::<_, _>(request, stop_gap, scan_options.batch_size, false)
                 .context("scanning the blockchain")?;
             (
                 res.chain_update,
