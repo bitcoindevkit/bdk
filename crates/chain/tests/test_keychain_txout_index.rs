@@ -18,6 +18,15 @@ enum TestKeychain {
     Internal,
 }
 
+impl core::fmt::Display for TestKeychain {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            TestKeychain::External => write!(f, "External"),
+            TestKeychain::Internal => write!(f, "Internal"),
+        }
+    }
+}
+
 fn parse_descriptor(descriptor: &str) -> Descriptor<DescriptorPublicKey> {
     let secp = bdk_chain::bitcoin::secp256k1::Secp256k1::signing_only();
     Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, descriptor)

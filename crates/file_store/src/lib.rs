@@ -25,13 +25,26 @@ pub enum StoreError {
 
 impl core::fmt::Display for StoreError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        fn fmt_hex_bytes(f: &mut core::fmt::Formatter<'_>, bytes: &[u8]) -> core::fmt::Result {
+            for &b in bytes {
+                write!(f, "{:02x}", b)?;
+            }
+            Ok(())
+        }
+
         match self {
-            Self::Io(e) => write!(f, "io error trying to read file: {e}"),
-            Self::InvalidMagicBytes { got, expected } => write!(
-                f,
-                "file has invalid magic bytes: expected={expected:?} got={got:?}",
-            ),
-            Self::Bincode(e) => write!(f, "bincode error while reading entry {e}"),
+            Self::Io(e) => write!(f, "io error while reading store file: {e}"),
+            Self::Bincode(e) => write!(f, "bincode error while decoding entry {e}"),
+            Self::InvalidMagicBytes { got, expected } => {
+                writeln!(f, "invalid magic bytes")?;
+                write!(f, "{:12}0x", "  expected:")?;
+                fmt_hex_bytes(f, expected)?;
+                writeln!(f)?;
+                write!(f, "{:12}0x", "  got:")?;
+                fmt_hex_bytes(f, got)?;
+                writeln!(f)?;
+                Ok(())
+            }
         }
     }
 }

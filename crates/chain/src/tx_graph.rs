@@ -256,15 +256,29 @@ pub enum CalculateFeeError {
 impl fmt::Display for CalculateFeeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            CalculateFeeError::MissingTxOut(outpoints) => write!(
-                f,
-                "missing `TxOut` for one or more of the inputs of the tx: {outpoints:?}",
-            ),
-            CalculateFeeError::NegativeFee(fee) => write!(
-                f,
-                "transaction is invalid according to the graph and has negative fee: {}",
-                fee.display_dynamic()
-            ),
+            CalculateFeeError::MissingTxOut(outpoints) => {
+                let max_show = 3;
+                let shown: Vec<_> = outpoints.iter().take(max_show).collect();
+                let remaining = outpoints.len().saturating_sub(max_show);
+
+                writeln!(f, "   missing `TxOut` for input(s)")?;
+                if outpoints.is_empty() {
+                    write!(f, "<none>")
+                } else {
+                    writeln!(f, "{}", shown[0])?;
+                    for op in &shown[1..] {
+                        writeln!(f, "{}", op)?;
+                    }
+                    if remaining > 0 {
+                        write!(f, "(+{} more)", remaining)?;
+                    }
+                    Ok(())
+                }
+            }
+            CalculateFeeError::NegativeFee(fee) => {
+                writeln!(f, "   invalid transaction: negative fee")?;
+                write!(f, "fee: {}", fee.display_dynamic())
+            }
         }
     }
 }
