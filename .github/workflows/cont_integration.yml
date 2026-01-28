@@ -29,7 +29,7 @@ jobs:
           - version: ${{ needs.prepare.outputs.rust_version }}
           - version: 1.85.0 # MSRV
         features:
-          - --no-default-features --features miniscript/no-std,bdk_chain/hashbrown
+          - --no-default-features --features bdk_chain/hashbrown
           - --all-features
     steps:
       - name: checkout
@@ -71,7 +71,7 @@ jobs:
       - name: Check bdk_chain
         working-directory: ./crates/chain
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features miniscript/no-std,hashbrown
+        run: cargo check --no-default-features --features hashbrown
       - name: Check esplora
         working-directory: ./crates/esplora
         # TODO "--target thumbv6m-none-eabi" should work but currently does not
