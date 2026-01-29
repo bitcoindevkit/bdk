@@ -8,7 +8,7 @@ use crate::{
     spk_client::{FullScanRequestBuilder, SyncRequestBuilder},
     spk_iter::BIP32_MAX_INDEX,
     spk_txout::SpkTxOutIndex,
-    DescriptorExt, DescriptorId, Indexed, IndexedTxOuts, Indexer, KeychainIndexed, SpkIterator,
+    DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
 };
 use alloc::{borrow::ToOwned, vec::Vec};
 use bitcoin::{
@@ -19,6 +19,7 @@ use core::{
     ops::{Bound, RangeBounds},
 };
 
+use crate::spk_txout::{CreatedTxOut, SpentTxOut};
 use crate::Merge;
 
 /// The default lookahead for a [`KeychainTxOutIndex`]
@@ -418,19 +419,25 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             .sent_and_received(tx, self.map_to_inner_bounds(range))
     }
 
-    /// Returns the sent and received [`TxOut`]s for this `tx` relative to the script pubkeys
-    /// belonging to the keychains in `range`. A TxOut is *sent* when a script pubkey in the
-    /// `range` is on an input and *received* when it is on an output. For `sent` to be computed
-    /// correctly, the index must have already scanned the output being spent. Calculating
-    /// received just uses the [`Transaction`] outputs directly, so it will be correct even if
-    /// it has not been scanned.
-    pub fn sent_and_received_txouts(
-        &self,
-        tx: &Transaction,
-        range: impl RangeBounds<K>,
-    ) -> (IndexedTxOuts, IndexedTxOuts) {
-        self.inner
-            .sent_and_received_txouts(tx, self.map_to_inner_bounds(range))
+    /// Returns the [`SpentTxOut`]s for the `tx` relative to the script pubkeys belonging to the
+    /// keychain. A TxOut is *spent* when a keychain script pubkey is in any input. For
+    /// `spent_txouts` to be computed correctly, the index must have already scanned the output
+    /// being spent.
+    pub fn spent_txouts<'a>(
+        &'a self,
+        tx: &'a Transaction,
+    ) -> impl Iterator<Item = SpentTxOut<(K, u32)>> + 'a {
+        self.inner.spent_txouts(tx)
+    }
+
+    /// Returns the [`CreatedTxOut`]s for the `tx` relative to the script pubkeys
+    /// belonging to the keychain. A TxOut is *created* when it is on an output.
+    /// These are computed directly from the transaction outputs.
+    pub fn created_txouts<'a>(
+        &'a self,
+        tx: &'a Transaction,
+    ) -> impl Iterator<Item = CreatedTxOut<(K, u32)>> + 'a {
+        self.inner.created_txouts(tx)
     }
 
     /// Computes the net value that this transaction gives to the script pubkeys in the index and

@@ -36,7 +36,7 @@ pub mod indexed_tx_graph;
 pub use indexed_tx_graph::IndexedTxGraph;
 pub mod indexer;
 pub use indexer::spk_txout;
-pub use indexer::{IndexedTxOuts, Indexer};
+pub use indexer::Indexer;
 pub mod local_chain;
 mod tx_data_traits;
 pub use tx_data_traits::*;

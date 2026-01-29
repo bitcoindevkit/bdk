@@ -5,11 +5,9 @@ use core::ops::RangeBounds;
 
 use crate::{
     collections::{hash_map::Entry, BTreeMap, BTreeSet, HashMap},
-    IndexedTxOuts, Indexer,
+    Indexer,
 };
-use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxOut, Txid};
-
-use alloc::vec::Vec;
+use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxIn, TxOut, Txid};
 
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
@@ -320,17 +318,14 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
         (sent, received)
     }
 
-    /// Collects the sent and received [`TxOut`]s for `tx` on the script pubkeys in `range`.
-    /// TxOuts are *sent* when a script pubkey in the `range` is on an input and *received* when
-    /// it is on an output. For `sent` to be computed correctly, the index must have already
-    /// scanned the output being spent. Calculating received just uses the [`Transaction`]
-    /// outputs directly, so it will be correct even if it has not been scanned.
+    /// Returns the relevant [`SpentTxOut`]s for a [`Transaction`]
     ///
-    /// Returns a tuple of (sent_txouts, received_txouts).
+    /// TxOuts are *spent* when an indexed script pubkey is found in one of the transaction's
+    /// inputs. For these to be computed correctly, the index must have already scanned the
+    /// output being spent.
     ///
     /// # Example
-    /// Shows the addresses of the TxOut sent from or received by a Transaction relevant to all spks
-    /// in this index.
+    /// Shows the addresses of the TxOut spent from a Transaction relevant to spks in this index.
     ///
     /// ```rust
     /// # use bdk_chain::spk_txout::SpkTxOutIndex;
@@ -343,49 +338,86 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// // ... scan transactions to populate the index ...
     /// # let tx = Transaction { version: bitcoin::transaction::Version::TWO, lock_time: bitcoin::locktime::absolute::LockTime::ZERO, input: vec![], output: vec![] };
     ///
-    /// // Get sent and received txouts for a transaction across all tracked addresses
-    /// let (sent_txouts, received_txouts) = index.sent_and_received_txouts(&tx, ..);
+    /// // Get spent txouts for a transaction for all indexed spks
+    /// let spent_txouts = index.spent_txouts(&tx);
     ///
     /// // Display addresses and amounts
-    /// println!("Sent:");
-    /// for (i, txout) in sent_txouts {
-    ///     let address = Address::from_script(&txout.script_pubkey, Network::Bitcoin)?;
-    ///     println!("input {}: from {} - {} sats", i, address, txout.value.to_sat());
-    /// }
-    ///
-    /// println!("Received:");
-    /// for (i, txout) in received_txouts {
-    ///     let address = Address::from_script(&txout.script_pubkey, Network::Bitcoin)?;
-    ///     println!("output {}: to {} + {} sats", i, address, txout.value.to_sat());
+    /// println!("Spent:");
+    /// for spent in spent_txouts {
+    ///     let address = Address::from_script(&spent.txout.script_pubkey, Network::Bitcoin)?;
+    ///     println!("input {}: from {} - {}", spent.outpoint().vout, address, &spent.txout.value.to_sat());
     /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub fn sent_and_received_txouts(
-        &self,
-        tx: &Transaction,
-        range: impl RangeBounds<I>,
-    ) -> (IndexedTxOuts, IndexedTxOuts) {
-        let mut sent = Vec::new();
-        let mut received = Vec::new();
+    pub fn spent_txouts<'a>(
+        &'a self,
+        tx: &'a Transaction,
+    ) -> impl Iterator<Item = SpentTxOut<I>> + 'a {
+        tx.input
+            .iter()
+            .enumerate()
+            .filter_map(|(input_index, txin)| {
+                self.txout(txin.previous_output)
+                    .map(|(index, txout)| SpentTxOut {
+                        txout: txout.clone(),
+                        spending_input: txin.clone(),
+                        spending_input_index: u32::try_from(input_index)
+                            .expect("invalid input index"),
+                        spk_index: index.clone(),
+                    })
+            })
+    }
 
-        for (i, txin) in tx.input.iter().enumerate() {
-            if let Some((index, txout)) = self.txout(txin.previous_output) {
-                if range.contains(index) {
-                    sent.push((i, txout.clone()));
-                }
-            }
-        }
-
-        for (i, txout) in tx.output.iter().enumerate() {
-            if let Some(index) = self.index_of_spk(txout.script_pubkey.clone()) {
-                if range.contains(index) {
-                    received.push((i, txout.clone()));
-                }
-            }
-        }
-
-        (sent, received)
+    /// Returns the relevant [`CreatedTxOut`]s for a [`Transaction`]
+    ///
+    /// TxOuts are *created* when an indexed script pubkey is found in one of the transaction's
+    /// outputs. These are computed directly from the transaction outputs.
+    ///
+    /// # Example
+    /// Shows the addresses of the TxOut created by a Transaction relevant to spks in this index.
+    ///
+    /// ```rust
+    /// # use bdk_chain::spk_txout::SpkTxOutIndex;
+    /// # use bitcoin::{Address, Network, Transaction};
+    /// # use std::str::FromStr;
+    /// #
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut index = SpkTxOutIndex::<u32>::default();
+    ///
+    /// // ... scan transactions to populate the index ...
+    /// # let tx = Transaction { version: bitcoin::transaction::Version::TWO, lock_time: bitcoin::locktime::absolute::LockTime::ZERO, input: vec![], output: vec![] };
+    ///
+    /// // Get created txouts for a transaction for all indexed spks
+    /// let created_txouts = index.created_txouts(&tx);
+    ///
+    /// // Display addresses and amounts
+    /// println!("Created:");
+    /// for created in created_txouts {
+    ///     let address = Address::from_script(&created.txout.script_pubkey, Network::Bitcoin)?;
+    ///     println!("output {}: to {} + {}", &created.outpoint.vout, address, &created.txout.value.display_dynamic());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn created_txouts<'a>(
+        &'a self,
+        tx: &'a Transaction,
+    ) -> impl Iterator<Item = CreatedTxOut<I>> + 'a {
+        tx.output
+            .iter()
+            .enumerate()
+            .filter_map(|(output_index, txout)| {
+                self.index_of_spk(txout.script_pubkey.clone())
+                    .map(|index| CreatedTxOut {
+                        outpoint: OutPoint {
+                            txid: tx.compute_txid(),
+                            vout: u32::try_from(output_index).expect("invalid output index"),
+                        },
+                        txout: txout.clone(),
+                        spk_index: index.clone(),
+                    })
+            })
     }
 
     /// Computes the net value transfer effect of `tx` on the script pubkeys in `range`. Shorthand
@@ -436,4 +468,39 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
             .map(|(spk, i)| (i.clone(), spk.clone()));
         spks_from_inputs.chain(spks_from_outputs).collect()
     }
+}
+
+/// A transaction output that was spent by a transaction input.
+///
+/// Contains information about the spent output and the input that spent it.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
+pub struct SpentTxOut<I> {
+    /// The transaction output that was spent.
+    pub txout: TxOut,
+    /// The transaction input that spent the output.
+    pub spending_input: TxIn,
+    /// The index of the spending input in the transaction.
+    pub spending_input_index: u32,
+    /// The script pubkey index associated with the spent output.
+    pub spk_index: I,
+}
+
+impl<I> SpentTxOut<I> {
+    /// Returns the outpoint of the spent transaction output.
+    pub fn outpoint(&self) -> OutPoint {
+        self.spending_input.previous_output
+    }
+}
+
+/// A transaction output that was created by a transaction.
+///
+/// Contains information about the created output and its location.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
+pub struct CreatedTxOut<I> {
+    /// The outpoint identifying the created output.
+    pub outpoint: OutPoint,
+    /// The transaction output that was created.
+    pub txout: TxOut,
+    /// The script pubkey index associated with the created output.
+    pub spk_index: I,
 }
