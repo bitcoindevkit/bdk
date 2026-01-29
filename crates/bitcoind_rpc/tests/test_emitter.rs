@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use bdk_bitcoind_client::jsonrpc::serde_json;
 use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
 use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
@@ -8,8 +7,12 @@ use bdk_chain::{
     spk_txout::SpkTxOutIndex,
     Balance, BlockId, CanonicalizationParams, IndexedTxGraph, Merge,
 };
-use bdk_testenv::{anyhow, TestEnv};
-use bitcoin::{hashes::Hash, Block, Network, OutPoint, ScriptBuf, WScriptHash};
+use bdk_testenv::{
+    anyhow,
+    corepc_node::{Input, Output},
+    TestEnv,
+};
+use bitcoin::{hashes::Hash, Block, Network, ScriptBuf, WScriptHash};
 
 use crate::common::ClientExt;
 
@@ -35,7 +38,7 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
     // returning block hashes.
     let exp_hashes = {
         let mut hashes = (0..=network_tip)
-            .map(|height| env.get_block_hash(height as u64))
+            .map(|height| env.get_block_hash(height))
             .collect::<Result<Vec<_>, _>>()?;
         hashes.extend(env.mine_blocks(101 - network_tip as usize, None)?);
         hashes
@@ -180,8 +183,6 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     // send 3 txs to a tracked address, these txs will be in the mempool
     let exp_txids = {
         let mut txids = BTreeSet::new();
-        let client = ClientExt::get_rpc_client(&env)?;
-
         for _ in 0..3 {
             txids.insert(
                 env.rpc_client()

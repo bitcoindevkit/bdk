@@ -20,8 +20,10 @@ fn testenv() -> anyhow::Result<TestEnv> {
 #[test]
 fn filter_iter_matches_blocks() -> anyhow::Result<()> {
     let env = testenv()?;
-    let addr = ClientExt::get_rpc_client(&env)?
-        .get_new_address(None, None)
+    let addr = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .address()?
         .assume_checked();
 
     let _ = env.mine_blocks(100, Some(addr.clone()))?;

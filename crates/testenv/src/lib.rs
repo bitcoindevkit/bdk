@@ -24,7 +24,7 @@ pub struct TestEnv {
 /// Configuration parameters.
 #[derive(Debug)]
 pub struct Config<'a> {
-    /// [`bitcoind::Conf`]
+    /// [`corepc_node::Conf`]
     pub bitcoind: corepc_node::Conf<'a>,
     /// [`electrsd::Conf`]
     pub electrsd: electrsd::Conf<'a>,

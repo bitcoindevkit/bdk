@@ -38,10 +38,10 @@ pub struct Emitter {
     /// that the block is no longer in the best chain, it will be popped off from here.
     last_cp: CheckPoint<BlockHash>,
 
-    /// The block header result returned from rpc of the last-emitted block. As this result contains the
-    /// next block's block hash (which we use to fetch the next block), we set this to `None`
-    /// whenever there are no more blocks, or the next block is no longer in the best chain. This
-    /// gives us an opportunity to re-fetch this result.
+    /// The block header result returned from rpc of the last-emitted block. As this result
+    /// contains the next block's block hash (which we use to fetch the next block), we set
+    /// this to `None` whenever there are no more blocks, or the next block is no longer in the
+    /// best chain. This gives us an opportunity to re-fetch this result.
     last_block: Option<GetBlockHeaderVerbose>,
 
     /// The last snapshot of mempool transactions.
