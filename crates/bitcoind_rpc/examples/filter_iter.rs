@@ -2,6 +2,7 @@
 use std::time::Instant;
 
 use anyhow::Context;
+use bdk_bitcoind_client::{Auth, Client};
 use bdk_bitcoind_rpc::bip158::{Event, FilterIter};
 use bdk_chain::bitcoin::{constants::genesis_block, secp256k1::Secp256k1, Network};
 use bdk_chain::indexer::keychain_txout::KeychainTxOutIndex;
@@ -44,8 +45,7 @@ fn main() -> anyhow::Result<()> {
     // Configure RPC client
     let url = std::env::var("RPC_URL").context("must set RPC_URL")?;
     let cookie = std::env::var("RPC_COOKIE").context("must set RPC_COOKIE")?;
-    let rpc_client =
-        bitcoincore_rpc::Client::new(&url, bitcoincore_rpc::Auth::CookieFile(cookie.into()))?;
+    let rpc_client = Client::with_auth(&url, Auth::CookieFile(cookie.into()))?;
 
     // Initialize `FilterIter`
     let mut spks = vec![];

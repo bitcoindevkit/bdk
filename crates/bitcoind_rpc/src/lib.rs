@@ -2,7 +2,7 @@
 //! use the wallet RPC API, so this crate can be used with wallet-disabled Bitcoin Core nodes.
 //!
 //! [`Emitter`] is the main structure which sources blockchain data from
-//! [`bitcoincore_rpc::Client`].
+//! [`bdk_bitcoind_client::Client`].
 //!
 //! To only get block updates (exclude mempool transactions), the caller can use
 //! [`Emitter::next_block`] until it returns `Ok(None)` (which means the chain tip is reached). A
@@ -15,34 +15,34 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
+use bdk_bitcoind_client::corepc_types::model::GetBlockHeaderVerbose;
+use bdk_bitcoind_client::{Client, Error};
 use bdk_core::collections::{HashMap, HashSet};
 use bdk_core::{BlockId, CheckPoint};
 use bitcoin::{Block, BlockHash, Transaction, Txid};
-use bitcoincore_rpc::{bitcoincore_rpc_json, RpcApi};
-use core::ops::Deref;
 
 pub mod bip158;
 
-pub use bitcoincore_rpc;
+pub use bdk_bitcoind_client;
 
-/// The [`Emitter`] is used to emit data sourced from [`bitcoincore_rpc::Client`].
+/// The [`Emitter`] is used to emit data sourced from [`bdk_bitcoind_client::Client`].
 ///
 /// Refer to [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate
-pub struct Emitter<C> {
-    client: C,
+pub struct Emitter {
+    client: Client,
     start_height: u32,
 
     /// The checkpoint of the last-emitted block that is in the best chain. If it is later found
     /// that the block is no longer in the best chain, it will be popped off from here.
     last_cp: CheckPoint<BlockHash>,
 
-    /// The block result returned from rpc of the last-emitted block. As this result contains the
+    /// The block header result returned from rpc of the last-emitted block. As this result contains the
     /// next block's block hash (which we use to fetch the next block), we set this to `None`
     /// whenever there are no more blocks, or the next block is no longer in the best chain. This
     /// gives us an opportunity to re-fetch this result.
-    last_block: Option<bitcoincore_rpc_json::GetBlockResult>,
+    last_block: Option<GetBlockHeaderVerbose>,
 
     /// The last snapshot of mempool transactions.
     ///
@@ -62,11 +62,7 @@ pub struct Emitter<C> {
 /// to start empty (i.e. with no unconfirmed transactions).
 pub const NO_EXPECTED_MEMPOOL_TXS: core::iter::Empty<Arc<Transaction>> = core::iter::empty();
 
-impl<C> Emitter<C>
-where
-    C: Deref,
-    C::Target: RpcApi,
-{
+impl Emitter {
     /// Construct a new [`Emitter`].
     ///
     /// `last_cp` informs the emitter of the chain we are starting off with. This way, the emitter
@@ -79,7 +75,7 @@ where
     /// wallet. This allows the [`Emitter`] to inform the wallet about relevant mempool evictions.
     /// If it is known that the wallet is empty, [`NO_EXPECTED_MEMPOOL_TXS`] can be used.
     pub fn new(
-        client: C,
+        client: Client,
         last_cp: CheckPoint<BlockHash>,
         start_height: u32,
         expected_mempool_txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>,
@@ -108,7 +104,7 @@ where
     /// and hash. Until `next_block()` advances the checkpoint to tip, `mempool()` will always
     /// return an empty `evicted` set.
     #[cfg(feature = "std")]
-    pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
+    pub fn mempool(&mut self) -> Result<MempoolEvent, Error> {
         let sync_time = std::time::UNIX_EPOCH
             .elapsed()
             .expect("must get current time")
@@ -121,8 +117,8 @@ where
     /// `sync_time` is in unix seconds.
     ///
     /// This is the no-std version of [`mempool`](Self::mempool).
-    pub fn mempool_at(&mut self, sync_time: u64) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
-        let client = &*self.client;
+    pub fn mempool_at(&mut self, sync_time: u64) -> Result<MempoolEvent, Error> {
+        let client = &self.client;
 
         let mut rpc_tip_height;
         let mut rpc_tip_hash;
@@ -145,10 +141,10 @@ where
         let mut mempool_event = MempoolEvent {
             update: rpc_mempool
                 .into_iter()
-                .filter_map(|txid| -> Option<Result<_, bitcoincore_rpc::Error>> {
+                .filter_map(|txid| -> Option<Result<_, Error>> {
                     let tx = match self.mempool_snapshot.get(&txid) {
                         Some(tx) => tx.clone(),
-                        None => match client.get_raw_transaction(&txid, None) {
+                        None => match client.get_raw_transaction(&txid) {
                             Ok(tx) => {
                                 let tx = Arc::new(tx);
                                 self.mempool_snapshot.insert(txid, tx.clone());
@@ -164,8 +160,7 @@ where
             ..Default::default()
         };
 
-        let at_tip =
-            rpc_tip_height == self.last_cp.height() as u64 && rpc_tip_hash == self.last_cp.hash();
+        let at_tip = rpc_tip_height == self.last_cp.height() && rpc_tip_hash == self.last_cp.hash();
 
         if at_tip {
             // We only emit evicted transactions when we have already emitted the RPC tip. This is
@@ -199,8 +194,8 @@ where
     }
 
     /// Emit the next block height and block (if any).
-    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
-        if let Some((checkpoint, block)) = poll(self, move |hash, client| client.get_block(hash))? {
+    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, Error> {
+        if let Some((checkpoint, block)) = poll(self)? {
             // Stop tracking unconfirmed transactions that have been confirmed in this block.
             for tx in &block.txdata {
                 self.mempool_snapshot.remove(&tx.compute_txid());
@@ -265,21 +260,17 @@ impl<B> BlockEvent<B> {
 }
 
 enum PollResponse {
-    Block(bitcoincore_rpc_json::GetBlockResult),
+    Block(GetBlockHeaderVerbose),
     NoMoreBlocks,
     /// Fetched block is not in the best chain.
     BlockNotInBestChain,
-    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint<BlockHash>),
+    AgreementFound(GetBlockHeaderVerbose, CheckPoint<BlockHash>),
     /// Force the genesis checkpoint down the receiver's throat.
     AgreementPointNotFound(BlockHash),
 }
 
-fn poll_once<C>(emitter: &Emitter<C>) -> Result<PollResponse, bitcoincore_rpc::Error>
-where
-    C: Deref,
-    C::Target: RpcApi,
-{
-    let client = &*emitter.client;
+fn poll_once(emitter: &Emitter) -> Result<PollResponse, Error> {
+    let client = &emitter.client;
 
     if let Some(last_res) = &emitter.last_block {
         let next_hash = if last_res.height < emitter.start_height as _ {
@@ -291,13 +282,13 @@ where
             }
             next_hash
         } else {
-            match last_res.nextblockhash {
+            match last_res.next_block_hash {
                 None => return Ok(PollResponse::NoMoreBlocks),
                 Some(next_hash) => next_hash,
             }
         };
 
-        let res = client.get_block_info(&next_hash)?;
+        let res = client.get_block_header_verbose(&next_hash)?;
         if res.confirmations < 0 {
             return Ok(PollResponse::BlockNotInBestChain);
         }
@@ -306,7 +297,7 @@ where
     }
 
     for cp in emitter.last_cp.iter() {
-        let res = match client.get_block_info(&cp.hash()) {
+        let res = match client.get_block_header_verbose(&cp.hash()) {
             // block not in best chain
             Ok(res) if res.confirmations < 0 => continue,
             Ok(res) => res,
@@ -328,21 +319,13 @@ where
     Ok(PollResponse::AgreementPointNotFound(genesis_hash))
 }
 
-fn poll<C, V, F>(
-    emitter: &mut Emitter<C>,
-    get_item: F,
-) -> Result<Option<(CheckPoint<BlockHash>, V)>, bitcoincore_rpc::Error>
-where
-    C: Deref,
-    C::Target: RpcApi,
-    F: Fn(&BlockHash, &C::Target) -> Result<V, bitcoincore_rpc::Error>,
-{
+fn poll(emitter: &mut Emitter) -> Result<Option<(CheckPoint<BlockHash>, Block)>, Error> {
     loop {
         match poll_once(emitter)? {
             PollResponse::Block(res) => {
-                let height = res.height as u32;
+                let height = res.height;
                 let hash = res.hash;
-                let item = get_item(&hash, &emitter.client)?;
+                let item = emitter.client.get_block(&hash)?;
 
                 let new_cp = emitter
                     .last_cp
@@ -376,18 +359,20 @@ where
     }
 }
 
-/// Extends [`bitcoincore_rpc::Error`].
-pub trait BitcoindRpcErrorExt {
+/// Extends [`bdk_bitcoind_client::Error`].
+pub trait BitcoindErrorExt {
     /// Returns whether the error is a "not found" error.
     ///
-    /// This is useful since [`Emitter`] emits [`Result<_, bitcoincore_rpc::Error>`]s as
+    /// This is useful since [`Emitter`] emits [`Result<_, bdk_bitcoind_client::Error>`]s as
     /// [`Iterator::Item`].
     fn is_not_found_error(&self) -> bool;
 }
 
-impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
+impl BitcoindErrorExt for bdk_bitcoind_client::Error {
     fn is_not_found_error(&self) -> bool {
-        if let bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(rpc_err)) = self
+        if let bdk_bitcoind_client::Error::JsonRpc(bdk_bitcoind_client::jsonrpc::Error::Rpc(
+            rpc_err,
+        )) = self
         {
             rpc_err.code == -5
         } else {
@@ -399,7 +384,9 @@ impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
+    use super::*;
     use crate::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
+    use bdk_bitcoind_client::Auth;
     use bdk_chain::local_chain::LocalChain;
     use bdk_testenv::{anyhow, TestEnv};
     use bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash};
@@ -411,12 +398,12 @@ mod test {
         let (chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
         let chain_tip = chain.tip();
 
-        let rpc_client = bitcoincore_rpc::Client::new(
+        let rpc_client = Client::with_auth(
             &env.bitcoind.rpc_url(),
-            bitcoincore_rpc::Auth::CookieFile(env.bitcoind.params.cookie_file.clone()),
+            Auth::CookieFile(env.bitcoind.params.cookie_file.clone()),
         )?;
 
-        let mut emitter = Emitter::new(&rpc_client, chain_tip.clone(), 1, NO_EXPECTED_MEMPOOL_TXS);
+        let mut emitter = Emitter::new(rpc_client, chain_tip.clone(), 1, NO_EXPECTED_MEMPOOL_TXS);
 
         env.mine_blocks(100, None)?;
         while emitter.next_block()?.is_some() {}
