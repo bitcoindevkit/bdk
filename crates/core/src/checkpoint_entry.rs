@@ -176,7 +176,8 @@ impl<D: ToBlockHash> CheckPointEntry<D> {
 
     /// Returns the entry located a number of heights below this one.
     pub fn floor_below(&self, offset: u32) -> Option<Self>
-    where D: Clone
+    where
+        D: Clone,
     {
         self.floor_at(self.height().checked_sub(offset)?)
     }
