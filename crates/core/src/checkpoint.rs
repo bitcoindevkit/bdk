@@ -385,7 +385,8 @@ where
     /// Puts another checkpoint onto the linked list representing the blockchain.
     ///
     /// Returns an `Err(self)` if:
-    /// * The block you are pushing on is not at a greater height that the one you are pushing on to.
+    /// * The block you are pushing on is not at a greater height that the one you are pushing on
+    ///   to.
     /// * The `prev_blockhash` does not match.
     pub fn push(self, height: u32, data: D) -> Result<Self, Self> {
         // Reject if trying to push at or below current height - chain must grow forward.
