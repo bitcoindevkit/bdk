@@ -8,4 +8,6 @@ edition = "2021"
 [dependencies]
 bdk_chain = { path = "../../crates/chain", features = ["serde"] }
 bdk_electrum = { path = "../../crates/electrum" }
+electrum-client = { version = "0.24.0", features = ["proxy"], default-features = false }
+bdk_core = { path = "../../crates/core" }
 example_cli = { path = "../example_cli" }

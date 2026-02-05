@@ -12,7 +12,7 @@ members = [
     "examples/example_electrum",
     "examples/example_esplora",
     "examples/example_bitcoind_rpc_polling",
-    "examples/example_one_liner",
+
 ]
 
 [workspace.package]
