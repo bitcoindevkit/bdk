@@ -1,5 +1,19 @@
+//! Example of a one-liner wallet sync using ElectrumSync.
+//!
+//! This example demonstrates how an application can build a "one-liner" Electrum sync
+//! by composing existing BDK APIs.
+//!
+//! No new API is introduced in bdk_electrum.
+//!
+//! This example demonstrates how to:
+//! 1. Create a wallet (KeychainTxOutIndex).
+//! 2. Create an Electrum client.
+//! 3. Use `ElectrumSync` for a "one-liner" sync.
+//!
+//! Note: This example requires an actual Electrum server URL to run successfully.
+//! By default it tries to connect to a public testnet server.
+
 use bdk_chain::{
-    bitcoin::Network,
     keychain_txout::KeychainTxOutIndex,
     tx_graph::TxGraph,
     collections::BTreeMap,
@@ -22,11 +36,11 @@ use electrum_client::{self, ElectrumApi};
 
 /// Configuration for the sync operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SyncOptions {
-    pub fast: bool,
-    pub stop_gap: usize,
-    pub batch_size: usize,
-    pub fetch_prev: bool,
+struct SyncOptions {
+    fast: bool,
+    stop_gap: usize,
+    batch_size: usize,
+    fetch_prev: bool,
 }
 
 impl Default for SyncOptions {
@@ -41,16 +55,16 @@ impl Default for SyncOptions {
 }
 
 impl SyncOptions {
-    pub fn fast() -> Self {
+    fn fast() -> Self {
         Self { fast: true, ..Default::default() }
     }
     
-    pub fn full_scan() -> Self {
+    fn full_scan() -> Self {
         Self { fast: false, ..Default::default() }
     }
 }
 
-pub struct ElectrumSync<'a, K, E> {
+struct ElectrumSync<'a, K, E> {
     wallet: &'a KeychainTxOutIndex<K>,
     client: BdkElectrumClient<E>,
 }
@@ -60,11 +74,11 @@ where
     E: ElectrumApi,
     K: Ord + Clone + core::fmt::Debug + Send + Sync,
 {
-    pub fn new(wallet: &'a KeychainTxOutIndex<K>, client: BdkElectrumClient<E>) -> Self {
+    fn new(wallet: &'a KeychainTxOutIndex<K>, client: BdkElectrumClient<E>) -> Self {
         Self { wallet, client }
     }
 
-    pub fn sync(
+    fn sync(
         &self,
         options: SyncOptions,
     ) -> Result<
