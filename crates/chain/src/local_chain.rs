@@ -15,7 +15,7 @@ use bitcoin::BlockHash;
 fn apply_changeset_to_checkpoint<D>(
     mut init_cp: CheckPoint<D>,
     changeset: &ChangeSet<D>,
-) -> Result<CheckPoint<D>, MissingGenesisError>
+) -> Result<CheckPoint<D>, ApplyBlockError>
 where
     D: ToBlockHash + fmt::Debug + Clone,
 {
@@ -48,7 +48,11 @@ where
         let new_tip = match base {
             Some(base) => base
                 .extend(extension)
-                .expect("extension is strictly greater than base"),
+                // Since `extension` is in height order, the only failure case is `prev_blockhash`
+                // mismatch.
+                .map_err(|last_cp| ApplyBlockError::PrevBlockhashMismatch {
+                    expected: last_cp.block_id(),
+                })?,
             None => LocalChain::from_blocks(extension)?.tip(),
         };
         init_cp = new_tip;
@@ -251,22 +255,27 @@ where
     ///
     /// The [`BTreeMap`] enforces the height order. However, the caller must ensure the blocks are
     /// all of the same chain.
-    pub fn from_blocks(blocks: BTreeMap<u32, D>) -> Result<Self, MissingGenesisError> {
+    pub fn from_blocks(blocks: BTreeMap<u32, D>) -> Result<Self, ApplyBlockError> {
         if !blocks.contains_key(&0) {
-            return Err(MissingGenesisError);
+            return Err(ApplyBlockError::MissingGenesis);
         }
 
-        Ok(Self {
-            tip: CheckPoint::from_blocks(blocks).expect("blocks must be in order"),
-        })
+        CheckPoint::from_blocks(blocks)
+            .map(|tip| Self { tip })
+            .map_err(|err| {
+                let last_cp = err.expect("must have atleast one block (genesis)");
+                ApplyBlockError::PrevBlockhashMismatch {
+                    expected: last_cp.block_id(),
+                }
+            })
     }
 
     /// Construct a [`LocalChain`] from an initial `changeset`.
-    pub fn from_changeset(changeset: ChangeSet<D>) -> Result<Self, MissingGenesisError> {
+    pub fn from_changeset(changeset: ChangeSet<D>) -> Result<Self, ApplyBlockError> {
         let genesis_entry = changeset.blocks.get(&0).cloned().flatten();
         let genesis_data = match genesis_entry {
             Some(data) => data,
-            None => return Err(MissingGenesisError),
+            None => return Err(ApplyBlockError::MissingGenesis),
         };
 
         let (mut chain, _) = Self::from_genesis(genesis_data);
@@ -310,7 +319,7 @@ where
     }
 
     /// Apply the given `changeset`.
-    pub fn apply_changeset(&mut self, changeset: &ChangeSet<D>) -> Result<(), MissingGenesisError> {
+    pub fn apply_changeset(&mut self, changeset: &ChangeSet<D>) -> Result<(), ApplyBlockError> {
         let old_tip = self.tip.clone();
         let new_tip = apply_changeset_to_checkpoint(old_tip, changeset)?;
         self.tip = new_tip;
@@ -485,6 +494,36 @@ impl<D> FromIterator<(u32, D)> for ChangeSet<D> {
     }
 }
 
+/// Error when applying blocks to a local chain.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ApplyBlockError {
+    /// Genesis block is missing or would be altered.
+    MissingGenesis,
+    /// Block's `prev_blockhash` doesn't match the expected block.
+    PrevBlockhashMismatch {
+        /// The block that `prev_blockhash` should reference.
+        expected: BlockId,
+    },
+}
+
+impl core::fmt::Display for ApplyBlockError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ApplyBlockError::MissingGenesis => {
+                write!(f, "genesis block is missing or would be altered")
+            }
+            ApplyBlockError::PrevBlockhashMismatch { expected } => write!(
+                f,
+                "`prev_blockhash` doesn't match block at height {} ({})",
+                expected.height, expected.hash
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for ApplyBlockError {}
+
 /// An error which occurs when a [`LocalChain`] is constructed without a genesis checkpoint.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MissingGenesisError;
@@ -596,6 +635,30 @@ fn merge_chains<D>(
 where
     D: ToBlockHash + fmt::Debug + Clone,
 {
+    // Apply the changeset to produce the final merged chain.
+    //
+    // `PrevBlockhashMismatch` should never happen because the merge iteration detects
+    // `prev_blockhash` conflicts and resolves them by invalidating conflicting blocks (setting
+    // them to `None` in the changeset) before we reach this point.
+    fn finish<D>(
+        original_tip: CheckPoint<D>,
+        changeset: ChangeSet<D>,
+    ) -> Result<(CheckPoint<D>, ChangeSet<D>), CannotConnectError>
+    where
+        D: ToBlockHash + fmt::Debug + Clone,
+    {
+        let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset).map_err(|err| {
+            debug_assert!(
+                matches!(err, ApplyBlockError::MissingGenesis),
+                "PrevBlockhashMismatch should never happen"
+            );
+            CannotConnectError {
+                try_include_height: 0,
+            }
+        })?;
+        Ok((new_tip, changeset))
+    }
+
     let mut changeset = ChangeSet::<D>::default();
 
     let mut orig = original_tip.entry_iter();
@@ -680,11 +743,13 @@ where
                         if is_update_height_superset_of_original {
                             return Ok((update_tip, changeset));
                         } else {
-                            let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset)
-                                .map_err(|_| CannotConnectError {
-                                try_include_height: 0,
-                            })?;
-                            return Ok((new_tip, changeset));
+                            return finish(original_tip, changeset);
+                        }
+                    }
+                    // Update placeholder with real data (if necessary).
+                    if let Some(u_data) = u.data_ref() {
+                        if o.is_placeholder() {
+                            changeset.blocks.insert(u.height(), Some(u_data.clone()));
                         }
                     }
                 } else {
@@ -719,10 +784,5 @@ where
         }
     }
 
-    let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset).map_err(|_| {
-        CannotConnectError {
-            try_include_height: 0,
-        }
-    })?;
-    Ok((new_tip, changeset))
+    finish(original_tip, changeset)
 }
