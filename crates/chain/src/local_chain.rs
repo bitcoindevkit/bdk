@@ -17,7 +17,7 @@ fn apply_changeset_to_checkpoint<D>(
     changeset: &ChangeSet<D>,
 ) -> Result<CheckPoint<D>, MissingGenesisError>
 where
-    D: ToBlockHash + fmt::Debug + Copy,
+    D: ToBlockHash + fmt::Debug + Clone,
 {
     if let Some(start_height) = changeset.blocks.keys().next().cloned() {
         // changes after point of agreement
@@ -34,10 +34,10 @@ where
             }
         }
 
-        for (&height, &data) in &changeset.blocks {
+        for (&height, data) in &changeset.blocks {
             match data {
                 Some(data) => {
-                    extension.insert(height, data);
+                    extension.insert(height, data.clone());
                 }
                 None => {
                     extension.remove(&height);
@@ -234,7 +234,7 @@ impl<D> LocalChain<D> {
 // Methods where `D: ToBlockHash`
 impl<D> LocalChain<D>
 where
-    D: ToBlockHash + fmt::Debug + Copy,
+    D: ToBlockHash + fmt::Debug + Clone,
 {
     /// Constructs a [`LocalChain`] from genesis data.
     pub fn from_genesis(data: D) -> (Self, ChangeSet<D>) {
@@ -263,7 +263,7 @@ where
 
     /// Construct a [`LocalChain`] from an initial `changeset`.
     pub fn from_changeset(changeset: ChangeSet<D>) -> Result<Self, MissingGenesisError> {
-        let genesis_entry = changeset.blocks.get(&0).copied().flatten();
+        let genesis_entry = changeset.blocks.get(&0).cloned().flatten();
         let genesis_data = match genesis_entry {
             Some(data) => data,
             None => return Err(MissingGenesisError),
@@ -412,7 +412,7 @@ where
             match cur.get(exp_height) {
                 Some(cp) => {
                     if cp.height() != exp_height
-                        || Some(cp.hash()) != exp_data.map(|d| d.to_blockhash())
+                        || Some(cp.hash()) != exp_data.as_ref().map(|d| d.to_blockhash())
                     {
                         return false;
                     }
@@ -594,7 +594,7 @@ fn merge_chains<D>(
     update_tip: CheckPoint<D>,
 ) -> Result<(CheckPoint<D>, ChangeSet<D>), CannotConnectError>
 where
-    D: ToBlockHash + fmt::Debug + Copy,
+    D: ToBlockHash + fmt::Debug + Clone,
 {
     let mut changeset = ChangeSet::<D>::default();
 
