@@ -1062,6 +1062,14 @@ fn merge_chains_with_prev_blockhash() {
         hash: hash!("B'"),
         prev_hash: hash!("A"),
     };
+    let block_a_alt = TestBlock {
+        hash: hash!("A_alt"),
+        prev_hash: hash!("_"),
+    };
+    let block_d = TestBlock {
+        hash: hash!("D"),
+        prev_hash: hash!("C"),
+    };
 
     [
         // Test: prev_blockhash can invalidate blocks in the original chain
@@ -1194,6 +1202,96 @@ fn merge_chains_with_prev_blockhash() {
             exp: ExpectedResult::Err(CannotConnectError {
                 try_include_height: 1,
             }),
+        },
+        // Test: update displaces invalid block below point of agreement
+        //
+        // ```text
+        //        | 0 | 1 | 2        | 4 |
+        // chain  | _       C(prev=B)  D
+        // update | _   A              D
+        // result | _   A              D
+        // ```
+        //
+        // Both chains agree on D at height 4. Chain has C at height 2 with `prev_blockhash = B`,
+        // but no B exists. Update introduces A at height 1, which displaces C because
+        // C's `prev_blockhash` ("B") doesn't match A's hash ("A").
+        //
+        // Note: This can only happen if chains are constructed incorrectly.
+        TestLocalChain {
+            name: "update displaces invalid block below point of agreement",
+            chain: LocalChain::from_blocks(
+                [(0, block_genesis), (2, block_c), (4, block_d_linked)].into(),
+            )
+            .unwrap(),
+            update: CheckPoint::from_blocks([
+                (0, block_genesis),
+                (1, block_a),
+                (4, block_d_linked),
+            ])
+            .unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(1, Some(block_a)), (2, None)],
+                init_changeset: &[
+                    (0, Some(block_genesis)),
+                    (1, Some(block_a)),
+                    (4, Some(block_d_linked)),
+                ],
+            },
+        },
+        // Test: update fills gap with matching prev_blockhash
+        //
+        // ```text
+        //        | 0 | 1 | 2        |
+        // chain  | _       B(prev=A)
+        // update | _   A   B
+        // result | _   A   B
+        // ```
+        //
+        // Chain has gap at height 1. Update provides A which matches B's `prev_blockhash`.
+        // The chains connect perfectly.
+        TestLocalChain {
+            name: "update fills gap with matching prev_blockhash",
+            chain: LocalChain::from_blocks([(0, block_genesis), (2, block_b)].into()).unwrap(),
+            update: CheckPoint::from_blocks([(0, block_genesis), (1, block_a), (2, block_b)])
+                .unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(1, Some(block_a))],
+                init_changeset: &[
+                    (0, Some(block_genesis)),
+                    (1, Some(block_a)),
+                    (2, Some(block_b)),
+                ],
+            },
+        },
+        // Test: cascading eviction through multiple blocks
+        //
+        // ```text
+        //        | 0 | 1    | 2        | 3        | 4        |
+        // chain  | _   A      B(prev=A)  C(prev=B)  D(prev=C)
+        // update | _   A_alt
+        // result | _   A_alt
+        // ```
+        //
+        // Update replaces A with A_alt. B's `prev_blockhash = A` doesn't match A_alt,
+        // so B is evicted. C and D depend on B via prev_blockhash, so they cascade evict.
+        TestLocalChain {
+            name: "cascading eviction through multiple blocks",
+            chain: LocalChain::from_blocks(
+                [
+                    (0, block_genesis),
+                    (1, block_a),
+                    (2, block_b),
+                    (3, block_c),
+                    (4, block_d),
+                ]
+                .into(),
+            )
+            .unwrap(),
+            update: CheckPoint::from_blocks([(0, block_genesis), (1, block_a_alt)]).unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(1, Some(block_a_alt)), (2, None), (3, None), (4, None)],
+                init_changeset: &[(0, Some(block_genesis)), (1, Some(block_a_alt))],
+            },
         },
     ]
     .into_iter()
