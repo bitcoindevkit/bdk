@@ -164,9 +164,15 @@ impl<A: Anchor> CanonicalView<A> {
                             last_seen: tx_node.last_seen,
                         },
                     },
-                    None => ChainPosition::Unconfirmed {
-                        first_seen: tx_node.first_seen,
-                        last_seen: tx_node.last_seen,
+                    None => match find_direct_anchor(&tx_node, chain, chain_tip)? {
+                        Some(anchor) => ChainPosition::Confirmed {
+                            anchor,
+                            transitively: None,
+                        },
+                        None => ChainPosition::Unconfirmed {
+                            first_seen: tx_node.first_seen,
+                            last_seen: tx_node.last_seen,
+                        },
                     },
                 },
                 CanonicalReason::Anchor { anchor, descendant } => match descendant {

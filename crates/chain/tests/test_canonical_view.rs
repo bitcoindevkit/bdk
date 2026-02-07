@@ -301,3 +301,61 @@ fn test_min_confirmations_multiple_transactions() {
     );
     assert_eq!(balance_high.untrusted_pending, Amount::ZERO);
 }
+
+#[test]
+fn test_assumed_canonical_with_anchor_is_confirmed() {
+    use bdk_chain::ChainPosition;
+
+    // Create a local chain
+    let blocks: BTreeMap<u32, BlockHash> = [
+        (0, hash!("genesis")),
+        (1, hash!("b1")),
+        (2, hash!("b2")),
+        (3, hash!("b3")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+
+    let mut tx_graph = TxGraph::default();
+
+    // create a transaction that will be both assumed canonical AND have an anchor
+    let tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("parent"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let txid = tx.compute_txid();
+
+    let _ = tx_graph.insert_tx(tx.clone());
+
+    // anchor at height 2
+    let anchor = ConfirmationBlockTime {
+        block_id: chain.get(2).unwrap().block_id(),
+        confirmation_time: 123456,
+    };
+    let _ = tx_graph.insert_anchor(txid, anchor);
+
+    let chain_tip = chain.tip().block_id();
+
+    let params = CanonicalizationParams {
+        assume_canonical: vec![txid],
+    };
+
+    let canonical_view = tx_graph.canonical_view(&chain, chain_tip, params);
+
+    let canonical_tx = canonical_view
+        .tx(txid)
+        .expect("tx should be in canonical view");
+
+    assert!(
+        matches!(canonical_tx.pos, ChainPosition::Confirmed { .. }),
+        "tx that is assumed canonical and has a direct anchor should have ChainPosition::Confirmed"
+    );
+}
