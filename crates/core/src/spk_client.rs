@@ -225,6 +225,7 @@ impl<I, D> SyncRequestBuilder<I, D> {
 /// [`chain_tip`](SyncRequestBuilder::chain_tip) (if provided).
 ///
 /// ```rust
+/// # use std::io::{self, Write};
 /// # use bdk_chain::{bitcoin::{hashes::Hash, ScriptBuf}, local_chain::LocalChain};
 /// # use bdk_chain::spk_client::SyncRequest;
 /// # let (local_chain, _) = LocalChain::from_genesis(Hash::all_zeros());
@@ -236,7 +237,22 @@ impl<I, D> SyncRequestBuilder<I, D> {
 ///     // Provide list of scripts to scan for transactions against.
 ///     .spks(scripts)
 ///     // This is called for every synced item.
-///     .inspect(|item, progress| println!("{} (remaining: {})", item, progress.remaining()))
+///     .inspect(|item, progress| {
+///         let pc = (100.0 * progress.consumed() as f32) / progress.total() as f32;
+///         match item {
+///             // In this example I = (), so the first field of Spk is unit.
+///             bdk_chain::spk_client::SyncItem::Spk((), spk) => {
+///                 eprintln!("[ SCANNING {pc:03.0}% ] script {}", spk);
+///             }
+///             bdk_chain::spk_client::SyncItem::Txid(txid) => {
+///                 eprintln!("[ SCANNING {pc:03.0}% ] txid {}", txid);
+///             }
+///             bdk_chain::spk_client::SyncItem::OutPoint(op) => {
+///                 eprintln!("[ SCANNING {pc:03.0}% ] outpoint {}", op);
+///             }
+///         }
+///         let _ = io::stderr().flush();
+///     })
 ///     // Finish constructing the sync request.
 ///     .build();
 /// ```

@@ -973,25 +973,27 @@ pub enum InsertDescriptorError<K> {
     },
 }
 
-impl<K: core::fmt::Debug> core::fmt::Display for InsertDescriptorError<K> {
+impl<K: core::fmt::Display> core::fmt::Display for InsertDescriptorError<K> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             InsertDescriptorError::DescriptorAlreadyAssigned {
-                existing_assignment: existing,
+                existing_assignment,
                 descriptor,
             } => {
                 write!(
                     f,
-                    "attempt to re-assign descriptor {descriptor:?} already assigned to {existing:?}"
+                    "descriptor '{}' is already in use by another keychain '{}'",
+                    descriptor, existing_assignment
                 )
             }
             InsertDescriptorError::KeychainAlreadyAssigned {
-                existing_assignment: existing,
+                existing_assignment,
                 keychain,
             } => {
                 write!(
                     f,
-                    "attempt to re-assign keychain {keychain:?} already assigned to {existing:?}"
+                    "keychain '{}' is already associated with another descriptor '{}'",
+                    keychain, existing_assignment
                 )
             }
         }
@@ -999,7 +1001,7 @@ impl<K: core::fmt::Debug> core::fmt::Display for InsertDescriptorError<K> {
 }
 
 #[cfg(feature = "std")]
-impl<K: core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
+impl<K: core::fmt::Display + core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
 
 /// `ChangeSet` represents persistent updates to a [`KeychainTxOutIndex`].
 ///
