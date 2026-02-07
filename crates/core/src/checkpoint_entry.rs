@@ -1,3 +1,16 @@
+//! Checkpoint entries for `prev_blockhash`-aware iteration.
+//!
+//! A [`CheckPoint`] chain may have gaps (non-contiguous heights). However, each checkpoint's
+//! data can include a `prev_blockhash` that references the block one height below. This module
+//! provides [`CheckPointEntry`], which represents either:
+//!
+//! - **Occupied**: A real checkpoint stored at this height.
+//! - **Placeholder**: No checkpoint exists at this height, but the checkpoint above references it
+//!   via `prev_blockhash`. The placeholder contains the implied [`BlockId`].
+//!
+//! Use [`CheckPoint::entry_iter`] to iterate over entries, which yields placeholders for any
+//! gaps where `prev_blockhash` implies a block.
+
 use core::ops::RangeBounds;
 
 use bitcoin::BlockHash;
