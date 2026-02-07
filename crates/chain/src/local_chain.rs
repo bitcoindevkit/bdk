@@ -263,7 +263,7 @@ where
         CheckPoint::from_blocks(blocks)
             .map(|tip| Self { tip })
             .map_err(|err| {
-                let last_cp = err.expect("must have atleast one block (genesis)");
+                let last_cp = err.expect("must have at least one block (genesis)");
                 ApplyBlockError::PrevBlockhashMismatch {
                     expected: last_cp.block_id(),
                 }
