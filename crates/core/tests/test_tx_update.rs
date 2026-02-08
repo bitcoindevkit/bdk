@@ -59,3 +59,27 @@ fn test_extend_makes_update_non_empty() {
         "`TxUpdate` must not be empty after extending with a non-empty update"
     );
 }
+
+#[test]
+fn test_map_anchors_transforms_anchor_type_and_preserves_txid() {
+    use bitcoin::hashes::Hash;
+
+    let txid = Txid::from_byte_array([3u8; 32]);
+
+    let mut u = TxUpdate::<u32>::default();
+    u.anchors.insert((42u32, txid));
+    u.seen_ats.insert((txid, 777));
+
+    let mapped: TxUpdate<u64> = u.map_anchors(|a| (a as u64) + 1000);
+
+    assert!(
+        mapped.anchors.contains(&(1042u64, txid)),
+        "mapped anchors must contain transformed anchor with the same txid"
+    );
+
+    // Ensure other fields are preserved by map_anchors
+    assert!(
+        mapped.seen_ats.contains(&(txid, 777)),
+        "`seen_ats` should be preserved by map_anchors"
+    );
+}
