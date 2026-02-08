@@ -19,6 +19,7 @@ use core::{
     ops::{Bound, RangeBounds},
 };
 
+use crate::spk_txout::{CreatedTxOut, SpentTxOut};
 use crate::Merge;
 
 /// The default lookahead for a [`KeychainTxOutIndex`]
@@ -416,6 +417,27 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ) -> (Amount, Amount) {
         self.inner
             .sent_and_received(tx, self.map_to_inner_bounds(range))
+    }
+
+    /// Returns the [`SpentTxOut`]s for the `tx` relative to the script pubkeys belonging to the
+    /// keychain. A TxOut is *spent* when a keychain script pubkey is in any input. For
+    /// `spent_txouts` to be computed correctly, the index must have already scanned the output
+    /// being spent.
+    pub fn spent_txouts<'a>(
+        &'a self,
+        tx: &'a Transaction,
+    ) -> impl Iterator<Item = SpentTxOut<(K, u32)>> + 'a {
+        self.inner.spent_txouts(tx)
+    }
+
+    /// Returns the [`CreatedTxOut`]s for the `tx` relative to the script pubkeys
+    /// belonging to the keychain. A TxOut is *created* when it is on an output.
+    /// These are computed directly from the transaction outputs.
+    pub fn created_txouts<'a>(
+        &'a self,
+        tx: &'a Transaction,
+    ) -> impl Iterator<Item = CreatedTxOut<(K, u32)>> + 'a {
+        self.inner.created_txouts(tx)
     }
 
     /// Computes the net value that this transaction gives to the script pubkeys in the index and

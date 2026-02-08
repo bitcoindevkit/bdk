@@ -1,3 +1,4 @@
+use bdk_chain::spk_txout::{CreatedTxOut, SpentTxOut};
 use bdk_chain::{spk_txout::SpkTxOutIndex, Indexer};
 use bitcoin::{
     absolute, transaction, Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxIn, TxOut,
@@ -78,6 +79,121 @@ fn spk_txout_sent_and_received() {
         (Amount::from_sat(0), Amount::from_sat(20_000))
     );
     assert_eq!(index.net_value(&tx2, ..), SignedAmount::from_sat(8_000));
+}
+
+#[test]
+fn spk_txout_spent_created_txouts() {
+    let spk0 = ScriptBuf::from_hex("001404f1e52ce2bab3423c6a8c63b7cd730d8f12542c").unwrap();
+    let spk1 = ScriptBuf::from_hex("00142b57404ae14f08c3a0c903feb2af7830605eb00f").unwrap();
+
+    let mut index = SpkTxOutIndex::default();
+    index.insert_spk(0, spk0.clone());
+    index.insert_spk(1, spk1.clone());
+
+    let tx1 = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![TxOut {
+            value: Amount::from_sat(42_000),
+            script_pubkey: spk0.clone(),
+        }],
+    };
+    index.scan(&tx1);
+    let spent_txouts = index.spent_txouts(&tx1).collect::<Vec<_>>();
+    assert!(spent_txouts.is_empty());
+
+    let created_txouts = index.created_txouts(&tx1).collect::<Vec<_>>();
+    assert_eq!(created_txouts.len(), 1);
+    assert_eq!(
+        created_txouts[0],
+        CreatedTxOut {
+            outpoint: OutPoint {
+                txid: tx1.compute_txid(),
+                vout: 0,
+            },
+            txout: TxOut {
+                value: Amount::from_sat(42_000),
+                script_pubkey: spk0.clone(),
+            },
+            spk_index: 0,
+        }
+    );
+
+    let tx2 = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint {
+                txid: tx1.compute_txid(),
+                vout: 0,
+            },
+            ..Default::default()
+        }],
+        output: vec![
+            TxOut {
+                value: Amount::from_sat(20_000),
+                script_pubkey: spk1.clone(),
+            },
+            TxOut {
+                script_pubkey: spk0.clone(),
+                value: Amount::from_sat(30_000),
+            },
+        ],
+    };
+    index.scan(&tx2);
+
+    let spent_txouts = index.spent_txouts(&tx2).collect::<Vec<_>>();
+    assert_eq!(spent_txouts.len(), 1);
+    assert_eq!(
+        spent_txouts[0],
+        SpentTxOut {
+            txout: TxOut {
+                value: Amount::from_sat(42_000),
+                script_pubkey: spk0.clone(),
+            },
+            spending_input: TxIn {
+                previous_output: OutPoint {
+                    txid: tx1.compute_txid(),
+                    vout: 0,
+                },
+                ..Default::default()
+            },
+            spending_input_index: 0,
+            spk_index: 0,
+        }
+    );
+
+    let created_txouts = index.created_txouts(&tx2).collect::<Vec<_>>();
+    assert_eq!(created_txouts.len(), 2);
+    assert_eq!(
+        created_txouts[0],
+        CreatedTxOut {
+            outpoint: OutPoint {
+                txid: tx2.compute_txid(),
+                vout: 0,
+            },
+            txout: TxOut {
+                value: Amount::from_sat(20_000),
+                script_pubkey: spk1.clone(),
+            },
+            spk_index: 1,
+        }
+    );
+    assert_eq!(
+        created_txouts[1],
+        CreatedTxOut {
+            outpoint: OutPoint {
+                txid: tx2.compute_txid(),
+                vout: 1,
+            },
+            txout: TxOut {
+                value: Amount::from_sat(30_000),
+                script_pubkey: spk0.clone(),
+            },
+            spk_index: 0,
+        }
+    );
 }
 
 #[test]
