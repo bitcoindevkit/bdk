@@ -62,8 +62,6 @@ fn test_extend_makes_update_non_empty() {
 
 #[test]
 fn test_map_anchors_transforms_anchor_type_and_preserves_txid() {
-    use bitcoin::hashes::Hash;
-
     let txid = Txid::from_byte_array([3u8; 32]);
 
     let mut u = TxUpdate::<u32>::default();
@@ -77,7 +75,6 @@ fn test_map_anchors_transforms_anchor_type_and_preserves_txid() {
         "mapped anchors must contain transformed anchor with the same txid"
     );
 
-    // Ensure other fields are preserved by map_anchors
     assert!(
         mapped.seen_ats.contains(&(txid, 777)),
         "`seen_ats` should be preserved by map_anchors"
