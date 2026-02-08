@@ -578,17 +578,24 @@ impl std::error::Error for ApplyHeaderError {}
 
 /// Applies `update_tip` onto `original_tip`.
 ///
-/// On success, a tuple is returned ([`CheckPoint`], [`ChangeSet`]).
+/// On success, returns a tuple containing [`CheckPoint`] and [`ChangeSet`].
 ///
 /// # Errors
 ///
-/// [`CannotConnectError`] occurs when the `original_tip` and `update_tip` chains are disjoint:
+/// [`CannotConnectError`] occurs when the `original_tip` and `update_tip`
+/// cannot be reconciled into a single consistent chain:
 ///
-/// - If no point of agreement is found between the update and original chains.
-/// - A point of agreement is found but the update is ambiguous above the point of agreement (a.k.a.
-///   the update and original chain both have a block above the point of agreement, but their
-///   heights do not overlap).
-/// - The update attempts to replace the genesis block of the original chain.
+/// - No point of agreement is found between the update and original chains,
+///   and the update does not form a consistent replacement.
+/// - A point of agreement is found, but the update is ambiguous above that
+///   point (i.e., both chains contain blocks above the agreement height
+///   with non-overlapping heights).
+///
+/// Note:
+/// The genesis block (height 0) may be replaced if the update forms a
+/// consistent chain and a point of agreement exists at a higher height.
+/// Replacing the genesis block alone does not trigger a
+/// [`CannotConnectError`].
 fn merge_chains<D>(
     original_tip: CheckPoint<D>,
     update_tip: CheckPoint<D>,
