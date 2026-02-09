@@ -6,18 +6,18 @@
 //! [0]: https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki
 //! [1]: https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki
 
+use bdk_bitcoind_client;
+use bdk_bitcoind_client::corepc_types::model::GetBlockHeaderVerbose;
 use bdk_core::bitcoin;
 use bdk_core::CheckPoint;
 use bitcoin::BlockHash;
 use bitcoin::{bip158::BlockFilter, Block, ScriptBuf};
-use bitcoincore_rpc;
-use bitcoincore_rpc::{json::GetBlockHeaderResult, RpcApi};
 
 /// Type that returns Bitcoin blocks by matching a list of script pubkeys (SPKs) against a
 /// [`bip158::BlockFilter`](bitcoin::bip158::BlockFilter).
 ///
 /// * `FilterIter` talks to bitcoind via JSON-RPC interface, which is handled by the
-///   [`bitcoincore_rpc::Client`].
+///   [`bdk_bitcoind_client::Client`].
 /// * Collect the script pubkeys (SPKs) you want to watch. These will usually correspond to wallet
 ///   addresses that have been handed out for receiving payments.
 /// * Construct `FilterIter` with the RPC client, SPKs, and [`CheckPoint`]. The checkpoint tip
@@ -31,19 +31,19 @@ use bitcoincore_rpc::{json::GetBlockHeaderResult, RpcApi};
 #[derive(Debug)]
 pub struct FilterIter<'a> {
     /// RPC client
-    client: &'a bitcoincore_rpc::Client,
+    client: &'a bdk_bitcoind_client::Client,
     /// SPK inventory
     spks: Vec<ScriptBuf>,
     /// checkpoint
     cp: CheckPoint<BlockHash>,
     /// Header info, contains the prev and next hashes for each header.
-    header: Option<GetBlockHeaderResult>,
+    header: Option<GetBlockHeaderVerbose>,
 }
 
 impl<'a> FilterIter<'a> {
     /// Construct [`FilterIter`] with checkpoint, RPC client and SPKs.
     pub fn new(
-        client: &'a bitcoincore_rpc::Client,
+        client: &'a bdk_bitcoind_client::Client,
         cp: CheckPoint,
         spks: impl IntoIterator<Item = ScriptBuf>,
     ) -> Self {
@@ -58,9 +58,9 @@ impl<'a> FilterIter<'a> {
     /// Return the agreement header with the remote node.
     ///
     /// Error if no agreement header is found.
-    fn find_base(&self) -> Result<GetBlockHeaderResult, Error> {
+    fn find_base(&self) -> Result<GetBlockHeaderVerbose, Error> {
         for cp in self.cp.iter() {
-            match self.client.get_block_header_info(&cp.hash()) {
+            match self.client.get_block_header_verbose(&cp.hash()) {
                 Err(e) if is_not_found(&e) => continue,
                 Ok(header) if header.confirmations <= 0 => continue,
                 Ok(header) => return Ok(header),
@@ -111,7 +111,7 @@ impl Iterator for FilterIter<'_> {
                 None => return Ok(None),
             };
 
-            let mut next_header = self.client.get_block_header_info(&next_hash)?;
+            let mut next_header = self.client.get_block_header_verbose(&next_hash)?;
 
             // In case of a reorg, rewind by fetching headers of previous hashes until we find
             // one with enough confirmations.
@@ -119,12 +119,12 @@ impl Iterator for FilterIter<'_> {
                 let prev_hash = next_header
                     .previous_block_hash
                     .ok_or(Error::ReorgDepthExceeded)?;
-                let prev_header = self.client.get_block_header_info(&prev_hash)?;
+                let prev_header = self.client.get_block_header_verbose(&prev_hash)?;
                 next_header = prev_header;
             }
 
             next_hash = next_header.hash;
-            let next_height: u32 = next_header.height.try_into()?;
+            let next_height: u32 = next_header.height;
 
             cp = cp.insert(next_height, next_hash);
 
@@ -153,7 +153,7 @@ impl Iterator for FilterIter<'_> {
 #[derive(Debug)]
 pub enum Error {
     /// RPC error
-    Rpc(bitcoincore_rpc::Error),
+    Rpc(bdk_bitcoind_client::Error),
     /// `bitcoin::bip158` error
     Bip158(bitcoin::bip158::Error),
     /// Max reorg depth exceeded.
@@ -176,8 +176,8 @@ impl core::fmt::Display for Error {
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
-impl From<bitcoincore_rpc::Error> for Error {
-    fn from(e: bitcoincore_rpc::Error) -> Self {
+impl From<bdk_bitcoind_client::Error> for Error {
+    fn from(e: bdk_bitcoind_client::Error) -> Self {
         Self::Rpc(e)
     }
 }
@@ -189,10 +189,13 @@ impl From<core::num::TryFromIntError> for Error {
 }
 
 /// Whether the RPC error is a "not found" error (code: `-5`).
-fn is_not_found(e: &bitcoincore_rpc::Error) -> bool {
-    matches!(
-        e,
-        bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(e))
-        if e.code == -5
-    )
+fn is_not_found(e: &bdk_bitcoind_client::Error) -> bool {
+    if let bdk_bitcoind_client::Error::JsonRpc(bdk_bitcoind_client::jsonrpc::Error::Rpc(
+        rpc_error,
+    )) = e
+    {
+        rpc_error.code == -5
+    } else {
+        false
+    }
 }
