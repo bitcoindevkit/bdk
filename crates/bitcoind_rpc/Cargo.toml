@@ -26,9 +26,10 @@ bdk_testenv = { path = "../testenv" }
 bdk_chain = { path = "../chain" }
 
 [features]
-default = ["std"]
+default = ["std", "bitcoind_28_0"]
 std = ["bitcoin/std", "bdk_core/std"]
 serde = ["bitcoin/serde", "bdk_core/serde"]
+bitcoind_28_0 =["bdk-bitcoind-client/28_0"]
 
 [[example]]
 name = "filter_iter"
