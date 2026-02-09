@@ -2,7 +2,6 @@ use bdk_bitcoind_rpc::bip158::{Error, FilterIter};
 use bdk_core::CheckPoint;
 use bdk_testenv::{anyhow, corepc_node, TestEnv};
 use bitcoin::{Address, Amount, Network, ScriptBuf};
-use bitcoincore_rpc::RpcApi;
 
 use crate::common::ClientExt;
 
@@ -22,7 +21,8 @@ fn testenv() -> anyhow::Result<TestEnv> {
 fn filter_iter_matches_blocks() -> anyhow::Result<()> {
     let env = testenv()?;
     let addr = ClientExt::get_rpc_client(&env)?
-        .get_new_address(None, None)?
+        .call::<String>("getnewaddress", &[])?
+        .parse::<Address<_>>()?
         .assume_checked();
 
     let _ = env.mine_blocks(100, Some(addr.clone()))?;
@@ -78,7 +78,7 @@ fn filter_iter_detects_reorgs() -> anyhow::Result<()> {
 
     let env = testenv()?;
     let rpc = ClientExt::get_rpc_client(&env)?;
-    while rpc.get_block_count()? < MINE_TO as u64 {
+    while rpc.get_block_count()? < MINE_TO {
         let _ = env.mine_blocks(1, None)?;
     }
 
