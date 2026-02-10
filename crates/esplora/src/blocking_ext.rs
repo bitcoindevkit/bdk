@@ -458,7 +458,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
 
     // get outpoint spend-statuses
     let mut outpoints = outpoints.into_iter();
-    let mut missing_txs = Vec::<Txid>::with_capacity(outpoints.len());
+    let mut missing_txs = HashSet::<Txid>::with_capacity(outpoints.len());
     loop {
         let handles = outpoints
             .by_ref()
@@ -484,7 +484,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
                     None => continue,
                 };
                 if !inserted_txs.contains(&spend_txid) {
-                    missing_txs.push(spend_txid);
+                    missing_txs.insert(spend_txid);
                 }
                 if let Some(spend_status) = op_status.status {
                     insert_anchor_or_seen_at_from_status(
