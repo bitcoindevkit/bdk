@@ -55,6 +55,24 @@ impl<D> Drop for CPInner<D> {
     }
 }
 
+/// Trait that converts [`Header`] to subset data.
+pub trait FromBlockHeader {
+    /// Returns the subset data from a block `header`.
+    fn from_blockheader(header: Header) -> Self;
+}
+
+impl FromBlockHeader for BlockHash {
+    fn from_blockheader(header: Header) -> Self {
+        header.block_hash()
+    }
+}
+
+impl FromBlockHeader for Header {
+    fn from_blockheader(header: Header) -> Self {
+        header
+    }
+}
+
 /// Trait that converts [`CheckPoint`] `data` to [`BlockHash`].
 ///
 /// Implementations of [`ToBlockHash`] must always return the block's consensus-defined hash. If
@@ -204,7 +222,7 @@ impl<D> CheckPoint<D> {
 // Methods where `D: ToBlockHash`
 impl<D> CheckPoint<D>
 where
-    D: ToBlockHash + fmt::Debug + Copy,
+    D: ToBlockHash + fmt::Debug + Clone,
 {
     const MTP_BLOCK_COUNT: u32 = 11;
 
