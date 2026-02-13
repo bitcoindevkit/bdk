@@ -5,7 +5,7 @@ use core::fmt;
 use core::ops::RangeBounds;
 
 use crate::collections::BTreeMap;
-use crate::{Anchor, BlockId, CanonicalView, CanonicalizationParams, ChainOracle, Merge, TxGraph};
+use crate::{Anchor, BlockId, CanonicalParams, CanonicalView, ChainOracle, Merge, TxGraph};
 use bdk_core::{ChainQuery, CheckPointEntry, ToBlockHash};
 pub use bdk_core::{CheckPoint, CheckPointIter};
 use bitcoin::block::Header;
@@ -108,13 +108,13 @@ impl LocalChain<BlockHash> {
     /// # Example
     ///
     /// ```
-    /// # use bdk_chain::{CanonicalizationTask, CanonicalizationParams, TxGraph, local_chain::LocalChain};
+    /// # use bdk_chain::{CanonicalTask, CanonicalParams, TxGraph, local_chain::LocalChain};
     /// # use bdk_core::BlockId;
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph: TxGraph<BlockId> = TxGraph::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
     /// let chain_tip = chain.tip().block_id();
-    /// let task = CanonicalizationTask::new(&tx_graph, chain_tip, CanonicalizationParams::default());
+    /// let task = CanonicalTask::new(&tx_graph, chain_tip, CanonicalParams::default());
     /// let view = chain.canonicalize(task);
     /// ```
     pub fn canonicalize<Q>(&self, mut task: Q) -> Q::Output
@@ -139,24 +139,21 @@ impl LocalChain<BlockHash> {
         task.finish()
     }
 
-    /// A convenience method that creates [`CanonicalizationTask`] task, canonicalize it and returns
-    /// a [`CanonicalView`].
+    /// Convenience method that runs both canonicalization phases and returns a [`CanonicalView`].
     ///
     /// This is equivalent to:
     /// ```ignore
-    /// let task = graph.canonicalization_task(chain_tip, Default::default());
-    /// let canonical_view = chain.canonicalize(task);
+    /// let canonical_txs = chain.canonicalize(tx_graph.canonical_task(tip, params));
+    /// let view = chain.canonicalize(canonical_txs.view_task(tx_graph));
     /// ```
-    ///
-    /// [`CanonicalizationTask`]: crate::CanonicalizationTask
     pub fn canonical_view<A: Anchor>(
         &self,
         tx_graph: &TxGraph<A>,
         tip: BlockId,
-        params: CanonicalizationParams,
+        params: CanonicalParams,
     ) -> CanonicalView<A> {
-        let task = tx_graph.canonicalization_task(tip, params);
-        self.canonicalize(task)
+        let canonical_txs = self.canonicalize(tx_graph.canonical_task(tip, params));
+        self.canonicalize(canonical_txs.view_task(tx_graph))
     }
 
     /// Update the chain with a given [`Header`] at `height` which you claim is connected to a

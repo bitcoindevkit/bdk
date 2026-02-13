@@ -4,7 +4,7 @@ use bdk_testenv::utils::DESCRIPTORS;
 use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 
-use bdk_chain::{spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor, CanonicalizationParams};
+use bdk_chain::{spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor, CanonicalParams};
 use bitcoin::{
     locktime::absolute::LockTime, secp256k1::Secp256k1, transaction, Amount, OutPoint, ScriptBuf,
     Sequence, Transaction, TxIn, TxOut, Txid, Witness,
@@ -57,7 +57,7 @@ pub struct TxTemplateEnv<'a, A> {
     pub tx_graph: TxGraph<A>,
     pub indexer: SpkTxOutIndex<u32>,
     pub txid_to_name: HashMap<&'a str, Txid>,
-    pub canonicalization_params: CanonicalizationParams,
+    pub canonicalization_params: CanonicalParams,
 }
 
 #[allow(dead_code)]
@@ -79,7 +79,7 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
     });
     let mut txid_to_name = HashMap::<&'a str, Txid>::new();
 
-    let mut canonicalization_params = CanonicalizationParams::default();
+    let mut canonicalization_params = CanonicalParams::default();
     for (bogus_txin_vout, tx_tmp) in tx_templates.into_iter().enumerate() {
         let tx = Transaction {
             version: transaction::Version::non_standard(0),

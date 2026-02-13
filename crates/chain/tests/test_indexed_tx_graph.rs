@@ -489,7 +489,7 @@ fn test_list_owned_txouts() {
             let confirmed_txouts_txid = txouts
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if full_txout.chain_position.is_confirmed() {
+                    if full_txout.pos.is_confirmed() {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -500,7 +500,7 @@ fn test_list_owned_txouts() {
             let unconfirmed_txouts_txid = txouts
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if !full_txout.chain_position.is_confirmed() {
+                    if !full_txout.pos.is_confirmed() {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -511,7 +511,7 @@ fn test_list_owned_txouts() {
             let confirmed_utxos_txid = utxos
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if full_txout.chain_position.is_confirmed() {
+                    if full_txout.pos.is_confirmed() {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
@@ -522,7 +522,7 @@ fn test_list_owned_txouts() {
             let unconfirmed_utxos_txid = utxos
                 .iter()
                 .filter_map(|(_, full_txout)| {
-                    if !full_txout.chain_position.is_confirmed() {
+                    if !full_txout.pos.is_confirmed() {
                         Some(full_txout.outpoint.txid)
                     } else {
                         None
