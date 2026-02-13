@@ -439,16 +439,10 @@ impl<'g, A: Anchor> ChainQuery for CanonicalViewTask<'g, A> {
 
                 // Determine chain position based on reason
                 let chain_position = match reason {
-                    CanonicalReason::Assumed { descendant } => match descendant {
-                        Some(_) => match self.direct_anchors.get(txid) {
-                            Some(anchor) => ChainPosition::Confirmed {
-                                anchor,
-                                transitively: None,
-                            },
-                            None => ChainPosition::Unconfirmed {
-                                first_seen: tx_node.first_seen,
-                                last_seen: tx_node.last_seen,
-                            },
+                    CanonicalReason::Assumed { .. } => match self.direct_anchors.get(txid) {
+                        Some(anchor) => ChainPosition::Confirmed {
+                            anchor,
+                            transitively: None,
                         },
                         None => ChainPosition::Unconfirmed {
                             first_seen: tx_node.first_seen,
@@ -509,7 +503,7 @@ impl<A: Anchor> CanonicalTxs<A> {
                     continue;
                 }
                 // Transitively anchored transactions need their own anchor checked
-                if reason.is_transitive() {
+                if reason.is_transitive() || reason.is_assumed() {
                     if let Some(anchors) = all_anchors.get(txid) {
                         unprocessed_anchor_checks.push_back((*txid, anchors));
                     }
@@ -622,6 +616,11 @@ impl<A: Clone> CanonicalReason<A> {
     /// (i.e., the transaction is canonical because of its descendant).
     pub fn is_transitive(&self) -> bool {
         self.descendant().is_some()
+    }
+
+    /// Returns true if this reason is [`CanonicalReason::Assumed`].
+    pub fn is_assumed(&self) -> bool {
+        matches!(self, CanonicalReason::Assumed { .. })
     }
 }
 
