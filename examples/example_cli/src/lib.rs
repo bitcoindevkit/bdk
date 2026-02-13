@@ -19,12 +19,12 @@ use bdk_chain::miniscript::{
     psbt::PsbtExt,
     Descriptor, DescriptorPublicKey, ForEachKey,
 };
-use bdk_chain::CanonicalizationParams;
+use bdk_chain::CanonicalParams;
 use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
-    tx_graph, ChainOracle, DescriptorExt, FullTxOut, IndexedTxGraph, Merge,
+    tx_graph, ChainOracle, ChainPosition, DescriptorExt, FullTxOut, IndexedTxGraph, Merge,
 };
 use bdk_coin_select::{
     metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
@@ -279,9 +279,9 @@ pub fn create_tx(
             plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.txout.value))
         }
         CoinSelectionAlgo::SmallestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.txout.value),
-        CoinSelectionAlgo::OldestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.chain_position),
+        CoinSelectionAlgo::OldestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.pos),
         CoinSelectionAlgo::NewestFirst => {
-            plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.chain_position))
+            plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.pos))
         }
         CoinSelectionAlgo::BranchAndBound => plan_utxos.shuffle(&mut thread_rng()),
     }
@@ -418,7 +418,7 @@ pub fn create_tx(
 }
 
 // Alias the elements of `planned_utxos`
-pub type PlanUtxo = (Plan, FullTxOut<ConfirmationBlockTime>);
+pub type PlanUtxo = (Plan, FullTxOut<ChainPosition<ConfirmationBlockTime>>);
 
 pub fn planned_utxos(
     graph: &KeychainTxGraph,
@@ -427,11 +427,8 @@ pub fn planned_utxos(
 ) -> Result<Vec<PlanUtxo>, Infallible> {
     let chain_tip = chain.tip().block_id();
     let outpoints = graph.index.outpoints();
-    let task = graph
-        .graph()
-        .canonicalization_task(chain_tip, CanonicalizationParams::default());
     chain
-        .canonicalize(task)
+        .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
         .filter_unspent_outpoints(outpoints.iter().cloned())
         .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
             let desc = graph
@@ -524,14 +521,13 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
             }
 
             let chain_tip = chain.tip().block_id();
-            let task = graph
-                .graph()
-                .canonicalization_task(chain_tip, CanonicalizationParams::default());
-            let balance = chain.canonicalize(task).balance(
-                graph.index.outpoints().iter().cloned(),
-                |(k, _), _| k == &Keychain::Internal,
-                1,
-            );
+            let balance = chain
+                .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
+                .balance(
+                    graph.index.outpoints().iter().cloned(),
+                    |(k, _), _| k == &Keychain::Internal,
+                    1,
+                );
 
             let confirmed_total = balance.confirmed + balance.immature;
             let unconfirmed_total = balance.untrusted_pending + balance.trusted_pending;
@@ -568,11 +564,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     confirmed,
                     unconfirmed,
                 } => {
-                    let task = graph
-                        .graph()
-                        .canonicalization_task(chain_tip, CanonicalizationParams::default());
                     let txouts = chain
-                        .canonicalize(task)
+                        .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
                         .filter_outpoints(outpoints.iter().cloned())
                         .filter(|(_, full_txo)| match (spent, unspent) {
                             (true, false) => full_txo.spent_by.is_some(),
@@ -580,8 +573,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                             _ => true,
                         })
                         .filter(|(_, full_txo)| match (confirmed, unconfirmed) {
-                            (true, false) => full_txo.chain_position.is_confirmed(),
-                            (false, true) => !full_txo.chain_position.is_confirmed(),
+                            (true, false) => full_txo.pos.is_confirmed(),
+                            (false, true) => !full_txo.pos.is_confirmed(),
                             _ => true,
                         })
                         .collect::<Vec<_>>();

@@ -1,6 +1,6 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
 use crate::tx_graph::{TxAncestors, TxDescendants};
-use crate::{Anchor, CanonicalView, ChainPosition, TxGraph};
+use crate::{Anchor, CanonicalTxs, CanonicalView, ChainPosition, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
@@ -23,8 +23,6 @@ enum CanonicalStage {
     SeenTxs,
     /// Processing leftover transactions.
     LeftOverTxs,
-    /// Processing transitively anchored transactions.
-    TransitivelyAnchoredTxs,
     /// All processing is complete.
     Finished,
 }
@@ -35,8 +33,7 @@ impl CanonicalStage {
             CanonicalStage::AssumedTxs => Self::AnchoredTxs,
             CanonicalStage::AnchoredTxs => Self::SeenTxs,
             CanonicalStage::SeenTxs => Self::LeftOverTxs,
-            CanonicalStage::LeftOverTxs => Self::TransitivelyAnchoredTxs,
-            CanonicalStage::TransitivelyAnchoredTxs => Self::Finished,
+            CanonicalStage::LeftOverTxs => Self::Finished,
             CanonicalStage::Finished => Self::Finished,
         };
     }
@@ -44,7 +41,7 @@ impl CanonicalStage {
 
 /// Modifies the canonicalization algorithm.
 #[derive(Debug, Default, Clone)]
-pub struct CanonicalizationParams {
+pub struct CanonicalParams {
     /// Transactions that will supersede all other transactions.
     ///
     /// In case of conflicting transactions within `assume_canonical`, transactions that appear
@@ -52,8 +49,14 @@ pub struct CanonicalizationParams {
     pub assume_canonical: Vec<Txid>,
 }
 
-/// Manages the canonicalization process without direct I/O operations.
-pub struct CanonicalizationTask<'g, A> {
+/// Determines which transactions are canonical without resolving chain positions.
+///
+/// This task implements the first phase of canonicalization: it walks the transaction
+/// graph and determines which transactions are canonical (non-conflicting) and why
+/// (via [`CanonicalReason`]). The output is a [`CanonicalTxs`] which can then be
+/// further processed by [`CanonicalViewTask`] to resolve reasons into
+/// [`ChainPosition`]s.
+pub struct CanonicalTask<'g, A> {
     tx_graph: &'g TxGraph<A>,
     chain_tip: BlockId,
 
@@ -61,7 +64,6 @@ pub struct CanonicalizationTask<'g, A> {
     unprocessed_anchored_txs: VecDeque<(Txid, Arc<Transaction>, &'g BTreeSet<A>)>,
     unprocessed_seen_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>, u64)> + 'g>,
     unprocessed_leftover_txs: VecDeque<(Txid, Arc<Transaction>, u32)>,
-    unprocessed_transitively_anchored_txs: VecDeque<(Txid, Arc<Transaction>, &'g BTreeSet<A>)>,
 
     canonical: CanonicalMap<A>,
     not_canonical: NotCanonicalSet,
@@ -69,15 +71,12 @@ pub struct CanonicalizationTask<'g, A> {
     // Store canonical transactions in order
     canonical_order: Vec<Txid>,
 
-    // Track which transactions have direct anchors (not transitive)
-    direct_anchors: HashMap<Txid, A>,
-
     // Track the current stage of processing
     current_stage: CanonicalStage,
 }
 
-impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
-    type Output = CanonicalView<A>;
+impl<'g, A: Anchor> ChainQuery for CanonicalTask<'g, A> {
+    type Output = CanonicalTxs<A>;
 
     fn next_query(&mut self) -> Option<ChainRequest> {
         loop {
@@ -130,18 +129,6 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
                         continue;
                     }
                 }
-                CanonicalStage::TransitivelyAnchoredTxs => {
-                    if let Some((_txid, _, anchors)) =
-                        self.unprocessed_transitively_anchored_txs.front()
-                    {
-                        let block_ids =
-                            anchors.iter().map(|anchor| anchor.anchor_block()).collect();
-                        return Some(ChainRequest {
-                            chain_tip: self.chain_tip,
-                            block_ids,
-                        });
-                    }
-                }
                 CanonicalStage::Finished => return None,
             }
 
@@ -150,9 +137,6 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
     }
 
     fn resolve_query(&mut self, response: ChainResponse) {
-        // Only AnchoredTxs and TransitivelyAnchoredTxs stages should receive query
-        // responses Other stages don't generate queries and thus shouldn't call
-        // resolve_query
         match self.current_stage {
             CanonicalStage::AnchoredTxs => {
                 // Process directly anchored transaction response
@@ -168,7 +152,6 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
                     match best_anchor {
                         Some(best_anchor) => {
                             // Transaction has a confirmed anchor
-                            self.direct_anchors.insert(txid, best_anchor.clone());
                             if !self.is_canonicalized(txid) {
                                 self.mark_canonical(
                                     txid,
@@ -195,28 +178,6 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
                     }
                 }
             }
-            CanonicalStage::TransitivelyAnchoredTxs => {
-                // Process transitively anchored transaction response
-                if let Some((txid, _tx, anchors)) =
-                    self.unprocessed_transitively_anchored_txs.pop_front()
-                {
-                    // Find the anchor that matches the confirmed BlockId
-                    let best_anchor = response.and_then(|block_id| {
-                        anchors
-                            .iter()
-                            .find(|anchor| anchor.anchor_block() == block_id)
-                            .cloned()
-                    });
-
-                    if let Some(best_anchor) = best_anchor {
-                        // Found a confirmed anchor for this transitively anchored transaction
-                        self.direct_anchors.insert(txid, best_anchor.clone());
-                        // Note: We don't re-mark as canonical since it's already marked
-                        // from being transitively anchored by its descendant
-                    }
-                    // If no confirmed anchor, we keep the transitive canonicalization status
-                }
-            }
             CanonicalStage::AssumedTxs
             | CanonicalStage::SeenTxs
             | CanonicalStage::LeftOverTxs
@@ -232,7 +193,6 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
     }
 
     fn finish(self) -> Self::Output {
-        // Build the canonical view
         let mut view_order = Vec::new();
         let mut view_txs = HashMap::new();
         let mut view_spends = HashMap::new();
@@ -247,6 +207,224 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
                         view_spends.insert(input.previous_output, *txid);
                     }
                 }
+
+                view_txs.insert(*txid, (tx.clone(), reason.clone()));
+            }
+        }
+
+        CanonicalTxs::new(self.chain_tip, view_order, view_txs, view_spends)
+    }
+}
+
+impl<'g, A: Anchor> CanonicalTask<'g, A> {
+    /// Creates a new canonicalization task.
+    pub fn new(tx_graph: &'g TxGraph<A>, chain_tip: BlockId, params: CanonicalParams) -> Self {
+        let anchors = tx_graph.all_anchors();
+        let unprocessed_assumed_txs = Box::new(
+            params
+                .assume_canonical
+                .into_iter()
+                .rev()
+                .filter_map(|txid| Some((txid, tx_graph.get_tx(txid)?))),
+        );
+        let unprocessed_anchored_txs: VecDeque<_> = tx_graph
+            .txids_by_descending_anchor_height()
+            .filter_map(|(_, txid)| Some((txid, tx_graph.get_tx(txid)?, anchors.get(&txid)?)))
+            .collect();
+        let unprocessed_seen_txs = Box::new(
+            tx_graph
+                .txids_by_descending_last_seen()
+                .filter_map(|(last_seen, txid)| Some((txid, tx_graph.get_tx(txid)?, last_seen))),
+        );
+
+        Self {
+            tx_graph,
+            chain_tip,
+
+            unprocessed_assumed_txs,
+            unprocessed_anchored_txs,
+            unprocessed_seen_txs,
+            unprocessed_leftover_txs: VecDeque::new(),
+
+            canonical: HashMap::new(),
+            not_canonical: HashSet::new(),
+
+            canonical_order: Vec::new(),
+            current_stage: CanonicalStage::default(),
+        }
+    }
+
+    fn is_canonicalized(&self, txid: Txid) -> bool {
+        self.canonical.contains_key(&txid) || self.not_canonical.contains(&txid)
+    }
+
+    fn mark_canonical(&mut self, txid: Txid, tx: Arc<Transaction>, reason: CanonicalReason<A>) {
+        let starting_txid = txid;
+        let mut is_starting_tx = true;
+
+        // We keep track of changes made so far so that we can undo it later in case we detect that
+        // `tx` double spends itself.
+        let mut detected_self_double_spend = false;
+        let mut undo_not_canonical = Vec::<Txid>::new();
+        let mut staged_canonical = Vec::<(Txid, Arc<Transaction>, CanonicalReason<A>)>::new();
+
+        // Process ancestors
+        TxAncestors::new_include_root(
+            self.tx_graph,
+            tx,
+            |_: usize, tx: Arc<Transaction>| -> Option<Txid> {
+                let this_txid = tx.compute_txid();
+                let this_reason = if is_starting_tx {
+                    is_starting_tx = false;
+                    reason.clone()
+                } else {
+                    // This is an ancestor being marked transitively
+                    reason.to_transitive(starting_txid)
+                };
+
+                use crate::collections::hash_map::Entry;
+                let canonical_entry = match self.canonical.entry(this_txid) {
+                    // Already visited tx before, exit early.
+                    Entry::Occupied(_) => return None,
+                    Entry::Vacant(entry) => entry,
+                };
+
+                // Any conflicts with a canonical tx can be added to `not_canonical`. Descendants
+                // of `not_canonical` txs can also be added to `not_canonical`.
+                for (_, conflict_txid) in self.tx_graph.direct_conflicts(&tx) {
+                    TxDescendants::new_include_root(
+                        self.tx_graph,
+                        conflict_txid,
+                        |_: usize, txid: Txid| -> Option<()> {
+                            if self.not_canonical.insert(txid) {
+                                undo_not_canonical.push(txid);
+                                Some(())
+                            } else {
+                                None
+                            }
+                        },
+                    )
+                    .run_until_finished()
+                }
+
+                if self.not_canonical.contains(&this_txid) {
+                    // Early exit if self-double-spend is detected.
+                    detected_self_double_spend = true;
+                    return None;
+                }
+
+                staged_canonical.push((this_txid, tx.clone(), this_reason.clone()));
+                canonical_entry.insert((tx.clone(), this_reason));
+                Some(this_txid)
+            },
+        )
+        .run_until_finished();
+
+        if detected_self_double_spend {
+            // Undo changes
+            for (txid, _, _) in staged_canonical {
+                self.canonical.remove(&txid);
+            }
+            for txid in undo_not_canonical {
+                self.not_canonical.remove(&txid);
+            }
+            return;
+        }
+
+        // Add to canonical order
+        for (txid, _, _) in &staged_canonical {
+            self.canonical_order.push(*txid);
+        }
+    }
+}
+
+/// Represents the current stage of view task processing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ViewStage {
+    /// Processing transactions to resolve their chain positions.
+    #[default]
+    ResolvingPositions,
+    /// All processing is complete.
+    Finished,
+}
+
+/// Resolves [`CanonicalReason`]s into [`ChainPosition`]s.
+///
+/// This task implements the second phase of canonicalization: given a set of canonical
+/// transactions with their reasons (from [`CanonicalTask`]), it resolves each reason
+/// into a concrete [`ChainPosition`] (confirmed or unconfirmed). For transitively
+/// anchored transactions, it queries the chain to check if they have their own direct
+/// anchors.
+pub struct CanonicalViewTask<'g, A> {
+    tx_graph: &'g TxGraph<A>,
+    tip: BlockId,
+
+    /// Transactions in canonical order with their reasons.
+    canonical_order: Vec<Txid>,
+    canonical_txs: HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>,
+    spends: HashMap<bitcoin::OutPoint, Txid>,
+
+    /// Transactions that need anchor verification (transitively anchored).
+    unprocessed_anchor_checks: VecDeque<(Txid, &'g BTreeSet<A>)>,
+
+    /// Resolved direct anchors for transitively anchored transactions.
+    direct_anchors: HashMap<Txid, A>,
+
+    current_stage: ViewStage,
+}
+
+impl<'g, A: Anchor> ChainQuery for CanonicalViewTask<'g, A> {
+    type Output = CanonicalView<A>;
+
+    fn next_query(&mut self) -> Option<ChainRequest> {
+        loop {
+            match self.current_stage {
+                ViewStage::ResolvingPositions => {
+                    if let Some((_txid, anchors)) = self.unprocessed_anchor_checks.front() {
+                        let block_ids =
+                            anchors.iter().map(|anchor| anchor.anchor_block()).collect();
+                        return Some(ChainRequest {
+                            chain_tip: self.tip,
+                            block_ids,
+                        });
+                    }
+                }
+                ViewStage::Finished => return None,
+            }
+
+            self.current_stage = ViewStage::Finished;
+        }
+    }
+
+    fn resolve_query(&mut self, response: ChainResponse) {
+        match self.current_stage {
+            ViewStage::ResolvingPositions => {
+                if let Some((txid, anchors)) = self.unprocessed_anchor_checks.pop_front() {
+                    let best_anchor = response.and_then(|block_id| {
+                        anchors
+                            .iter()
+                            .find(|anchor| anchor.anchor_block() == block_id)
+                            .cloned()
+                    });
+
+                    if let Some(best_anchor) = best_anchor {
+                        self.direct_anchors.insert(txid, best_anchor);
+                    }
+                }
+            }
+            ViewStage::Finished => {
+                debug_assert!(false, "resolve_query called in Finished stage");
+            }
+        }
+    }
+
+    fn finish(self) -> Self::Output {
+        let mut view_order = Vec::new();
+        let mut view_txs = HashMap::new();
+
+        for txid in &self.canonical_order {
+            if let Some((tx, reason)) = self.canonical_txs.get(txid) {
+                view_order.push(*txid);
 
                 // Get transaction node for first_seen/last_seen info
                 let tx_node = match self.tx_graph.get_tx_node(*txid) {
@@ -307,155 +485,45 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
             }
         }
 
-        CanonicalView::new(self.chain_tip, view_order, view_txs, view_spends)
+        CanonicalView::new(self.tip, view_order, view_txs, self.spends.clone())
     }
 }
 
-impl<'g, A: Anchor> CanonicalizationTask<'g, A> {
-    /// Creates a new canonicalization task.
-    pub fn new(
-        tx_graph: &'g TxGraph<A>,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> Self {
-        let anchors = tx_graph.all_anchors();
-        let unprocessed_assumed_txs = Box::new(
-            params
-                .assume_canonical
-                .into_iter()
-                .rev()
-                .filter_map(|txid| Some((txid, tx_graph.get_tx(txid)?))),
-        );
-        let unprocessed_anchored_txs: VecDeque<_> = tx_graph
-            .txids_by_descending_anchor_height()
-            .filter_map(|(_, txid)| Some((txid, tx_graph.get_tx(txid)?, anchors.get(&txid)?)))
-            .collect();
-        let unprocessed_seen_txs = Box::new(
-            tx_graph
-                .txids_by_descending_last_seen()
-                .filter_map(|(last_seen, txid)| Some((txid, tx_graph.get_tx(txid)?, last_seen))),
-        );
+impl<A: Anchor> CanonicalTxs<A> {
+    /// Creates a [`CanonicalViewTask`] that resolves [`CanonicalReason`]s into [`ChainPosition`]s.
+    ///
+    /// This is the second phase of the canonicalization pipeline. The resulting task
+    /// queries the chain to verify anchors for transitively anchored transactions and
+    /// produces a [`CanonicalView`] with resolved chain positions.
+    pub fn view_task<'g>(self, tx_graph: &'g TxGraph<A>) -> CanonicalViewTask<'g, A> {
+        let all_anchors = tx_graph.all_anchors();
 
-        Self {
-            tx_graph,
-            chain_tip,
-
-            unprocessed_assumed_txs,
-            unprocessed_anchored_txs,
-            unprocessed_seen_txs,
-            unprocessed_leftover_txs: VecDeque::new(),
-            unprocessed_transitively_anchored_txs: VecDeque::new(),
-
-            canonical: HashMap::new(),
-            not_canonical: HashSet::new(),
-
-            canonical_order: Vec::new(),
-            direct_anchors: HashMap::new(),
-            current_stage: CanonicalStage::default(),
-        }
-    }
-
-    fn is_canonicalized(&self, txid: Txid) -> bool {
-        self.canonical.contains_key(&txid) || self.not_canonical.contains(&txid)
-    }
-
-    fn mark_canonical(&mut self, txid: Txid, tx: Arc<Transaction>, reason: CanonicalReason<A>) {
-        let starting_txid = txid;
-        let mut is_starting_tx = true;
-
-        // We keep track of changes made so far so that we can undo it later in case we detect that
-        // `tx` double spends itself.
-        let mut detected_self_double_spend = false;
-        let mut undo_not_canonical = Vec::<Txid>::new();
-        let mut staged_canonical = Vec::<(Txid, Arc<Transaction>, CanonicalReason<A>)>::new();
-
-        // Process ancestors
-        TxAncestors::new_include_root(
-            self.tx_graph,
-            tx,
-            |_: usize, tx: Arc<Transaction>| -> Option<Txid> {
-                let this_txid = tx.compute_txid();
-                let this_reason = if is_starting_tx {
-                    is_starting_tx = false;
-                    reason.clone()
-                } else {
-                    // This is an ancestor being marked transitively
-                    // Check if it has its own anchor that needs to be verified later
-                    // We'll check anchors after marking it canonical
-                    reason.to_transitive(starting_txid)
-                };
-
-                use crate::collections::hash_map::Entry;
-                let canonical_entry = match self.canonical.entry(this_txid) {
-                    // Already visited tx before, exit early.
-                    Entry::Occupied(_) => return None,
-                    Entry::Vacant(entry) => entry,
-                };
-
-                // Any conflicts with a canonical tx can be added to `not_canonical`. Descendants
-                // of `not_canonical` txs can also be added to `not_canonical`.
-                for (_, conflict_txid) in self.tx_graph.direct_conflicts(&tx) {
-                    TxDescendants::new_include_root(
-                        self.tx_graph,
-                        conflict_txid,
-                        |_: usize, txid: Txid| -> Option<()> {
-                            if self.not_canonical.insert(txid) {
-                                undo_not_canonical.push(txid);
-                                Some(())
-                            } else {
-                                None
-                            }
-                        },
-                    )
-                    .run_until_finished()
+        // Find transactions that need anchor verification
+        let mut unprocessed_anchor_checks = VecDeque::new();
+        for txid in &self.order {
+            if let Some((_, reason)) = self.txs.get(txid) {
+                // Skip ObservedIn transactions — they don't have anchors to verify
+                if matches!(reason, CanonicalReason::ObservedIn { .. }) {
+                    continue;
                 }
-
-                if self.not_canonical.contains(&this_txid) {
-                    // Early exit if self-double-spend is detected.
-                    detected_self_double_spend = true;
-                    return None;
-                }
-
-                staged_canonical.push((this_txid, tx.clone(), this_reason.clone()));
-                canonical_entry.insert((tx.clone(), this_reason));
-                Some(this_txid)
-            },
-        )
-        .run_until_finished();
-
-        if detected_self_double_spend {
-            // Undo changes
-            for (txid, _, _) in staged_canonical {
-                self.canonical.remove(&txid);
-            }
-            for txid in undo_not_canonical {
-                self.not_canonical.remove(&txid);
-            }
-            return;
-        }
-
-        // Add to canonical order
-        for (txid, tx, reason) in &staged_canonical {
-            self.canonical_order.push(*txid);
-
-            // ObservedIn transactions don't need anchor verification
-            if matches!(reason, CanonicalReason::ObservedIn { .. }) {
-                continue;
-            }
-
-            // Check if this transaction was marked transitively and needs its own anchors verified
-            if reason.is_transitive() {
-                if let Some(anchors) = self.tx_graph.all_anchors().get(txid) {
-                    // only check anchors we haven't already confirmed
-                    if !self.direct_anchors.contains_key(txid) {
-                        self.unprocessed_transitively_anchored_txs.push_back((
-                            *txid,
-                            tx.clone(),
-                            anchors,
-                        ));
+                // Transitively anchored transactions need their own anchor checked
+                if reason.is_transitive() {
+                    if let Some(anchors) = all_anchors.get(txid) {
+                        unprocessed_anchor_checks.push_back((*txid, anchors));
                     }
                 }
             }
+        }
+
+        CanonicalViewTask {
+            tx_graph,
+            tip: self.tip,
+            canonical_order: self.order,
+            canonical_txs: self.txs,
+            spends: self.spends,
+            unprocessed_anchor_checks,
+            direct_anchors: HashMap::new(),
+            current_stage: ViewStage::default(),
         }
     }
 }
@@ -595,10 +663,12 @@ mod tests {
         };
         let _ = tx_graph.insert_anchor(txid, anchor);
 
-        // Create canonicalization task and canonicalize using the chain
-        let params = CanonicalizationParams::default();
-        let task = CanonicalizationTask::new(&tx_graph, chain_tip, params);
-        let canonical_view = chain.canonicalize(task);
+        // Create canonicalization task and canonicalize using the two-step pipeline
+        let params = CanonicalParams::default();
+        let task = CanonicalTask::new(&tx_graph, chain_tip, params);
+        let canonical_txs = chain.canonicalize(task);
+        let view_task = canonical_txs.view_task(&tx_graph);
+        let canonical_view = chain.canonicalize(view_task);
 
         // Should have one canonical transaction
         assert_eq!(canonical_view.txs().len(), 1);

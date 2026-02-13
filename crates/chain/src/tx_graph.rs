@@ -23,10 +23,9 @@
 //!
 //! The canonicalization process uses a two-step, sans-IO approach:
 //!
-//! 1. **Create a canonicalization task** using
-//!    [`canonicalization_task`](TxGraph::canonicalization_task): ```ignore let task =
-//!    tx_graph.canonicalization_task(params); ``` This creates a [`CanonicalizationTask`] that
-//!    encapsulates the canonicalization logic without performing any I/O operations.
+//! 1. **Create a canonicalization task** using [`canonical_task`](TxGraph::canonical_task):
+//!    ```ignore let task = tx_graph.canonical_task(params); ``` This creates a [`CanonicalTask`]
+//!    that encapsulates the canonicalization logic without performing any I/O operations.
 //!
 //! 2. **Execute the task** with a chain oracle to obtain a [`CanonicalView`]: ```ignore let view =
 //!    chain.canonicalize(task); ``` The chain oracle (such as
@@ -127,8 +126,8 @@
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::collections::*;
-use crate::CanonicalizationParams;
-use crate::CanonicalizationTask;
+use crate::CanonicalParams;
+use crate::CanonicalTask;
 use crate::{Anchor, BlockId, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
@@ -976,18 +975,18 @@ impl<A: Anchor> TxGraph<A> {
         }
     }
 
-    /// Creates a [`CanonicalizationTask`] to determine the [`CanonicalView`] of transactions.
+    /// Creates a [`CanonicalTask`] to determine the [`CanonicalView`] of transactions.
     ///
-    /// This method delegates to the underlying [`TxGraph`] to create a [`CanonicalizationTask`]
+    /// This method delegates to the underlying [`TxGraph`] to create a [`CanonicalTask`]
     /// that can be used to determine which transactions are canonical based on the provided
     /// parameters. The task handles the stateless canonicalization logic and can be polled
     /// for anchor verification requests.
-    pub fn canonicalization_task(
+    pub fn canonical_task(
         &'_ self,
         chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> CanonicalizationTask<'_, A> {
-        CanonicalizationTask::new(self, chain_tip, params)
+        params: CanonicalParams,
+    ) -> CanonicalTask<'_, A> {
+        CanonicalTask::new(self, chain_tip, params)
     }
 }
 

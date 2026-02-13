@@ -161,38 +161,42 @@ impl<A: Ord> PartialOrd for ChainPosition<A> {
     }
 }
 
-/// A `TxOut` with as much data as we can retrieve about it
+/// A `TxOut` with as much data as we can retrieve about it.
+///
+/// The position type `P` is generic — it can be [`ChainPosition`] for resolved views,
+/// or [`CanonicalReason`](crate::canonical_task::CanonicalReason) for unresolved canonicalization
+/// results.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FullTxOut<A> {
+pub struct FullTxOut<P> {
     /// The position of the transaction in `outpoint` in the overall chain.
-    pub chain_position: ChainPosition<A>,
+    pub pos: P,
     /// The location of the `TxOut`.
     pub outpoint: OutPoint,
     /// The `TxOut`.
     pub txout: TxOut,
-    /// The txid and chain position of the transaction (if any) that has spent this output.
-    pub spent_by: Option<(ChainPosition<A>, Txid)>,
+    /// The txid and position of the transaction (if any) that has spent this output.
+    pub spent_by: Option<(P, Txid)>,
     /// Whether this output is on a coinbase transaction.
     pub is_on_coinbase: bool,
 }
 
-impl<A: Ord> Ord for FullTxOut<A> {
+impl<P: Ord> Ord for FullTxOut<P> {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.chain_position
-            .cmp(&other.chain_position)
+        self.pos
+            .cmp(&other.pos)
             // Tie-break with `outpoint` and `spent_by`.
             .then_with(|| self.outpoint.cmp(&other.outpoint))
             .then_with(|| self.spent_by.cmp(&other.spent_by))
     }
 }
 
-impl<A: Ord> PartialOrd for FullTxOut<A> {
+impl<P: Ord> PartialOrd for FullTxOut<P> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<A: Anchor> FullTxOut<A> {
+impl<A: Anchor> FullTxOut<ChainPosition<A>> {
     /// Whether the `txout` is considered mature.
     ///
     /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
@@ -202,7 +206,7 @@ impl<A: Anchor> FullTxOut<A> {
     /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
     pub fn is_mature(&self, tip: u32) -> bool {
         if self.is_on_coinbase {
-            let conf_height = match self.chain_position.confirmation_height_upper_bound() {
+            let conf_height = match self.pos.confirmation_height_upper_bound() {
                 Some(height) => height,
                 None => {
                     debug_assert!(false, "coinbase tx can never be unconfirmed");
@@ -232,7 +236,7 @@ impl<A: Anchor> FullTxOut<A> {
             return false;
         }
 
-        let conf_height = match self.chain_position.confirmation_height_upper_bound() {
+        let conf_height = match self.pos.confirmation_height_upper_bound() {
             Some(height) => height,
             None => return false,
         };
