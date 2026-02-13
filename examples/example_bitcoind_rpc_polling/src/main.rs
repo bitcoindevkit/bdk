@@ -11,7 +11,7 @@ use bdk_bitcoind_rpc::{
     bitcoincore_rpc::{Auth, Client, RpcApi},
     Emitter,
 };
-use bdk_chain::{bitcoin::Block, local_chain, CanonicalizationParams, Merge};
+use bdk_chain::{bitcoin::Block, local_chain, CanonicalParams, Merge};
 use example_cli::{
     anyhow,
     clap::{self, Args, Subcommand},
@@ -144,16 +144,15 @@ fn main() -> anyhow::Result<()> {
                     &rpc_client,
                     chain.tip(),
                     fallback_height,
-                    {
-                        let chain_tip = chain.tip().block_id();
-                        let task = graph
-                            .graph()
-                            .canonicalization_task(chain_tip, CanonicalizationParams::default());
-                        chain.canonicalize(task)
-                    }
-                    .txs()
-                    .filter(|tx| tx.pos.is_unconfirmed())
-                    .map(|tx| tx.tx),
+                    chain
+                        .canonical_view(
+                            graph.graph(),
+                            chain.tip().block_id(),
+                            CanonicalParams::default(),
+                        )
+                        .txs()
+                        .filter(|tx| tx.pos.is_unconfirmed())
+                        .map(|tx| tx.tx),
                 )
             };
             let mut db_stage = ChangeSet::default();
@@ -197,19 +196,17 @@ fn main() -> anyhow::Result<()> {
                     last_print = Instant::now();
                     let synced_to = chain.tip();
                     let balance = {
-                        {
-                            let synced_to_block = synced_to.block_id();
-                            let task = graph.graph().canonicalization_task(
-                                synced_to_block,
-                                CanonicalizationParams::default(),
-                            );
-                            chain.canonicalize(task)
-                        }
-                        .balance(
-                            graph.index.outpoints().iter().cloned(),
-                            |(k, _), _| k == &Keychain::Internal,
-                            0,
-                        )
+                        chain
+                            .canonical_view(
+                                graph.graph(),
+                                synced_to.block_id(),
+                                CanonicalParams::default(),
+                            )
+                            .balance(
+                                graph.index.outpoints().iter().cloned(),
+                                |(k, _), _| k == &Keychain::Internal,
+                                0,
+                            )
                     };
                     println!(
                         "[{:>10}s] synced to {} @ {} | total: {}",
@@ -252,16 +249,15 @@ fn main() -> anyhow::Result<()> {
                     rpc_client.clone(),
                     chain.tip(),
                     fallback_height,
-                    {
-                        let chain_tip = chain.tip().block_id();
-                        let task = graph
-                            .graph()
-                            .canonicalization_task(chain_tip, CanonicalizationParams::default());
-                        chain.canonicalize(task)
-                    }
-                    .txs()
-                    .filter(|tx| tx.pos.is_unconfirmed())
-                    .map(|tx| tx.tx),
+                    chain
+                        .canonical_view(
+                            graph.graph(),
+                            chain.tip().block_id(),
+                            CanonicalParams::default(),
+                        )
+                        .txs()
+                        .filter(|tx| tx.pos.is_unconfirmed())
+                        .map(|tx| tx.tx),
                 )
             };
 
@@ -360,19 +356,17 @@ fn main() -> anyhow::Result<()> {
                     last_print = Some(Instant::now());
                     let synced_to = chain.tip();
                     let balance = {
-                        {
-                            let synced_to_block = synced_to.block_id();
-                            let task = graph.graph().canonicalization_task(
-                                synced_to_block,
-                                CanonicalizationParams::default(),
-                            );
-                            chain.canonicalize(task)
-                        }
-                        .balance(
-                            graph.index.outpoints().iter().cloned(),
-                            |(k, _), _| k == &Keychain::Internal,
-                            0,
-                        )
+                        chain
+                            .canonical_view(
+                                graph.graph(),
+                                synced_to.block_id(),
+                                CanonicalParams::default(),
+                            )
+                            .balance(
+                                graph.index.outpoints().iter().cloned(),
+                                |(k, _), _| k == &Keychain::Internal,
+                                0,
+                            )
                     };
                     println!(
                         "[{:>10}s] synced to {} @ {} / {} | total: {}",

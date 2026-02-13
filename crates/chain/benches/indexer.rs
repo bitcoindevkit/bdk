@@ -1,7 +1,7 @@
 use bdk_chain::{
     keychain_txout::{InsertDescriptorError, KeychainTxOutIndex},
     local_chain::LocalChain,
-    CanonicalizationParams, IndexedTxGraph,
+    CanonicalParams, IndexedTxGraph,
 };
 use bdk_core::{BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate};
 use bitcoin::{
@@ -84,10 +84,9 @@ fn do_bench(indexed_tx_graph: &KeychainTxGraph, chain: &LocalChain) {
     // Check balance
     let chain_tip = chain.tip().block_id();
     let op = graph.index.outpoints().clone();
-    let task = graph
-        .graph()
-        .canonicalization_task(chain_tip, CanonicalizationParams::default());
-    let bal = chain.canonicalize(task).balance(op, |_, _| false, 1);
+    let bal = chain
+        .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
+        .balance(op, |_, _| false, 1);
     assert_eq!(bal.total(), AMOUNT * TX_CT as u64);
 }
 
