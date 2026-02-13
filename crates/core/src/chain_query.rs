@@ -7,17 +7,10 @@
 use crate::BlockId;
 use alloc::vec::Vec;
 
-/// A request to check which block identifiers are confirmed in the chain.
+/// A request containing block identifiers to check for confirmation in the chain.
 ///
-/// This is used to verify if specific blocks are part of the canonical chain.
 /// The generic parameter `B` represents the block identifier type, which defaults to `BlockId`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChainRequest<B = BlockId> {
-    /// The chain tip to use as reference for the query.
-    pub chain_tip: B,
-    /// The block identifiers to check for confirmation in the chain.
-    pub block_ids: Vec<B>,
-}
+pub type ChainRequest<B = BlockId> = Vec<B>;
 
 /// Response containing the best confirmed block identifier, if any.
 ///
@@ -47,6 +40,9 @@ pub type ChainResponse<B = BlockId> = Option<B>;
 pub trait ChainQuery<B = BlockId> {
     /// The final output type produced when the query process is complete.
     type Output;
+
+    /// Returns the chain tip used as the reference point for all queries.
+    fn tip(&self) -> B;
 
     /// Returns the next query needed, if any.
     ///
