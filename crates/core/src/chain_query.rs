@@ -33,6 +33,14 @@ pub type ChainResponse<B = BlockId> = Option<B>;
 /// that need to interact with blockchain oracles, chain sources, or other blockchain
 /// data providers without directly performing I/O.
 ///
+/// # Protocol
+///
+/// Callers must drive the task by calling [`next_query`](Self::next_query) and
+/// [`resolve_query`](Self::resolve_query) in a loop. `resolve_query` must only be called
+/// after `next_query` returns `Some`. Once `next_query` returns `None`, call
+/// [`finish`](Self::finish) to get the output. Calling `resolve_query` or `finish` out of
+/// sequence is a programming error.
+///
 /// # Type Parameters
 ///
 /// * `B` - The type of block identifier used in queries (defaults to `BlockId`)
@@ -52,17 +60,9 @@ pub trait ChainQuery<B = BlockId> {
     /// the internal state accordingly.
     fn resolve_query(&mut self, response: ChainResponse<B>);
 
-    /// Returns true if the query process is complete and ready to finish.
-    ///
-    /// The default implementation returns `true` when there are no more queries needed.
-    /// Implementors can override this for more specific behavior if needed.
-    fn is_finished(&mut self) -> bool {
-        self.next_query().is_none()
-    }
-
     /// Completes the query process and returns the final output.
     ///
-    /// This method should be called when `is_finished` returns `true`.
+    /// This method should be called once [`next_query`](Self::next_query) returns `None`.
     /// It consumes `self` and produces the final output.
     fn finish(self) -> Self::Output;
 }
