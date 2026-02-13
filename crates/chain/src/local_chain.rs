@@ -149,7 +149,7 @@ impl LocalChain<BlockHash> {
     /// ```
     pub fn canonicalize<Q>(&self, mut task: Q) -> Q::Output
     where
-        Q: ChainQuery<BlockId>,
+        Q: ChainQuery,
     {
         let chain_tip = task.tip();
         while let Some(request) = task.next_query() {
