@@ -78,6 +78,10 @@ pub struct CanonicalTask<'g, A> {
 impl<'g, A: Anchor> ChainQuery for CanonicalTask<'g, A> {
     type Output = CanonicalTxs<A>;
 
+    fn tip(&self) -> BlockId {
+        self.chain_tip
+    }
+
     fn next_query(&mut self) -> Option<ChainRequest> {
         loop {
             match self.current_stage {
@@ -93,10 +97,7 @@ impl<'g, A: Anchor> ChainQuery for CanonicalTask<'g, A> {
                     if let Some((_txid, _, anchors)) = self.unprocessed_anchored_txs.front() {
                         let block_ids =
                             anchors.iter().map(|anchor| anchor.anchor_block()).collect();
-                        return Some(ChainRequest {
-                            chain_tip: self.chain_tip,
-                            block_ids,
-                        });
+                        return Some(block_ids);
                     }
                 }
                 CanonicalStage::SeenTxs => {
@@ -376,6 +377,10 @@ pub struct CanonicalViewTask<'g, A> {
 impl<'g, A: Anchor> ChainQuery for CanonicalViewTask<'g, A> {
     type Output = CanonicalView<A>;
 
+    fn tip(&self) -> BlockId {
+        self.tip
+    }
+
     fn next_query(&mut self) -> Option<ChainRequest> {
         loop {
             match self.current_stage {
@@ -383,10 +388,7 @@ impl<'g, A: Anchor> ChainQuery for CanonicalViewTask<'g, A> {
                     if let Some((_txid, anchors)) = self.unprocessed_anchor_checks.front() {
                         let block_ids =
                             anchors.iter().map(|anchor| anchor.anchor_block()).collect();
-                        return Some(ChainRequest {
-                            chain_tip: self.tip,
-                            block_ids,
-                        });
+                        return Some(block_ids);
                     }
                 }
                 ViewStage::Finished => return None,
