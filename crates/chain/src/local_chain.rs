@@ -147,13 +147,10 @@ impl LocalChain<BlockHash> {
     where
         Q: ChainQuery<BlockId>,
     {
-        // Process all requests from the task
+        let chain_tip = task.tip();
         while let Some(request) = task.next_query() {
-            let chain_tip = request.chain_tip;
-
-            // Check each block ID and return the first confirmed one
             let mut best_block_id = None;
-            for block_id in &request.block_ids {
+            for block_id in &request {
                 if self
                     .is_block_in_chain(*block_id, chain_tip)
                     .expect("infallible")
@@ -165,8 +162,6 @@ impl LocalChain<BlockHash> {
             }
             task.resolve_query(best_block_id);
         }
-
-        // Return the finished canonical view
         task.finish()
     }
 
