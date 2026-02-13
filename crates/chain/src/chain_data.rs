@@ -1,4 +1,4 @@
-use bitcoin::{constants::COINBASE_MATURITY, OutPoint, TxOut, Txid};
+use bitcoin::Txid;
 
 use crate::Anchor;
 
@@ -158,104 +158,6 @@ impl<A: Ord> Ord for ChainPosition<A> {
 impl<A: Ord> PartialOrd for ChainPosition<A> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-/// A `TxOut` with as much data as we can retrieve about it.
-///
-/// The position type `P` is generic — it can be [`ChainPosition`] for resolved views,
-/// or [`CanonicalReason`](crate::canonical_task::CanonicalReason) for unresolved canonicalization
-/// results.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FullTxOut<P> {
-    /// The position of the transaction in `outpoint` in the overall chain.
-    pub pos: P,
-    /// The location of the `TxOut`.
-    pub outpoint: OutPoint,
-    /// The `TxOut`.
-    pub txout: TxOut,
-    /// The txid and position of the transaction (if any) that has spent this output.
-    pub spent_by: Option<(P, Txid)>,
-    /// Whether this output is on a coinbase transaction.
-    pub is_on_coinbase: bool,
-}
-
-impl<P: Ord> Ord for FullTxOut<P> {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.pos
-            .cmp(&other.pos)
-            // Tie-break with `outpoint` and `spent_by`.
-            .then_with(|| self.outpoint.cmp(&other.outpoint))
-            .then_with(|| self.spent_by.cmp(&other.spent_by))
-    }
-}
-
-impl<P: Ord> PartialOrd for FullTxOut<P> {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl<A: Anchor> FullTxOut<ChainPosition<A>> {
-    /// Whether the `txout` is considered mature.
-    ///
-    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpreted confirmation count may be
-    /// less than the actual value.
-    ///
-    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
-    pub fn is_mature(&self, tip: u32) -> bool {
-        if self.is_on_coinbase {
-            let conf_height = match self.pos.confirmation_height_upper_bound() {
-                Some(height) => height,
-                None => {
-                    debug_assert!(false, "coinbase tx can never be unconfirmed");
-                    return false;
-                }
-            };
-            let age = tip.saturating_sub(conf_height);
-            if age + 1 < COINBASE_MATURITY {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    /// Whether the utxo is/was/will be spendable with chain `tip`.
-    ///
-    /// This method does not take into account the lock time.
-    ///
-    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpreted confirmation count may be
-    /// less than the actual value.
-    ///
-    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
-    pub fn is_confirmed_and_spendable(&self, tip: u32) -> bool {
-        if !self.is_mature(tip) {
-            return false;
-        }
-
-        let conf_height = match self.pos.confirmation_height_upper_bound() {
-            Some(height) => height,
-            None => return false,
-        };
-        if conf_height > tip {
-            return false;
-        }
-
-        // if the spending tx is confirmed within tip height, the txout is no longer spendable
-        if let Some(spend_height) = self
-            .spent_by
-            .as_ref()
-            .and_then(|(pos, _)| pos.confirmation_height_upper_bound())
-        {
-            if spend_height <= tip {
-                return false;
-            }
-        }
-
-        true
     }
 }
 
