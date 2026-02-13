@@ -46,8 +46,10 @@ mod chain_oracle;
 pub use chain_oracle::*;
 mod canonical_task;
 pub use canonical_task::*;
-mod canonical_view;
-pub use canonical_view::*;
+mod canonical;
+pub use canonical::*;
+mod canonical_view_task;
+pub use canonical_view_task::*;
 
 #[doc(hidden)]
 pub mod example_utils;

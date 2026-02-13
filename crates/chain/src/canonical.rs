@@ -24,14 +24,15 @@
 
 use crate::collections::HashMap;
 use alloc::sync::Arc;
+use alloc::vec::Vec;
 use core::{fmt, ops::RangeBounds};
 
-use alloc::vec::Vec;
-
 use bdk_core::BlockId;
-use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, Txid};
+use bitcoin::{
+    constants::COINBASE_MATURITY, Amount, OutPoint, ScriptBuf, Transaction, TxOut, Txid,
+};
 
-use crate::{spk_txout::SpkTxOutIndex, Anchor, Balance, ChainPosition, FullTxOut};
+use crate::{spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalViewTask, ChainPosition, TxGraph};
 
 /// A single canonical transaction with its position.
 ///
@@ -65,6 +66,104 @@ impl<P: Ord> Ord for CanonicalTx<P> {
 impl<P: Ord> PartialOrd for CanonicalTx<P> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+/// A canonical transaction output with position and spend information.
+///
+/// The position type `P` is generic — it can be [`ChainPosition`] for resolved views,
+/// or [`CanonicalReason`](crate::canonical_task::CanonicalReason) for unresolved canonicalization
+/// results.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalTxOut<P> {
+    /// The position of the transaction in `outpoint` in the overall chain.
+    pub pos: P,
+    /// The location of the `TxOut`.
+    pub outpoint: OutPoint,
+    /// The `TxOut`.
+    pub txout: TxOut,
+    /// The txid and position of the transaction (if any) that has spent this output.
+    pub spent_by: Option<(P, Txid)>,
+    /// Whether this output is on a coinbase transaction.
+    pub is_on_coinbase: bool,
+}
+
+impl<P: Ord> Ord for CanonicalTxOut<P> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.pos
+            .cmp(&other.pos)
+            // Tie-break with `outpoint` and `spent_by`.
+            .then_with(|| self.outpoint.cmp(&other.outpoint))
+            .then_with(|| self.spent_by.cmp(&other.spent_by))
+    }
+}
+
+impl<P: Ord> PartialOrd for CanonicalTxOut<P> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
+    /// Whether the `txout` is considered mature.
+    ///
+    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
+    /// method may return false-negatives. In other words, interpreted confirmation count may be
+    /// less than the actual value.
+    ///
+    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
+    pub fn is_mature(&self, tip: u32) -> bool {
+        if self.is_on_coinbase {
+            let conf_height = match self.pos.confirmation_height_upper_bound() {
+                Some(height) => height,
+                None => {
+                    debug_assert!(false, "coinbase tx can never be unconfirmed");
+                    return false;
+                }
+            };
+            let age = tip.saturating_sub(conf_height);
+            if age + 1 < COINBASE_MATURITY {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Whether the utxo is/was/will be spendable with chain `tip`.
+    ///
+    /// This method does not take into account the lock time.
+    ///
+    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
+    /// method may return false-negatives. In other words, interpreted confirmation count may be
+    /// less than the actual value.
+    ///
+    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
+    pub fn is_confirmed_and_spendable(&self, tip: u32) -> bool {
+        if !self.is_mature(tip) {
+            return false;
+        }
+
+        let conf_height = match self.pos.confirmation_height_upper_bound() {
+            Some(height) => height,
+            None => return false,
+        };
+        if conf_height > tip {
+            return false;
+        }
+
+        // if the spending tx is confirmed within tip height, the txout is no longer spendable
+        if let Some(spend_height) = self
+            .spent_by
+            .as_ref()
+            .and_then(|(pos, _)| pos.confirmation_height_upper_bound())
+        {
+            if spend_height <= tip {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -151,7 +250,7 @@ impl<A, P: Clone> Canonical<A, P> {
     /// - The transaction doesn't exist in the canonical set
     /// - The output index is out of bounds
     /// - The transaction was excluded due to conflicts
-    pub fn txout(&self, op: OutPoint) -> Option<FullTxOut<P>> {
+    pub fn txout(&self, op: OutPoint) -> Option<CanonicalTxOut<P>> {
         let (tx, pos) = self.txs.get(&op.txid)?;
         let vout: usize = op.vout.try_into().ok()?;
         let txout = tx.output.get(vout)?;
@@ -159,7 +258,7 @@ impl<A, P: Clone> Canonical<A, P> {
             let (_, spent_by_pos) = &self.txs[spent_by_txid];
             (spent_by_pos.clone(), *spent_by_txid)
         });
-        Some(FullTxOut {
+        Some(CanonicalTxOut {
             pos: pos.clone(),
             outpoint: op,
             txout: txout.clone(),
@@ -202,7 +301,7 @@ impl<A, P: Clone> Canonical<A, P> {
     /// Get a filtered list of outputs from the given outpoints.
     ///
     /// This method takes an iterator of `(identifier, outpoint)` pairs and returns an iterator
-    /// of `(identifier, full_txout)` pairs for outpoints that exist in the canonical set.
+    /// of `(identifier, canonical_txout)` pairs for outpoints that exist in the canonical set.
     /// Non-existent outpoints are silently filtered out.
     ///
     /// The identifier type `O` is useful for tracking which outpoints correspond to which addresses
@@ -228,7 +327,7 @@ impl<A, P: Clone> Canonical<A, P> {
     pub fn filter_outpoints<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
-    ) -> impl Iterator<Item = (O, FullTxOut<P>)> + 'v {
+    ) -> impl Iterator<Item = (O, CanonicalTxOut<P>)> + 'v {
         outpoints
             .into_iter()
             .filter_map(|(op_i, op)| Some((op_i, self.txout(op)?)))
@@ -259,7 +358,7 @@ impl<A, P: Clone> Canonical<A, P> {
     pub fn filter_unspent_outpoints<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
-    ) -> impl Iterator<Item = (O, FullTxOut<P>)> + 'v {
+    ) -> impl Iterator<Item = (O, CanonicalTxOut<P>)> + 'v {
         self.filter_outpoints(outpoints)
             .filter(|(_, txo)| txo.spent_by.is_none())
     }
@@ -337,7 +436,7 @@ impl<A: Anchor> CanonicalView<A> {
     pub fn balance<'v, O: Clone + 'v>(
         &'v self,
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
-        mut trust_predicate: impl FnMut(&O, &FullTxOut<ChainPosition<A>>) -> bool,
+        mut trust_predicate: impl FnMut(&O, &CanonicalTxOut<ChainPosition<A>>) -> bool,
         min_confirmations: u32,
     ) -> Balance {
         let mut immature = Amount::ZERO;
@@ -385,5 +484,16 @@ impl<A: Anchor> CanonicalView<A> {
             untrusted_pending,
             confirmed,
         }
+    }
+}
+
+impl<A: Anchor> CanonicalTxs<A> {
+    /// Creates a [`CanonicalViewTask`] that resolves [`CanonicalReason`]s into [`ChainPosition`]s.
+    ///
+    /// This is the second phase of the canonicalization pipeline. The resulting task
+    /// queries the chain to verify anchors for transitively anchored transactions and
+    /// produces a [`CanonicalView`] with resolved chain positions.
+    pub fn view_task<'g>(self, tx_graph: &'g TxGraph<A>) -> CanonicalViewTask<'g, A> {
+        CanonicalViewTask::new(tx_graph, self.tip, self.order, self.txs, self.spends)
     }
 }
