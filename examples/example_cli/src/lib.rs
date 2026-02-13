@@ -24,7 +24,7 @@ use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
-    tx_graph, ChainOracle, ChainPosition, DescriptorExt, FullTxOut, IndexedTxGraph, Merge,
+    tx_graph, CanonicalTxOut, ChainOracle, ChainPosition, DescriptorExt, IndexedTxGraph, Merge,
 };
 use bdk_coin_select::{
     metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
@@ -418,7 +418,7 @@ pub fn create_tx(
 }
 
 // Alias the elements of `planned_utxos`
-pub type PlanUtxo = (Plan, FullTxOut<ChainPosition<ConfirmationBlockTime>>);
+pub type PlanUtxo = (Plan, CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>);
 
 pub fn planned_utxos(
     graph: &KeychainTxGraph,
