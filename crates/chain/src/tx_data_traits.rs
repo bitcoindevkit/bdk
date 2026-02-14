@@ -81,6 +81,10 @@ impl<A: Anchor> Anchor for &A {
     fn anchor_block(&self) -> BlockId {
         <A as Anchor>::anchor_block(self)
     }
+
+    fn confirmation_height_upper_bound(&self) -> u32 {
+        <A as Anchor>::confirmation_height_upper_bound(&self)
+    }
 }
 
 impl Anchor for BlockId {
