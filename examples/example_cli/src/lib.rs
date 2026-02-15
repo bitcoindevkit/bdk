@@ -227,7 +227,7 @@ impl FromStr for CoinSelectionAlgo {
             "oldest-first" => OldestFirst,
             "newest-first" => NewestFirst,
             "bnb" => BranchAndBound,
-            unknown => bail!("unknown coin selection algorithm '{unknown}'"),
+            unknown => bail!("unknown coin selection algorithm '{}'. Supported algorithms: largest-first, smallest-first, oldest-first, newest-first, bnb", unknown),
         })
     }
 }
