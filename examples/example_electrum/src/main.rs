@@ -129,7 +129,7 @@ fn main() -> anyhow::Result<()> {
     // Tell the electrum client about the txs and anchors we've already got locally so it doesn't
     // re-download .them
     {
-        let graph = graph.lock().unwrap();
+        let graph = graph.lock().expect("mutex poisoned");
         client.populate_tx_cache(graph.graph().full_txs().map(|tx_node| tx_node.tx));
         client.populate_anchor_cache(graph.graph().all_anchors().clone());
     }
@@ -141,8 +141,8 @@ fn main() -> anyhow::Result<()> {
             ..
         } => {
             let request = {
-                let graph = &*graph.lock().unwrap();
-                let chain = &*chain.lock().unwrap();
+                let graph = &*graph.lock().expect("mutex poisoned");
+                let chain = &*chain.lock().expect("mutex poisoned");
 
                 FullScanRequest::builder()
                     .chain_tip(chain.tip())
@@ -193,8 +193,8 @@ fn main() -> anyhow::Result<()> {
             ..
         } => {
             // Get a short lock on the tracker to get the spks we're interested in
-            let graph = graph.lock().unwrap();
-            let chain = chain.lock().unwrap();
+            let graph = graph.lock().expect("mutex poisoned");
+            let chain = chain.lock().expect("mutex poisoned");
 
             if !(all_spks || unused_spks || utxos || unconfirmed) {
                 unused_spks = true;
@@ -269,8 +269,8 @@ fn main() -> anyhow::Result<()> {
     };
 
     let db_changeset = {
-        let mut chain = chain.lock().unwrap();
-        let mut graph = graph.lock().unwrap();
+        let mut chain = chain.lock().expect("mutex poisoned");
+        let mut graph = graph.lock().expect("mutex poisoned");
 
         let chain_changeset = chain.apply_update(chain_update.expect("request has chain tip"))?;
 
@@ -290,7 +290,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut db = db.lock().unwrap();
+    let mut db = db.lock().expect("mutex poisoned");
     db.append(&db_changeset)?;
     Ok(())
 }
