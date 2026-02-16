@@ -10,3 +10,5 @@ Cargo.lock
 *.sqlite*
 
 crates/electrum/target
+
+.direnv/
