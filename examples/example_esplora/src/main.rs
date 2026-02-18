@@ -69,6 +69,7 @@ pub struct EsploraArgs {
     esplora_url: Option<String>,
 }
 
+use std::time::Duration;
 impl EsploraArgs {
     pub fn client(&self, network: Network) -> anyhow::Result<esplora_client::BlockingClient> {
         let esplora_url = self.esplora_url.as_deref().unwrap_or(match network {
@@ -79,10 +80,14 @@ impl EsploraArgs {
             _ => panic!("unsupported network"),
         });
 
-        let client = esplora_client::Builder::new(esplora_url).build_blocking();
+        let client = esplora_client::Builder::new(esplora_url)
+            .timeout(60)
+            .build_blocking();
+
         Ok(client)
     }
 }
+
 
 #[derive(Parser, Debug, Clone, PartialEq)]
 pub struct ScanOptions {
