@@ -497,7 +497,7 @@ impl<D> FromIterator<(u32, D)> for ChangeSet<D> {
 /// Error when applying blocks to a local chain.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ApplyBlockError {
-    /// Genesis block is missing or would be altered.
+    /// Genesis block is missing.
     MissingGenesis,
     /// Block's `prev_blockhash` doesn't match the expected block.
     PrevBlockhashMismatch {
@@ -510,7 +510,7 @@ impl core::fmt::Display for ApplyBlockError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ApplyBlockError::MissingGenesis => {
-                write!(f, "genesis block is missing or would be altered")
+                write!(f, "genesis block is missing")
             }
             ApplyBlockError::PrevBlockhashMismatch { expected } => write!(
                 f,
@@ -753,6 +753,13 @@ where
                         }
                     }
                 } else {
+                    // Genesis block (height 0) cannot be replaced. If the original and
+                    // update disagree on genesis, they belong to different chains.
+                    if o.height() == 0 && !o.is_placeholder() {
+                        return Err(CannotConnectError {
+                            try_include_height: 0,
+                        });
+                    }
                     // We have an invalidation height so we set the height to the updated hash and
                     // also purge all the original chain block hashes above this block.
                     changeset.blocks.insert(u.height(), u.data());
