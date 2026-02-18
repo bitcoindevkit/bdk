@@ -386,12 +386,10 @@ fn checkpoint_insert_between_conflicting_both_sides() {
 
     // Verify chain structure
     assert_eq!(result.height(), 5, "tip should be at height 5");
-    // Should have: checkpoint 5 only
-    assert_eq!(
-        result.iter().count(),
-        1,
-        "should have 1 checkpoint(s) (4 was displaced, 6 was evicted)"
-    );
+    // Should have: checkpoint 5 only (4 was removed because data's prev_blockhash
+    // conflicts with it, 6 was removed because its prev_blockhash conflicts with
+    // the newly inserted block at 5)
+    assert_eq!(result.iter().count(), 1, "should have 1 checkpoint");
 }
 
 /// Test that push returns Err(self) when trying to push at the same height.
@@ -519,7 +517,11 @@ fn checkpoint_push_creates_non_contiguous_chain() {
     assert_eq!(new_cp.height(), 105);
     assert_eq!(new_cp.hash(), hash!("block_105"));
 
-    // Verify chain structure: 100, 105
+    // Verify chain structure contains exactly checkpoints at 105 and 100
+    let cp_105 = new_cp.get(105).expect("checkpoint at 105 should exist");
+    assert_eq!(cp_105.hash(), hash!("block_105"));
+    let cp_100 = new_cp.get(100).expect("checkpoint at 100 should exist");
+    assert_eq!(cp_100.hash(), hash!("block_100"));
     assert_eq!(new_cp.iter().count(), 2);
 }
 
@@ -531,13 +533,8 @@ fn checkpoint_insert_cannot_replace_genesis() {
         blockhash: hash!("block_0"),
         prev_blockhash: hash!("genesis_parent"),
     };
-    let block_1 = TestBlock {
-        blockhash: hash!("block_1"),
-        prev_blockhash: hash!("block_0"),
-    };
 
-    let cp = CheckPoint::from_blocks(vec![(0, block_0), (1, block_1)])
-        .expect("should create valid chain");
+    let cp = CheckPoint::new(0, block_0);
 
     // Try to replace genesis with a different block - should panic
     let block_0_new = TestBlock {
@@ -555,13 +552,8 @@ fn checkpoint_insert_cannot_displace_genesis() {
         blockhash: hash!("block_0"),
         prev_blockhash: hash!("genesis_parent"),
     };
-    let block_1 = TestBlock {
-        blockhash: hash!("block_1"),
-        prev_blockhash: hash!("block_0"),
-    };
 
-    let cp = CheckPoint::from_blocks(vec![(0, block_0), (1, block_1)])
-        .expect("should create valid chain");
+    let cp = CheckPoint::new(0, block_0);
 
     // Insert at height 1 with prev_blockhash that conflicts with genesis - should panic
     let block_1_new = TestBlock {
