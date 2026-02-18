@@ -176,11 +176,11 @@ fn update_local_chain() {
         },
         TestLocalChain {
             name: "fix blockhash before agreement point",
-            chain: local_chain![(0, hash!("im-wrong")), (1, hash!("we-agree"))],
-            update: chain_update![(0, hash!("fix")), (1, hash!("we-agree"))],
+            chain: local_chain![(0, hash!("_")), (1, hash!("im-wrong")), (2, hash!("we-agree"))],
+            update: chain_update![(0, hash!("_")), (1, hash!("fix")), (2, hash!("we-agree"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(0, Some(hash!("fix")))],
-                init_changeset: &[(0, Some(hash!("fix"))), (1, Some(hash!("we-agree")))],
+                changeset: &[(1, Some(hash!("fix")))],
+                init_changeset: &[(0, Some(hash!("_"))), (1, Some(hash!("fix"))), (2, Some(hash!("we-agree")))],
             },
         },
         // B and C are in both chain and update
@@ -319,6 +319,18 @@ fn update_local_chain() {
                     (3, Some(hash!("D'"))),
                 ],
             },
+        },
+        // Conflicting genesis with no point of agreement should fail.
+        //        | 0 | 2
+        // chain  | _   B
+        // update | _'  B'
+        TestLocalChain {
+            name: "conflicting genesis without agreement point",
+            chain: local_chain![(0, hash!("_")), (2, hash!("B"))],
+            update: chain_update![(0, hash!("_'")), (2, hash!("B'"))],
+            exp: ExpectedResult::Err(CannotConnectError {
+                try_include_height: 0,
+            }),
         },
     ]
     .into_iter()
