@@ -1,0 +1,8 @@
+* @evanlinjin @oleonardolima
+/crates/chain/ @evanlinjin @oleonardolima
+/crates/core/ @evanlinjin @oleonardolima
+/crates/electrum/ @evanlinjin @oleonardolima
+/crates/esplora/ @oleonardolima @luisschwab
+/crates/bitcoind_rpc/ @evanlinjin @ValuedMammal
+/crates/testenv/ @tvpeter @luisschwab
+/crates/file_store/ @nymius
