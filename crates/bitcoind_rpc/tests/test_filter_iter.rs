@@ -1,7 +1,7 @@
 use bdk_bitcoind_rpc::bip158::{Error, FilterIter};
 use bdk_core::CheckPoint;
 use bdk_testenv::{anyhow, corepc_node, TestEnv};
-use bitcoin::{Address, Amount, Network, ScriptBuf};
+use bitcoin::{Address, Amount, BlockHash, Network, ScriptBuf};
 use bitcoincore_rpc::RpcApi;
 
 use crate::common::ClientExt;
@@ -63,7 +63,7 @@ fn filter_iter_error_wrong_network() -> anyhow::Result<()> {
     let _ = env.mine_blocks(10, None)?;
 
     // Try to initialize FilterIter with a CP on the wrong network
-    let cp = CheckPoint::new(0, bitcoin::hashes::Hash::hash(b"wrong-hash"));
+    let cp = CheckPoint::<BlockHash>::new(0, bitcoin::hashes::Hash::hash(b"wrong-hash"));
     let client = ClientExt::get_rpc_client(&env)?;
     let mut iter = FilterIter::new(&client, cp, [ScriptBuf::new()]);
     assert!(matches!(iter.next(), Some(Err(Error::ReorgDepthExceeded))));
