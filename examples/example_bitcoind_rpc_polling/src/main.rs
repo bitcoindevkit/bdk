@@ -138,8 +138,8 @@ fn main() -> anyhow::Result<()> {
 
             let rpc_client = rpc_args.new_client()?;
             let mut emitter = {
-                let chain = chain.lock().unwrap();
-                let graph = graph.lock().unwrap();
+                let chain = chain.lock().expect("mutex poisoned");
+                let graph = graph.lock().expect("mutex poisoned");
                 Emitter::new(
                     &rpc_client,
                     chain.tip(),
@@ -163,8 +163,8 @@ fn main() -> anyhow::Result<()> {
             while let Some(emission) = emitter.next_block()? {
                 let height = emission.block_height();
 
-                let mut chain = chain.lock().unwrap();
-                let mut graph = graph.lock().unwrap();
+                let mut chain = chain.lock().expect("mutex poisoned");
+                let mut graph = graph.lock().expect("mutex poisoned");
 
                 let chain_changeset = chain
                     .apply_update(emission.checkpoint)
@@ -179,7 +179,7 @@ fn main() -> anyhow::Result<()> {
 
                 // commit staged db changes in intervals
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
-                    let db = &mut *db.lock().unwrap();
+                    let db = &mut *db.lock().expect("mutex poisoned");
                     last_db_commit = Instant::now();
                     if let Some(changeset) = db_stage.take() {
                         db.append(&changeset)?;
@@ -224,7 +224,7 @@ fn main() -> anyhow::Result<()> {
                 .unwrap()
                 .batch_insert_relevant_unconfirmed(mempool_txs.update);
             {
-                let db = &mut *db.lock().unwrap();
+                let db = &mut *db.lock().expect("mutex poisoned");
                 db_stage.merge(ChangeSet {
                     tx_graph: graph_changeset.tx_graph,
                     indexer: graph_changeset.indexer,
@@ -243,8 +243,8 @@ fn main() -> anyhow::Result<()> {
 
             let rpc_client = Arc::new(rpc_args.new_client()?);
             let mut emitter = {
-                let chain = chain.lock().unwrap();
-                let graph = graph.lock().unwrap();
+                let chain = chain.lock().expect("mutex poisoned");
+                let graph = graph.lock().expect("mutex poisoned");
                 Emitter::new(
                     rpc_client.clone(),
                     chain.tip(),
@@ -306,8 +306,8 @@ fn main() -> anyhow::Result<()> {
             let mut db_stage = ChangeSet::default();
 
             for emission in rx {
-                let mut graph = graph.lock().unwrap();
-                let mut chain = chain.lock().unwrap();
+                let mut graph = graph.lock().expect("mutex poisoned");
+                let mut chain = chain.lock().expect("mutex poisoned");
 
                 let (chain_changeset, graph_changeset) = match emission {
                     Emission::Block(block_emission) => {
@@ -340,7 +340,7 @@ fn main() -> anyhow::Result<()> {
                 });
 
                 if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
-                    let db = &mut *db.lock().unwrap();
+                    let db = &mut *db.lock().expect("mutex poisoned");
                     last_db_commit = Instant::now();
                     if let Some(changeset) = db_stage.take() {
                         db.append(&changeset)?;

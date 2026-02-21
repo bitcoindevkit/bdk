@@ -462,7 +462,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
         Commands::Generate { .. } => unreachable!("handled by generate command"),
         Commands::ChainSpecific(_) => unreachable!("example code should handle this!"),
         Commands::Address { addr_cmd } => {
-            let graph = &mut *graph.lock().unwrap();
+            let graph = &mut *graph.lock().expect("mutex poisoned");
             let index = &mut graph.index;
 
             match addr_cmd {
@@ -475,7 +475,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
 
                     let ((spk_i, spk), index_changeset) =
                         spk_chooser(index, Keychain::External).expect("Must exist");
-                    let db = &mut *db.lock().unwrap();
+                    let db = &mut *db.lock().expect("mutex poisoned");
                     db.append(&ChangeSet {
                         indexer: index_changeset,
                         ..Default::default()
@@ -510,8 +510,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
             }
         }
         Commands::Balance => {
-            let graph = &*graph.lock().unwrap();
-            let chain = &*chain.lock().unwrap();
+            let graph = &*graph.lock().expect("mutex poisoned");
+            let chain = &*chain.lock().expect("mutex poisoned");
             fn print_balances<'a>(
                 title_str: &'a str,
                 items: impl IntoIterator<Item = (&'a str, Amount)>,
@@ -557,8 +557,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
             Ok(())
         }
         Commands::TxOut { txout_cmd } => {
-            let graph = &*graph.lock().unwrap();
-            let chain = &*chain.lock().unwrap();
+            let graph = &*graph.lock().expect("mutex poisoned");
+            let chain = &*chain.lock().expect("mutex poisoned");
             let chain_tip = chain.get_chain_tip()?;
             let outpoints = graph.index.outpoints();
 
@@ -608,8 +608,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 let address = address.require_network(network)?;
 
                 let (psbt, change_info) = {
-                    let mut graph = graph.lock().unwrap();
-                    let chain = chain.lock().unwrap();
+                    let mut graph = graph.lock().expect("mutex poisoned");
+                    let chain = chain.lock().expect("mutex poisoned");
 
                     // collect assets we can sign for
                     let mut pks = vec![];
@@ -648,7 +648,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     // change keychain so future scans will find the tx we're about to broadcast.
                     // If we're unable to persist this, then we don't want to broadcast.
                     {
-                        let db = &mut *db.lock().unwrap();
+                        let db = &mut *db.lock().expect("mutex poisoned");
                         db.append(&ChangeSet {
                             indexer,
                             ..Default::default()
@@ -715,7 +715,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 let tx = psbt.extract_tx()?;
 
                 if broadcast {
-                    let mut graph = graph.lock().unwrap();
+                    let mut graph = graph.lock().expect("mutex poisoned");
 
                     match broadcast_fn(chain_specific, &tx) {
                         Ok(_) => {
