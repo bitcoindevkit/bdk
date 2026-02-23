@@ -41,7 +41,7 @@ jobs:
         with:
             toolchain: ${{ matrix.rust.version }}
             override: true
-            cache: true
+            cache: false
       - name: Pin dependencies for MSRV
         if: matrix.rust.version == '1.85.0'
         run: ./ci/pin-msrv.sh
@@ -66,7 +66,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           override: true
-          cache: true
+          cache: false
           # target: "thumbv6m-none-eabi"
       - name: Check bdk_chain
         working-directory: ./crates/chain
@@ -98,7 +98,7 @@ jobs:
         with:
             toolchain: ${{ needs.prepare.outputs.rust_version }}
             override: true
-            cache: true
+            cache: false
             target: "wasm32-unknown-unknown"
       - name: Check esplora
         working-directory: ./crates/esplora
@@ -117,7 +117,7 @@ jobs:
         with:
             toolchain: nightly
             override: true
-            cache: true
+            cache: false
             components: rustfmt
       - name: Check fmt
         run: cargo fmt --all --check
@@ -137,7 +137,7 @@ jobs:
             toolchain: ${{ needs.prepare.outputs.rust_version }}
             components: clippy
             override: true
-            cache: true
+            cache: false
       - name: Clippy
         run: cargo clippy --all-features --all-targets -- -D warnings
 
@@ -162,7 +162,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           override: true
-          cache: true
+          cache: false
       - name: Build
         working-directory: examples/${{ matrix.example-dir }}
         run: cargo build

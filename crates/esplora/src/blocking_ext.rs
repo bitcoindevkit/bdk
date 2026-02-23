@@ -170,9 +170,9 @@ fn fetch_latest_blocks(
     client: &esplora_client::BlockingClient,
 ) -> Result<BTreeMap<u32, BlockHash>, Error> {
     Ok(client
-        .get_blocks(None)?
+        .get_block_infos(None)?
         .into_iter()
-        .map(|b| (b.time.height, b.id))
+        .map(|b| (b.height, b.id))
         .collect())
 }
 
