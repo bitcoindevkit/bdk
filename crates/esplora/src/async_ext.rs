@@ -184,10 +184,10 @@ async fn fetch_latest_blocks<S: Sleeper>(
     client: &esplora_client::AsyncClient<S>,
 ) -> Result<BTreeMap<u32, BlockHash>, Error> {
     Ok(client
-        .get_blocks(None)
+        .get_block_infos(None)
         .await?
         .into_iter()
-        .map(|b| (b.time.height, b.id))
+        .map(|b| (b.height, b.id))
         .collect())
 }
 
