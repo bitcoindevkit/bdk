@@ -67,6 +67,9 @@ pub struct Emitter<C, D = BlockHash> {
     /// sure the tip block is already emitted. When a block is emitted, the transactions in the
     /// block are removed from this field.
     mempool_snapshot: HashMap<Txid, Arc<Transaction>>,
+
+    /// Closure to convert a block into checkpoint data `D`.
+    to_cp_data: Box<dyn Fn(&Block) -> D + Send + Sync>,
 }
 
 /// Indicates that there are no initially-expected mempool transactions.
@@ -79,7 +82,40 @@ impl<C, D> Emitter<C, D>
 where
     C: Deref,
     C::Target: RpcApi,
-    D: ToBlockHash + Clone + Debug,
+    D: ToBlockHash + Clone + Debug + 'static,
+{
+    /// Construct a new [`Emitter`] with a custom closure to convert blocks into checkpoint data.
+    ///
+    /// Use [`new`](Self::new) for the common case where `D` implements [`FromBlockHeader`].
+    pub fn new_with(
+        client: C,
+        last_cp: CheckPoint<D>,
+        start_height: u32,
+        expected_mempool_txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>,
+        to_cp_data: impl Fn(&Block) -> D + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            client,
+            start_height,
+            last_cp,
+            last_block: None,
+            mempool_snapshot: expected_mempool_txs
+                .into_iter()
+                .map(|tx| {
+                    let tx: Arc<Transaction> = tx.into();
+                    (tx.compute_txid(), tx)
+                })
+                .collect(),
+            to_cp_data: Box::new(to_cp_data),
+        }
+    }
+}
+
+impl<C, D> Emitter<C, D>
+where
+    C: Deref,
+    C::Target: RpcApi,
+    D: ToBlockHash + FromBlockHeader + Clone + Debug + 'static,
 {
     /// Construct a new [`Emitter`].
     ///
@@ -98,21 +134,22 @@ where
         start_height: u32,
         expected_mempool_txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>,
     ) -> Self {
-        Self {
+        Self::new_with(
             client,
-            start_height,
             last_cp,
-            last_block: None,
-            mempool_snapshot: expected_mempool_txs
-                .into_iter()
-                .map(|tx| {
-                    let tx: Arc<Transaction> = tx.into();
-                    (tx.compute_txid(), tx)
-                })
-                .collect(),
-        }
+            start_height,
+            expected_mempool_txs,
+            |block| D::from_blockheader(block.header),
+        )
     }
+}
 
+impl<C, D> Emitter<C, D>
+where
+    C: Deref,
+    C::Target: RpcApi,
+    D: ToBlockHash + Clone + Debug + 'static,
+{
     /// Emit mempool transactions and any evicted [`Txid`]s.
     ///
     /// This method returns a [`MempoolEvent`] containing the full transactions that were emitted,
@@ -120,7 +157,7 @@ where
     /// not when the node first saw the transaction), and [`MempoolEvent::evicted`] which are any
     /// [`Txid`]s which were previously seen in the mempool and are now missing. The timestamp
     /// advances on each poll, so callers should treat it as a "last seen" value. Evicted txids
-    /// are only reported once the emitter’s checkpoint matches the RPC’s best block in both height
+    /// are only reported once the emitter's checkpoint matches the RPC's best block in both height
     /// and hash. Until `next_block()` advances the checkpoint to tip, `mempool()` will always
     /// return an empty `evicted` set.
     ///
@@ -257,27 +294,6 @@ where
         Ok(mempool_event)
     }
 
-    /// Emit the next block, using `to_data` to construct checkpoint data from the block.
-    ///
-    /// This is the alternative to [`next_block`](Self::next_block) when [`FromBlockHeader`] isn't
-    /// implemented for `D`.
-    pub fn next_block_with<F>(
-        &mut self,
-        to_data: F,
-    ) -> Result<Option<BlockEvent<Block, D>>, bitcoincore_rpc::Error>
-    where
-        F: Fn(&Block) -> D,
-    {
-        if let Some((checkpoint, block)) = poll(self, to_data)? {
-            // Stop tracking unconfirmed transactions that have been confirmed in this block.
-            for tx in &block.txdata {
-                self.mempool_snapshot.remove(&tx.compute_txid());
-            }
-            return Ok(Some(BlockEvent { block, checkpoint }));
-        }
-        Ok(None)
-    }
-
     /// Emit the next block height and block (if any).
     ///
     /// Call this repeatedly until it returns `Ok(None)`, which means the chain tip has been
@@ -307,11 +323,15 @@ where
     /// }
     /// # Ok::<_, bdk_bitcoind_rpc::bitcoincore_rpc::Error>(())
     /// ```
-    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block, D>>, bitcoincore_rpc::Error>
-    where
-        D: FromBlockHeader,
-    {
-        self.next_block_with(|block| D::from_blockheader(block.header))
+    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block, D>>, bitcoincore_rpc::Error> {
+        if let Some((checkpoint, block)) = poll(self)? {
+            // Stop tracking unconfirmed transactions that have been confirmed in this block.
+            for tx in &block.txdata {
+                self.mempool_snapshot.remove(&tx.compute_txid());
+            }
+            return Ok(Some(BlockEvent { block, checkpoint }));
+        }
+        Ok(None)
     }
 }
 
@@ -432,15 +452,13 @@ where
     Ok(PollResponse::AgreementPointNotFound(genesis_hash))
 }
 
-fn poll<C, D, F>(
+fn poll<C, D>(
     emitter: &mut Emitter<C, D>,
-    to_cp_data: F,
 ) -> Result<Option<(CheckPoint<D>, Block)>, bitcoincore_rpc::Error>
 where
     C: Deref,
     C::Target: RpcApi,
-    D: ToBlockHash + Clone + Debug,
-    F: Fn(&Block) -> D,
+    D: ToBlockHash + Clone + Debug + 'static,
 {
     let client = &emitter.client;
     loop {
@@ -448,7 +466,7 @@ where
             PollResponse::Block(res) => {
                 let height = res.height as u32;
                 let block = client.get_block(&res.hash)?;
-                let cp_data = to_cp_data(&block);
+                let cp_data = (emitter.to_cp_data)(&block);
 
                 let new_cp = emitter
                     .last_cp
@@ -482,7 +500,7 @@ where
             }
             PollResponse::AgreementPointNotFound(genesis_hash) => {
                 let block = client.get_block(&genesis_hash)?;
-                let cp_data = to_cp_data(&block);
+                let cp_data = (emitter.to_cp_data)(&block);
                 emitter.last_cp = CheckPoint::new(0, cp_data);
                 emitter.last_block = None;
                 continue;
