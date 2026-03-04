@@ -16,10 +16,11 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 use bdk_core::collections::{HashMap, HashSet};
-use bdk_core::{BlockId, CheckPoint};
+use bdk_core::{BlockId, CheckPoint, FromBlockHeader, ToBlockHash};
 use bitcoin::{Block, BlockHash, Transaction, Txid};
 use bitcoincore_rpc::{bitcoincore_rpc_json, RpcApi};
 use core::ops::Deref;
+use std::fmt::Debug;
 
 pub mod bip158;
 
@@ -30,13 +31,13 @@ pub use bitcoincore_rpc;
 /// Refer to [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate
-pub struct Emitter<C> {
+pub struct Emitter<C, D = BlockHash> {
     client: C,
     start_height: u32,
 
     /// The checkpoint of the last-emitted block that is in the best chain. If it is later found
     /// that the block is no longer in the best chain, it will be popped off from here.
-    last_cp: CheckPoint<BlockHash>,
+    last_cp: CheckPoint<D>,
 
     /// The block result returned from rpc of the last-emitted block. As this result contains the
     /// next block's block hash (which we use to fetch the next block), we set this to `None`
@@ -54,6 +55,9 @@ pub struct Emitter<C> {
     /// sure the tip block is already emitted. When a block is emitted, the transactions in the
     /// block are removed from this field.
     mempool_snapshot: HashMap<Txid, Arc<Transaction>>,
+
+    /// Closure to convert a block into checkpoint data `D`.
+    to_cp_data: Box<dyn Fn(&Block) -> D + Send + Sync>,
 }
 
 /// Indicates that there are no initially-expected mempool transactions.
@@ -62,10 +66,44 @@ pub struct Emitter<C> {
 /// to start empty (i.e. with no unconfirmed transactions).
 pub const NO_EXPECTED_MEMPOOL_TXS: core::iter::Empty<Arc<Transaction>> = core::iter::empty();
 
-impl<C> Emitter<C>
+impl<C, D> Emitter<C, D>
 where
     C: Deref,
     C::Target: RpcApi,
+    D: ToBlockHash + Clone + Debug + 'static,
+{
+    /// Construct a new [`Emitter`] with a custom closure to convert blocks into checkpoint data.
+    ///
+    /// Use [`new`](Self::new) for the common case where `D` implements [`FromBlockHeader`].
+    pub fn new_with(
+        client: C,
+        last_cp: CheckPoint<D>,
+        start_height: u32,
+        expected_mempool_txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>,
+        to_cp_data: impl Fn(&Block) -> D + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            client,
+            start_height,
+            last_cp,
+            last_block: None,
+            mempool_snapshot: expected_mempool_txs
+                .into_iter()
+                .map(|tx| {
+                    let tx: Arc<Transaction> = tx.into();
+                    (tx.compute_txid(), tx)
+                })
+                .collect(),
+            to_cp_data: Box::new(to_cp_data),
+        }
+    }
+}
+
+impl<C, D> Emitter<C, D>
+where
+    C: Deref,
+    C::Target: RpcApi,
+    D: ToBlockHash + FromBlockHeader + Clone + Debug + 'static,
 {
     /// Construct a new [`Emitter`].
     ///
@@ -80,31 +118,32 @@ where
     /// If it is known that the wallet is empty, [`NO_EXPECTED_MEMPOOL_TXS`] can be used.
     pub fn new(
         client: C,
-        last_cp: CheckPoint<BlockHash>,
+        last_cp: CheckPoint<D>,
         start_height: u32,
         expected_mempool_txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>,
     ) -> Self {
-        Self {
+        Self::new_with(
             client,
-            start_height,
             last_cp,
-            last_block: None,
-            mempool_snapshot: expected_mempool_txs
-                .into_iter()
-                .map(|tx| {
-                    let tx: Arc<Transaction> = tx.into();
-                    (tx.compute_txid(), tx)
-                })
-                .collect(),
-        }
+            start_height,
+            expected_mempool_txs,
+            |block| D::from_blockheader(block.header),
+        )
     }
+}
 
+impl<C, D> Emitter<C, D>
+where
+    C: Deref,
+    C::Target: RpcApi,
+    D: ToBlockHash + Clone + Debug + 'static,
+{
     /// Emit mempool transactions and any evicted [`Txid`]s.
     ///
     /// This method returns a [`MempoolEvent`] containing the full transactions (with their
     /// first-seen unix timestamps) that were emitted, and [`MempoolEvent::evicted`] which are
     /// any [`Txid`]s which were previously seen in the mempool and are now missing. Evicted txids
-    /// are only reported once the emitter’s checkpoint matches the RPC’s best block in both height
+    /// are only reported once the emitter's checkpoint matches the RPC's best block in both height
     /// and hash. Until `next_block()` advances the checkpoint to tip, `mempool()` will always
     /// return an empty `evicted` set.
     #[cfg(feature = "std")]
@@ -199,8 +238,8 @@ where
     }
 
     /// Emit the next block height and block (if any).
-    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
-        if let Some((checkpoint, block)) = poll(self, move |hash, client| client.get_block(hash))? {
+    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block, D>>, bitcoincore_rpc::Error> {
+        if let Some((checkpoint, block)) = poll(self)? {
             // Stop tracking unconfirmed transactions that have been confirmed in this block.
             for tx in &block.txdata {
                 self.mempool_snapshot.remove(&tx.compute_txid());
@@ -223,7 +262,7 @@ pub struct MempoolEvent {
 
 /// A newly emitted block from [`Emitter`].
 #[derive(Debug)]
-pub struct BlockEvent<B> {
+pub struct BlockEvent<B = Block, D = BlockHash> {
     /// The block.
     pub block: B,
 
@@ -235,10 +274,10 @@ pub struct BlockEvent<B> {
     ///
     /// This is important as BDK structures require block-to-apply to be connected with another
     /// block in the original chain.
-    pub checkpoint: CheckPoint<BlockHash>,
+    pub checkpoint: CheckPoint<D>,
 }
 
-impl<B> BlockEvent<B> {
+impl<B, D> BlockEvent<B, D> {
     /// The block height of this new block.
     pub fn block_height(&self) -> u32 {
         self.checkpoint.height()
@@ -264,17 +303,17 @@ impl<B> BlockEvent<B> {
     }
 }
 
-enum PollResponse {
+enum PollResponse<D = BlockHash> {
     Block(bitcoincore_rpc_json::GetBlockResult),
     NoMoreBlocks,
     /// Fetched block is not in the best chain.
     BlockNotInBestChain,
-    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint<BlockHash>),
+    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint<D>),
     /// Force the genesis checkpoint down the receiver's throat.
     AgreementPointNotFound(BlockHash),
 }
 
-fn poll_once<C>(emitter: &Emitter<C>) -> Result<PollResponse, bitcoincore_rpc::Error>
+fn poll_once<C, D>(emitter: &Emitter<C, D>) -> Result<PollResponse<D>, bitcoincore_rpc::Error>
 where
     C: Deref,
     C::Target: RpcApi,
@@ -328,30 +367,30 @@ where
     Ok(PollResponse::AgreementPointNotFound(genesis_hash))
 }
 
-fn poll<C, V, F>(
-    emitter: &mut Emitter<C>,
-    get_item: F,
-) -> Result<Option<(CheckPoint<BlockHash>, V)>, bitcoincore_rpc::Error>
+fn poll<C, D>(
+    emitter: &mut Emitter<C, D>,
+) -> Result<Option<(CheckPoint<D>, Block)>, bitcoincore_rpc::Error>
 where
     C: Deref,
     C::Target: RpcApi,
-    F: Fn(&BlockHash, &C::Target) -> Result<V, bitcoincore_rpc::Error>,
+    D: ToBlockHash + Clone + Debug + 'static,
 {
+    let client = &emitter.client;
     loop {
         match poll_once(emitter)? {
             PollResponse::Block(res) => {
                 let height = res.height as u32;
-                let hash = res.hash;
-                let item = get_item(&hash, &emitter.client)?;
+                let block = client.get_block(&res.hash)?;
+                let cp_data = (emitter.to_cp_data)(&block);
 
                 let new_cp = emitter
                     .last_cp
                     .clone()
-                    .push(height, hash)
+                    .push(height, cp_data)
                     .expect("must push");
                 emitter.last_cp = new_cp.clone();
                 emitter.last_block = Some(res);
-                return Ok(Some((new_cp, item)));
+                return Ok(Some((new_cp, block)));
             }
             PollResponse::NoMoreBlocks => {
                 emitter.last_block = None;
@@ -368,7 +407,9 @@ where
                 continue;
             }
             PollResponse::AgreementPointNotFound(genesis_hash) => {
-                emitter.last_cp = CheckPoint::new(0, genesis_hash);
+                let block = client.get_block(&genesis_hash)?;
+                let cp_data = (emitter.to_cp_data)(&block);
+                emitter.last_cp = CheckPoint::new(0, cp_data);
                 emitter.last_block = None;
                 continue;
             }
