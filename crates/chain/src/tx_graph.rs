@@ -913,6 +913,9 @@ impl<A: Anchor> TxGraph<A> {
     ///
     /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions
     /// that exist in `update` but not in `self`).
+    ///
+    /// **Note**: Transactions in the `update` without temporal context (anchors or seen_ats)
+    /// will be stored but will not be considered canonical. See [`TxUpdate`] for more details.
     pub fn apply_update(&mut self, update: TxUpdate<A>) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         for tx in update.txs {

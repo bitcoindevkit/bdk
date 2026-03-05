@@ -18,6 +18,13 @@ use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 /// tx_update.txs.push(tx);
 /// tx_update.anchors.insert((anchor, txid));
 /// ```
+/// ## Temporal context
+/// To contribute to a wallet's balance, transactions must have an entry in either:
+/// - [`Self::anchors`]: for confirmed transactions.
+/// - [`Self::seen_ats`]: for unconfirmed transactions.
+///
+/// The built-in chain-source crates (`bdk_electrum`, `bdk_esplora`, `bdk_bitcoind_rpc`) handle this
+/// automatically. Transactions lacking temporal context are stored but ignored by canonicalization.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct TxUpdate<A = ()> {

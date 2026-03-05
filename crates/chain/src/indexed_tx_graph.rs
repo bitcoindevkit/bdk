@@ -178,6 +178,10 @@ where
     ///
     /// `update` is a [`tx_graph::TxUpdate<A>`] and the resultant changes is returned as
     /// [`ChangeSet`].
+    ///
+    /// **Note**: Transactions in the `update` without temporal context (anchors or seen_ats)
+    /// will be stored but will not be considered canonical. See [`tx_graph::TxUpdate`] for
+    /// more details.
     pub fn apply_update(&mut self, update: tx_graph::TxUpdate<A>) -> ChangeSet<A, I::ChangeSet> {
         let tx_graph = self.graph.apply_update(update);
         let indexer = self.index_tx_graph_changeset(&tx_graph);
