@@ -456,6 +456,10 @@ fn checkpoint_push_fails_conflicting_prev_blockhash() {
         result.unwrap_err().eq_ptr(&cp),
         "should return self on error"
     );
+
+    // Verify the original checkpoint at 100 is still intact
+    assert_eq!(cp.height(), 100);
+    assert_eq!(cp.hash(), hash!("block_100"));
 }
 
 /// Test that push succeeds when prev_blockhash matches self's hash for contiguous height.
@@ -485,6 +489,11 @@ fn checkpoint_push_succeeds_matching_prev_blockhash() {
     let new_cp = result.unwrap();
     assert_eq!(new_cp.height(), 101);
     assert_eq!(new_cp.hash(), hash!("block_101"));
+    assert_eq!(
+        new_cp.iter().count(),
+        2,
+        "should have 2 checkpoints (100, 101)"
+    );
 }
 
 /// Test that push creates a placeholder for non-contiguous heights with prev_blockhash.

@@ -283,9 +283,15 @@ where
 
     /// Construct from an iterator of block data.
     ///
+    /// # Returns
+    ///
+    /// Returns the checkpoint chain tip on success.
+    ///
+    /// # Errors
+    ///
     /// Returns `Err(None)` if `blocks` doesn't yield any data. If the blocks are not in ascending
-    /// height order, or there are any `prev_blockhash` mismatches, then returns an `Err(..)`
-    /// containing the last checkpoint that would have been extended.
+    /// height order, or there are any `prev_blockhash` mismatches, then returns `Err(Some(..))`
+    /// containing the last checkpoint that was successfully extended.
     pub fn from_blocks(blocks: impl IntoIterator<Item = (u32, D)>) -> Result<Self, Option<Self>> {
         let mut blocks = blocks.into_iter();
         let (height, data) = blocks.next().ok_or(None)?;
