@@ -278,7 +278,7 @@ impl<C> std::fmt::Display for StoreErrorWithDump<C> {
     }
 }
 
-impl<C: fmt::Debug> std::error::Error for StoreErrorWithDump<C> {}
+impl<C: fmt::Debug> core::error::Error for StoreErrorWithDump<C> {}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

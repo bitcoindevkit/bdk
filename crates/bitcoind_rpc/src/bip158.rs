@@ -173,8 +173,7 @@ impl core::fmt::Display for Error {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for Error {}
+impl core::error::Error for Error {}
 
 impl From<bitcoincore_rpc::Error> for Error {
     fn from(e: bitcoincore_rpc::Error) -> Self {

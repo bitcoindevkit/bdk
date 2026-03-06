@@ -332,7 +332,7 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// # use bitcoin::{Address, Network, Transaction};
     /// # use std::str::FromStr;
     /// #
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # fn example() -> Result<(), Box<dyn core::error::Error>> {
     /// let mut index = SpkTxOutIndex::<u32>::default();
     ///
     /// // ... scan transactions to populate the index ...
@@ -382,7 +382,7 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// # use bitcoin::{Address, Network, Transaction};
     /// # use std::str::FromStr;
     /// #
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # fn example() -> Result<(), Box<dyn core::error::Error>> {
     /// let mut index = SpkTxOutIndex::<u32>::default();
     ///
     /// // ... scan transactions to populate the index ...

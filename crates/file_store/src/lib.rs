@@ -53,4 +53,4 @@ impl From<io::Error> for StoreError {
     }
 }
 
-impl std::error::Error for StoreError {}
+impl core::error::Error for StoreError {}
