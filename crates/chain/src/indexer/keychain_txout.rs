@@ -1022,8 +1022,7 @@ impl<K: core::fmt::Display> core::fmt::Display for InsertDescriptorError<K> {
     }
 }
 
-#[cfg(feature = "std")]
-impl<K: core::fmt::Display + core::fmt::Debug> std::error::Error for InsertDescriptorError<K> {}
+impl<K: core::fmt::Display + core::fmt::Debug> core::error::Error for InsertDescriptorError<K> {}
 
 /// `ChangeSet` represents persistent updates to a [`KeychainTxOutIndex`].
 ///

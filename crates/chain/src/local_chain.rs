@@ -498,8 +498,7 @@ impl core::fmt::Display for MissingGenesisError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for MissingGenesisError {}
+impl core::error::Error for MissingGenesisError {}
 
 /// Represents a failure when trying to insert/remove a checkpoint to/from [`LocalChain`].
 #[derive(Clone, Debug, PartialEq)]
@@ -529,8 +528,7 @@ impl core::fmt::Display for AlterCheckPointError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for AlterCheckPointError {}
+impl core::error::Error for AlterCheckPointError {}
 
 /// Occurs when an update does not have a common checkpoint with the original chain.
 #[derive(Clone, Debug, PartialEq)]
@@ -549,8 +547,7 @@ impl core::fmt::Display for CannotConnectError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for CannotConnectError {}
+impl core::error::Error for CannotConnectError {}
 
 /// The error type for [`LocalChain::apply_header_connected_to`].
 #[derive(Debug, Clone, PartialEq)]
@@ -573,8 +570,7 @@ impl core::fmt::Display for ApplyHeaderError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for ApplyHeaderError {}
+impl core::error::Error for ApplyHeaderError {}
 
 /// Applies `update_tip` onto `original_tip`.
 ///

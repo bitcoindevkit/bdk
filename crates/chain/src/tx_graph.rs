@@ -287,8 +287,7 @@ impl fmt::Display for CalculateFeeError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for CalculateFeeError {}
+impl core::error::Error for CalculateFeeError {}
 
 impl<A> TxGraph<A> {
     /// Iterate over all tx outputs known by [`TxGraph`].

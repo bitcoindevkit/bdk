@@ -268,7 +268,7 @@ pub fn create_tx<O: ChainOracle>(
     feerate: f32,
 ) -> anyhow::Result<(Psbt, Option<ChangeInfo>)>
 where
-    O::Error: std::error::Error + Send + Sync + 'static,
+    O::Error: core::error::Error + Send + Sync + 'static,
 {
     let mut changeset = keychain_txout::ChangeSet::default();
 

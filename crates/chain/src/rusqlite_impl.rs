@@ -185,11 +185,11 @@ impl ToSql for Impl<bitcoin::Network> {
     }
 }
 
-fn from_sql_error<E: std::error::Error + Send + Sync + 'static>(err: E) -> FromSqlError {
+fn from_sql_error<E: core::error::Error + Send + Sync + 'static>(err: E) -> FromSqlError {
     FromSqlError::Other(Box::new(err))
 }
 
-fn to_sql_error<E: std::error::Error + Send + Sync + 'static>(err: E) -> rusqlite::Error {
+fn to_sql_error<E: core::error::Error + Send + Sync + 'static>(err: E) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(err))
 }
 
