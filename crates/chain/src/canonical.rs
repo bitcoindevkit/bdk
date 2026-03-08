@@ -488,7 +488,8 @@ impl<A: Anchor> CanonicalView<A> {
 }
 
 impl<A: Anchor> CanonicalTxs<A> {
-    /// Creates a [`CanonicalViewTask`] that resolves [`CanonicalReason`]s into [`ChainPosition`]s.
+    /// Creates a [`CanonicalViewTask`] that resolves [`CanonicalReason`](crate::CanonicalReason)s
+    /// into [`ChainPosition`]s.
     ///
     /// This is the second phase of the canonicalization pipeline. The resulting task
     /// queries the chain to verify anchors for transitively anchored transactions and

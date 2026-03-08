@@ -24,7 +24,7 @@ use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
-    tx_graph, CanonicalTxOut, ChainOracle, ChainPosition, DescriptorExt, IndexedTxGraph, Merge,
+    tx_graph, CanonicalTxOut, ChainPosition, DescriptorExt, IndexedTxGraph, Merge,
 };
 use bdk_coin_select::{
     metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
@@ -390,9 +390,7 @@ pub fn create_tx(
         version: transaction::Version::TWO,
         lock_time: assets
             .absolute_timelock
-            .unwrap_or(absolute::LockTime::from_height(
-                chain.get_chain_tip()?.height,
-            )?),
+            .unwrap_or(absolute::LockTime::from_height(chain.chain_tip().height)?),
         input: selected
             .iter()
             .map(|(plan, utxo)| TxIn {
@@ -554,7 +552,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
         Commands::TxOut { txout_cmd } => {
             let graph = &*graph.lock().unwrap();
             let chain = &*chain.lock().unwrap();
-            let chain_tip = chain.get_chain_tip()?;
+            let chain_tip = chain.chain_tip();
             let outpoints = graph.index.outpoints();
 
             match txout_cmd {
