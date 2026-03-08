@@ -53,9 +53,9 @@ pub struct CanonicalParams {
 ///
 /// This task implements the first phase of canonicalization: it walks the transaction
 /// graph and determines which transactions are canonical (non-conflicting) and why
-/// (via [`CanonicalReason`]). The output is a [`CanonicalTxs`] which can then be
-/// further processed by [`CanonicalViewTask`] to resolve reasons into
-/// [`ChainPosition`]s.
+/// (via [`CanonicalReason`](crate::CanonicalReason)). The output is a [`CanonicalTxs`] which can
+/// then be further processed by [`CanonicalViewTask`](crate::CanonicalViewTask) to resolve reasons
+/// into [`ChainPosition`](crate::ChainPosition)s.
 pub struct CanonicalTask<'g, A> {
     tx_graph: &'g TxGraph<A>,
     chain_tip: BlockId,

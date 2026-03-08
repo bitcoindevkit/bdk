@@ -7,7 +7,7 @@ use bdk_chain::{
     local_chain::LocalChain,
     tx_graph::{self, CalculateFeeError},
     tx_graph::{ChangeSet, TxGraph},
-    Anchor, ChainOracle, ChainPosition, Merge,
+    Anchor, ChainPosition, Merge,
 };
 use bdk_testenv::{block_id, hash, utils::new_tx};
 use bitcoin::hex::FromHex;
@@ -758,7 +758,7 @@ fn test_walk_ancestors() {
                 let tx_node = graph.get_tx_node(tx.compute_txid())?;
                 for block in tx_node.anchors {
                     match local_chain.is_block_in_chain(block.anchor_block(), tip.block_id()) {
-                        Ok(Some(true)) => return None,
+                        Some(true) => return None,
                         _ => continue,
                     }
                 }

@@ -1,11 +1,10 @@
-//! The [`LocalChain`] is a local implementation of [`ChainOracle`].
+//! The [`LocalChain`] is a local chain of checkpoints.
 
-use core::convert::Infallible;
 use core::fmt;
 use core::ops::RangeBounds;
 
 use crate::collections::BTreeMap;
-use crate::{Anchor, BlockId, CanonicalParams, CanonicalView, ChainOracle, Merge, TxGraph};
+use crate::{Anchor, BlockId, CanonicalParams, CanonicalView, Merge, TxGraph};
 use bdk_core::{ChainQuery, ToBlockHash};
 pub use bdk_core::{CheckPoint, CheckPointIter};
 use bitcoin::block::Header;
@@ -57,7 +56,7 @@ where
     Ok(init_cp)
 }
 
-/// This is a local implementation of [`ChainOracle`].
+/// A local chain of checkpoints.
 #[derive(Debug, Clone)]
 pub struct LocalChain<D = BlockHash> {
     tip: CheckPoint<D>,
@@ -69,62 +68,37 @@ impl<D> PartialEq for LocalChain<D> {
     }
 }
 
-impl<D> ChainOracle for LocalChain<D> {
-    type Error = Infallible;
-
-    fn is_block_in_chain(
-        &self,
-        block: BlockId,
-        chain_tip: BlockId,
-    ) -> Result<Option<bool>, Self::Error> {
+// Methods for `LocalChain<BlockHash>`
+impl LocalChain<BlockHash> {
+    /// Check if a block is in the chain.
+    ///
+    /// # Arguments
+    /// * `block` - The block to check
+    /// * `chain_tip` - The chain tip to check against
+    ///
+    /// # Returns
+    /// * `Some(true)` if the block is in the chain
+    /// * `Some(false)` if the block is not in the chain
+    /// * `None` if it cannot be determined
+    pub fn is_block_in_chain(&self, block: BlockId, chain_tip: BlockId) -> Option<bool> {
         let chain_tip_cp = match self.tip.get(chain_tip.height) {
             // we can only determine whether `block` is in chain of `chain_tip` if `chain_tip` can
             // be identified in chain
             Some(cp) if cp.hash() == chain_tip.hash => cp,
-            _ => return Ok(None),
+            _ => return None,
         };
-        match chain_tip_cp.get(block.height) {
-            Some(cp) => Ok(Some(cp.hash() == block.hash)),
-            None => Ok(None),
-        }
+        chain_tip_cp
+            .get(block.height)
+            .map(|cp| cp.hash() == block.hash)
     }
 
-    fn get_chain_tip(&self) -> Result<BlockId, Self::Error> {
-        Ok(self.tip.block_id())
+    /// Get the chain tip.
+    ///
+    /// # Returns
+    /// The [`BlockId`] of the chain tip.
+    pub fn chain_tip(&self) -> BlockId {
+        self.tip.block_id()
     }
-}
-
-// Methods for `LocalChain<BlockHash>`
-impl LocalChain<BlockHash> {
-    // /// Check if a block is in the chain.
-    // ///
-    // /// # Arguments
-    // /// * `block` - The block to check
-    // /// * `chain_tip` - The chain tip to check against
-    // ///
-    // /// # Returns
-    // /// * `Some(true)` if the block is in the chain
-    // /// * `Some(false)` if the block is not in the chain
-    // /// * `None` if it cannot be determined
-    // pub fn is_block_in_chain(&self, block: BlockId, chain_tip: BlockId) -> Option<bool> {
-    //     let chain_tip_cp = match self.tip.get(chain_tip.height) {
-    //         // we can only determine whether `block` is in chain of `chain_tip` if `chain_tip`
-    // can         // be identified in chain
-    //         Some(cp) if cp.hash() == chain_tip.hash => cp,
-    //         _ => return None,
-    //     };
-    //     chain_tip_cp
-    //         .get(block.height)
-    //         .map(|cp| cp.hash() == block.hash)
-    // }
-
-    // /// Get the chain tip.
-    // ///
-    // /// # Returns
-    // /// The [`BlockId`] of the chain tip.
-    // pub fn chain_tip(&self) -> BlockId {
-    //     self.tip.block_id()
-    // }
 
     /// Canonicalize a transaction graph using this chain.
     ///
@@ -151,11 +125,7 @@ impl LocalChain<BlockHash> {
         while let Some(request) = task.next_query() {
             let mut best_block_id = None;
             for block_id in &request {
-                if self
-                    .is_block_in_chain(*block_id, chain_tip)
-                    .expect("infallible")
-                    == Some(true)
-                {
+                if self.is_block_in_chain(*block_id, chain_tip) == Some(true) {
                     best_block_id = Some(*block_id);
                     break;
                 }

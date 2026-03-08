@@ -305,7 +305,7 @@ fn insert_relevant_txs() {
 }
 
 /// Ensure consistency IndexedTxGraph list_* and balance methods. These methods lists
-/// relevant txouts and utxos from the information fetched from a ChainOracle (here a LocalChain).
+/// relevant txouts and utxos from the information fetched from a LocalChain.
 ///
 /// Test Setup:
 ///
