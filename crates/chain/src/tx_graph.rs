@@ -124,6 +124,7 @@
 //! assert!(changeset.is_empty());
 //! ```
 //! [`insert_txout`]: TxGraph::insert_txout
+//! [`CanonicalView`]: crate::CanonicalView
 
 use crate::collections::*;
 use crate::CanonicalParams;
@@ -981,6 +982,8 @@ impl<A: Anchor> TxGraph<A> {
     /// that can be used to determine which transactions are canonical based on the provided
     /// parameters. The task handles the stateless canonicalization logic and can be polled
     /// for anchor verification requests.
+    ///
+    /// [`CanonicalView`]: crate::CanonicalView
     pub fn canonical_task(
         &'_ self,
         chain_tip: BlockId,

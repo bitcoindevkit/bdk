@@ -436,7 +436,8 @@ impl<A, X> IndexedTxGraph<A, X>
 where
     A: Anchor,
 {
-    /// Creates a [`CanonicalTask`] to determine the [`CanonicalView`] of transactions.
+    /// Creates a [`CanonicalTask`] to determine the [`CanonicalView`](crate::CanonicalView) of
+    /// transactions.
     ///
     /// This method delegates to the underlying [`TxGraph`] to create a [`CanonicalTask`]
     /// that can be used to determine which transactions are canonical based on the provided
