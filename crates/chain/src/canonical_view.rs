@@ -134,16 +134,9 @@ impl<A: Anchor> CanonicalView<A> {
         };
 
         for r in CanonicalIter::new(tx_graph, chain, chain_tip, params) {
-            let (txid, tx, why) = r?;
-
-            let tx_node = match tx_graph.get_tx_node(txid) {
-                Some(tx_node) => tx_node,
-                None => {
-                    // TODO: Have the `CanonicalIter` return `TxNode`s.
-                    debug_assert!(false, "tx node must exist!");
-                    continue;
-                }
-            };
+            let (tx_node, why) = r?;
+            let txid = tx_node.txid;
+            let tx = tx_node.tx.clone();
 
             view.order.push(txid);
 

@@ -301,3 +301,62 @@ fn test_min_confirmations_multiple_transactions() {
     );
     assert_eq!(balance_high.untrusted_pending, Amount::ZERO);
 }
+
+#[test]
+fn test_canonical_view_construction_with_tx_nodes() {
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("genesis")), (1, hash!("b1"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+
+    let mut tx_graph = TxGraph::default();
+    let tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("parent"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(100_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let txid = tx.compute_txid();
+    let outpoint = OutPoint::new(txid, 0);
+
+    let _ = tx_graph.insert_tx(tx);
+
+    let _ = tx_graph.insert_anchor(
+        txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 123456,
+        },
+    );
+
+    let chain_tip = chain.tip().block_id();
+    let canonical_view =
+        tx_graph.canonical_view(&chain, chain_tip, CanonicalizationParams::default());
+
+    let tx_opt = canonical_view.tx(txid);
+    assert!(
+        tx_opt.is_some(),
+        "Transaction should exist in canonical view"
+    );
+
+    let canonical_tx = tx_opt.unwrap();
+    assert_eq!(canonical_tx.txid, txid);
+
+    let txout = canonical_view.txout(outpoint);
+    assert!(
+        txout.is_some(),
+        "Output should be available in canonical view"
+    );
+
+    let balance = canonical_view.balance(
+        [((), outpoint)],
+        |_, _| true, // trust all
+        1,
+    );
+    assert_eq!(balance.confirmed, Amount::from_sat(100_000));
+}

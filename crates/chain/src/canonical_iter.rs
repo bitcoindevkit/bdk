@@ -1,5 +1,5 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
-use crate::tx_graph::{TxAncestors, TxDescendants};
+use crate::tx_graph::{TxAncestors, TxDescendants, TxNode};
 use crate::{Anchor, ChainOracle, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
@@ -200,18 +200,22 @@ impl<'g, A: Anchor, C: ChainOracle> CanonicalIter<'g, A, C> {
     }
 }
 
-impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
-    type Item = Result<(Txid, Arc<Transaction>, CanonicalReason<A>), C::Error>;
+impl<'g, A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'g, A, C> {
+    type Item = Result<(TxNode<'g, Arc<Transaction>, A>, CanonicalReason<A>), C::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(txid) = self.queue.pop_front() {
-                let (tx, reason) = self
+                let reason = self
                     .canonical
                     .get(&txid)
-                    .cloned()
+                    .map(|(_, reason)| reason.clone())
                     .expect("reason must exist");
-                return Some(Ok((txid, tx, reason)));
+                let tx_node = self
+                    .tx_graph
+                    .get_tx_node(txid)
+                    .expect("tx node must exist if in canonical map");
+                return Some(Ok((tx_node, reason)));
             }
 
             if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
