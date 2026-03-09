@@ -1,14 +1,14 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
 use crate::tx_graph::{TxAncestors, TxDescendants};
-use crate::{Anchor, CanonicalTxs, TxGraph};
+use crate::{canonical::CanonicalEntry, Anchor, CanonicalTxs, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bdk_core::{BlockId, ChainQuery, ChainRequest, ChainResponse};
+use bdk_core::{BlockId, BlockQueries, ChainQuery, TaskProgress, ToBlockHash};
 use bitcoin::{Transaction, Txid};
 
-type CanonicalMap<A> = HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>;
+type CanonicalMap<A> = HashMap<Txid, CanonicalEntry<CanonicalReason<A>>>;
 type NotCanonicalSet = HashSet<Txid>;
 
 /// Represents the current stage of canonicalization processing.
@@ -28,7 +28,7 @@ enum CanonicalStage {
 }
 
 impl CanonicalStage {
-    fn advance(&mut self) {
+    fn next_stage(&mut self) {
         *self = match self {
             CanonicalStage::AssumedTxs => Self::AnchoredTxs,
             CanonicalStage::AnchoredTxs => Self::SeenTxs,
@@ -56,9 +56,11 @@ pub struct CanonicalParams {
 /// (via [`CanonicalReason`](crate::CanonicalReason)). The output is a [`CanonicalTxs`] which can
 /// then be further processed by [`CanonicalViewTask`](crate::CanonicalViewTask) to resolve reasons
 /// into [`ChainPosition`](crate::ChainPosition)s.
-pub struct CanonicalTask<'g, A> {
+pub struct CanonicalTask<'g, A, B> {
     tx_graph: &'g TxGraph<A>,
     chain_tip: BlockId,
+
+    queries: BlockQueries<B>,
 
     unprocessed_assumed_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>)> + 'g>,
     unprocessed_anchored_txs: VecDeque<(Txid, Arc<Transaction>, &'g BTreeSet<A>)>,
@@ -75,149 +77,150 @@ pub struct CanonicalTask<'g, A> {
     current_stage: CanonicalStage,
 }
 
-impl<'g, A: Anchor> ChainQuery for CanonicalTask<'g, A> {
-    type Output = CanonicalTxs<A>;
+impl<'g, A: Anchor, B: ToBlockHash> ChainQuery<B> for CanonicalTask<'g, A, B> {
+    type Output = (CanonicalTxs<A>, BlockQueries<B>);
 
     fn tip(&self) -> BlockId {
         self.chain_tip
     }
 
-    fn next_query(&mut self) -> Option<ChainRequest> {
-        loop {
-            match self.current_stage {
-                CanonicalStage::AssumedTxs => {
-                    if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
-                        if !self.is_canonicalized(txid) {
-                            self.mark_canonical(txid, tx, CanonicalReason::assumed());
-                        }
-                        continue;
-                    }
-                }
-                CanonicalStage::AnchoredTxs => {
-                    if let Some((_txid, _, anchors)) = self.unprocessed_anchored_txs.front() {
-                        let block_ids =
-                            anchors.iter().map(|anchor| anchor.anchor_block()).collect();
-                        return Some(block_ids);
-                    }
-                }
-                CanonicalStage::SeenTxs => {
-                    if let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
-                        debug_assert!(
-                            !tx.is_coinbase(),
-                            "Coinbase txs must not have `last_seen` (in mempool) value"
-                        );
-                        if !self.is_canonicalized(txid) {
-                            let observed_in = ObservedIn::Mempool(last_seen);
-                            self.mark_canonical(
-                                txid,
-                                tx,
-                                CanonicalReason::from_observed_in(observed_in),
-                            );
-                        }
-                        continue;
-                    }
-                }
-                CanonicalStage::LeftOverTxs => {
-                    if let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
-                        if !self.is_canonicalized(txid) && !tx.is_coinbase() {
-                            let observed_in = ObservedIn::Block(height);
-                            self.mark_canonical(
-                                txid,
-                                tx,
-                                CanonicalReason::from_observed_in(observed_in),
-                            );
-                        }
-                        continue;
-                    }
-                }
-                CanonicalStage::Finished => return None,
-            }
+    fn unresolved_queries<'a>(&'a self) -> impl Iterator<Item = u32> + 'a {
+        self.queries.unresolved()
+    }
 
-            self.current_stage.advance();
+    fn poll(&mut self) -> TaskProgress {
+        match self.current_stage {
+            CanonicalStage::AssumedTxs => {
+                if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
+                    if !self.is_canonicalized(txid) {
+                        self.mark_canonical(txid, tx, CanonicalReason::assumed());
+                    }
+                } else {
+                    self.current_stage.next_stage();
+                }
+                TaskProgress::Advanced
+            }
+            CanonicalStage::AnchoredTxs => {
+                if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.pop_front() {
+                    if self.is_canonicalized(txid) {
+                        return TaskProgress::Advanced;
+                    }
+
+                    let mut best_anchor = Option::<A>::None;
+                    let mut has_unresolved_heights = false;
+
+                    for a in anchors.iter() {
+                        let h = a.anchor_block().height;
+                        match self.queries.get(h) {
+                            Some(Some(b)) if b.to_blockhash() == a.anchor_block().hash => {
+                                best_anchor = Some(a.clone());
+                                break;
+                            }
+                            None => has_unresolved_heights = true,
+                            // Either the block does not match the anchor, or the chain source
+                            // failed to fetch a block at this height.
+                            _ => {}
+                        }
+                    }
+
+                    if let Some(a) = best_anchor {
+                        self.mark_canonical(txid, tx, CanonicalReason::from_anchor(a));
+                        return TaskProgress::Advanced;
+                    }
+
+                    if has_unresolved_heights {
+                        let heights = self
+                            .queries
+                            .request(anchors.iter().map(|a| a.anchor_block().height));
+                        self.unprocessed_anchored_txs
+                            .push_front((txid, tx, anchors));
+                        return TaskProgress::Query(heights);
+                    }
+
+                    // No confirmed anchor found.
+                    self.unprocessed_leftover_txs.push_back((
+                        txid,
+                        tx,
+                        anchors
+                            .iter()
+                            .last()
+                            .expect("must have at least one anchor")
+                            .confirmation_height_upper_bound(),
+                    ));
+                } else {
+                    self.current_stage.next_stage();
+                }
+                TaskProgress::Advanced
+            }
+            CanonicalStage::SeenTxs => {
+                if let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
+                    debug_assert!(
+                        !tx.is_coinbase(),
+                        "Coinbase txs must not have `last_seen` (in mempool) value"
+                    );
+                    if !self.is_canonicalized(txid) {
+                        let observed_in = ObservedIn::Mempool(last_seen);
+                        self.mark_canonical(
+                            txid,
+                            tx,
+                            CanonicalReason::from_observed_in(observed_in),
+                        );
+                    }
+                } else {
+                    self.current_stage.next_stage();
+                }
+                TaskProgress::Advanced
+            }
+            CanonicalStage::LeftOverTxs => {
+                if let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
+                    if !self.is_canonicalized(txid) && !tx.is_coinbase() {
+                        let observed_in = ObservedIn::Block(height);
+                        self.mark_canonical(
+                            txid,
+                            tx,
+                            CanonicalReason::from_observed_in(observed_in),
+                        );
+                    }
+                } else {
+                    self.current_stage.next_stage();
+                }
+                TaskProgress::Advanced
+            }
+            CanonicalStage::Finished => TaskProgress::Done,
         }
     }
 
-    fn resolve_query(&mut self, response: ChainResponse) {
-        match self.current_stage {
-            CanonicalStage::AnchoredTxs => {
-                // Process directly anchored transaction response
-                if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.pop_front() {
-                    // Find the anchor that matches the confirmed BlockId
-                    let best_anchor = response.and_then(|block_id| {
-                        anchors
-                            .iter()
-                            .find(|anchor| anchor.anchor_block() == block_id)
-                            .cloned()
-                    });
-
-                    match best_anchor {
-                        Some(best_anchor) => {
-                            // Transaction has a confirmed anchor
-                            if !self.is_canonicalized(txid) {
-                                self.mark_canonical(
-                                    txid,
-                                    tx,
-                                    CanonicalReason::from_anchor(best_anchor),
-                                );
-                            }
-                        }
-                        None => {
-                            // No confirmed anchor found, add to leftover transactions for later
-                            // processing
-                            self.unprocessed_leftover_txs.push_back((
-                                txid,
-                                tx,
-                                anchors
-                                    .iter()
-                                    .last()
-                                    .expect(
-                                        "tx taken from `unprocessed_anchored_txs` so it must have at least one anchor",
-                                    )
-                                    .confirmation_height_upper_bound(),
-                            ))
-                        }
-                    }
-                }
-            }
-            CanonicalStage::AssumedTxs
-            | CanonicalStage::SeenTxs
-            | CanonicalStage::LeftOverTxs
-            | CanonicalStage::Finished => {
-                // These stages don't generate queries and shouldn't receive responses
-                debug_assert!(
-                    false,
-                    "resolve_query called for stage {:?} which doesn't generate queries",
-                    self.current_stage
-                );
-            }
-        }
+    fn resolve_query(&mut self, height: u32, block: Option<B>) {
+        self.queries.resolve(height, block);
     }
 
     fn finish(self) -> Self::Output {
-        let mut view_order = Vec::new();
-        let mut view_txs = HashMap::new();
         let mut view_spends = HashMap::new();
 
         for txid in &self.canonical_order {
-            if let Some((tx, reason)) = self.canonical.get(txid) {
-                view_order.push(*txid);
-
-                // Add spends
-                if !tx.is_coinbase() {
-                    for input in &tx.input {
+            if let Some(entry) = self.canonical.get(txid) {
+                if !entry.tx.is_coinbase() {
+                    for input in &entry.tx.input {
                         view_spends.insert(input.previous_output, *txid);
                     }
                 }
-
-                view_txs.insert(*txid, (tx.clone(), reason.clone()));
             }
         }
 
-        CanonicalTxs::new(self.chain_tip, view_order, view_txs, view_spends)
+        (
+            CanonicalTxs::new(
+                self.chain_tip,
+                self.canonical_order,
+                self.canonical,
+                view_spends,
+                None,
+            ),
+            self.queries,
+        )
     }
 }
 
-impl<'g, A: Anchor> CanonicalTask<'g, A> {
+impl<'g, A: Anchor, B: ToBlockHash> CanonicalTask<'g, A, B> {
     /// Creates a new canonicalization task.
     pub fn new(tx_graph: &'g TxGraph<A>, chain_tip: BlockId, params: CanonicalParams) -> Self {
         let anchors = tx_graph.all_anchors();
@@ -252,6 +255,8 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
 
             canonical_order: Vec::new(),
             current_stage: CanonicalStage::default(),
+
+            queries: BlockQueries::new(),
         }
     }
 
@@ -315,7 +320,11 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
                 }
 
                 staged_canonical.push((this_txid, tx.clone(), this_reason.clone()));
-                canonical_entry.insert((tx.clone(), this_reason));
+                canonical_entry.insert(CanonicalEntry {
+                    tx: tx.clone(),
+                    pos: this_reason,
+                    mtp: None,
+                });
                 Some(this_txid)
             },
         )
@@ -442,6 +451,7 @@ impl<A: Clone> CanonicalReason<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collections::BTreeMap;
     use crate::local_chain::LocalChain;
     use crate::ChainPosition;
     use bitcoin::{hashes::Hash, BlockHash, TxIn, TxOut};
@@ -483,8 +493,8 @@ mod tests {
         // Create canonicalization task and canonicalize using the two-step pipeline
         let params = CanonicalParams::default();
         let task = CanonicalTask::new(&tx_graph, chain_tip, params);
-        let canonical_txs = chain.canonicalize(task);
-        let view_task = canonical_txs.view_task(&tx_graph);
+        let (txs, queries) = chain.canonicalize(task);
+        let view_task = txs.view_task(&tx_graph, queries);
         let canonical_view = chain.canonicalize(view_task);
 
         // Should have one canonical transaction
@@ -495,5 +505,86 @@ mod tests {
 
         // Should be confirmed (anchored)
         assert!(matches!(canon_tx.pos, ChainPosition::Confirmed { .. }));
+    }
+
+    #[test]
+    fn test_mtp_with_header_chain() {
+        use bitcoin::block::Header;
+        use bitcoin::CompactTarget;
+
+        // Helper to create a header with a specific prev_blockhash and time
+        fn make_header(prev_blockhash: BlockHash, time: u32) -> Header {
+            Header {
+                version: bitcoin::block::Version::ONE,
+                prev_blockhash,
+                merkle_root: bitcoin::TxMerkleNode::all_zeros(),
+                time,
+                bits: CompactTarget::from_consensus(0x2000_0000),
+                nonce: 0,
+            }
+        }
+
+        // Build a chain of 12 headers (heights 0..=11) with known timestamps.
+        // Timestamps: height h has time = (h + 1) * 100
+        let genesis_header = make_header(BlockHash::all_zeros(), 100);
+        let genesis_hash = genesis_header.block_hash();
+
+        let mut headers: BTreeMap<u32, Header> = BTreeMap::new();
+        headers.insert(0, genesis_header);
+
+        let mut prev_hash = genesis_hash;
+        for h in 1u32..=11 {
+            let header = make_header(prev_hash, (h + 1) * 100);
+            prev_hash = header.block_hash();
+            headers.insert(h, header);
+        }
+
+        let chain = LocalChain::<Header>::from_blocks(headers.clone()).unwrap();
+        let chain_tip = chain.tip().block_id();
+
+        // Create a transaction graph with a tx anchored at height 5
+        let mut tx_graph = TxGraph::default();
+
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::ONE,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: bitcoin::ScriptBuf::new(),
+            }],
+        };
+        let _ = tx_graph.insert_tx(tx.clone());
+        let txid = tx.compute_txid();
+
+        let anchor = crate::ConfirmationBlockTime {
+            block_id: chain.get(5).unwrap().block_id(),
+            confirmation_time: 600,
+        };
+        let _ = tx_graph.insert_anchor(txid, anchor);
+
+        // Run the two-phase pipeline with MTP enabled
+        let params = CanonicalParams::default();
+        let task = CanonicalTask::new(&tx_graph, chain_tip, params);
+        let (txs, queries) = chain.canonicalize(task);
+        let view_task = txs.view_task(&tx_graph, queries).with_mtp();
+        let view = chain.canonicalize(view_task);
+
+        // Should have one tx
+        assert_eq!(view.txs().len(), 1);
+        assert!(matches!(
+            view.txs().next().unwrap().pos,
+            ChainPosition::Confirmed { .. }
+        ));
+
+        // Per-tx MTP at height 5: median of timestamps at heights 0..=5
+        // Timestamps: 100, 200, 300, 400, 500, 600 → sorted, median = ts[len/2] = ts[3] = 400
+        let canon_tx = view.txs().next().unwrap();
+        assert_eq!(canon_tx.mtp, Some(400));
+
+        // MTP at tip height (11): median of timestamps at heights 1..=11
+        // Timestamps: 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200
+        // 11 elements, median = ts[5] = 700
+        assert_eq!(view.tip_mtp(), Some(700));
     }
 }

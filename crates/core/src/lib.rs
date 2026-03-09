@@ -75,3 +75,6 @@ pub mod spk_client;
 
 mod chain_query;
 pub use chain_query::*;
+
+mod block_queries;
+pub use block_queries::*;

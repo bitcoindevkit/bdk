@@ -439,11 +439,11 @@ where
     /// that can be used to determine which transactions are canonical based on the provided
     /// parameters. The task handles the stateless canonicalization logic and can be polled
     /// for anchor verification requests.
-    pub fn canonical_task(
+    pub fn canonical_task<B: bdk_core::ToBlockHash>(
         &'_ self,
         chain_tip: BlockId,
         params: CanonicalParams,
-    ) -> CanonicalTask<'_, A> {
+    ) -> CanonicalTask<'_, A, B> {
         self.graph.canonical_task(chain_tip, params)
     }
 }

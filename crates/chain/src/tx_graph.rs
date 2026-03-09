@@ -133,8 +133,8 @@ use crate::{Anchor, BlockId, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bdk_core::ConfirmationBlockTime;
 pub use bdk_core::TxUpdate;
+use bdk_core::{ConfirmationBlockTime, ToBlockHash};
 use bitcoin::{Amount, OutPoint, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::ops::{Deref, RangeInclusive};
@@ -981,11 +981,11 @@ impl<A: Anchor> TxGraph<A> {
     /// for anchor verification requests.
     ///
     /// [`CanonicalView`]: crate::CanonicalView
-    pub fn canonical_task(
+    pub fn canonical_task<B: ToBlockHash>(
         &'_ self,
         chain_tip: BlockId,
         params: CanonicalParams,
-    ) -> CanonicalTask<'_, A> {
+    ) -> CanonicalTask<'_, A, B> {
         CanonicalTask::new(self, chain_tip, params)
     }
 }

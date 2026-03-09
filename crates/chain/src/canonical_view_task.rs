@@ -3,20 +3,21 @@
 use crate::canonical_task::{CanonicalReason, ObservedIn};
 use crate::collections::{HashMap, VecDeque};
 use alloc::collections::BTreeSet;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use bdk_core::{BlockId, ChainQuery, ChainRequest, ChainResponse};
-use bitcoin::{OutPoint, Transaction, Txid};
+use bdk_core::{BlockId, BlockQueries, ChainQuery, TaskProgress, ToBlockHash, ToBlockTime};
+use bitcoin::{OutPoint, Txid};
 
-use crate::{Anchor, CanonicalView, ChainPosition, TxGraph};
+use crate::{canonical::CanonicalEntry, Anchor, CanonicalView, ChainPosition, TxGraph};
 
 /// Represents the current stage of view task processing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum ViewStage {
-    /// Processing transactions to resolve their chain positions.
+    /// Verifying anchors for transitively anchored transactions.
     #[default]
     ResolvingPositions,
+    /// Fetching blocks needed for MTP computation.
+    FetchingMtpBlocks,
     /// All processing is complete.
     Finished,
 }
@@ -28,48 +29,61 @@ enum ViewStage {
 /// reason into a concrete [`ChainPosition`] (confirmed or unconfirmed). For transitively
 /// anchored transactions, it queries the chain to check if they have their own direct
 /// anchors.
-pub struct CanonicalViewTask<'g, A> {
+///
+/// When `with_mtp()` is called, this task also computes median-time-past (MTP) values
+/// for confirmed heights and stores them in the resulting [`CanonicalView`].
+pub struct CanonicalViewTask<'g, A, B> {
     tx_graph: &'g TxGraph<A>,
     tip: BlockId,
 
-    /// Transactions in canonical order with their reasons.
+    queries: BlockQueries<B>,
+
     canonical_order: Vec<Txid>,
-    canonical_txs: HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>,
+    canonical_txs: HashMap<Txid, CanonicalEntry<CanonicalReason<A>>>,
     spends: HashMap<OutPoint, Txid>,
-
-    /// Transactions that need anchor verification (transitively anchored).
     unprocessed_anchor_checks: VecDeque<(Txid, &'g BTreeSet<A>)>,
-
-    /// Resolved direct anchors for transitively anchored transactions.
     direct_anchors: HashMap<Txid, A>,
+
+    // MTP support — `extract_time` being `Some` means MTP is enabled.
+    extract_time: Option<fn(&B) -> u32>,
 
     current_stage: ViewStage,
 }
 
-impl<'g, A: Anchor> CanonicalViewTask<'g, A> {
+impl<'g, A: Anchor, B> CanonicalViewTask<'g, A, B> {
     /// Creates a new [`CanonicalViewTask`].
     ///
-    /// Accepts canonical transaction data and a reference to the [`TxGraph`].
-    /// Scans transactions to find those needing anchor verification.
-    pub fn new(
+    /// Accepts canonical transaction data, a reference to the [`TxGraph`], and blocks
+    /// already fetched during phase 1 (to avoid redundant queries).
+    pub(crate) fn new(
         tx_graph: &'g TxGraph<A>,
         tip: BlockId,
         order: Vec<Txid>,
-        txs: HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>,
+        txs: HashMap<Txid, CanonicalEntry<CanonicalReason<A>>>,
         spends: HashMap<OutPoint, Txid>,
+        queries: BlockQueries<B>,
     ) -> Self {
         let all_anchors = tx_graph.all_anchors();
 
         let mut unprocessed_anchor_checks = VecDeque::new();
+        let mut direct_anchors = HashMap::new();
         for txid in &order {
-            if let Some((_, reason)) = txs.get(txid) {
-                if matches!(reason, CanonicalReason::ObservedIn { .. }) {
-                    continue;
-                }
-                if reason.is_transitive() || reason.is_assumed() {
-                    if let Some(anchors) = all_anchors.get(txid) {
-                        unprocessed_anchor_checks.push_back((*txid, anchors));
+            if let Some(entry) = txs.get(txid) {
+                match &entry.pos {
+                    CanonicalReason::Anchor {
+                        anchor,
+                        descendant: None,
+                    } => {
+                        // Non-transitive anchor — already resolved.
+                        direct_anchors.insert(*txid, anchor.clone());
                     }
+                    CanonicalReason::Anchor { .. } | CanonicalReason::Assumed { .. } => {
+                        // Transitive or assumed — needs anchor verification.
+                        if let Some(anchors) = all_anchors.get(txid) {
+                            unprocessed_anchor_checks.push_back((*txid, anchors));
+                        }
+                    }
+                    CanonicalReason::ObservedIn { .. } => {}
                 }
             }
         }
@@ -77,68 +91,141 @@ impl<'g, A: Anchor> CanonicalViewTask<'g, A> {
         Self {
             tx_graph,
             tip,
+            queries,
             canonical_order: order,
             canonical_txs: txs,
             spends,
             unprocessed_anchor_checks,
-            direct_anchors: HashMap::new(),
+            direct_anchors,
+            extract_time: None,
             current_stage: ViewStage::default(),
         }
     }
 }
 
-impl<'g, A: Anchor> ChainQuery for CanonicalViewTask<'g, A> {
+impl<'g, A: Anchor, B: ToBlockHash + ToBlockTime> CanonicalViewTask<'g, A, B> {
+    /// Enable MTP (median-time-past) computation.
+    ///
+    /// When enabled, the task will fetch additional blocks needed to compute MTP values
+    /// for each confirmed height and the tip height. The resulting [`CanonicalView`] will
+    /// have per-tx MTP on [`CanonicalTx::mtp`](crate::CanonicalTx::mtp) and the tip MTP
+    /// accessible via [`tip_mtp()`](crate::Canonical::tip_mtp).
+    pub fn with_mtp(mut self) -> Self {
+        self.extract_time = Some(B::to_blocktime);
+        self
+    }
+}
+
+impl<'g, A: Anchor, B: ToBlockHash> ChainQuery<B> for CanonicalViewTask<'g, A, B> {
     type Output = CanonicalView<A>;
 
     fn tip(&self) -> BlockId {
         self.tip
     }
 
-    fn next_query(&mut self) -> Option<ChainRequest> {
-        loop {
-            match self.current_stage {
-                ViewStage::ResolvingPositions => {
-                    if let Some((_txid, anchors)) = self.unprocessed_anchor_checks.front() {
-                        let block_ids =
-                            anchors.iter().map(|anchor| anchor.anchor_block()).collect();
-                        return Some(block_ids);
-                    }
-                }
-                ViewStage::Finished => return None,
-            }
-
-            self.current_stage = ViewStage::Finished;
-        }
+    fn unresolved_queries<'a>(&'a self) -> impl Iterator<Item = u32> + 'a {
+        self.queries.unresolved()
     }
 
-    fn resolve_query(&mut self, response: ChainResponse) {
+    fn poll(&mut self) -> TaskProgress {
         match self.current_stage {
             ViewStage::ResolvingPositions => {
                 if let Some((txid, anchors)) = self.unprocessed_anchor_checks.pop_front() {
-                    let best_anchor = response.and_then(|block_id| {
-                        anchors
-                            .iter()
-                            .find(|anchor| anchor.anchor_block() == block_id)
-                            .cloned()
-                    });
+                    let mut best_anchor = Option::<A>::None;
+                    let mut has_unresolved_heights = false;
 
-                    if let Some(best_anchor) = best_anchor {
-                        self.direct_anchors.insert(txid, best_anchor);
+                    for a in anchors.iter() {
+                        let h = a.anchor_block().height;
+                        match self.queries.get(h) {
+                            Some(Some(b)) => {
+                                if b.to_blockhash() == a.anchor_block().hash {
+                                    best_anchor = Some(a.clone());
+                                    break;
+                                }
+                            }
+                            Some(None) => {}
+                            None => {
+                                has_unresolved_heights = true;
+                            }
+                        }
                     }
+
+                    if let Some(anchor) = best_anchor {
+                        self.direct_anchors.insert(txid, anchor);
+                        return TaskProgress::Advanced;
+                    }
+
+                    if has_unresolved_heights {
+                        let heights = self
+                            .queries
+                            .request(anchors.iter().map(|a| a.anchor_block().height));
+                        self.unprocessed_anchor_checks.push_front((txid, anchors));
+                        return TaskProgress::Query(heights);
+                    }
+
+                    // No confirmed anchor found for this tx
+                    TaskProgress::Advanced
+                } else {
+                    self.current_stage = ViewStage::FetchingMtpBlocks;
+                    TaskProgress::Advanced
                 }
             }
-            ViewStage::Finished => {
-                debug_assert!(false, "resolve_query called in Finished stage");
+            ViewStage::FetchingMtpBlocks => {
+                if self.extract_time.is_none() {
+                    self.current_stage = ViewStage::Finished;
+                    return TaskProgress::Advanced;
+                }
+
+                // Collect all MTP heights needed.
+                let mut mtp_heights = BTreeSet::new();
+                mtp_heights.insert(self.tip.height);
+                for anchor in self.direct_anchors.values() {
+                    mtp_heights.insert(anchor.confirmation_height_upper_bound());
+                }
+
+                let needed = self
+                    .queries
+                    .request(mtp_heights.iter().flat_map(|&h| h.saturating_sub(10)..=h));
+
+                if needed.is_empty() {
+                    self.current_stage = ViewStage::Finished;
+                    return TaskProgress::Advanced;
+                }
+
+                TaskProgress::Query(needed)
             }
+            ViewStage::Finished => TaskProgress::Done,
         }
     }
 
+    fn resolve_query(&mut self, height: u32, block: Option<B>) {
+        self.queries.resolve(height, block);
+    }
+
     fn finish(self) -> Self::Output {
+        // Helper: compute MTP for a given height from the blocks map.
+        let compute_mtp_at = |h: u32, f: fn(&B) -> u32| -> Option<u32> {
+            let start = h.saturating_sub(10);
+            let mut ts: Vec<u32> = (start..=h)
+                .map(|mtp_h| self.queries.get(mtp_h).and_then(|b| b.as_ref()).map(f))
+                .collect::<Option<Vec<_>>>()?;
+            ts.sort_unstable();
+            Some(ts[ts.len() / 2])
+        };
+
+        let extract_time = self.extract_time;
+
+        // Compute tip MTP.
+        let tip_mtp = extract_time.and_then(|f| compute_mtp_at(self.tip.height, f));
+
         let mut view_order = Vec::new();
         let mut view_txs = HashMap::new();
 
         for txid in &self.canonical_order {
-            if let Some((tx, reason)) = self.canonical_txs.get(txid) {
+            if let Some(CanonicalEntry {
+                tx, pos: reason, ..
+            }) = self.canonical_txs.get(txid)
+            {
                 view_order.push(*txid);
 
                 // Get transaction node for first_seen/last_seen info
@@ -150,50 +237,64 @@ impl<'g, A: Anchor> ChainQuery for CanonicalViewTask<'g, A> {
                     }
                 };
 
-                // Determine chain position based on reason
-                let chain_position = match reason {
-                    CanonicalReason::Assumed { .. } => match self.direct_anchors.get(txid) {
-                        Some(anchor) => ChainPosition::Confirmed {
+                // Determine chain position and per-tx MTP. For confirmed txs, prefer
+                // direct_anchors (which includes both non-transitive anchors and resolved
+                // anchors for transitive/assumed txs).
+                let (chain_position, mtp) = if let Some(anchor) = self.direct_anchors.get(txid) {
+                    let mtp = extract_time
+                        .and_then(|f| compute_mtp_at(anchor.confirmation_height_upper_bound(), f));
+                    (
+                        ChainPosition::Confirmed {
                             anchor,
                             transitively: None,
                         },
-                        None => ChainPosition::Unconfirmed {
-                            first_seen: tx_node.first_seen,
-                            last_seen: tx_node.last_seen,
-                        },
-                    },
-                    CanonicalReason::Anchor { anchor, descendant } => match descendant {
-                        Some(_) => match self.direct_anchors.get(txid) {
-                            Some(anchor) => ChainPosition::Confirmed {
-                                anchor,
-                                transitively: None,
+                        mtp,
+                    )
+                } else {
+                    match reason {
+                        CanonicalReason::Anchor { anchor, descendant } => {
+                            let mtp = extract_time.and_then(|f| {
+                                compute_mtp_at(anchor.confirmation_height_upper_bound(), f)
+                            });
+                            (
+                                ChainPosition::Confirmed {
+                                    anchor,
+                                    transitively: *descendant,
+                                },
+                                mtp,
+                            )
+                        }
+                        CanonicalReason::ObservedIn {
+                            observed_in: ObservedIn::Mempool(last_seen),
+                            ..
+                        } => (
+                            ChainPosition::Unconfirmed {
+                                first_seen: tx_node.first_seen,
+                                last_seen: Some(*last_seen),
                             },
-                            None => ChainPosition::Confirmed {
-                                anchor,
-                                transitively: *descendant,
+                            None,
+                        ),
+                        _ => (
+                            ChainPosition::Unconfirmed {
+                                first_seen: tx_node.first_seen,
+                                last_seen: tx_node.last_seen,
                             },
-                        },
-                        None => ChainPosition::Confirmed {
-                            anchor,
-                            transitively: None,
-                        },
-                    },
-                    CanonicalReason::ObservedIn { observed_in, .. } => match observed_in {
-                        ObservedIn::Mempool(last_seen) => ChainPosition::Unconfirmed {
-                            first_seen: tx_node.first_seen,
-                            last_seen: Some(*last_seen),
-                        },
-                        ObservedIn::Block(_) => ChainPosition::Unconfirmed {
-                            first_seen: tx_node.first_seen,
-                            last_seen: None,
-                        },
-                    },
+                            None,
+                        ),
+                    }
                 };
 
-                view_txs.insert(*txid, (tx.clone(), chain_position.cloned()));
+                view_txs.insert(
+                    *txid,
+                    CanonicalEntry {
+                        tx: tx.clone(),
+                        pos: chain_position.cloned(),
+                        mtp,
+                    },
+                );
             }
         }
 
-        CanonicalView::new(self.tip, view_order, view_txs, self.spends.clone())
+        CanonicalView::new(self.tip, view_order, view_txs, self.spends.clone(), tip_mtp)
     }
 }
