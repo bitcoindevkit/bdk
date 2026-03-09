@@ -3,6 +3,7 @@
 #[macro_use]
 mod common;
 use bdk_chain::{collections::*, BlockId, CanonicalizationParams, ConfirmationBlockTime};
+#[allow(deprecated)]
 use bdk_chain::{
     local_chain::LocalChain,
     tx_graph::{self, CalculateFeeError},
@@ -754,6 +755,7 @@ fn test_walk_ancestors() {
             .walk_ancestors(tx_e0.clone(), |depth, tx| Some((depth, tx)))
             .collect::<Vec<_>>(),
         // Only traverse unconfirmed ancestors of tx_e0 this time
+        #[allow(deprecated)]
         graph
             .walk_ancestors(tx_e0.clone(), |depth, tx| {
                 let tx_node = graph.get_tx_node(tx.compute_txid())?;

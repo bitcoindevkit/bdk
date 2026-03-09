@@ -22,6 +22,10 @@ pub struct CanonicalizationParams {
 }
 
 /// Iterates over canonical txs.
+#[deprecated(
+    since = "0.23.3",
+    note = "`CanonicalIter` will be removed in a future release, replaced by `CanonicalTask` and `CanonicalViewTask`. See: https://github.com/bitcoindevkit/bdk/pull/2038"
+)]
 pub struct CanonicalIter<'g, A, C> {
     tx_graph: &'g TxGraph<A>,
     chain: &'g C,

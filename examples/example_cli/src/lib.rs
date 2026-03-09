@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use bdk_chain::keychain_txout::DEFAULT_LOOKAHEAD;
 use serde_json::json;
 use std::cmp;

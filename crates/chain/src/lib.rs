@@ -32,18 +32,22 @@ mod balance;
 pub use balance::*;
 mod chain_data;
 pub use chain_data::*;
+#[allow(deprecated)]
 pub mod indexed_tx_graph;
 pub use indexed_tx_graph::IndexedTxGraph;
 pub mod indexer;
 pub use indexer::spk_txout;
 pub use indexer::Indexer;
+#[allow(deprecated)]
 pub mod local_chain;
 mod tx_data_traits;
 pub use tx_data_traits::*;
+#[allow(deprecated)]
 pub mod tx_graph;
 pub use tx_graph::TxGraph;
 mod chain_oracle;
 pub use chain_oracle::*;
+#[allow(deprecated)]
 mod canonical_iter;
 pub use canonical_iter::*;
 

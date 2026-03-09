@@ -6,6 +6,10 @@ use crate::BlockId;
 /// is an ancestor of the `chain_tip`.
 ///
 /// [`is_block_in_chain`]: Self::is_block_in_chain
+#[deprecated(
+    since = "0.23.3",
+    note = "`ChainOracle` will be removed in a future release, replaced by `ChainQuery` in `bdk_core`. See: https://github.com/bitcoindevkit/bdk/pull/2038"
+)]
 pub trait ChainOracle {
     /// Error type.
     type Error: core::fmt::Debug;
