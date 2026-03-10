@@ -133,7 +133,7 @@ use bitcoin::{Amount, OutPoint, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
 use core::{
     convert::Infallible,
-    ops::{Deref, RangeInclusive},
+    ops::Deref,
 };
 
 impl<A: Ord> From<TxGraph<A>> for TxUpdate<A> {
@@ -171,7 +171,8 @@ impl<A: Anchor> From<TxUpdate<A>> for TxGraph<A> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TxGraph<A = ConfirmationBlockTime> {
     txs: HashMap<Txid, TxNodeInternal>,
-    spends: BTreeMap<OutPoint, HashSet<Txid>>,
+    spends: HashMap<OutPoint, HashSet<Txid>>,
+    spend_vouts_by_txid: HashMap<Txid, BTreeSet<u32>>,
     anchors: HashMap<Txid, BTreeSet<A>>,
     first_seen: HashMap<Txid, u64>,
     last_seen: HashMap<Txid, u64>,
@@ -191,6 +192,7 @@ impl<A> Default for TxGraph<A> {
         Self {
             txs: Default::default(),
             spends: Default::default(),
+            spend_vouts_by_txid: Default::default(),
             anchors: Default::default(),
             first_seen: Default::default(),
             last_seen: Default::default(),
@@ -468,11 +470,16 @@ impl<A> TxGraph<A> {
         &self,
         txid: Txid,
     ) -> impl DoubleEndedIterator<Item = (u32, &HashSet<Txid>)> + '_ {
-        let start = OutPoint::new(txid, 0);
-        let end = OutPoint::new(txid, u32::MAX);
-        self.spends
-            .range(start..=end)
-            .map(|(outpoint, spends)| (outpoint.vout, spends))
+        self.spend_vouts_by_txid
+            .get(&txid)
+            .into_iter()
+            .flat_map(move |vouts| {
+                vouts.iter().filter_map(move |vout| {
+                    self.spends
+                        .get(&OutPoint::new(txid, *vout))
+                        .map(|spends| (*vout, spends))
+                })
+            })
     }
 }
 
@@ -707,6 +714,10 @@ impl<A: Anchor> TxGraph<A> {
                     if txin.previous_output.is_null() {
                         continue;
                     }
+                    self.spend_vouts_by_txid
+                        .entry(txin.previous_output.txid)
+                        .or_default()
+                        .insert(txin.previous_output.vout);
                     self.spends
                         .entry(txin.previous_output)
                         .or_default()
@@ -1417,8 +1428,7 @@ where
     fn populate_queue(&mut self, depth: usize, txid: Txid) {
         let spend_paths = self
             .graph
-            .spends
-            .range(tx_outpoint_range(txid))
+            .tx_spends(txid)
             .flat_map(|(_, spends)| spends)
             .map(|&txid| (depth, txid));
         self.queue.extend(spend_paths);
@@ -1447,8 +1457,4 @@ where
         self.populate_queue(op_spends + 1, txid);
         Some(item)
     }
-}
-
-fn tx_outpoint_range(txid: Txid) -> RangeInclusive<OutPoint> {
-    OutPoint::new(txid, u32::MIN)..=OutPoint::new(txid, u32::MAX)
 }

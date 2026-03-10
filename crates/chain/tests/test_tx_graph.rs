@@ -1537,3 +1537,93 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+#[test]
+fn test_hashmap_spends_deterministic_vout_order() {
+    let parent_tx = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![TxOut::NULL; 5],
+    };
+    let parent_txid = parent_tx.compute_txid();
+
+    let children: Vec<Transaction> = vec![4u32, 1, 3, 0, 2]
+        .into_iter()
+        .map(|vout| Transaction {
+            version: transaction::Version::ONE,
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::new(parent_txid, vout),
+                ..Default::default()
+            }],
+            output: vec![],
+        })
+        .collect();
+
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+    let _ = graph.insert_tx(Arc::new(parent_tx));
+    for child in &children {
+        let _ = graph.insert_tx(Arc::new(child.clone()));
+    }
+
+    let vouts_in_order: Vec<u32> = graph.tx_spends(parent_txid).map(|(vout, _)| vout).collect();
+
+    assert_eq!(
+        vouts_in_order,
+        vec![0, 1, 2, 3, 4],
+        "vouts must be returned in sorted order"
+    );
+}
+
+#[test]
+fn test_hashmap_spends_descendant_walking() {
+    let parent_tx = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![TxOut::NULL],
+    };
+    let parent_txid = parent_tx.compute_txid();
+
+    let child = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::new(parent_txid, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut::NULL],
+    };
+    let child_txid = child.compute_txid();
+
+    let grandchild = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::new(child_txid, 0),
+            ..Default::default()
+        }],
+        output: vec![],
+    };
+    let grandchild_txid = grandchild.compute_txid();
+
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+    let _ = graph.insert_tx(Arc::new(parent_tx));
+    let _ = graph.insert_tx(Arc::new(child));
+    let _ = graph.insert_tx(Arc::new(grandchild));
+
+    let descendants: Vec<Txid> = graph
+        .walk_descendants(parent_txid, |_, txid| Some(txid))
+        .collect();
+
+    assert_eq!(descendants.len(), 2, "parent has 2 descendants");
+    assert!(
+        descendants.contains(&child_txid),
+        "child must be in descendants"
+    );
+    assert!(
+        descendants.contains(&grandchild_txid),
+        "grandchild must be in descendants"
+    );
+}
