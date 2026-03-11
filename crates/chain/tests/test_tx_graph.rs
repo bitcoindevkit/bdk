@@ -1545,6 +1545,58 @@ fn test_get_first_seen_of_a_tx() {
     assert_eq!(first_seen, Some(seen_at));
 }
 
+#[test]
+fn test_assumed_canonical_with_anchor_is_confirmed() {
+    use bdk_chain::ChainPosition;
+
+    let chain = LocalChain::from_blocks(
+        [(0, hash!("genesis")), (2, hash!("b2"))]
+            .into_iter()
+            .collect(),
+    )
+    .unwrap();
+
+    // Create an anchored transaction that will be assumed canonical via `CanonicalizationParams`.
+    let tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("parent"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let txid = tx.compute_txid();
+
+    let mut tx_graph = TxGraph::default();
+    let _ = tx_graph.insert_tx(tx);
+    let _ = tx_graph.insert_anchor(
+        txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(2).unwrap().block_id(),
+            confirmation_time: 123456,
+        },
+    );
+
+    let canonical_tx = tx_graph
+        .list_canonical_txs(
+            &chain,
+            chain.tip().block_id(),
+            CanonicalizationParams {
+                assume_canonical: vec![txid],
+            },
+        )
+        .find(|c_tx| c_tx.tx_node.txid == txid)
+        .expect("tx must exist");
+
+    assert!(
+        matches!(canonical_tx.chain_position, ChainPosition::Confirmed { .. }),
+        "tx that is assumed canonical and has a direct anchor should have ChainPosition::Confirmed"
+    );
+}
+
 /// A helper structure to constructs multiple [`TxGraph`] scenarios, used in
 /// `test_list_ordered_canonical_txs`.
 struct Scenario<'a> {

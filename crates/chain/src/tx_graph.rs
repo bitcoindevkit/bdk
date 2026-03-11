@@ -1028,8 +1028,8 @@ impl<A: Anchor> TxGraph<A> {
                 res.map(|(txid, _, canonical_reason)| {
                     let tx_node = self.get_tx_node(txid).expect("must contain tx");
                     let chain_position = match canonical_reason {
-                        CanonicalReason::Assumed { descendant } => match descendant {
-                            Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
+                        CanonicalReason::Assumed { .. } => {
+                            match find_direct_anchor(&tx_node, chain, chain_tip)? {
                                 Some(anchor) => ChainPosition::Confirmed {
                                     anchor,
                                     transitively: None,
@@ -1038,12 +1038,8 @@ impl<A: Anchor> TxGraph<A> {
                                     first_seen: tx_node.first_seen,
                                     last_seen: tx_node.last_seen,
                                 },
-                            },
-                            None => ChainPosition::Unconfirmed {
-                                first_seen: tx_node.first_seen,
-                                last_seen: tx_node.last_seen,
-                            },
-                        },
+                            }
+                        }
                         CanonicalReason::Anchor { anchor, descendant } => match descendant {
                             Some(_) => match find_direct_anchor(&tx_node, chain, chain_tip)? {
                                 Some(anchor) => ChainPosition::Confirmed {
