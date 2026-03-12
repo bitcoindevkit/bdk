@@ -20,7 +20,7 @@ jobs:
         with:
             toolchain: nightly-2025-11-27
             override: true
-            cache: true
+            cache: false
             components: llvm-tools-preview
       - name: Install cargo-llvm-cov
         run: if [[ ! -e ~/.cargo/bin/cargo-llvm-cov ]]; then cargo install cargo-llvm-cov; fi
