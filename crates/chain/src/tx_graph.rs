@@ -247,12 +247,27 @@ impl Default for TxNodeInternal {
 }
 
 /// A transaction that is deemed to be part of the canonical history.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CanonicalTx<'a, T, A> {
     /// How the transaction is observed in the canonical chain (confirmed or unconfirmed).
     pub chain_position: ChainPosition<A>,
     /// The transaction node (as part of the graph).
     pub tx_node: TxNode<'a, T, A>,
+}
+
+impl<'a, T: Ord, A: Ord> Ord for CanonicalTx<'a, T, A> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.chain_position
+            .cmp(&other.chain_position)
+            // Txid tiebreaker for same position
+            .then_with(|| self.tx_node.txid.cmp(&other.tx_node.txid))
+    }
+}
+
+impl<'a, T: Ord, A: Ord> PartialOrd for CanonicalTx<'a, T, A> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 impl<'a, T, A> From<CanonicalTx<'a, T, A>> for Txid {
