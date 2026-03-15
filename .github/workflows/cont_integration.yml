@@ -166,3 +166,21 @@ jobs:
       - name: Build
         working-directory: examples/${{ matrix.example-dir }}
         run: cargo build
+
+  check-docs:
+    needs: prepare
+    name: Check documentation errors
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          override: true
+          cache: true
+      - name: Check docs
+        run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps

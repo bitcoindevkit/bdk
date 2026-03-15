@@ -87,7 +87,7 @@ Coding Conventions
 ------------------
 
 This codebase uses spaces, not tabs.
-Run `just check` to check formatting, linting, compilation and commit signing, `just fmt` to format code before commiting, and `just test` to run tests for all crates.
+Run `just check` to check formatting, linting, compilation and commit signing, `just fmt` to format code before commiting, `just test` to run tests for all crates, `just pre-push` to run the full pre-push suite before pushing changes and `just doc` to check documentation build warnings and errors for all packages.
 This is also enforced by the CI.
 All public items must be documented. We adhere to the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/about.html) with respect to documentation.
 
