@@ -2,6 +2,7 @@
 
 use crate::canonical_task::{CanonicalReason, ObservedIn};
 use crate::collections::{HashMap, VecDeque};
+use crate::tx_graph::TxDescendants;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -152,16 +153,53 @@ impl<'g, A: Anchor> ChainQuery for CanonicalViewTask<'g, A> {
 
                 // Determine chain position based on reason
                 let chain_position = match reason {
-                    CanonicalReason::Assumed { .. } => match self.direct_anchors.get(txid) {
-                        Some(anchor) => ChainPosition::Confirmed {
-                            anchor,
-                            transitively: None,
-                        },
-                        None => ChainPosition::Unconfirmed {
-                            first_seen: tx_node.first_seen,
-                            last_seen: tx_node.last_seen,
-                        },
-                    },
+                    CanonicalReason::Assumed { descendant } => {
+                        match self.direct_anchors.get(txid) {
+                            // it has a direct anchor found
+                            // regardless if it's directly or transitively assumed canonical
+                            Some(anchor) => ChainPosition::Confirmed {
+                                anchor,
+                                transitively: None,
+                            },
+                            None => match descendant {
+                                // transitively assumed canonical, walk through descendants to find
+                                // the first confirmed one.
+                                Some(_descendant) => {
+                                    match TxDescendants::new_exclude_root(
+                                        self.tx_graph,
+                                        *txid,
+                                        |_, desc_txid| -> Option<(Txid, &A)> {
+                                            // assert the descendant visited is canonical
+                                            self.canonical_txs
+                                                .contains_key(&desc_txid)
+                                                .then(|| {
+                                                    self.direct_anchors
+                                                        .get(&desc_txid)
+                                                        .map(|anchor| (desc_txid, anchor))
+                                                })
+                                                .flatten()
+                                        },
+                                    )
+                                    .next()
+                                    {
+                                        Some((desc_txid, anchor)) => ChainPosition::Confirmed {
+                                            anchor,
+                                            transitively: Some(desc_txid),
+                                        },
+                                        None => ChainPosition::Unconfirmed {
+                                            first_seen: tx_node.first_seen,
+                                            last_seen: tx_node.last_seen,
+                                        },
+                                    }
+                                }
+                                // directly assumed canonical, no direct anchor found.
+                                None => ChainPosition::Unconfirmed {
+                                    first_seen: tx_node.first_seen,
+                                    last_seen: tx_node.last_seen,
+                                },
+                            },
+                        }
+                    }
                     CanonicalReason::Anchor { anchor, descendant } => match descendant {
                         Some(_) => match self.direct_anchors.get(txid) {
                             Some(anchor) => ChainPosition::Confirmed {

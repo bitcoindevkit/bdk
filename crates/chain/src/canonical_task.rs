@@ -14,7 +14,7 @@ type NotCanonicalSet = HashSet<Txid>;
 /// Represents the current stage of canonicalization processing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum CanonicalStage {
-    /// Processing transctions assumed to be canonical.
+    /// Processing transactions assumed to be canonical.
     #[default]
     AssumedTxs,
     /// Processing directly anchored transactions.
