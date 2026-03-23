@@ -7,6 +7,24 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [chain-0.23.3]
+
+### Added
+
+- Add new `list_ordered_canonical_txs` method to `TxGraph` that returns canonical transactions in topological order. #2027
+- Add new `spent_txouts` and `created_txouts` methods on `SpkTxOutIndex` and `KeychainTxOutIndex`. #2161
+- Add new `SpentTxOut` and `CreatedTxOut` structs returned by `spent_txouts` and `created_txouts` functions. #2161
+
+### Fixed
+
+- Fixed `ChainPosition` ordering so unconfirmed transactions never seen in mempool appear last instead of first. #2146
+- The `Anchor::confirmation_height_upper_bound` impl was missing for `&A`, causing it to fallback to the default impl. #2149
+- Previously, assumed-canonical transactions always became unconfirmed even though the transaction may be anchored in the best chain. #2150
+
+### Changed
+
+- Simplified `FullTxOut` ordering to only use essential fields (chain_position, outpoint, spent_by). #2146
+
 ## [chain-0.23.2]
 
 ### Added
@@ -86,3 +104,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [chain-0.23.0]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.0
 [chain-0.23.1]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.1
 [chain-0.23.2]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.2
+[chain-0.23.3]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.3

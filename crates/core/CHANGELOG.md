@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [core-0.6.3]
+
+### Fixed
+
+- Fix `broken-intra-doc-link` for `KeychainTxOutIndex`. #2155
+
 ## [core-0.6.2]
 
 ### Added
@@ -57,3 +63,4 @@ This is because requests now have a `start_time`, instead of specifying a `seen_
 [core-0.6.0]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.0
 [core-0.6.1]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.1
 [core-0.6.2]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.2
+[core-0.6.3]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.3
