@@ -1,0 +1,111 @@
+# Bitcoin Dev Kit (BDK)
+
+> A modern, lightweight, descriptor-based wallet library written in Rust.
+
+## Project Overview
+
+The Bitcoin Dev Kit (BDK) is a suite of libraries for building modern Bitcoin wallets and applications. It provides well-engineered components for descriptor-based wallets, chain data management, and blockchain data sources. Built on `rust-bitcoin` and `rust-miniscript`.
+
+## Architecture
+
+Rust workspace with modular crates in `/crates/` and example applications in `/examples/`.
+
+### Workspace Crates
+
+| Crate | Path | Description |
+|-------|------|-------------|
+| `bdk_chain` | `crates/chain/` | Tools for storing and indexing chain data (keychain tracking, tx graph) |
+| `bdk_core` | `crates/core/` | Core structures shared across BDK crates (spk indices, tx updates) |
+| `bdk_file_store` | `crates/file_store/` | Append-only flat file database for persisting bdk_chain data |
+| `bdk_electrum` | `crates/electrum/` | Electrum blockchain data source for BDK |
+| `bdk_esplora` | `crates/esplora/` | Esplora blockchain data source for BDK |
+| `bdk_bitcoind_rpc` | `crates/bitcoind_rpc/` | Bitcoin Core RPC blockchain data source |
+| `bdk_testenv` | `crates/testenv/` | Testing framework for BDK chain sources |
+
+### Example Applications
+
+| Example | Description |
+|---------|-------------|
+| `example_cli` | Minimal wallet using `bdk_wallet` |
+| `example_electrum` | Wallet backed by Electrum server |
+| `example_esplora` | Wallet backed by Esplora block explorer |
+| `example_bitcoind_rpc_polling` | Wallet using Bitcoin Core RPC polling |
+
+## Key Concepts
+
+- **Descriptors**: BDK uses output descriptors (miniscript) for wallet key management
+- **Chain sources**: Pluggable blockchain data backends (Electrum, Esplora, bitcoind RPC)
+- **Keychain tracking**: Per-keychain derivation index tracking for address discovery
+- **Tx graph**: In-memory transaction graph with confirmation tracking
+- **Persistence**: Optional append-only file store for wallet state
+
+## Key Dependencies
+
+- `rust-bitcoin` — Bitcoin protocol types and primitives
+- `rust-miniscript` — Descriptor and miniscript support
+- `electrum-client` — Electrum protocol client
+- `esplora-client` — Esplora block explorer client
+- `tokio` — Async runtime (for RPC chain sources)
+
+## Building and Running
+
+```bash
+# Build all crates
+cargo build
+
+# Run examples
+cargo run --example example_cli
+cargo run --example example_esplora
+
+# Run tests
+cargo test
+
+# Run with specific feature
+cargo test --features "electrum"
+```
+
+Requires Rust 1.85.0+ (see `rust-version` file).
+
+## Testing
+
+```bash
+# Unit tests
+cargo test
+
+# Integration tests (requires test environment)
+cargo test --features test-env
+
+# Check clippy
+cargo clippy --all-targets
+```
+
+Uses `bdk_testenv` crate for integration testing against real Bitcoin Core instances.
+
+## Contributing
+
+- `CONTRIBUTING.md` — Contribution guidelines
+- `DEVELOPMENT_CYCLE.md` — Release cycle documentation
+- Discord: https://discord.gg/d7NkDKm
+- Licensed: MIT OR Apache-2.0
+
+## Code Style
+
+- `rustfmt.toml` — Rust formatting rules
+- `clippy.toml` — Clippy lint configuration
+- Workspace-level lints deny `print_stdout` and `print_stderr`
+
+## Important Files
+
+| File | Purpose |
+|------|---------|
+| `Cargo.toml` | Workspace definition |
+| `justfile` | Task runner recipes |
+| `ci/` | CI/CD workflows |
+| `docs/` | Additional documentation |
+| `nursery/` | Experimental/prototype code |
+
+## Notes
+
+- BDK has an existing `AGENTS.md` in `rust-bitcoin/rust-bitcoin` (upstream dependency) requiring AI commit attribution
+- The project uses a structured release cycle (see `DEVELOPMENT_CYCLE.md`)
+- `nursery/` contains experimental code not ready for production use
