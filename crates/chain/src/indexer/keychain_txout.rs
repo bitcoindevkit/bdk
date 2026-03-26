@@ -1096,13 +1096,13 @@ impl Merge for ChangeSet {
 
 /// Trait to extend [`SyncRequestBuilder`].
 pub trait SyncRequestBuilderExt<K> {
-    /// Add [`Script`](bitcoin::Script)s that are revealed by the `indexer` of the given `spk_range`
+    /// Add [`Script`]s that are revealed by the `indexer` of the given `spk_range`
     /// that will be synced against.
     fn revealed_spks_from_indexer<R>(self, indexer: &KeychainTxOutIndex<K>, spk_range: R) -> Self
     where
         R: core::ops::RangeBounds<K>;
 
-    /// Add [`Script`](bitcoin::Script)s that are revealed by the `indexer` but currently unused.
+    /// Add [`Script`]s that are revealed by the `indexer` but currently unused.
     fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self;
 }
 

@@ -3,6 +3,7 @@ alias c := check
 alias f := fmt
 alias t := test
 alias p := pre-push
+alias d := doc
 
 _default:
   @just --list
@@ -57,3 +58,7 @@ _test-testenv:
 
 # Run pre-push suite: format, check, and test
 pre-push: fmt check test
+
+# Check documentation for all workspace packages
+doc:
+   RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
