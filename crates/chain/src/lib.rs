@@ -48,6 +48,8 @@ mod canonical_iter;
 pub use canonical_iter::*;
 mod canonical_view;
 pub use canonical_view::*;
+mod ancestor_package;
+pub use ancestor_package::*;
 
 #[doc(hidden)]
 pub mod example_utils;
