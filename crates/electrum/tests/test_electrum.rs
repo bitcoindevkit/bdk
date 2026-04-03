@@ -3,8 +3,7 @@ use bdk_chain::{
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest, SyncResponse},
     spk_txout::SpkTxOutIndex,
-    Balance, CanonicalizationParams, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge,
-    TxGraph,
+    Balance, CanonicalParams, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
 };
 use bdk_core::bitcoin::{
     key::{Secp256k1, UntweakedPublicKey},
@@ -40,9 +39,9 @@ fn get_balance(
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
-    let balance = recv_graph
-        .canonical_view(recv_chain, chain_tip, CanonicalizationParams::default())
-        .balance(outpoints, |_, _| true, 1);
+    let balance = recv_chain
+        .canonical_view(recv_graph.graph(), chain_tip, CanonicalParams::default())
+        .balance(outpoints, |_, _| true, 0);
     Ok(balance)
 }
 
@@ -156,8 +155,8 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
         .chain_tip(chain.tip())
         .spks_with_indexes(graph.index.all_spks().clone())
         .expected_spk_txids(
-            graph
-                .canonical_view(&chain, chain.tip().block_id(), Default::default())
+            chain
+                .canonical_view(graph.graph(), chain.tip().block_id(), Default::default())
                 .list_expected_spk_txids(&graph.index, ..),
         );
     let sync_response = client.sync(sync_request, BATCH_SIZE, true)?;
@@ -186,8 +185,8 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
         .chain_tip(chain.tip())
         .spks_with_indexes(graph.index.all_spks().clone())
         .expected_spk_txids(
-            graph
-                .canonical_view(&chain, chain.tip().block_id(), Default::default())
+            chain
+                .canonical_view(graph.graph(), chain.tip().block_id(), Default::default())
                 .list_expected_spk_txids(&graph.index, ..),
         );
     let sync_response = client.sync(sync_request, BATCH_SIZE, true)?;
