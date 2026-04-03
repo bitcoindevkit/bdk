@@ -11,27 +11,31 @@ use bdk_chain::{
     BlockId,
 };
 use bdk_testenv::{chain_update, hash, local_chain};
+use bitcoin::consensus::encode::deserialize_hex;
 use bitcoin::{block::Header, hashes::Hash, BlockHash};
 use proptest::prelude::*;
 
 #[derive(Debug)]
-struct TestLocalChain<'a> {
+struct TestLocalChain<'a, D> {
     name: &'static str,
-    chain: LocalChain,
-    update: CheckPoint<BlockHash>,
-    exp: ExpectedResult<'a>,
+    chain: LocalChain<D>,
+    update: CheckPoint<D>,
+    exp: ExpectedResult<'a, D>,
 }
 
 #[derive(Debug, PartialEq)]
-enum ExpectedResult<'a> {
+enum ExpectedResult<'a, D> {
     Ok {
-        changeset: &'a [(u32, Option<BlockHash>)],
-        init_changeset: &'a [(u32, Option<BlockHash>)],
+        changeset: &'a [(u32, Option<D>)],
+        init_changeset: &'a [(u32, Option<D>)],
     },
     Err(CannotConnectError),
 }
 
-impl TestLocalChain<'_> {
+impl<D> TestLocalChain<'_, D>
+where
+    D: bdk_core::ToBlockHash + Copy + PartialEq + std::fmt::Debug,
+{
     fn run(mut self) {
         let got_changeset = match self.chain.apply_update(self.update) {
             Ok(changeset) => changeset,
@@ -75,7 +79,7 @@ impl TestLocalChain<'_> {
 #[test]
 fn update_local_chain() {
     [
-        TestLocalChain {
+        TestLocalChain::<BlockHash> {
             name: "add first tip",
             chain: local_chain![(0, hash!("A"))],
             update: chain_update![(0, hash!("A"))],
@@ -172,11 +176,11 @@ fn update_local_chain() {
         },
         TestLocalChain {
             name: "fix blockhash before agreement point",
-            chain: local_chain![(0, hash!("im-wrong")), (1, hash!("we-agree"))],
-            update: chain_update![(0, hash!("fix")), (1, hash!("we-agree"))],
+            chain: local_chain![(0, hash!("_")), (1, hash!("im-wrong")), (2, hash!("we-agree"))],
+            update: chain_update![(0, hash!("_")), (1, hash!("fix")), (2, hash!("we-agree"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(0, Some(hash!("fix")))],
-                init_changeset: &[(0, Some(hash!("fix"))), (1, Some(hash!("we-agree")))],
+                changeset: &[(1, Some(hash!("fix")))],
+                init_changeset: &[(0, Some(hash!("_"))), (1, Some(hash!("fix"))), (2, Some(hash!("we-agree")))],
             },
         },
         // B and C are in both chain and update
@@ -315,6 +319,18 @@ fn update_local_chain() {
                     (3, Some(hash!("D'"))),
                 ],
             },
+        },
+        // Conflicting genesis with no point of agreement should fail.
+        //        | 0 | 2
+        // chain  | _   B
+        // update | _'  B'
+        TestLocalChain {
+            name: "conflicting genesis without agreement point",
+            chain: local_chain![(0, hash!("_")), (2, hash!("B"))],
+            update: chain_update![(0, hash!("_'")), (2, hash!("B'"))],
+            exp: ExpectedResult::Err(CannotConnectError {
+                try_include_height: 0,
+            }),
         },
     ]
     .into_iter()
@@ -548,6 +564,53 @@ fn local_chain_disconnect_from() {
             i, t.name
         );
     }
+}
+
+// Test that `apply_update` can connect 1 `Header` at a time
+// and fails if a `prev_blockhash` conflict is detected.
+#[test]
+fn test_apply_update_single_header() {
+    let headers: Vec<Header> = [
+        "0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4adae5494dffff7f2002000000",
+        "0000002006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f1c96cc459dbb0c7bbc722af14f913da868779290ad48ff87ee314ebb8ae08f384b166069ffff7f2001000000",
+        "0000002078ce518c7dcfd99ad5859c35bd2be15794c0e5dc8e60c1fea3b0461c45da181ca80f828504f88c645ea46cfcf93156269807e3bd409e1317271a1546d238e9b24c166069ffff7f2001000000",
+        "000000200dfd6c5af6ea3cb341a08db344f93743d94b630d122867faff855f6310e58864e6e0c859fda703d66d051b86f16f09b0cead182f3cbe13767cd91b6371ec252c4c166069ffff7f2000000000",
+    ]
+    .into_iter()
+    .map(|s| deserialize_hex::<Header>(s).expect("failed to deserialize header"))
+    .collect();
+
+    let header_0 = headers[0];
+    let header_1 = headers[1];
+    let header_2 = headers[2];
+    let header_3 = headers[3];
+
+    let (mut chain, _) = LocalChain::from_genesis(header_0);
+
+    // Apply 1 `CheckPoint<Header>` at a time
+    for (height, header) in (1..).zip([header_1, header_2, header_3]) {
+        let changeset = chain.apply_update(CheckPoint::new(height, header)).unwrap();
+        assert_eq!(
+            changeset,
+            ChangeSet {
+                blocks: [(height, Some(headers[height as usize]))].into()
+            },
+        );
+    }
+    assert_eq!(chain.tip().iter().count(), 4);
+    for height in 0..4 {
+        assert!(chain
+            .get(height)
+            .is_some_and(|cp| cp.hash() == headers[height as usize].block_hash()))
+    }
+
+    // `apply_update` should error if update does not connect.
+    // Reset chain for error test.
+    chain = LocalChain::from_blocks([(0, header_0), (1, header_1)].into()).unwrap();
+    let mut header_2_alt = header_2;
+    header_2_alt.prev_blockhash = hash!("header_1_new");
+    let result = chain.apply_update(CheckPoint::new(2, header_2_alt));
+    assert!(result.is_err(), "Failed to detect prev_blockhash conflict");
 }
 
 #[test]
@@ -952,4 +1015,297 @@ proptest! {
         let heights = cp.range(range).map(|cp| cp.height()).collect::<Vec<u32>>();
         prop_assert_eq!(heights, exp_heights);
     }
+}
+
+/// A test block type that returns `Some` for `prev_blockhash`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TestBlock {
+    hash: BlockHash,
+    prev_hash: BlockHash,
+}
+
+impl bdk_core::ToBlockHash for TestBlock {
+    fn to_blockhash(&self) -> BlockHash {
+        self.hash
+    }
+
+    fn prev_blockhash(&self) -> Option<BlockHash> {
+        Some(self.prev_hash)
+    }
+}
+
+/// Tests for `prev_blockhash` behavior in chain merging.
+#[test]
+fn merge_chains_with_prev_blockhash() {
+    // Common test blocks
+    let block_genesis = TestBlock {
+        hash: hash!("_"),
+        prev_hash: BlockHash::all_zeros(),
+    };
+    let block_a = TestBlock {
+        hash: hash!("A"),
+        prev_hash: hash!("_"),
+    };
+    let block_b = TestBlock {
+        hash: hash!("B"),
+        prev_hash: hash!("A"),
+    };
+    let block_c = TestBlock {
+        hash: hash!("C"),
+        prev_hash: hash!("B"),
+    };
+    let block_c_prime = TestBlock {
+        hash: hash!("C'"),
+        prev_hash: hash!("B'"), // conflicts with B
+    };
+    let block_d_orphan = TestBlock {
+        hash: hash!("D"),
+        prev_hash: hash!("C_nonexistent"),
+    };
+    let block_d_linked = TestBlock {
+        hash: hash!("D"),
+        prev_hash: hash!("C"), // matches block_c
+    };
+    let block_a_prime = TestBlock {
+        hash: hash!("A'"),
+        prev_hash: hash!("_'"), // points to different genesis
+    };
+    let block_b_prime = TestBlock {
+        hash: hash!("B'"),
+        prev_hash: hash!("A"),
+    };
+    let block_a_alt = TestBlock {
+        hash: hash!("A_alt"),
+        prev_hash: hash!("_"),
+    };
+    let block_d = TestBlock {
+        hash: hash!("D"),
+        prev_hash: hash!("C"),
+    };
+
+    [
+        // Test: prev_blockhash can invalidate blocks in the original chain
+        //
+        // ```text
+        //        | 0 | 1 | 2 | 3 | 4 |
+        // chain  | _   A   B       D
+        // update | _   A       C'(prev=B')
+        // result | _   A       C'
+        // ```
+        //
+        // The update at height 3 has `prev_blockhash = B'` which conflicts with the original
+        // `B` at height 2. This should invalidate blocks at heights 2 and 4.
+        TestLocalChain::<TestBlock> {
+            name: "prev_blockhash invalidates conflicting blocks",
+            chain: LocalChain::from_blocks(
+                [
+                    (0, block_genesis),
+                    (1, block_a),
+                    (2, block_b),
+                    (4, block_d_orphan),
+                ]
+                .into(),
+            )
+            .unwrap(),
+            update: CheckPoint::from_blocks([(0, block_genesis), (1, block_a), (3, block_c_prime)])
+                .unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(2, None), (3, Some(block_c_prime)), (4, None)],
+                init_changeset: &[
+                    (0, Some(block_genesis)),
+                    (1, Some(block_a)),
+                    (3, Some(block_c_prime)),
+                ],
+            },
+        },
+        // Test: prev_blockhash can connect disjoint chains
+        //
+        // ```text
+        //        | 0 | 2 | 3 | 4 |
+        // chain  | _   B   C
+        // update | _   B       D(prev=C)
+        // result | _   B   C   D
+        // ```
+        //
+        // The update at height 4 has `prev_blockhash = C` which matches height 3 in the
+        // original. Even though the update doesn't include height 3 explicitly, the chains
+        // should connect.
+        TestLocalChain {
+            name: "prev_blockhash connects disjoint chains",
+            chain: LocalChain::from_blocks([(0, block_genesis), (2, block_b), (3, block_c)].into())
+                .unwrap(),
+            update: CheckPoint::from_blocks([
+                (0, block_genesis),
+                (2, block_b),
+                (4, block_d_linked),
+            ])
+            .unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(4, Some(block_d_linked))],
+                init_changeset: &[
+                    (0, Some(block_genesis)),
+                    (2, Some(block_b)),
+                    (3, Some(block_c)),
+                    (4, Some(block_d_linked)),
+                ],
+            },
+        },
+        // Test: update's block evicts chain blocks via prev_blockhash conflict
+        //
+        // ```text
+        //        | 0 | 1 | 2 | 3 |
+        // chain  | _   A       C(prev=B)
+        // update | _   A   B'
+        // result | _   A   B'
+        // ```
+        //
+        // The chain's block C at height 3 has `prev_blockhash = B`. The update has B' at height 2
+        // which doesn't match. C gets evicted because its prev_blockhash is invalidated.
+        TestLocalChain {
+            name: "update evicts chain blocks via prev_blockhash conflict",
+            chain: LocalChain::from_blocks([(0, block_genesis), (1, block_a), (3, block_c)].into())
+                .unwrap(),
+            update: CheckPoint::from_blocks([(0, block_genesis), (1, block_a), (2, block_b_prime)])
+                .unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(2, Some(block_b_prime)), (3, None)],
+                init_changeset: &[
+                    (0, Some(block_genesis)),
+                    (1, Some(block_a)),
+                    (2, Some(block_b_prime)),
+                ],
+            },
+        },
+        // Test: prev_blockhash at height 1 implies different genesis
+        //
+        // ```text
+        //        | 0 | 1 |
+        // chain  | _   A
+        // update |     A'(prev=_')
+        // result | error
+        // ```
+        //
+        // The update only has a block at height 1, whose `prev_blockhash = _'` conflicts with
+        // the chain's genesis `_`. This should fail to connect.
+        TestLocalChain {
+            name: "prev_blockhash implies different genesis",
+            chain: LocalChain::from_blocks([(0, block_genesis), (1, block_a)].into()).unwrap(),
+            update: CheckPoint::new(1, block_a_prime),
+            exp: ExpectedResult::Err(CannotConnectError {
+                try_include_height: 0,
+            }),
+        },
+        // Test: unverifiable connection despite shared genesis
+        //
+        // ```text
+        //        | 0 | 1 | 2 | 4 |
+        // chain  | _       B(prev=A)
+        // update | _           D(prev=C)
+        // result | error (height 1)
+        // ```
+        //
+        // Both chains share genesis, but the chain's B implies A at height 1 (via prev_blockhash).
+        // The update doesn't have anything at height 1 to verify this connection, so the merge
+        // fails at height 1.
+        TestLocalChain {
+            name: "unverifiable connection despite shared genesis",
+            chain: LocalChain::from_blocks([(0, block_genesis), (2, block_b)].into()).unwrap(),
+            update: CheckPoint::from_blocks([(0, block_genesis), (4, block_d_linked)]).unwrap(),
+            exp: ExpectedResult::Err(CannotConnectError {
+                try_include_height: 1,
+            }),
+        },
+        // Test: update displaces invalid block below point of agreement
+        //
+        // ```text
+        //        | 0 | 1 | 2        | 4 |
+        // chain  | _       C(prev=B)  D
+        // update | _   A              D
+        // result | _   A              D
+        // ```
+        //
+        // Both chains agree on D at height 4. Chain has C at height 2 with `prev_blockhash = B`,
+        // but no B exists. Update introduces A at height 1, which displaces C because
+        // C's `prev_blockhash` ("B") doesn't match A's hash ("A").
+        //
+        // Note: This can only happen if chains are constructed incorrectly.
+        TestLocalChain {
+            name: "update displaces invalid block below point of agreement",
+            chain: LocalChain::from_blocks(
+                [(0, block_genesis), (2, block_c), (4, block_d_linked)].into(),
+            )
+            .unwrap(),
+            update: CheckPoint::from_blocks([
+                (0, block_genesis),
+                (1, block_a),
+                (4, block_d_linked),
+            ])
+            .unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(1, Some(block_a)), (2, None)],
+                init_changeset: &[
+                    (0, Some(block_genesis)),
+                    (1, Some(block_a)),
+                    (4, Some(block_d_linked)),
+                ],
+            },
+        },
+        // Test: update fills gap with matching prev_blockhash
+        //
+        // ```text
+        //        | 0 | 1 | 2        |
+        // chain  | _       B(prev=A)
+        // update | _   A   B
+        // result | _   A   B
+        // ```
+        //
+        // Chain has gap at height 1. Update provides A which matches B's `prev_blockhash`.
+        // The chains connect perfectly.
+        TestLocalChain {
+            name: "update fills gap with matching prev_blockhash",
+            chain: LocalChain::from_blocks([(0, block_genesis), (2, block_b)].into()).unwrap(),
+            update: CheckPoint::from_blocks([(0, block_genesis), (1, block_a), (2, block_b)])
+                .unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(1, Some(block_a))],
+                init_changeset: &[
+                    (0, Some(block_genesis)),
+                    (1, Some(block_a)),
+                    (2, Some(block_b)),
+                ],
+            },
+        },
+        // Test: cascading eviction through multiple blocks
+        //
+        // ```text
+        //        | 0 | 1    | 2        | 3        | 4        |
+        // chain  | _   A      B(prev=A)  C(prev=B)  D(prev=C)
+        // update | _   A_alt
+        // result | _   A_alt
+        // ```
+        //
+        // Update replaces A with A_alt. B's `prev_blockhash = A` doesn't match A_alt,
+        // so B is evicted. C and D depend on B via prev_blockhash, so they cascade evict.
+        TestLocalChain {
+            name: "cascading eviction through multiple blocks",
+            chain: LocalChain::from_blocks(
+                [
+                    (0, block_genesis),
+                    (1, block_a),
+                    (2, block_b),
+                    (3, block_c),
+                    (4, block_d),
+                ]
+                .into(),
+            )
+            .unwrap(),
+            update: CheckPoint::from_blocks([(0, block_genesis), (1, block_a_alt)]).unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(1, Some(block_a_alt)), (2, None), (3, None), (4, None)],
+                init_changeset: &[(0, Some(block_genesis)), (1, Some(block_a_alt))],
+            },
+        },
+    ]
+    .into_iter()
+    .for_each(TestLocalChain::run);
 }
