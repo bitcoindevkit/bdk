@@ -23,3 +23,8 @@ serde = ["dep:serde", "bitcoin/serde", "hashbrown?/serde"]
 [dev-dependencies]
 bdk_chain = { path = "../chain" }
 bdk_testenv = { path = "../testenv", default-features = false }
+criterion = { version = "0.2" }
+
+[[bench]]
+name = "checkpoint_skiplist"
+harness = false

@@ -7,6 +7,9 @@ use bitcoin::{block::Header, BlockHash};
 
 use crate::BlockId;
 
+/// Interval for skiplist pointers based on checkpoint index.
+const CHECKPOINT_SKIP_INTERVAL: u32 = 100;
+
 /// A checkpoint is a node of a reference-counted linked list of [`BlockId`]s.
 ///
 /// Checkpoints are cheaply cloneable and are useful to find the agreement point between two sparse
@@ -29,6 +32,10 @@ struct CPInner<D> {
     data: D,
     /// Previous checkpoint (if any).
     prev: Option<Arc<CPInner<D>>>,
+    /// Skip pointer for fast traversals.
+    skip: Option<Arc<CPInner<D>>>,
+    /// Index of this checkpoint (number of checkpoints from the first).
+    index: u32,
 }
 
 /// When a `CPInner` is dropped we need to go back down the chain and manually remove any
@@ -136,6 +143,16 @@ impl<D> CheckPoint<D> {
         self.0.prev.clone().map(CheckPoint)
     }
 
+    /// Get the index of this checkpoint (number of checkpoints from the first).
+    pub fn index(&self) -> u32 {
+        self.0.index
+    }
+
+    /// Get the skip pointer checkpoint if it exists.
+    pub fn skip(&self) -> Option<CheckPoint<D>> {
+        self.0.skip.clone().map(CheckPoint)
+    }
+
     /// Iterate from this checkpoint in descending height.
     pub fn iter(&self) -> CheckPointIter<D> {
         self.clone().into_iter()
@@ -145,7 +162,37 @@ impl<D> CheckPoint<D> {
     ///
     /// Returns `None` if checkpoint at `height` does not exist`.
     pub fn get(&self, height: u32) -> Option<Self> {
-        self.range(height..=height).next()
+        let mut current = self.clone();
+
+        if current.height() == height {
+            return Some(current);
+        }
+
+        // Use skip pointers to jump close to target
+        while current.height() > height {
+            match current.skip() {
+                Some(skip_cp) => match skip_cp.height().cmp(&height) {
+                    core::cmp::Ordering::Greater => current = skip_cp,
+                    core::cmp::Ordering::Equal => return Some(skip_cp),
+                    core::cmp::Ordering::Less => break, // Skip would undershoot
+                },
+                None => break, // No more skip pointers
+            }
+        }
+
+        // Linear search for exact height
+        while current.height() > height {
+            match current.prev() {
+                Some(prev_cp) => match prev_cp.height().cmp(&height) {
+                    core::cmp::Ordering::Greater => current = prev_cp,
+                    core::cmp::Ordering::Equal => return Some(prev_cp),
+                    core::cmp::Ordering::Less => break, // Height doesn't exist
+                },
+                None => break, // End of chain
+            }
+        }
+
+        None
     }
 
     /// Iterate checkpoints over a height range.
@@ -158,17 +205,39 @@ impl<D> CheckPoint<D> {
     {
         let start_bound = range.start_bound().cloned();
         let end_bound = range.end_bound().cloned();
-        self.iter()
-            .skip_while(move |cp| match end_bound {
-                core::ops::Bound::Included(inc_bound) => cp.height() > inc_bound,
-                core::ops::Bound::Excluded(exc_bound) => cp.height() >= exc_bound,
-                core::ops::Bound::Unbounded => false,
-            })
-            .take_while(move |cp| match start_bound {
-                core::ops::Bound::Included(inc_bound) => cp.height() >= inc_bound,
-                core::ops::Bound::Excluded(exc_bound) => cp.height() > exc_bound,
-                core::ops::Bound::Unbounded => true,
-            })
+
+        let is_above_bound = |height: u32| match end_bound {
+            core::ops::Bound::Included(inc_bound) => height > inc_bound,
+            core::ops::Bound::Excluded(exc_bound) => height >= exc_bound,
+            core::ops::Bound::Unbounded => false,
+        };
+
+        let mut current = self.clone();
+
+        // Use skip pointers to jump close to target
+        while is_above_bound(current.height()) {
+            match current.skip() {
+                Some(skip_cp) if is_above_bound(skip_cp.height()) => {
+                    current = skip_cp;
+                }
+                _ => break, // Skip would undershoot or doesn't exist
+            }
+        }
+
+        // Linear search to exact position
+        while is_above_bound(current.height()) {
+            match current.prev() {
+                Some(prev) => current = prev,
+                None => break,
+            }
+        }
+
+        // Iterate from start point
+        current.into_iter().take_while(move |cp| match start_bound {
+            core::ops::Bound::Included(inc_bound) => cp.height() >= inc_bound,
+            core::ops::Bound::Excluded(exc_bound) => cp.height() > exc_bound,
+            core::ops::Bound::Unbounded => true,
+        })
     }
 
     /// Returns the checkpoint at `height` if one exists, otherwise the nearest checkpoint at a
@@ -218,6 +287,8 @@ where
             },
             data,
             prev: None,
+            skip: None,
+            index: 0,
         }))
     }
 
@@ -314,6 +385,7 @@ where
             cp = cp.prev().expect("will break before genesis block");
         };
 
+        // Rebuild the chain: base -> new block -> tail
         base.extend(core::iter::once((height, data)).chain(tail.into_iter().rev()))
             .expect("tail is in order")
     }
@@ -323,18 +395,42 @@ where
     /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the
     /// one you are pushing on to.
     pub fn push(self, height: u32, data: D) -> Result<Self, Self> {
-        if self.height() < height {
-            Ok(Self(Arc::new(CPInner {
-                block_id: BlockId {
-                    height,
-                    hash: data.to_blockhash(),
-                },
-                data,
-                prev: Some(self.0),
-            })))
-        } else {
-            Err(self)
+        if self.height() >= height {
+            return Err(self);
         }
+
+        let new_index = self.0.index + 1;
+
+        // Skip pointers are added every CHECKPOINT_SKIP_INTERVAL (100) checkpoints
+        // e.g., checkpoints at index 100, 200, 300, etc. have skip pointers
+        let needs_skip_pointer =
+            new_index >= CHECKPOINT_SKIP_INTERVAL && new_index % CHECKPOINT_SKIP_INTERVAL == 0;
+
+        let skip = if needs_skip_pointer {
+            // Skip pointer points back CHECKPOINT_SKIP_INTERVAL positions
+            // e.g., checkpoint at index 200 points to checkpoint at index 100
+            // We walk back CHECKPOINT_SKIP_INTERVAL - 1 steps since we start from self (index
+            // new_index - 1)
+            let mut current = self.0.clone();
+            for _ in 0..(CHECKPOINT_SKIP_INTERVAL - 1) {
+                // This is safe: if we're at index >= 100, we must have at least 99 predecessors
+                current = current.prev.clone().expect("chain has enough checkpoints");
+            }
+            Some(current)
+        } else {
+            None
+        };
+
+        Ok(Self(Arc::new(CPInner {
+            block_id: BlockId {
+                height,
+                hash: data.to_blockhash(),
+            },
+            data,
+            prev: Some(self.0),
+            skip,
+            index: new_index,
+        })))
     }
 }
 
@@ -402,12 +498,15 @@ mod tests {
         let genesis = cp.get(0).expect("genesis exists");
         let weak = Arc::downgrade(&genesis.0);
 
-        // At this point there should be exactly two strong references to the
-        // genesis checkpoint: the variable `genesis` and the chain `cp`.
+        // At this point there should be exactly three strong references to the
+        // genesis checkpoint:
+        // 1. The variable `genesis`
+        // 2. The chain `cp` through checkpoint 1's prev pointer
+        // 3. Checkpoint at index 100's skip pointer (points to index 0)
         assert_eq!(
             Arc::strong_count(&genesis.0),
-            2,
-            "`cp` and `genesis` should be the only strong references",
+            3,
+            "`cp`, `genesis`, and checkpoint 100's skip pointer should be the only strong references",
         );
 
         // Dropping the chain should remove one strong reference.
