@@ -5,7 +5,7 @@ use bdk_chain::{
     bitcoin::{Address, Amount, Txid},
     local_chain::{CheckPoint, LocalChain},
     spk_txout::SpkTxOutIndex,
-    Balance, BlockId, CanonicalizationParams, IndexedTxGraph, Merge,
+    Balance, BlockId, CanonicalParams, IndexedTxGraph, Merge,
 };
 use bdk_testenv::{
     anyhow,
@@ -320,9 +320,9 @@ fn get_balance(
 ) -> anyhow::Result<Balance> {
     let chain_tip = recv_chain.tip().block_id();
     let outpoints = recv_graph.index.outpoints().clone();
-    let balance = recv_graph
-        .canonical_view(recv_chain, chain_tip, CanonicalizationParams::default())
-        .balance(outpoints, |_, _| true, 1);
+    let balance = recv_chain
+        .canonical_view(recv_graph.graph(), chain_tip, CanonicalParams::default())
+        .balance(outpoints, |_, _| true, 0);
     Ok(balance)
 }
 
@@ -634,8 +634,8 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     let _txid_2 = core.send_raw_transaction(&tx1b)?;
 
     // Retrieve the expected unconfirmed txids and spks from the graph.
-    let exp_spk_txids = graph
-        .canonical_view(&chain, chain_tip, Default::default())
+    let exp_spk_txids = chain
+        .canonical_view(graph.graph(), chain_tip, Default::default())
         .list_expected_spk_txids(&graph.index, ..)
         .collect::<Vec<_>>();
     assert_eq!(exp_spk_txids, vec![(spk, txid_1)]);
@@ -650,8 +650,8 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     // Update graph with evicted tx.
     let _ = graph.batch_insert_relevant_evicted_at(mempool_event.evicted);
 
-    let canonical_txids = graph
-        .canonical_view(&chain, chain_tip, CanonicalizationParams::default())
+    let canonical_txids = chain
+        .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
         .txs()
         .map(|tx| tx.txid)
         .collect::<Vec<_>>();

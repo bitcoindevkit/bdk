@@ -8,7 +8,7 @@ use bdk_chain::{
     bitcoin::Network,
     keychain_txout::FullScanRequestBuilderExt,
     spk_client::{FullScanRequest, SyncRequest},
-    CanonicalizationParams, Merge,
+    CanonicalParams, Merge,
 };
 use bdk_esplora::{esplora_client, EsploraExt};
 use example_cli::{
@@ -237,10 +237,11 @@ fn main() -> anyhow::Result<()> {
             {
                 let graph = graph.lock().unwrap();
                 let chain = chain.lock().unwrap();
-                let canonical_view = graph.canonical_view(
-                    &*chain,
-                    local_tip.block_id(),
-                    CanonicalizationParams::default(),
+                let local_tip_block = local_tip.block_id();
+                let canonical_view = chain.canonical_view(
+                    graph.graph(),
+                    local_tip_block,
+                    CanonicalParams::default(),
                 );
 
                 request = request

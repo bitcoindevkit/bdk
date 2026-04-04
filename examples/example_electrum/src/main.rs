@@ -5,7 +5,7 @@ use bdk_chain::{
     collections::BTreeSet,
     indexed_tx_graph,
     spk_client::{FullScanRequest, SyncRequest},
-    CanonicalizationParams, ConfirmationBlockTime, Merge,
+    CanonicalParams, ConfirmationBlockTime, Merge,
 };
 use bdk_electrum::{
     electrum_client::{self, Client, ElectrumApi},
@@ -226,11 +226,10 @@ fn main() -> anyhow::Result<()> {
                         }
                         let _ = io::stderr().flush();
                     });
-            let canonical_view = graph.canonical_view(
-                &*chain,
-                chain_tip.block_id(),
-                CanonicalizationParams::default(),
-            );
+
+            let chain_tip_block = chain_tip.block_id();
+            let canonical_view =
+                chain.canonical_view(graph.graph(), chain_tip_block, CanonicalParams::default());
 
             request = request
                 .expected_spk_txids(canonical_view.list_expected_spk_txids(&graph.index, ..));

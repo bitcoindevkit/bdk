@@ -1,12 +1,11 @@
-//! The [`LocalChain`] is a local implementation of [`ChainOracle`].
+//! The [`LocalChain`] is a local chain of checkpoints.
 
-use core::convert::Infallible;
 use core::fmt;
 use core::ops::RangeBounds;
 
 use crate::collections::BTreeMap;
-use crate::{BlockId, ChainOracle, Merge};
-use bdk_core::ToBlockHash;
+use crate::{Anchor, BlockId, CanonicalParams, CanonicalTask, CanonicalView, Merge, TxGraph};
+use bdk_core::{ChainQuery, TaskProgress, ToBlockHash, ToBlockTime};
 pub use bdk_core::{CheckPoint, CheckPointIter};
 use bitcoin::block::Header;
 use bitcoin::BlockHash;
@@ -57,7 +56,7 @@ where
     Ok(init_cp)
 }
 
-/// This is a local implementation of [`ChainOracle`].
+/// A local chain of checkpoints.
 #[derive(Debug, Clone)]
 pub struct LocalChain<D = BlockHash> {
     tip: CheckPoint<D>,
@@ -69,33 +68,16 @@ impl<D> PartialEq for LocalChain<D> {
     }
 }
 
-impl<D> ChainOracle for LocalChain<D> {
-    type Error = Infallible;
-
-    fn is_block_in_chain(
-        &self,
-        block: BlockId,
-        chain_tip: BlockId,
-    ) -> Result<Option<bool>, Self::Error> {
-        let chain_tip_cp = match self.tip.get(chain_tip.height) {
-            // we can only determine whether `block` is in chain of `chain_tip` if `chain_tip` can
-            // be identified in chain
-            Some(cp) if cp.hash() == chain_tip.hash => cp,
-            _ => return Ok(None),
-        };
-        match chain_tip_cp.get(block.height) {
-            Some(cp) => Ok(Some(cp.hash() == block.hash)),
-            None => Ok(None),
-        }
-    }
-
-    fn get_chain_tip(&self) -> Result<BlockId, Self::Error> {
-        Ok(self.tip.block_id())
-    }
-}
-
 // Methods for `LocalChain<BlockHash>`
 impl LocalChain<BlockHash> {
+    /// Get the chain tip.
+    ///
+    /// # Returns
+    /// The [`BlockId`] of the chain tip.
+    pub fn chain_tip(&self) -> BlockId {
+        self.tip.block_id()
+    }
+
     /// Update the chain with a given [`Header`] at `height` which you claim is connected to a
     /// existing block in the chain.
     ///
@@ -404,6 +386,92 @@ where
             None => return Ok(ChangeSet::default()),
         };
         Ok(changeset)
+    }
+
+    /// Check if a block is in the chain.
+    ///
+    /// # Returns
+    /// * `Some(true)` if the block is in the chain
+    /// * `Some(false)` if the block is not in the chain
+    /// * `None` if it cannot be determined
+    pub fn is_block_in_chain(&self, block: BlockId, chain_tip: BlockId) -> Option<bool> {
+        let chain_tip_cp = match self.tip.get(chain_tip.height) {
+            Some(cp) if cp.hash() == chain_tip.hash => cp,
+            _ => return None,
+        };
+        chain_tip_cp
+            .get(block.height)
+            .map(|cp| cp.hash() == block.hash)
+    }
+
+    /// Canonicalize a transaction graph using this chain.
+    ///
+    /// This method processes any type implementing [`ChainQuery<D>`], handling all its requests
+    /// to determine which transactions are canonical, and returns the query's output.
+    /// The chain responds with its data type `D`, so `LocalChain<Header>` responds with
+    /// headers and `LocalChain<BlockHash>` responds with hashes.
+    pub fn canonicalize<Q>(&self, mut task: Q) -> Q::Output
+    where
+        Q: ChainQuery<D>,
+        D: Clone,
+    {
+        loop {
+            match task.poll() {
+                TaskProgress::Advanced => continue,
+                TaskProgress::Done => return task.finish(),
+                TaskProgress::Query(heights) => {
+                    debug_assert!(!heights.is_empty(), "TaskProgress::Query must not be empty");
+                    for height in heights {
+                        let data = self
+                            .get(height)
+                            .filter(|cp| {
+                                let chain_tip = task.tip();
+                                self.is_block_in_chain(cp.block_id(), chain_tip) == Some(true)
+                            })
+                            .map(|cp| cp.data());
+                        task.resolve_query(height, data);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Convenience method that runs both canonicalization phases and returns a [`CanonicalView`].
+    ///
+    /// This is equivalent to:
+    /// ```ignore
+    /// let (txs, queries) = chain.canonicalize(CanonicalTask::new(&tx_graph, tip, params));
+    /// let view = chain.canonicalize(txs.view_task(tx_graph, queries));
+    /// ```
+    pub fn canonical_view<A: Anchor>(
+        &self,
+        tx_graph: &TxGraph<A>,
+        tip: BlockId,
+        params: CanonicalParams,
+    ) -> CanonicalView<A> {
+        let (txs, queries) = self.canonicalize(CanonicalTask::new(tx_graph, tip, params));
+        self.canonicalize(txs.view_task(tx_graph, queries))
+    }
+
+    /// Like [`canonical_view`](Self::canonical_view), but also computes median-time-past (MTP)
+    /// values for confirmed transactions and the chain tip.
+    ///
+    /// Requires `D: ToBlockTime` (e.g. `LocalChain<Header>`).
+    ///
+    /// The resulting [`CanonicalView`] will have per-tx MTP on
+    /// [`CanonicalTx::mtp`](crate::CanonicalTx::mtp) and the tip MTP accessible via
+    /// [`tip_mtp()`](crate::Canonical::tip_mtp).
+    pub fn canonical_view_with_mtp<A: Anchor>(
+        &self,
+        tx_graph: &TxGraph<A>,
+        tip: BlockId,
+        params: CanonicalParams,
+    ) -> CanonicalView<A>
+    where
+        D: ToBlockTime,
+    {
+        let (txs, queries) = self.canonicalize(CanonicalTask::new(tx_graph, tip, params));
+        self.canonicalize(txs.view_task(tx_graph, queries).with_mtp())
     }
 
     fn _check_changeset_is_applied(&self, changeset: &ChangeSet<D>) -> bool {
