@@ -487,7 +487,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
 /// If blockchain re-org includes the start height, emit new start height block
 ///
 /// 1. mine 101 blocks
-/// 2. emit blocks 99a, 100a
+/// 2. emit blocks 98a, 99a, 100a
 /// 3. invalidate blocks 99a, 100a, 101a
 /// 4. mine new blocks 99b, 100b, 101b
 /// 5. emit block 99b
@@ -505,48 +505,45 @@ fn no_agreement_point() -> anyhow::Result<()> {
     let mut emitter = Emitter::new(
         &client,
         CheckPoint::new(0, env.genesis_hash()?),
-        (PREMINE_COUNT - 2) as u32,
+        (PREMINE_COUNT - 3) as u32,
         NO_EXPECTED_MEMPOOL_TXS,
     );
 
     // mine 101 blocks
     env.mine_blocks(PREMINE_COUNT, None)?;
 
-    // emit block 99a
-    let block_header_99a = emitter
-        .next_block()?
-        .expect("block 99a header")
-        .block
-        .header;
-    let block_hash_99a = block_header_99a.block_hash();
-    let block_hash_98a = block_header_99a.prev_blockhash;
-
-    // emit block 100a
-    let block_header_100a = emitter.next_block()?.expect("block 100a header").block;
-    let block_hash_100a = block_header_100a.block_hash();
+    // emit blocks: 98a, 99a, 100a
+    let block_98a = emitter.next_block()?.expect("block 98a");
+    let block_99a = emitter.next_block()?.expect("block 99a");
+    let block_100a = emitter.next_block()?.expect("block 100a");
+    assert_eq!(block_98a.block_height(), 98);
+    assert_eq!(block_99a.block_height(), 99);
+    assert_eq!(block_100a.block_height(), 100);
 
     // get hash for block 101a
-    let block_hash_101a = env.rpc_client().get_block_hash(101)?.block_hash()?;
+    let blockhash_101a = env.rpc_client().get_block_hash(101)?.block_hash()?;
 
     // invalidate blocks 99a, 100a, 101a
-    env.rpc_client().invalidate_block(block_hash_99a)?;
-    env.rpc_client().invalidate_block(block_hash_100a)?;
-    env.rpc_client().invalidate_block(block_hash_101a)?;
+    env.rpc_client().invalidate_block(blockhash_101a)?;
+    env.rpc_client().invalidate_block(block_100a.block_hash())?;
+    env.rpc_client().invalidate_block(block_99a.block_hash())?;
 
     // mine new blocks 99b, 100b, 101b
     env.mine_blocks(3, None)?;
 
     // emit block header 99b
-    let block_header_99b = emitter
-        .next_block()?
-        .expect("block 99b header")
-        .block
-        .header;
-    let block_hash_99b = block_header_99b.block_hash();
-    let block_hash_98b = block_header_99b.prev_blockhash;
+    let block_99b = emitter.next_block()?.expect("block 99b");
+    assert_eq!(block_99b.block_height(), 99);
 
-    assert_ne!(block_hash_99a, block_hash_99b);
-    assert_eq!(block_hash_98a, block_hash_98b);
+    assert_ne!(block_99a.block_hash(), block_99b.block_hash());
+    assert_eq!(
+        block_98a.block_hash(),
+        block_99a.block.header.prev_blockhash
+    );
+    assert_eq!(
+        block_98a.block_hash(),
+        block_99b.block.header.prev_blockhash
+    );
 
     Ok(())
 }
@@ -657,6 +654,47 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
         .collect::<Vec<_>>();
     // tx1 should no longer be canonical.
     assert!(!canonical_txids.contains(&txid_1));
+
+    Ok(())
+}
+
+/// Creating a new [`Emitter`] after a reorg with `start_height` at the tip should still
+/// produce a connectable checkpoint. When blocks are invalidated, the emitted checkpoint must
+/// include the invalidation height so the update can connect with the original chain.
+#[test]
+fn test_sync_with_new_emitter_after_reorg() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let (mut local_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
+    let client = ClientExt::get_rpc_client(&env)?;
+
+    env.mine_blocks(110, None)?;
+
+    let mut emitter = Emitter::new(&client, local_chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
+    while let Some(emission) = emitter.next_block()? {
+        let _ = local_chain.apply_update(emission.checkpoint)?;
+    }
+
+    let pre_reorg_tip = local_chain.tip();
+    let tip_height = pre_reorg_tip.height();
+
+    env.reorg(6)?;
+
+    // New emitter with start_height = tip height (common caller pattern).
+    let mut emitter = Emitter::new(
+        &client,
+        local_chain.tip(),
+        tip_height,
+        NO_EXPECTED_MEMPOOL_TXS,
+    );
+
+    while let Some(emission) = emitter.next_block()? {
+        let _ = local_chain
+            .apply_update(emission.checkpoint)
+            .expect("emission checkpoint must connect with local chain");
+    }
+
+    assert_eq!(local_chain.tip().height(), tip_height);
+    assert_ne!(local_chain.tip().hash(), pre_reorg_tip.hash());
 
     Ok(())
 }
