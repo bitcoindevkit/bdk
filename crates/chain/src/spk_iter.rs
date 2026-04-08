@@ -67,12 +67,12 @@ where
     {
         let start = match range.start_bound() {
             Bound::Included(start) => *start,
-            Bound::Excluded(start) => *start + 1,
+            Bound::Excluded(start) => start.saturating_add(1),
             Bound::Unbounded => u32::MIN,
         };
 
         let mut end = match range.end_bound() {
-            Bound::Included(end) => *end + 1,
+            Bound::Included(end) => end.saturating_add(1),
             Bound::Excluded(end) => *end,
             Bound::Unbounded => u32::MAX,
         };
@@ -136,6 +136,8 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
+    use core::ops::Bound;
+
     use crate::{
         bitcoin::secp256k1::Secp256k1,
         indexer::keychain_txout::KeychainTxOutIndex,
@@ -262,6 +264,31 @@ mod test {
         assert_eq!(
             SpkIterator::new_with_range(&no_wildcard_descriptor, 10..=10).next(),
             None
+        );
+    }
+
+    #[test]
+    fn test_spkiterator_no_overflow_on_u32_max_range() {
+        let (_, external_desc, _) = init_txout_index();
+
+        // Inclusive range up to u32::MAX should not overflow and should produce items
+        // (clamped to BIP32_MAX_INDEX).
+        let mut iter = SpkIterator::new_with_range(&external_desc, 0..=u32::MAX);
+        assert!(
+            iter.next().is_some(),
+            "0..=u32::MAX range should produce items, not overflow to empty"
+        );
+
+        // Exclusive start at u32::MAX should not overflow and should produce an empty iterator
+        // (start saturates to u32::MAX which is beyond BIP32_MAX_INDEX).
+        let mut iter = SpkIterator::new_with_range(
+            &external_desc,
+            (Bound::Excluded(u32::MAX), Bound::Included(u32::MAX)),
+        );
+        assert_eq!(
+            iter.next(),
+            None,
+            "range starting after u32::MAX should be empty"
         );
     }
 }
