@@ -944,6 +944,34 @@ fn test_tx_conflict_handling() {
             },
         },
         Scenario {
+            name: "only assumed-canonical txs are yielded without anchored or seen txs",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "assumed_a",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(21_000, Some(0))],
+                    assume_canonical: true,
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "assumed_b",
+                    inputs: &[TxInTemplate::Bogus],
+                    outputs: &[TxOutTemplate::new(18_000, Some(1))],
+                    assume_canonical: true,
+                    ..Default::default()
+                },
+            ],
+            exp_chain_txs: HashSet::from(["assumed_a", "assumed_b"]),
+            exp_chain_txouts: HashSet::from([("assumed_a", 0), ("assumed_b", 0)]),
+            exp_unspents: HashSet::from([("assumed_a", 0), ("assumed_b", 0)]),
+            exp_balance: Balance {
+                immature: Amount::ZERO,
+                trusted_pending: Amount::from_sat(21_000 + 18_000),
+                untrusted_pending: Amount::ZERO,
+                confirmed: Amount::ZERO,
+            },
+        },
+        Scenario {
             name: "coinbase tx must not become unconfirmed",
             tx_templates: &[
                 TxTemplate {
