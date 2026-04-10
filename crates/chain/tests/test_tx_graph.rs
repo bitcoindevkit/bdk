@@ -1,7 +1,5 @@
 #![cfg(feature = "miniscript")]
 
-#[macro_use]
-mod common;
 use bdk_chain::{collections::*, BlockId, CanonicalizationParams, ConfirmationBlockTime};
 use bdk_chain::{
     local_chain::LocalChain,
@@ -10,13 +8,13 @@ use bdk_chain::{
     Anchor, ChainOracle, ChainPosition, Merge,
 };
 use bdk_testenv::{block_id, hash, utils::new_tx};
+use bdk_testenv::{init_graph, TxInTemplate, TxOutTemplate, TxTemplate};
 use bitcoin::hex::FromHex;
 use bitcoin::Witness;
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,
     Transaction, TxIn, TxOut, Txid,
 };
-use common::*;
 use core::iter;
 use rand::RngCore;
 use std::sync::Arc;

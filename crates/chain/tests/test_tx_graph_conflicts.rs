@@ -1,12 +1,9 @@
 #![cfg(feature = "miniscript")]
 
-#[macro_use]
-mod common;
-
 use bdk_chain::{local_chain::LocalChain, Balance, BlockId};
 use bdk_testenv::{block_id, hash, local_chain};
+use bdk_testenv::{init_graph, TxInTemplate, TxOutTemplate, TxTemplate};
 use bitcoin::{Amount, BlockHash, OutPoint};
-use common::*;
 use std::collections::{BTreeSet, HashSet};
 
 #[allow(dead_code)]
