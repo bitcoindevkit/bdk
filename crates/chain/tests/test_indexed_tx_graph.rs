@@ -11,27 +11,13 @@ use bdk_chain::{
     SpkIterator,
 };
 use bdk_testenv::{
-    anyhow::{self},
-    bitcoind::{Input, Output},
-    block_id, hash,
-    utils::{new_tx, DESCRIPTORS},
-    TestEnv,
+    TestEnv, anyhow::{self}, bitcoind::{Input, Output}, block_id, hash, spk, utils::{DESCRIPTORS, new_tx}
 };
 use bitcoin::{
     secp256k1::Secp256k1, Address, Amount, BlockHash, Network, OutPoint, ScriptBuf, Transaction,
     TxIn, TxOut, Txid,
 };
 use miniscript::Descriptor;
-
-fn gen_spk() -> ScriptBuf {
-    use bitcoin::secp256k1::{Secp256k1, SecretKey};
-
-    let secp = Secp256k1::new();
-    let (x_only_pk, _) = SecretKey::new(&mut rand::thread_rng())
-        .public_key(&secp)
-        .x_only_public_key();
-    ScriptBuf::new_p2tr(&secp, x_only_pk, None)
-}
 
 /// Conflicts of relevant transactions must also be considered relevant.
 ///
@@ -64,7 +50,7 @@ fn relevant_conflicts() -> anyhow::Result<()> {
                 .address()?
                 .require_network(Network::Regtest)?;
 
-            let recv_spk = gen_spk();
+            let recv_spk = spk!();
             let recv_addr = Address::from_script(&recv_spk, &bitcoin::params::REGTEST)?;
 
             let mut graph = SpkTxGraph::default();

@@ -1095,9 +1095,7 @@ fn test_chain_spends() {
 
         // Because this tx conflicts with an already confirmed transaction, chain position should
         // return none.
-        assert!(canonical_positions
-            .get(&tx_1_conflict.compute_txid())
-            .is_none());
+        assert!(!canonical_positions.contains_key(&tx_1_conflict.compute_txid()));
     }
 
     // Another conflicting tx that conflicts with tx_2.
