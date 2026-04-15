@@ -11,7 +11,11 @@ use bdk_chain::{
     SpkIterator,
 };
 use bdk_testenv::{
-    TestEnv, anyhow::{self}, bitcoind::{Input, Output}, block_id, hash, spk, utils::{DESCRIPTORS, new_tx}
+    anyhow::{self},
+    bitcoind::{Input, Output},
+    block_id, hash, spk,
+    utils::{new_tx, DESCRIPTORS},
+    TestEnv,
 };
 use bitcoin::{
     secp256k1::Secp256k1, Address, Amount, BlockHash, Network, OutPoint, ScriptBuf, Transaction,
