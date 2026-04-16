@@ -5,7 +5,7 @@ use crate::{
     alloc::boxed::Box,
     collections::*,
     miniscript::{Descriptor, DescriptorPublicKey},
-    spk_client::{FullScanRequestBuilder, SyncRequestBuilder},
+    spk_client::{FullScanRequestBuilder, ScanRequestBuilder, SyncRequestBuilder},
     spk_iter::BIP32_MAX_INDEX,
     spk_txout::SpkTxOutIndex,
     DescriptorExt, DescriptorId, Indexed, Indexer, KeychainIndexed, SpkIterator,
@@ -1131,6 +1131,55 @@ impl<K: Clone + Ord + core::fmt::Debug> FullScanRequestBuilderExt<K> for FullSca
             self = self.spks_for_keychain(keychain, spks);
         }
         self
+    }
+}
+
+/// Trait to extend [`ScanRequestBuilder`].
+pub trait ScanRequestBuilderExt<K> {
+    /// Add keychains from `indexer` for discovery, starting after the last revealed
+    /// index of each keychain.
+    ///
+    /// Discovery starts at `last_revealed + 1` for each keychain. For wallets with
+    /// no revealed scripts, discovery starts at 0. Combine with
+    /// [`revealed_spks_from_indexer`](Self::revealed_spks_from_indexer) to cover the
+    /// full revealed and undiscovered range without overlap.
+    fn discover_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self;
+
+    /// Add already-revealed [`Script`]s from `indexer` for explicit sync.
+    fn revealed_spks_from_indexer<R>(self, indexer: &KeychainTxOutIndex<K>, spk_range: R) -> Self
+    where
+        R: core::ops::RangeBounds<K>;
+
+    /// Add unused [`Script`]s from `indexer` for explicit sync.
+    fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self;
+}
+
+impl<K: Clone + Ord + core::fmt::Debug> ScanRequestBuilderExt<K>
+    for ScanRequestBuilder<K, (K, u32)>
+{
+    fn discover_from_indexer(mut self, indexer: &KeychainTxOutIndex<K>) -> Self {
+        for (keychain, descriptor) in indexer.keychains() {
+            // Start discovery AFTER last revealed index — revealed scripts
+            // are handled by revealed_spks_from_indexer(). No overlap.
+            let start = indexer
+                .last_revealed_index(keychain.clone())
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            let spks = SpkIterator::new_with_range(descriptor.clone(), start..);
+            self = self.discover_keychain(keychain.clone(), spks);
+        }
+        self
+    }
+
+    fn revealed_spks_from_indexer<R>(self, indexer: &KeychainTxOutIndex<K>, spk_range: R) -> Self
+    where
+        R: core::ops::RangeBounds<K>,
+    {
+        self.spks_with_indexes(indexer.revealed_spks(spk_range))
+    }
+
+    fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self {
+        self.spks_with_indexes(indexer.unused_spks())
     }
 }
 
