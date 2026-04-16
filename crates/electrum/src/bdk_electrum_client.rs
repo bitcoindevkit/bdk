@@ -2,7 +2,8 @@ use bdk_core::{
     bitcoin::{block::Header, BlockHash, OutPoint, Transaction, Txid},
     collections::{BTreeMap, HashMap, HashSet},
     spk_client::{
-        FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
+        FullScanRequest, FullScanResponse, ScanRequest, ScanResponse, SpkWithExpectedTxids,
+        SyncRequest, SyncResponse,
     },
     BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
 };
@@ -259,6 +260,114 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         Ok(SyncResponse {
             tx_update,
             chain_update,
+        })
+    }
+
+    /// Scan keychain scripts, explicit scripts, txids, and/or outpoints with the blockchain (via
+    /// an Electrum client) and returns updates for [`bdk_chain`] data structures.
+    ///
+    /// - `request`: struct with data required to perform a spk-based blockchain client scan, see
+    ///   [`ScanRequest`]. Keychain discovery stops after a gap of `request.stop_gap()` script
+    ///   pubkeys with no associated transactions.
+    /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
+    ///   request.
+    /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation. Note
+    ///   that this requires additional calls to the Electrum server, but is necessary for
+    ///   calculating the fee on a transaction if your wallet does not own the inputs. Methods like
+    ///   [`Wallet.calculate_fee`] and [`Wallet.calculate_fee_rate`] will return a
+    ///   [`CalculateFeeError::MissingTxOut`] error if those `TxOut`s are not present in the
+    ///   transaction graph.
+    ///
+    /// [`bdk_chain`]: ../bdk_chain/index.html
+    /// [`CalculateFeeError::MissingTxOut`]: ../bdk_chain/tx_graph/enum.CalculateFeeError.html#variant.MissingTxOut
+    /// [`Wallet.calculate_fee`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee
+    /// [`Wallet.calculate_fee_rate`]: ../bdk_wallet/struct.Wallet.html#method.calculate_fee_rate
+    pub fn scan<K: Ord + Clone, I: 'static>(
+        &self,
+        request: impl Into<ScanRequest<K, I>>,
+        batch_size: usize,
+        fetch_prev_txouts: bool,
+    ) -> Result<ScanResponse<K>, Error> {
+        let mut request: ScanRequest<K, I> = request.into();
+        let start_time = request.start_time();
+
+        let tip_and_latest_blocks = match request.chain_tip() {
+            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            None => None,
+        };
+
+        let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
+        let mut last_active_indices = BTreeMap::<K, u32>::default();
+        let mut pending_anchors = Vec::new();
+
+        // Discovery: scan keychain spks with stop_gap
+        let stop_gap = request.stop_gap();
+        for keychain in request.keychains() {
+            let spks = request
+                .iter_discovery_spks(keychain.clone())
+                .map(|(spk_i, spk)| (spk_i, SpkWithExpectedTxids::from(spk)));
+            if let Some(last_active_index) = self.populate_with_spks(
+                start_time,
+                &mut tx_update,
+                spks,
+                stop_gap,
+                batch_size,
+                &mut pending_anchors,
+            )? {
+                last_active_indices.insert(keychain, last_active_index);
+            }
+        }
+
+        // Explicit sync: spks, txids, outpoints
+        self.populate_with_spks(
+            start_time,
+            &mut tx_update,
+            request
+                .iter_spks_with_expected_txids()
+                .enumerate()
+                .map(|(i, spk)| (i as u32, spk)),
+            usize::MAX,
+            batch_size,
+            &mut pending_anchors,
+        )?;
+        self.populate_with_txids(
+            start_time,
+            &mut tx_update,
+            request.iter_txids(),
+            &mut pending_anchors,
+        )?;
+        self.populate_with_outpoints(
+            start_time,
+            &mut tx_update,
+            request.iter_outpoints(),
+            &mut pending_anchors,
+        )?;
+
+        // Fetch previous TxOuts for fee calculation if flag is enabled.
+        if fetch_prev_txouts {
+            self.fetch_prev_txout(&mut tx_update)?;
+        }
+
+        if !pending_anchors.is_empty() {
+            let anchors = self.batch_fetch_anchors(&pending_anchors)?;
+            for (txid, anchor) in anchors {
+                tx_update.anchors.insert((anchor, txid));
+            }
+        }
+
+        let chain_update = match tip_and_latest_blocks {
+            Some((chain_tip, latest_blocks)) => Some(chain_update(
+                chain_tip,
+                &latest_blocks,
+                tx_update.anchors.iter().cloned(),
+            )?),
+            None => None,
+        };
+
+        Ok(ScanResponse {
+            tx_update,
+            chain_update,
+            last_active_indices,
         })
     }
 
