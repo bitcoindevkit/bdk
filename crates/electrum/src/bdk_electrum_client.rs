@@ -300,8 +300,9 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut last_active_indices = BTreeMap::<K, u32>::default();
         let mut pending_anchors = Vec::new();
 
-        // Discovery: scan keychain spks with stop_gap
-        let stop_gap = request.stop_gap();
+        // Discovery: scan keychain spks with stop_gap.
+        // Treat stop_gap = 0 as 1 to match esplora semantics (see fetch_txs_with_keychain_spks).
+        let stop_gap = request.stop_gap().max(1);
         for keychain in request.keychains() {
             let spks = request
                 .iter_discovery_spks(keychain.clone())
