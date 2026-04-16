@@ -648,6 +648,12 @@ fn merge_chains(
                         }
                     }
                 } else {
+                    // The genesis block must never be replaced.
+                    if u.height() == 0 {
+                        return Err(CannotConnectError {
+                            try_include_height: 0,
+                        });
+                    }
                     // We have an invalidation height so we set the height to the updated hash and
                     // also purge all the original chain block hashes above this block.
                     changeset.blocks.insert(u.height(), Some(u.hash()));

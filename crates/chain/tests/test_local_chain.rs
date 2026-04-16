@@ -171,11 +171,11 @@ fn update_local_chain() {
         },
         TestLocalChain {
             name: "fix blockhash before agreement point",
-            chain: local_chain![(0, hash!("im-wrong")), (1, hash!("we-agree"))],
-            update: chain_update![(0, hash!("fix")), (1, hash!("we-agree"))],
+            chain: local_chain![(0, hash!("genesis")), (1, hash!("im-wrong")), (2, hash!("we-agree"))],
+            update: chain_update![(0, hash!("genesis")), (1, hash!("fix")), (2, hash!("we-agree"))],
             exp: ExpectedResult::Ok {
-                changeset: &[(0, Some(hash!("fix")))],
-                init_changeset: &[(0, Some(hash!("fix"))), (1, Some(hash!("we-agree")))],
+                changeset: &[(1, Some(hash!("fix")))],
+                init_changeset: &[(0, Some(hash!("genesis"))), (1, Some(hash!("fix"))), (2, Some(hash!("we-agree")))],
             },
         },
         // B and C are in both chain and update
@@ -314,6 +314,18 @@ fn update_local_chain() {
                     (3, Some(hash!("D'"))),
                 ],
             },
+        },
+        // Reject update that replaces the genesis block
+        //        | 0 | 1 | 2
+        // chain  | A   B   C
+        // update | A'  B'  C'
+        TestLocalChain {
+            name: "reject genesis block replacement",
+            chain: local_chain![(0, hash!("A")), (1, hash!("B")), (2, hash!("C"))],
+            update: chain_update![(0, hash!("A'")), (1, hash!("B'")), (2, hash!("C'"))],
+            exp: ExpectedResult::Err(CannotConnectError {
+                try_include_height: 0,
+            }),
         },
     ]
     .into_iter()
