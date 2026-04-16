@@ -1,10 +1,12 @@
 #![doc = include_str!("../README.md")]
 //! # Stop Gap
 //!
-//! [`EsploraExt::full_scan`] takes in a `stop_gap` input which is defined as the maximum number of
-//! consecutive unused script pubkeys to scan transactions for before stopping.
+//! [`EsploraExt::scan`] uses the stop gap configured on [`bdk_core::spk_client::ScanRequest`] for
+//! keychain discovery, while [`EsploraExt::full_scan`] takes `stop_gap` directly. The stop gap is
+//! defined as the maximum number of consecutive unused script pubkeys to scan transactions for
+//! before stopping.
 //!
-//! For example, with a `stop_gap` of 3, `full_scan` will keep scanning until it encounters 3
+//! For example, with a `stop_gap` of 3, discovery will keep scanning until it encounters 3
 //! consecutive script pubkeys with no associated transactions.
 //!
 //! This follows the same approach as other Bitcoin-related software,

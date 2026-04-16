@@ -3,8 +3,9 @@
 BDK Esplora extends [`esplora-client`] (with extension traits: [`EsploraExt`] and
 [`EsploraAsyncExt`]) to update [`bdk_chain`] structures from an Esplora server.
 
-The extension traits are primarily intended to satisfy [`SyncRequest`]s with [`sync`] and
-[`FullScanRequest`]s with [`full_scan`].
+The extension traits are primarily intended to satisfy [`ScanRequest`]s with [`scan`]. This
+unifies the work previously split across [`sync`] for explicit scripts/txids/outpoints and
+[`full_scan`] for keychain discovery. [`scan`] is intended to replace [`sync`] and [`full_scan`].
 
 ## Usage
 
@@ -47,7 +48,9 @@ For full examples, refer to [`example_wallet_esplora_blocking`](https://github.c
 [`bdk_chain`]: https://docs.rs/bdk-chain/
 [`EsploraExt`]: crate::EsploraExt
 [`EsploraAsyncExt`]: crate::EsploraAsyncExt
+[`ScanRequest`]: bdk_core::spk_client::ScanRequest
 [`SyncRequest`]: bdk_core::spk_client::SyncRequest
 [`FullScanRequest`]: bdk_core::spk_client::FullScanRequest
+[`scan`]: crate::EsploraExt::scan
 [`sync`]: crate::EsploraExt::sync
 [`full_scan`]: crate::EsploraExt::full_scan

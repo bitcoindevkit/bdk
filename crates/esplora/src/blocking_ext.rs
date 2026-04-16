@@ -1,6 +1,7 @@
 use bdk_core::collections::{BTreeMap, BTreeSet, HashSet};
 use bdk_core::spk_client::{
-    FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
+    FullScanRequest, FullScanResponse, ScanRequest, ScanResponse, SpkWithExpectedTxids,
+    SyncRequest, SyncResponse,
 };
 use bdk_core::{
     bitcoin::{BlockHash, OutPoint, Txid},
@@ -46,6 +47,20 @@ pub trait EsploraExt {
         request: R,
         parallel_requests: usize,
     ) -> Result<SyncResponse, Error>;
+
+    /// Scan keychain scripts, explicit scripts, txids, and/or outpoints against Esplora.
+    ///
+    /// `request` provides the data required to perform a script-pubkey-based scan (see
+    /// [`ScanRequest`]). Discovery for each keychain (`K`) stops after a gap of
+    /// `request.stop_gap()` script pubkeys with no associated transactions.
+    /// `parallel_requests` specifies the maximum number of HTTP requests to make in parallel.
+    ///
+    /// Refer to [crate-level docs](crate) for more.
+    fn scan<K: Ord + Clone, I: 'static, R: Into<ScanRequest<K, I>>>(
+        &self,
+        request: R,
+        parallel_requests: usize,
+    ) -> Result<ScanResponse<K>, Error>;
 }
 
 impl EsploraExt for esplora_client::BlockingClient {
@@ -155,6 +170,85 @@ impl EsploraExt for esplora_client::BlockingClient {
         Ok(SyncResponse {
             chain_update,
             tx_update,
+        })
+    }
+
+    fn scan<K: Ord + Clone, I: 'static, R: Into<ScanRequest<K, I>>>(
+        &self,
+        request: R,
+        parallel_requests: usize,
+    ) -> Result<ScanResponse<K>, Error> {
+        let mut request: ScanRequest<K, I> = request.into();
+        let start_time = request.start_time();
+
+        let chain_tip = request.chain_tip();
+        let latest_blocks = if chain_tip.is_some() {
+            Some(fetch_latest_blocks(self)?)
+        } else {
+            None
+        };
+
+        let mut tx_update = TxUpdate::default();
+        let mut inserted_txs = HashSet::<Txid>::new();
+        let mut last_active_indices = BTreeMap::<K, u32>::new();
+
+        // Discovery: scan keychain spks with stop_gap
+        let stop_gap = request.stop_gap();
+        for keychain in request.keychains() {
+            let keychain_spks = request
+                .iter_discovery_spks(keychain.clone())
+                .map(|(spk_i, spk)| (spk_i, spk.into()));
+            let (update, last_active_index) = fetch_txs_with_keychain_spks(
+                self,
+                start_time,
+                &mut inserted_txs,
+                keychain_spks,
+                stop_gap,
+                parallel_requests,
+            )?;
+            tx_update.extend(update);
+            if let Some(last_active_index) = last_active_index {
+                last_active_indices.insert(keychain, last_active_index);
+            }
+        }
+
+        // Explicit sync: spks, txids, outpoints
+        tx_update.extend(fetch_txs_with_spks(
+            self,
+            start_time,
+            &mut inserted_txs,
+            request.iter_spks_with_expected_txids(),
+            parallel_requests,
+        )?);
+        tx_update.extend(fetch_txs_with_txids(
+            self,
+            start_time,
+            &mut inserted_txs,
+            request.iter_txids(),
+            parallel_requests,
+        )?);
+        tx_update.extend(fetch_txs_with_outpoints(
+            self,
+            start_time,
+            &mut inserted_txs,
+            request.iter_outpoints(),
+            parallel_requests,
+        )?);
+
+        let chain_update = match (chain_tip, latest_blocks) {
+            (Some(chain_tip), Some(latest_blocks)) => Some(chain_update(
+                self,
+                &latest_blocks,
+                &chain_tip,
+                &tx_update.anchors,
+            )?),
+            _ => None,
+        };
+
+        Ok(ScanResponse {
+            chain_update,
+            tx_update,
+            last_active_indices,
         })
     }
 }

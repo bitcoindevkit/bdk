@@ -1,3 +1,5 @@
+use bdk_chain::bitcoin::secp256k1::Secp256k1 as DescriptorSecp256k1;
+use bdk_chain::miniscript::{Descriptor, DescriptorPublicKey};
 use bdk_core::bitcoin::key::{Secp256k1, UntweakedPublicKey};
 use bdk_core::bitcoin::ScriptBuf;
 
@@ -11,4 +13,13 @@ pub fn get_test_spk() -> ScriptBuf {
     let secp = Secp256k1::new();
     let pk = UntweakedPublicKey::from_slice(PK_BYTES).expect("Must be valid PK");
     ScriptBuf::new_p2tr(&secp, pk, None)
+}
+
+pub fn parse_descriptor(descriptor: &str) -> Descriptor<DescriptorPublicKey> {
+    Descriptor::<DescriptorPublicKey>::parse_descriptor(
+        &DescriptorSecp256k1::signing_only(),
+        descriptor,
+    )
+    .expect("descriptor must parse")
+    .0
 }

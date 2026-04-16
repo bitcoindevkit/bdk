@@ -1,11 +1,12 @@
 use bdk_chain::bitcoin::{Address, Amount};
+use bdk_chain::indexer::keychain_txout::{KeychainTxOutIndex, ScanRequestBuilderExt};
 use bdk_chain::local_chain::LocalChain;
-use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
+use bdk_chain::spk_client::{FullScanRequest, ScanRequest, SyncRequest};
 use bdk_chain::spk_txout::SpkTxOutIndex;
 use bdk_chain::{ConfirmationBlockTime, IndexedTxGraph, TxGraph};
 use bdk_esplora::EsploraAsyncExt;
 use bdk_testenv::corepc_node::{Input, Output};
-use bdk_testenv::{anyhow, TestEnv};
+use bdk_testenv::{anyhow, utils::DESCRIPTORS, TestEnv};
 use esplora_client::{self, Builder};
 use std::collections::{BTreeSet, HashSet};
 use std::str::FromStr;
@@ -366,6 +367,379 @@ pub async fn test_async_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     assert_eq!(txs.len(), 2);
     assert!(txs.contains(&txid_4th_addr) && txs.contains(&txid_last_addr));
     assert_eq!(full_scan_update.last_active_indices[&0], 9);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_scan_detect_receive_tx_cancel() -> anyhow::Result<()> {
+    const SEND_TX_FEE: Amount = Amount::from_sat(1000);
+    const UNDO_SEND_TX_FEE: Amount = Amount::from_sat(2000);
+
+    let env = TestEnv::new()?;
+    let rpc_client = env.rpc_client();
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_async()?;
+
+    let mut graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new(SpkTxOutIndex::<()>::default());
+    let (chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
+
+    let receiver_spk = common::get_test_spk();
+    let receiver_addr = Address::from_script(&receiver_spk, bdk_chain::bitcoin::Network::Regtest)?;
+    graph.index.insert_spk((), receiver_spk);
+
+    env.mine_blocks(101, None)?;
+
+    let selected_utxo = rpc_client
+        .list_unspent()?
+        .0
+        .into_iter()
+        .find(|utxo| utxo.amount == Amount::from_int_btc(50).to_btc())
+        .expect("Must find a block reward UTXO")
+        .into_model()?;
+
+    let sender_spk = selected_utxo.script_pubkey.clone();
+    let sender_addr = Address::from_script(&sender_spk, bdk_chain::bitcoin::Network::Regtest)
+        .expect("Failed to derive address from UTXO");
+
+    let inputs = [Input {
+        txid: selected_utxo.txid,
+        vout: selected_utxo.vout as u64,
+        sequence: None,
+    }];
+
+    let address = receiver_addr;
+    let value = selected_utxo.amount.to_unsigned()? - SEND_TX_FEE;
+    let send_tx_outputs = Output::new(address, value);
+
+    let send_tx = rpc_client
+        .create_raw_transaction(&inputs, &[send_tx_outputs])?
+        .into_model()?
+        .0;
+    let send_tx = rpc_client
+        .sign_raw_transaction_with_wallet(&send_tx)?
+        .into_model()?
+        .tx;
+
+    let undo_send_outputs = [Output::new(
+        sender_addr,
+        selected_utxo.amount.to_unsigned()? - UNDO_SEND_TX_FEE,
+    )];
+    let undo_send_tx = rpc_client
+        .create_raw_transaction(&inputs, &undo_send_outputs)?
+        .into_model()?
+        .0;
+    let undo_send_tx = rpc_client
+        .sign_raw_transaction_with_wallet(&undo_send_tx)?
+        .into_model()?
+        .tx;
+
+    let send_txid = env
+        .rpc_client()
+        .send_raw_transaction(&send_tx)?
+        .into_model()?
+        .0;
+    env.wait_until_electrum_sees_txid(send_txid, Duration::from_secs(6))?;
+    let scan_request = ScanRequest::<()>::builder()
+        .chain_tip(chain.tip())
+        .spks_with_indexes(graph.index.all_spks().clone())
+        .expected_spk_txids(
+            graph
+                .canonical_view(&chain, chain.tip().block_id(), Default::default())
+                .list_expected_spk_txids(&graph.index, ..),
+        );
+    let scan_response = client.scan(scan_request, 1).await?;
+    assert!(
+        scan_response
+            .tx_update
+            .txs
+            .iter()
+            .any(|tx| tx.compute_txid() == send_txid),
+        "scan response must include the send_tx"
+    );
+    let changeset = graph.apply_update(scan_response.tx_update.clone());
+    assert!(
+        changeset.tx_graph.txs.contains(&send_tx),
+        "tx graph must deem send_tx relevant and include it"
+    );
+
+    let undo_send_txid = env
+        .rpc_client()
+        .send_raw_transaction(&undo_send_tx)?
+        .txid()?;
+    env.wait_until_electrum_sees_txid(undo_send_txid, Duration::from_secs(6))?;
+    let scan_request = ScanRequest::<()>::builder()
+        .chain_tip(chain.tip())
+        .spks_with_indexes(graph.index.all_spks().clone())
+        .expected_spk_txids(
+            graph
+                .canonical_view(&chain, chain.tip().block_id(), Default::default())
+                .list_expected_spk_txids(&graph.index, ..),
+        );
+    let scan_response = client.scan(scan_request, 1).await?;
+    assert!(
+        scan_response
+            .tx_update
+            .evicted_ats
+            .iter()
+            .any(|(txid, _)| *txid == send_txid),
+        "scan response must track send_tx as missing from mempool"
+    );
+    let changeset = graph.apply_update(scan_response.tx_update.clone());
+    assert!(
+        changeset.tx_graph.last_evicted.contains_key(&send_txid),
+        "tx graph must track send_tx as missing"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_scan_update_tx_graph_without_keychain() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_async()?;
+
+    let receive_address0 =
+        Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")?.assume_checked();
+    let receive_address1 =
+        Address::from_str("bcrt1qfjg5lv3dvc9az8patec8fjddrs4aqtauadnagr")?.assume_checked();
+
+    let misc_spks = [
+        receive_address0.script_pubkey(),
+        receive_address1.script_pubkey(),
+    ];
+
+    let _block_hashes = env.mine_blocks(101, None)?;
+    let txid1 = env
+        .bitcoind
+        .client
+        .send_to_address(&receive_address1, Amount::from_sat(10000))?
+        .txid()?;
+    let txid2 = env
+        .bitcoind
+        .client
+        .send_to_address(&receive_address0, Amount::from_sat(20000))?
+        .txid()?;
+    let _block_hashes = env.mine_blocks(1, None)?;
+    while client.get_height().await.unwrap() < 102 {
+        sleep(Duration::from_millis(10))
+    }
+
+    let cp_tip = env.make_checkpoint_tip();
+
+    let scan_update = {
+        let request = ScanRequest::<()>::builder()
+            .chain_tip(cp_tip.clone())
+            .spks(misc_spks);
+        client.scan(request, 1).await?
+    };
+
+    assert!(
+        {
+            let update_cps = scan_update
+                .chain_update
+                .iter()
+                .map(|cp| cp.block_id())
+                .collect::<BTreeSet<_>>();
+            let superset_cps = cp_tip
+                .iter()
+                .map(|cp| cp.block_id())
+                .collect::<BTreeSet<_>>();
+            superset_cps.is_superset(&update_cps)
+        },
+        "update should not alter original checkpoint tip since we already started with all checkpoints",
+    );
+
+    let tx_update = scan_update.tx_update;
+    let updated_graph = {
+        let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+        let _ = graph.apply_update(tx_update.clone());
+        graph
+    };
+    for tx in &tx_update.txs {
+        let fee = updated_graph.calculate_fee(tx).expect("Fee must exist");
+
+        let tx_fee = env
+            .bitcoind
+            .client
+            .get_transaction(tx.compute_txid())
+            .expect("Tx must exist")
+            .into_model()?
+            .fee
+            .expect("Fee must exist")
+            .abs()
+            .to_unsigned()
+            .expect("valid `Amount`");
+
+        assert_eq!(fee, tx_fee);
+    }
+
+    assert_eq!(
+        tx_update
+            .txs
+            .iter()
+            .map(|tx| tx.compute_txid())
+            .collect::<BTreeSet<_>>(),
+        [txid1, txid2].into(),
+        "update must include all expected transactions"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_scan_update_tx_graph_stop_gap() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_async()?;
+    let _block_hashes = env.mine_blocks(101, None)?;
+
+    let addresses = [
+        "bcrt1qj9f7r8r3p2y0sqf4r3r62qysmkuh0fzep473d2ar7rcz64wqvhssjgf0z4",
+        "bcrt1qmm5t0ch7vh2hryx9ctq3mswexcugqe4atkpkl2tetm8merqkthas3w7q30",
+        "bcrt1qut9p7ej7l7lhyvekj28xknn8gnugtym4d5qvnp5shrsr4nksmfqsmyn87g",
+        "bcrt1qqz0xtn3m235p2k96f5wa2dqukg6shxn9n3txe8arlrhjh5p744hsd957ww",
+        "bcrt1q9c0t62a8l6wfytmf2t9lfj35avadk3mm8g4p3l84tp6rl66m48sqrme7wu",
+        "bcrt1qkmh8yrk2v47cklt8dytk8f3ammcwa4q7dzattedzfhqzvfwwgyzsg59zrh",
+        "bcrt1qvgrsrzy07gjkkfr5luplt0azxtfwmwq5t62gum5jr7zwcvep2acs8hhnp2",
+        "bcrt1qw57edarcg50ansq8mk3guyrk78rk0fwvrds5xvqeupteu848zayq549av8",
+        "bcrt1qvtve5ekf6e5kzs68knvnt2phfw6a0yjqrlgat392m6zt9jsvyxhqfx67ef",
+        "bcrt1qw03ddumfs9z0kcu76ln7jrjfdwam20qtffmkcral3qtza90sp9kqm787uk",
+    ];
+    let addresses: Vec<_> = addresses
+        .into_iter()
+        .map(|s| Address::from_str(s).unwrap().assume_checked())
+        .collect();
+    let spks: Vec<_> = addresses
+        .iter()
+        .enumerate()
+        .map(|(i, addr)| (i as u32, addr.script_pubkey()))
+        .collect();
+
+    let txid_4th_addr = env
+        .bitcoind
+        .client
+        .send_to_address(&addresses[3], Amount::from_sat(10000))?
+        .txid()?;
+    let _block_hashes = env.mine_blocks(1, None)?;
+    while client.get_height().await.unwrap() < 103 {
+        sleep(Duration::from_millis(10))
+    }
+
+    let cp_tip = env.make_checkpoint_tip();
+
+    let scan_update = {
+        let request = ScanRequest::<u32>::builder()
+            .chain_tip(cp_tip.clone())
+            .stop_gap(3)
+            .discover_keychain(0, spks.clone());
+        client.scan(request, 1).await?
+    };
+    assert!(scan_update.tx_update.txs.is_empty());
+    assert!(scan_update.last_active_indices.is_empty());
+
+    let scan_update = {
+        let request = ScanRequest::<u32>::builder()
+            .chain_tip(cp_tip.clone())
+            .stop_gap(4)
+            .discover_keychain(0, spks.clone());
+        client.scan(request, 1).await?
+    };
+    assert_eq!(
+        scan_update.tx_update.txs.first().unwrap().compute_txid(),
+        txid_4th_addr
+    );
+    assert_eq!(scan_update.last_active_indices[&0], 3);
+
+    let txid_last_addr = env
+        .bitcoind
+        .client
+        .send_to_address(&addresses[addresses.len() - 1], Amount::from_sat(10000))?
+        .txid()?;
+    let _block_hashes = env.mine_blocks(1, None)?;
+    while client.get_height().await.unwrap() < 104 {
+        sleep(Duration::from_millis(10))
+    }
+
+    let scan_update = {
+        let request = ScanRequest::<u32>::builder()
+            .chain_tip(cp_tip.clone())
+            .stop_gap(6)
+            .discover_keychain(0, spks.clone());
+        client.scan(request, 1).await?
+    };
+    let txs: HashSet<_> = scan_update
+        .tx_update
+        .txs
+        .iter()
+        .map(|tx| tx.compute_txid())
+        .collect();
+    assert_eq!(txs, [txid_4th_addr, txid_last_addr].into());
+    assert_eq!(scan_update.last_active_indices[&0], 9);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_scan_revealed_scripts_beyond_stop_gap() -> anyhow::Result<()> {
+    const KEYCHAIN: u32 = 0;
+    const REVEALED_INDEX: u32 = 9;
+    const STOP_GAP: usize = 3;
+
+    let env = TestEnv::new()?;
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_async()?;
+
+    let mut indexer = KeychainTxOutIndex::new(0, true);
+    let _ = indexer
+        .insert_descriptor(KEYCHAIN, common::parse_descriptor(DESCRIPTORS[3]))
+        .expect("descriptor must insert");
+    let _ = indexer
+        .reveal_to_target(KEYCHAIN, REVEALED_INDEX)
+        .expect("keychain must exist");
+    assert_eq!(indexer.last_revealed_index(KEYCHAIN), Some(REVEALED_INDEX));
+
+    let (_, revealed_spk) = indexer
+        .revealed_keychain_spks(KEYCHAIN)
+        .last()
+        .expect("revealed spk must exist");
+    let revealed_addr = Address::from_script(&revealed_spk, bdk_chain::bitcoin::Network::Regtest)?;
+
+    let _block_hashes = env.mine_blocks(101, None)?;
+    let txid = env
+        .bitcoind
+        .client
+        .send_to_address(&revealed_addr, Amount::from_sat(10000))?
+        .txid()?;
+    let _block_hashes = env.mine_blocks(1, None)?;
+    while client.get_height().await.unwrap() < 103 {
+        sleep(Duration::from_millis(10))
+    }
+
+    let cp_tip = env.make_checkpoint_tip();
+    let scan_update = {
+        let request = ScanRequest::builder()
+            .chain_tip(cp_tip)
+            .stop_gap(STOP_GAP)
+            .revealed_spks_from_indexer(&indexer, KEYCHAIN..=KEYCHAIN)
+            .discover_from_indexer(&indexer);
+        client.scan(request, 1).await?
+    };
+
+    let txids: HashSet<_> = scan_update
+        .tx_update
+        .txs
+        .iter()
+        .map(|tx| tx.compute_txid())
+        .collect();
+    assert!(
+        txids.contains(&txid),
+        "scan must sync transactions on revealed scripts even when discovery stop gap would stop earlier",
+    );
+    assert!(
+        scan_update.last_active_indices.is_empty(),
+        "the transaction must be found by explicit sync, not discovery",
+    );
 
     Ok(())
 }
