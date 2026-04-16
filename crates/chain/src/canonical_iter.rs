@@ -218,6 +218,7 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
                 if !self.is_canonicalized(txid) {
                     self.mark_canonical(txid, tx, CanonicalReason::assumed());
                 }
+                continue;
             }
 
             if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.next() {
