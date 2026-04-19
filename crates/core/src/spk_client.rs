@@ -456,6 +456,18 @@ impl<K: Ord, D> FullScanRequestBuilder<K, D> {
         self
     }
 
+    /// Record the last revealed script pubkey `index` for a given `keychain`.
+    ///
+    /// `full_scan` covers `0..=index` for this keychain; `stop_gap`
+    /// applies only to indices past `index`. Keychains without a recorded last revealed
+    /// index fall back to applying `stop_gap` from index 0.
+    /// Users working with a `KeychainTxOutIndex` usually don't call this directly,
+    /// `spks_from_indexer` (from `bdk_chain`) populates it automatically.
+    pub fn last_revealed_for_keychain(mut self, keychain: K, index: u32) -> Self {
+        self.inner.last_revealed.insert(keychain, index);
+        self
+    }
+
     /// Set the closure that will inspect every sync item visited.
     pub fn inspect<F>(mut self, inspect: F) -> Self
     where
@@ -474,15 +486,17 @@ impl<K: Ord, D> FullScanRequestBuilder<K, D> {
 /// Data required to perform a spk-based blockchain client full scan.
 ///
 /// A client full scan iterates through all the scripts for the given keychains, fetching relevant
-/// data until some stop gap number of scripts is found that have no data. This operation is
-/// generally only used when importing or restoring previously used keychains in which the list of
-/// used scripts is not known. The full scan process also updates the chain from the given
+/// data. It always scans the revealed range (up to the last-revealed index), then keeps going until
+/// a run of `stop_gap` consecutive scripts with no data is found. This operation is generally only
+/// used when importing or restoring previously used keychains in which the list of used scripts is
+/// not known. The full scan process also updates the chain from the given
 /// [`chain_tip`](FullScanRequestBuilder::chain_tip) (if provided).
 #[must_use]
 pub struct FullScanRequest<K, D = BlockHash> {
     start_time: u64,
     chain_tip: Option<CheckPoint<D>>,
     spks_by_keychain: BTreeMap<K, Box<dyn Iterator<Item = Indexed<ScriptBuf>> + Send>>,
+    last_revealed: BTreeMap<K, u32>,
     inspect: Box<InspectFullScan<K>>,
 }
 
@@ -507,6 +521,7 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
                 start_time,
                 chain_tip: None,
                 spks_by_keychain: BTreeMap::new(),
+                last_revealed: BTreeMap::new(),
                 inspect: Box::new(|_, _, _| ()),
             },
         }
@@ -539,6 +554,14 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
     /// List all keychains contained in this request.
     pub fn keychains(&self) -> Vec<K> {
         self.spks_by_keychain.keys().cloned().collect()
+    }
+
+    /// Get the last revealed script pubkey index for `keychain` (if set).
+    ///
+    /// Chain sources use this to scan `0..=last_revealed` before applying
+    /// `stop_gap` to further discovery.
+    pub fn last_revealed(&self, keychain: &K) -> Option<u32> {
+        self.last_revealed.get(keychain).copied()
     }
 
     /// Advances the full scan request and returns the next indexed [`ScriptBuf`] of the given
