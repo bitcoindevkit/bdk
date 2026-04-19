@@ -79,6 +79,7 @@ where
         let mut inserted_txs = HashSet::<Txid>::new();
         let mut last_active_indices = BTreeMap::<K, u32>::new();
         for keychain in keychains {
+            let last_revealed = request.last_revealed(&keychain);
             let keychain_spks = request
                 .iter_spks(keychain.clone())
                 .map(|(spk_i, spk)| (spk_i, spk.into()));
@@ -88,6 +89,7 @@ where
                 &mut inserted_txs,
                 keychain_spks,
                 stop_gap,
+                last_revealed,
                 parallel_requests,
             )
             .await?;
@@ -305,6 +307,7 @@ async fn fetch_txs_with_keychain_spks<I, S>(
     inserted_txs: &mut HashSet<Txid>,
     mut keychain_spks: I,
     stop_gap: usize,
+    last_revealed: Option<u32>,
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error>
 where
@@ -355,12 +358,13 @@ where
         }
 
         for (index, txs, evicted) in handles.try_collect::<Vec<TxsOfSpkIndex>>().await? {
-            if txs.is_empty() {
-                consecutive_unused = consecutive_unused.saturating_add(1);
-            } else {
+            if !txs.is_empty() {
                 consecutive_unused = 0;
                 last_active_index = Some(index);
+            } else if last_revealed.is_none_or(|lr| index > lr) {
+                consecutive_unused = consecutive_unused.saturating_add(1);
             }
+
             for tx in txs {
                 if inserted_txs.insert(tx.txid) {
                     update.txs.push(tx.to_tx().into());
@@ -407,6 +411,7 @@ where
         inserted_txs,
         spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
         usize::MAX,
+        None,
         parallel_requests,
     )
     .await
