@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.6.1" }
-electrum-client = { version = "0.24.0", features = [ "proxy" ], default-features = false }
+electrum-client = { version = "0.25.0", features = [ "proxy" ], default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv" }
@@ -23,14 +23,17 @@ criterion = { version = "0.2" }
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["electrum-client/use-rustls"]
-use-rustls-ring = ["electrum-client/use-rustls-ring"]
-use-openssl = ["electrum-client/use-openssl"]
+use-rustls = ["electrum-client/rustls"]
+use-rustls-ring = ["electrum-client/rustls-ring"]
+use-openssl = ["electrum-client/openssl"]
 
 [[test]]
 name = "test_electrum"
-required-features = ["use-rustls"]
+required-features = ["rustls"]
 
 [[bench]]
 name = "test_sync"
 harness = false
+
+[patch.crates-io]
+electrum-client = { git = "https://github.com/oleonardolima/rust-electrum-client.git", branch = "release/electrum-client-0.25.0" }
