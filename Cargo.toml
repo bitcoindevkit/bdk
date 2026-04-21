@@ -23,3 +23,6 @@ print_stderr = "deny"
 
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage,coverage_nightly)'] }
+
+[patch.crates-io]
+electrum-client = { git = "https://github.com/oleonardolima/rust-electrum-client.git", branch = "release/electrum-client-0.25.0" }
