@@ -660,11 +660,11 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
 fn test_sync_with_new_emitter_after_reorg() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let (mut local_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
-    let client = ClientExt::get_rpc_client(&env)?;
+    let client_1 = ClientExt::get_rpc_client(&env)?;
 
     env.mine_blocks(110, None)?;
 
-    let mut emitter = Emitter::new(&client, local_chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
+    let mut emitter = Emitter::new(client_1, local_chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
     while let Some(emission) = emitter.next_block()? {
         let _ = local_chain.apply_update(emission.checkpoint)?;
     }
@@ -674,9 +674,11 @@ fn test_sync_with_new_emitter_after_reorg() -> anyhow::Result<()> {
 
     env.reorg(6)?;
 
+    let client_2 = ClientExt::get_rpc_client(&env)?;
+
     // New emitter with start_height = tip height (common caller pattern).
     let mut emitter = Emitter::new(
-        &client,
+        client_2,
         local_chain.tip(),
         tip_height,
         NO_EXPECTED_MEMPOOL_TXS,

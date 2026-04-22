@@ -354,9 +354,7 @@ fn poll(
             PollResponse::AgreementFound(res, cp) => {
                 // When a reorg happens, the agreement point drops below `last_cp`. We
                 // override `start_height` so the emitter revisits the invalidated heights.
-                if (res.height as u32) < emitter.start_height
-                    && (res.height as u32) < emitter.last_cp.height()
-                {
+                if res.height < emitter.start_height && res.height < emitter.last_cp.height() {
                     emitter.start_height = res.height as _;
                 }
                 // get rid of evicted blocks
@@ -369,28 +367,6 @@ fn poll(
                 emitter.last_block = None;
                 continue;
             }
-        }
-    }
-}
-
-/// Extends [`bdk_bitcoind_client::Error`].
-pub trait BitcoindRpcErrorExt {
-    /// Returns whether the error is a "not found" error.
-    ///
-    /// This is useful since [`Emitter`] emits [`Result<_, bdk_bitcoind_client::Error>`]s as
-    /// [`Iterator::Item`].
-    fn is_not_found_error(&self) -> bool;
-}
-
-impl BitcoindRpcErrorExt for bdk_bitcoind_client::Error {
-    fn is_not_found_error(&self) -> bool {
-        if let bdk_bitcoind_client::Error::JsonRpc(bdk_bitcoind_client::jsonrpc::Error::Rpc(
-            rpc_err,
-        )) = self
-        {
-            rpc_err.code == -5
-        } else {
-            false
         }
     }
 }
