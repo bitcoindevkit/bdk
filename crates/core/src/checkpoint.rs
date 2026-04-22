@@ -6,8 +6,20 @@ use core::ops::RangeBounds;
 
 use crate::{BlockId, CheckPointEntry, CheckPointEntryIter};
 
-/// Interval for skiplist pointers based on checkpoint index.
-const CHECKPOINT_SKIP_INTERVAL: u32 = 100;
+/// Spacing (in checkpoint indices) between skip pointers in the single-level skiplist.
+///
+/// A single skip pointer exists on every node whose index is a nonzero multiple of this value,
+/// and points `CHECKPOINT_SKIP_INTERVAL` positions further back. Traversal cost with a fixed
+/// interval `k` is `O(n/k + k)`, which is minimized when `k ≈ √n`.
+///
+/// `1000` is chosen to match the dense server workload that motivates this skiplist: a full
+/// Bitcoin chain has ~1M blocks, and `√1_000_000 ≈ 1000`. At that size a traversal takes on the
+/// order of 1–2k hops instead of ~1M.
+///
+/// This is deliberately tuned for *large* chains. For small chains (`n ≲ 1000`) no skip pointers
+/// get created and traversal is linear — but at that size linear is already microseconds and not
+/// worth optimizing for.
+const CHECKPOINT_SKIP_INTERVAL: u32 = 1000;
 
 /// A checkpoint is a node of a reference-counted linked list of [`BlockId`]s.
 ///
@@ -481,19 +493,21 @@ where
 
         let new_index = self.0.index + 1;
 
-        // Skip pointers are added every CHECKPOINT_SKIP_INTERVAL (100) checkpoints
-        // e.g., checkpoints at index 100, 200, 300, etc. have skip pointers
+        // Skip pointers are added every CHECKPOINT_SKIP_INTERVAL checkpoints
+        // e.g., checkpoints at index 1000, 2000, 3000, etc. have skip pointers
         let needs_skip_pointer =
             new_index >= CHECKPOINT_SKIP_INTERVAL && new_index % CHECKPOINT_SKIP_INTERVAL == 0;
 
         let skip = if needs_skip_pointer {
             // Skip pointer points back CHECKPOINT_SKIP_INTERVAL positions
-            // e.g., checkpoint at index 200 points to checkpoint at index 100
+            // e.g., checkpoint at index 2000 points to checkpoint at index 1000
             // We walk back CHECKPOINT_SKIP_INTERVAL - 1 steps since we start from self (index
             // new_index - 1)
             let mut current = self.0.clone();
             for _ in 0..(CHECKPOINT_SKIP_INTERVAL - 1) {
-                // This is safe: if we're at index >= 100, we must have at least 99 predecessors
+                // Safe: new_index is a nonzero multiple of CHECKPOINT_SKIP_INTERVAL, so `self`
+                // sits at index new_index - 1 and has at least CHECKPOINT_SKIP_INTERVAL - 1
+                // predecessors.
                 current = current.prev.clone().expect("chain has enough checkpoints");
             }
             Some(current)

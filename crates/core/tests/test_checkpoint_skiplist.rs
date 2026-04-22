@@ -4,56 +4,33 @@ use bitcoin::BlockHash;
 
 #[test]
 fn test_skiplist_indices() {
-    // Create a long chain to test skiplist
+    // Build a chain long enough to hold multiple skip pointers (indices 1000..=5000).
     let mut cp = CheckPoint::new(0, BlockHash::all_zeros());
     assert_eq!(cp.index(), 0);
 
-    for height in 1..=500 {
-        let hash = BlockHash::from_byte_array([height as u8; 32]);
+    for height in 1..=5000u32 {
+        let hash = BlockHash::from_byte_array([(height % 256) as u8; 32]);
         cp = cp.push(height, hash).unwrap();
         assert_eq!(cp.index(), height);
     }
+    assert_eq!(cp.index(), 5000);
 
-    // Test that skip pointers are set correctly
-    // At index 100, 200, 300, 400, 500 we should have skip pointers
-    assert_eq!(cp.index(), 500);
-
-    // Navigate to index 400 and check skip pointer
-    let mut current = cp.clone();
-    for _ in 0..100 {
-        current = current.prev().unwrap();
-    }
-    assert_eq!(current.index(), 400);
-
-    // Check that skip pointer exists at index 400
-    if let Some(skip) = current.skip() {
-        assert_eq!(skip.index(), 300);
-    } else {
-        panic!("Expected skip pointer at index 400");
+    // Skip pointers are expected at indices 1000, 2000, 3000, 4000, 5000, each pointing 1000 back.
+    // Intermediate indices should not have skip pointers.
+    for target_index in [5000u32, 4000, 3000, 2000, 1000] {
+        let node = cp.get(target_index).expect("checkpoint exists");
+        let skip = node
+            .skip()
+            .unwrap_or_else(|| panic!("expected skip pointer at index {target_index}"));
+        assert_eq!(skip.index(), target_index - 1000);
     }
 
-    // Navigate to index 300 and check skip pointer
-    for _ in 0..100 {
-        current = current.prev().unwrap();
-    }
-    assert_eq!(current.index(), 300);
-
-    if let Some(skip) = current.skip() {
-        assert_eq!(skip.index(), 200);
-    } else {
-        panic!("Expected skip pointer at index 300");
-    }
-
-    // Navigate to index 100 and check skip pointer
-    for _ in 0..200 {
-        current = current.prev().unwrap();
-    }
-    assert_eq!(current.index(), 100);
-
-    if let Some(skip) = current.skip() {
-        assert_eq!(skip.index(), 0);
-    } else {
-        panic!("Expected skip pointer at index 100");
+    for non_skip_index in [500u32, 1500, 2500, 4999] {
+        let node = cp.get(non_skip_index).expect("checkpoint exists");
+        assert!(
+            node.skip().is_none(),
+            "unexpected skip pointer at index {non_skip_index}"
+        );
     }
 }
 
