@@ -631,10 +631,6 @@ where
     D: ToBlockHash + fmt::Debug + Clone,
 {
     // Apply the changeset to produce the final merged chain.
-    //
-    // `PrevBlockhashMismatch` should never happen because the merge iteration detects
-    // `prev_blockhash` conflicts and resolves them by invalidating conflicting blocks (setting
-    // them to `None` in the changeset) before we reach this point.
     fn finish<D>(
         original_tip: CheckPoint<D>,
         changeset: ChangeSet<D>,
@@ -643,12 +639,24 @@ where
         D: ToBlockHash + fmt::Debug + Clone,
     {
         let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset).map_err(|err| {
-            debug_assert!(
-                matches!(err, ApplyBlockError::MissingGenesis),
-                "PrevBlockhashMismatch should never happen"
-            );
-            CannotConnectError {
-                try_include_height: 0,
+            match err {
+                ApplyBlockError::MissingGenesis => CannotConnectError {
+                    try_include_height: 0,
+                },
+                // The merge iteration is supposed to detect `prev_blockhash` conflicts and resolve
+                // them by invalidating conflicting blocks in the changeset. Reaching this arm means
+                // either the original chain was internally inconsistent or the iteration missed a
+                // case — a bug on our side. Debug builds panic; release builds surface the height
+                // where the mismatch surfaced so the caller at least has a useful pointer.
+                ApplyBlockError::PrevBlockhashMismatch { expected } => {
+                    debug_assert!(
+                        false,
+                        "merge_chains should have resolved prev_blockhash mismatch at {expected:?}",
+                    );
+                    CannotConnectError {
+                        try_include_height: expected.height,
+                    }
+                }
             }
         })?;
         Ok((new_tip, changeset))
@@ -692,7 +700,7 @@ where
         match (curr_orig.as_ref(), curr_update.as_ref()) {
             // Update block that doesn't exist in the original chain
             (o, Some(u)) if Some(u.height()) > o.map(|o| o.height()) => {
-                // Only append to `ChangeSet` when this is an actual checkpoint.
+                // Only append to `ChangeSet` when this is a non-placeholder checkpoint.
                 if let Some(data) = u.data() {
                     changeset.blocks.insert(u.height(), Some(data));
                 }
@@ -757,6 +765,12 @@ where
                     }
                     // We have an invalidation height so we set the height to the updated hash and
                     // also purge all the original chain block hashes above this block.
+                    //
+                    // `u.data()` returns `None` when `u` is a placeholder — in that case we erase
+                    // orig's checkpoint at this height without providing replacement data. The
+                    // implied block is still recoverable via the `prev_blockhash` of the occupied
+                    // checkpoint above it in the update chain (which is handled in its own
+                    // iteration).
                     changeset.blocks.insert(u.height(), u.data());
                     for invalidated_height in potentially_invalidated_heights.drain(..) {
                         changeset.blocks.insert(invalidated_height, None);

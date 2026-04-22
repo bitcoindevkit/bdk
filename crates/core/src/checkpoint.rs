@@ -317,8 +317,9 @@ where
     /// Inserts `data` at its `height` within the chain.
     ///
     /// If a checkpoint already exists at `height` with a matching hash, returns `self` unchanged.
-    /// If a checkpoint exists at `height` with a different hash, or if `prev_blockhash` conflicts
-    /// occur, the conflicting checkpoint and all checkpoints above it are removed.
+    /// Otherwise, if the insertion conflicts — either with an existing checkpoint at `height` (by
+    /// hash), or with the checkpoint at `height - 1` (via `data.prev_blockhash`) — every
+    /// checkpoint at or above `height` is removed.
     ///
     /// # Panics
     ///

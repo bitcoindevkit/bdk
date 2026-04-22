@@ -1228,7 +1228,9 @@ fn merge_chains_with_prev_blockhash() {
         // but no B exists. Update introduces A at height 1, which displaces C because
         // C's `prev_blockhash` ("B") doesn't match A's hash ("A").
         //
-        // Note: This can only happen if chains are constructed incorrectly.
+        // Note: This shape of chain isn't reachable via the public API in normal use, but the
+        // merge remains best-effort so a caller with pre-existing bad state (partial persistence,
+        // data loaded from an untrusted source, etc.) can still recover.
         TestLocalChain {
             name: "update displaces invalid block below point of agreement",
             chain: LocalChain::from_blocks(
