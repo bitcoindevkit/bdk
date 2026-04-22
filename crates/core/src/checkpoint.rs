@@ -120,6 +120,25 @@ impl<D: ToBlockHash> ToBlockHash for WithMtp<D> {
     }
 }
 
+/// Error returned by [`CheckPoint::compute_mtp`] when one or more required ancestor
+/// checkpoints are missing from the chain.
+///
+/// The `heights` field lists every height in the MTP window (`h-10..=h`) that the caller
+/// needs to fetch and insert before `compute_mtp` can succeed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingBlocks {
+    /// Heights whose checkpoints were expected but not found in the chain.
+    pub heights: Vec<u32>,
+}
+
+impl fmt::Display for MissingBlocks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "missing block data for heights {:?}", self.heights)
+    }
+}
+
+impl core::error::Error for MissingBlocks {}
+
 impl<D> PartialEq for CheckPoint<D> {
     fn eq(&self, other: &Self) -> bool {
         let self_cps = self.iter().map(|cp| cp.block_id());
@@ -257,31 +276,36 @@ where
     /// Note: This is a pseudo-median that takes the higher of the two middle values rather than
     /// averaging them. This matches the BIP-0113 specification.
     ///
-    /// Returns `None` if any of the 11 required ancestor checkpoints are missing from the chain.
+    /// Returns `Err(MissingBlocks)` listing every missing height when one or more ancestors in
+    /// the MTP window are not present in the chain. Callers can use this to drive a fetch-retry
+    /// loop against their chain source.
     ///
     /// If you want a compile-time guarantee that MTP is always available without walking the
     /// chain, store it directly on each checkpoint via [`WithMtp`] and use
     /// [`CheckPoint::mtp`] instead.
-    pub fn compute_mtp(&self) -> Option<u32>
+    pub fn compute_mtp(&self) -> Result<u32, MissingBlocks>
     where
         D: ToBlockTime,
     {
         let current_height = self.height();
         let earliest_height = current_height.saturating_sub(Self::MTP_BLOCK_COUNT - 1);
 
-        let mut timestamps = (earliest_height..=current_height)
-            .map(|height| {
-                // Return `None` for missing blocks or missing block times
-                let cp = self.get(height)?;
-                let block_time = cp.data_ref().to_blocktime();
-                Some(block_time)
-            })
-            .collect::<Option<Vec<u32>>>()?;
+        let mut timestamps = Vec::with_capacity(Self::MTP_BLOCK_COUNT as usize);
+        let mut missing = Vec::new();
+        for height in earliest_height..=current_height {
+            match self.get(height) {
+                Some(cp) => timestamps.push(cp.data_ref().to_blocktime()),
+                None => missing.push(height),
+            }
+        }
+        if !missing.is_empty() {
+            return Err(MissingBlocks { heights: missing });
+        }
         timestamps.sort_unstable();
 
         // If there are more than 1 middle values, use the higher middle value.
         // This is mathematically incorrect, but this is the BIP-0113 specification.
-        Some(timestamps[timestamps.len() / 2])
+        Ok(timestamps[timestamps.len() / 2])
     }
 
     /// Construct from an iterator of block data.
