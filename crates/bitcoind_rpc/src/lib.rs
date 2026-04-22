@@ -29,8 +29,8 @@ pub use bdk_bitcoind_client;
 /// Refer to [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate
-pub struct Emitter {
-    client: Client,
+pub struct Emitter<'a> {
+    client: &'a Client,
     start_height: u32,
 
     /// The checkpoint of the last-emitted block that is in the best chain. If it is later found
@@ -61,7 +61,7 @@ pub struct Emitter {
 /// to start empty (i.e. with no unconfirmed transactions).
 pub const NO_EXPECTED_MEMPOOL_TXS: core::iter::Empty<Arc<Transaction>> = core::iter::empty();
 
-impl Emitter {
+impl<'a> Emitter<'a> {
     /// Construct a new [`Emitter`].
     ///
     /// `last_cp` informs the emitter of the chain we are starting off with. This way, the emitter
@@ -74,7 +74,7 @@ impl Emitter {
     /// wallet. This allows the [`Emitter`] to inform the wallet about relevant mempool evictions.
     /// If it is known that the wallet is empty, [`NO_EXPECTED_MEMPOOL_TXS`] can be used.
     pub fn new(
-        client: Client,
+        client: &'a Client,
         last_cp: CheckPoint<BlockHash>,
         start_height: u32,
         expected_mempool_txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>,
@@ -278,11 +278,11 @@ fn poll_once(emitter: &Emitter) -> Result<PollResponse, bdk_bitcoind_client::Err
     let client = &emitter.client;
 
     if let Some(last_res) = &emitter.last_block {
-        let next_hash = if last_res.height + 1 < emitter.start_height as _ {
+        let next_hash = if last_res.height + 1 < emitter.start_height {
             // enforce start height
-            let next_hash = client.get_block_hash(emitter.start_height as _)?;
+            let next_hash = client.get_block_hash(emitter.start_height)?;
             // make sure last emission is still in best chain
-            if client.get_block_hash(last_res.height as _)? != last_res.hash {
+            if client.get_block_hash(last_res.height)? != last_res.hash {
                 return Ok(PollResponse::BlockNotInBestChain);
             }
             next_hash
@@ -354,10 +354,8 @@ fn poll(
             PollResponse::AgreementFound(res, cp) => {
                 // When a reorg happens, the agreement point drops below `last_cp`. We
                 // override `start_height` so the emitter revisits the invalidated heights.
-                if (res.height as u32) < emitter.start_height
-                    && (res.height as u32) < emitter.last_cp.height()
-                {
-                    emitter.start_height = res.height as _;
+                if res.height < emitter.start_height && res.height < emitter.last_cp.height() {
+                    emitter.start_height = res.height;
                 }
                 // get rid of evicted blocks
                 emitter.last_cp = cp;
@@ -369,28 +367,6 @@ fn poll(
                 emitter.last_block = None;
                 continue;
             }
-        }
-    }
-}
-
-/// Extends [`bdk_bitcoind_client::Error`].
-pub trait BitcoindRpcErrorExt {
-    /// Returns whether the error is a "not found" error.
-    ///
-    /// This is useful since [`Emitter`] emits [`Result<_, bdk_bitcoind_client::Error>`]s as
-    /// [`Iterator::Item`].
-    fn is_not_found_error(&self) -> bool;
-}
-
-impl BitcoindRpcErrorExt for bdk_bitcoind_client::Error {
-    fn is_not_found_error(&self) -> bool {
-        if let bdk_bitcoind_client::Error::JsonRpc(bdk_bitcoind_client::jsonrpc::Error::Rpc(
-            rpc_err,
-        )) = self
-        {
-            rpc_err.code == -5
-        } else {
-            false
         }
     }
 }
@@ -415,7 +391,7 @@ mod test {
             bdk_bitcoind_client::Auth::CookieFile(env.bitcoind.params.cookie_file.clone()),
         )?;
 
-        let mut emitter = Emitter::new(rpc_client, chain_tip.clone(), 1, NO_EXPECTED_MEMPOOL_TXS);
+        let mut emitter = Emitter::new(&rpc_client, chain_tip.clone(), 1, NO_EXPECTED_MEMPOOL_TXS);
 
         env.mine_blocks(100, None)?;
         while emitter.next_block()?.is_some() {}

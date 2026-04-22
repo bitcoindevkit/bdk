@@ -61,7 +61,7 @@ impl<'a> FilterIter<'a> {
     fn find_base(&self) -> Result<GetBlockHeaderVerbose, Error> {
         for cp in self.cp.iter() {
             match self.client.get_block_header_verbose(&cp.hash()) {
-                Err(e) if is_not_found(&e) => continue,
+                Err(e) if e.is_not_found_error() => continue,
                 Ok(header) if header.confirmations <= 0 => continue,
                 Ok(header) => return Ok(header),
                 Err(e) => return Err(Error::Rpc(e)),
@@ -184,17 +184,5 @@ impl From<bdk_bitcoind_client::Error> for Error {
 impl From<core::num::TryFromIntError> for Error {
     fn from(e: core::num::TryFromIntError) -> Self {
         Self::TryFromInt(e)
-    }
-}
-
-/// Whether the RPC error is a "not found" error (code: `-5`).
-fn is_not_found(e: &bdk_bitcoind_client::Error) -> bool {
-    if let bdk_bitcoind_client::Error::JsonRpc(bdk_bitcoind_client::jsonrpc::Error::Rpc(
-        rpc_error,
-    )) = e
-    {
-        rpc_error.code == -5
-    } else {
-        false
     }
 }

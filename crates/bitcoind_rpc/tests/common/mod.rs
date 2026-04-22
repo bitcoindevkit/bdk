@@ -1,7 +1,7 @@
 use bdk_testenv::anyhow;
 use bdk_testenv::TestEnv;
 
-/// This trait is used for testing. It allows creating a new [`bdk_bictoind_client::Client`]
+/// This trait is used for testing. It allows creating a new [`bdk_bitcoind_client::Client`]
 /// connected to the instance of bitcoind running in the test environment. This way the `TestEnv`
 /// and the `Emitter` aren't required to share the same client.
 pub trait ClientExt {

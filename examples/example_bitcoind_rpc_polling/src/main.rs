@@ -12,7 +12,7 @@ use bdk_bitcoind_rpc::{
     Emitter,
 };
 use bdk_chain::{
-    bitcoin::{Block, Txid},
+    bitcoin::{consensus::encode::serialize_hex, Block, Txid},
     local_chain, CanonicalizationParams, Merge,
 };
 use example_cli::{
@@ -98,7 +98,6 @@ enum RpcCommands {
         rpc_args: RpcArgs,
     },
 }
-
 fn main() -> anyhow::Result<()> {
     let start = Instant::now();
 
@@ -123,7 +122,8 @@ fn main() -> anyhow::Result<()> {
                 network,
                 |rpc_args, tx| {
                     let client = rpc_args.new_client()?;
-                    let _txid: Txid = client.call("sendrawtransaction", &[json!(tx)])?;
+                    let _txid: Txid =
+                        client.call("sendrawtransaction", &[json!(serialize_hex(tx))])?;
                     Ok(())
                 },
                 general_cmd,
@@ -142,7 +142,7 @@ fn main() -> anyhow::Result<()> {
                 let chain = chain.lock().unwrap();
                 let graph = graph.lock().unwrap();
                 Emitter::new(
-                    rpc_client,
+                    &rpc_client,
                     chain.tip(),
                     fallback_height,
                     graph
@@ -242,13 +242,12 @@ fn main() -> anyhow::Result<()> {
             } = rpc_args;
             let sigterm_flag = start_ctrlc_handler();
 
-            let emitter_client = rpc_args.new_client()?;
             let rpc_client = rpc_args.new_client()?;
             let mut emitter = {
                 let chain = chain.lock().unwrap();
                 let graph = graph.lock().unwrap();
                 Emitter::new(
-                    emitter_client,
+                    &rpc_client,
                     chain.tip(),
                     fallback_height,
                     graph
@@ -268,120 +267,131 @@ fn main() -> anyhow::Result<()> {
                 start.elapsed().as_secs_f32()
             );
             let (tx, rx) = std::sync::mpsc::sync_channel::<Emission>(CHANNEL_BOUND);
-            let emission_jh = std::thread::spawn(move || -> anyhow::Result<()> {
-                let mut block_count = rpc_client.get_block_count()?;
-                tx.send(Emission::Tip(block_count))?;
 
-                loop {
-                    match emitter.next_block()? {
-                        Some(block_emission) => {
+            let _ = std::thread::scope(|s| -> anyhow::Result<()> {
+                let emission_jh = s.spawn(|| -> anyhow::Result<()> {
+                    let mut block_count = rpc_client.get_block_count()?;
+                    tx.send(Emission::Tip(block_count))?;
+
+                    loop {
+                        match emitter.next_block()? {
+                            Some(block_emission) => {
+                                let height = block_emission.block_height();
+                                if sigterm_flag.load(Ordering::Acquire) {
+                                    break;
+                                }
+                                if height > block_count {
+                                    block_count = rpc_client.get_block_count()?;
+                                    tx.send(Emission::Tip(block_count))?;
+                                }
+                                tx.send(Emission::Block(block_emission))?;
+                            }
+                            None => {
+                                if await_flag(&sigterm_flag, MEMPOOL_EMIT_DELAY) {
+                                    break;
+                                }
+                                println!("preparing mempool emission...");
+                                let now = Instant::now();
+                                tx.send(Emission::Mempool(emitter.mempool()?))?;
+                                println!(
+                                    "mempool emission prepared in {}s",
+                                    now.elapsed().as_secs()
+                                );
+                                continue;
+                            }
+                        };
+                    }
+
+                    println!("emitter thread shutting down...");
+                    Ok(())
+                });
+
+                let mut tip_height = 0_u32;
+                let mut last_db_commit = Instant::now();
+                let mut last_print = Option::<Instant>::None;
+                let mut db_stage = ChangeSet::default();
+
+                for emission in rx {
+                    let mut graph = graph.lock().unwrap();
+                    let mut chain = chain.lock().unwrap();
+
+                    let (chain_changeset, graph_changeset) = match emission {
+                        Emission::Block(block_emission) => {
                             let height = block_emission.block_height();
-                            if sigterm_flag.load(Ordering::Acquire) {
-                                break;
-                            }
-                            if height > block_count {
-                                block_count = rpc_client.get_block_count()?;
-                                tx.send(Emission::Tip(block_count))?;
-                            }
-                            tx.send(Emission::Block(block_emission))?;
+                            let chain_changeset =
+                                chain.apply_update(block_emission.checkpoint).expect(
+                                    "must always apply as we receive blocks in order from emitter",
+                                );
+                            let graph_changeset =
+                                graph.apply_block_relevant(&block_emission.block, height);
+                            (chain_changeset, graph_changeset)
                         }
-                        None => {
-                            if await_flag(&sigterm_flag, MEMPOOL_EMIT_DELAY) {
-                                break;
-                            }
-                            println!("preparing mempool emission...");
-                            let now = Instant::now();
-                            tx.send(Emission::Mempool(emitter.mempool()?))?;
-                            println!("mempool emission prepared in {}s", now.elapsed().as_secs());
+                        Emission::Mempool(mempool_txs) => {
+                            let mut graph_changeset =
+                                graph.batch_insert_relevant_unconfirmed(mempool_txs.update.clone());
+                            graph_changeset
+                                .merge(graph.batch_insert_relevant_evicted_at(mempool_txs.evicted));
+                            (local_chain::ChangeSet::default(), graph_changeset)
+                        }
+                        Emission::Tip(h) => {
+                            tip_height = h;
                             continue;
                         }
                     };
+
+                    db_stage.merge(ChangeSet {
+                        local_chain: chain_changeset,
+                        tx_graph: graph_changeset.tx_graph,
+                        indexer: graph_changeset.indexer,
+                        ..Default::default()
+                    });
+
+                    if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
+                        let db = &mut *db.lock().unwrap();
+                        last_db_commit = Instant::now();
+                        if let Some(changeset) = db_stage.take() {
+                            db.append(&changeset)?;
+                        }
+                        println!(
+                            "[{:>10}s] committed to db (took {}s)",
+                            start.elapsed().as_secs_f32(),
+                            last_db_commit.elapsed().as_secs_f32()
+                        );
+                    }
+
+                    if last_print.map_or(Duration::MAX, |i| i.elapsed()) >= STDOUT_PRINT_DELAY {
+                        last_print = Some(Instant::now());
+                        let synced_to = chain.tip();
+                        let balance = {
+                            graph
+                                .canonical_view(
+                                    &*chain,
+                                    synced_to.block_id(),
+                                    CanonicalizationParams::default(),
+                                )
+                                .balance(
+                                    graph.index.outpoints().iter().cloned(),
+                                    |(k, _), _| k == &Keychain::Internal,
+                                    1,
+                                )
+                        };
+                        println!(
+                            "[{:>10}s] synced to {} @ {} / {} | total: {}",
+                            start.elapsed().as_secs_f32(),
+                            synced_to.hash(),
+                            synced_to.height(),
+                            tip_height,
+                            balance.total()
+                        );
+                    }
                 }
 
-                println!("emitter thread shutting down...");
+                emission_jh
+                    .join()
+                    .unwrap()
+                    .expect("must join emitter thread");
                 Ok(())
             });
-
-            let mut tip_height = 0_u32;
-            let mut last_db_commit = Instant::now();
-            let mut last_print = Option::<Instant>::None;
-            let mut db_stage = ChangeSet::default();
-
-            for emission in rx {
-                let mut graph = graph.lock().unwrap();
-                let mut chain = chain.lock().unwrap();
-
-                let (chain_changeset, graph_changeset) = match emission {
-                    Emission::Block(block_emission) => {
-                        let height = block_emission.block_height();
-                        let chain_changeset = chain
-                            .apply_update(block_emission.checkpoint)
-                            .expect("must always apply as we receive blocks in order from emitter");
-                        let graph_changeset =
-                            graph.apply_block_relevant(&block_emission.block, height);
-                        (chain_changeset, graph_changeset)
-                    }
-                    Emission::Mempool(mempool_txs) => {
-                        let mut graph_changeset =
-                            graph.batch_insert_relevant_unconfirmed(mempool_txs.update.clone());
-                        graph_changeset
-                            .merge(graph.batch_insert_relevant_evicted_at(mempool_txs.evicted));
-                        (local_chain::ChangeSet::default(), graph_changeset)
-                    }
-                    Emission::Tip(h) => {
-                        tip_height = h;
-                        continue;
-                    }
-                };
-
-                db_stage.merge(ChangeSet {
-                    local_chain: chain_changeset,
-                    tx_graph: graph_changeset.tx_graph,
-                    indexer: graph_changeset.indexer,
-                    ..Default::default()
-                });
-
-                if last_db_commit.elapsed() >= DB_COMMIT_DELAY {
-                    let db = &mut *db.lock().unwrap();
-                    last_db_commit = Instant::now();
-                    if let Some(changeset) = db_stage.take() {
-                        db.append(&changeset)?;
-                    }
-                    println!(
-                        "[{:>10}s] committed to db (took {}s)",
-                        start.elapsed().as_secs_f32(),
-                        last_db_commit.elapsed().as_secs_f32()
-                    );
-                }
-
-                if last_print.map_or(Duration::MAX, |i| i.elapsed()) >= STDOUT_PRINT_DELAY {
-                    last_print = Some(Instant::now());
-                    let synced_to = chain.tip();
-                    let balance = {
-                        graph
-                            .canonical_view(
-                                &*chain,
-                                synced_to.block_id(),
-                                CanonicalizationParams::default(),
-                            )
-                            .balance(
-                                graph.index.outpoints().iter().cloned(),
-                                |(k, _), _| k == &Keychain::Internal,
-                                1,
-                            )
-                    };
-                    println!(
-                        "[{:>10}s] synced to {} @ {} / {} | total: {}",
-                        start.elapsed().as_secs_f32(),
-                        synced_to.hash(),
-                        synced_to.height(),
-                        tip_height,
-                        balance.total()
-                    );
-                }
-            }
-
-            emission_jh.join().expect("must join emitter thread")?;
         }
     }
 

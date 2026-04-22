@@ -20,10 +20,7 @@ fn testenv() -> anyhow::Result<TestEnv> {
 #[test]
 fn filter_iter_matches_blocks() -> anyhow::Result<()> {
     let env = testenv()?;
-    let addr = ClientExt::get_rpc_client(&env)?
-        .call::<String>("getnewaddress", &[])?
-        .parse::<Address<_>>()?
-        .assume_checked();
+    let addr = env.bitcoind.client.new_address()?;
 
     let _ = env.mine_blocks(100, Some(addr.clone()))?;
     assert_eq!(ClientExt::get_rpc_client(&env)?.get_block_count()?, 101);
