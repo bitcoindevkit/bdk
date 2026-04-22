@@ -72,3 +72,6 @@ mod merge;
 pub use merge::*;
 
 pub mod spk_client;
+
+mod chain_query;
+pub use chain_query::*;
