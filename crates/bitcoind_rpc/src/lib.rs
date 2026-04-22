@@ -366,28 +366,6 @@ fn poll(
     }
 }
 
-/// Extends [`bdk_bitcoind_client::Error`].
-pub trait BitcoindRpcErrorExt {
-    /// Returns whether the error is a "not found" error.
-    ///
-    /// This is useful since [`Emitter`] emits [`Result<_, bdk_bitcoind_client::Error>`]s as
-    /// [`Iterator::Item`].
-    fn is_not_found_error(&self) -> bool;
-}
-
-impl BitcoindRpcErrorExt for bdk_bitcoind_client::Error {
-    fn is_not_found_error(&self) -> bool {
-        if let bdk_bitcoind_client::Error::JsonRpc(bdk_bitcoind_client::jsonrpc::Error::Rpc(
-            rpc_err,
-        )) = self
-        {
-            rpc_err.code == -5
-        } else {
-            false
-        }
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
