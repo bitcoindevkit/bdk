@@ -1,4 +1,4 @@
-use bdk_chain::CanonicalizationParams;
+use bdk_chain::CanonicalParams;
 use bdk_chain::{keychain_txout::KeychainTxOutIndex, local_chain::LocalChain, IndexedTxGraph};
 use bdk_core::{BlockId, CheckPoint};
 use bdk_core::{ConfirmationBlockTime, TxUpdate};
@@ -95,31 +95,22 @@ fn setup<F: Fn(&mut KeychainTxGraph, &LocalChain)>(f: F) -> (KeychainTxGraph, Lo
 }
 
 fn run_list_canonical_txs(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txs: usize) {
-    let view = tx_graph.canonical_view(
-        chain,
-        chain.tip().block_id(),
-        CanonicalizationParams::default(),
-    );
+    let chain_tip = chain.tip().block_id();
+    let view = chain.canonical_view(tx_graph.graph(), chain_tip, CanonicalParams::default());
     let txs = view.txs();
     assert_eq!(txs.count(), exp_txs);
 }
 
 fn run_filter_chain_txouts(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_txos: usize) {
-    let view = tx_graph.canonical_view(
-        chain,
-        chain.tip().block_id(),
-        CanonicalizationParams::default(),
-    );
+    let chain_tip = chain.tip().block_id();
+    let view = chain.canonical_view(tx_graph.graph(), chain_tip, CanonicalParams::default());
     let utxos = view.filter_outpoints(tx_graph.index.outpoints().clone());
     assert_eq!(utxos.count(), exp_txos);
 }
 
 fn run_filter_chain_unspents(tx_graph: &KeychainTxGraph, chain: &LocalChain, exp_utxos: usize) {
-    let view = tx_graph.canonical_view(
-        chain,
-        chain.tip().block_id(),
-        CanonicalizationParams::default(),
-    );
+    let chain_tip = chain.tip().block_id();
+    let view = chain.canonical_view(tx_graph.graph(), chain_tip, CanonicalParams::default());
     let utxos = view.filter_unspent_outpoints(tx_graph.index.outpoints().clone());
     assert_eq!(utxos.count(), exp_utxos);
 }
