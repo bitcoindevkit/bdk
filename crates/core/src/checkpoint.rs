@@ -93,6 +93,33 @@ impl ToBlockTime for Header {
     }
 }
 
+/// Wraps [`CheckPoint`] `data` with a precomputed median-time-past (MTP) value.
+///
+/// Using `CheckPoint<WithMtp<D>>` provides a compile-time guarantee that the MTP is available
+/// for every checkpoint in the chain, without needing to walk back 11 blocks to compute it.
+///
+/// See [BIP-0113](https://github.com/bitcoin/bips/blob/master/bip-0113.mediawiki) for the MTP
+/// definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WithMtp<D> {
+    /// The median-time-past for this block.
+    pub mtp: u32,
+    /// The wrapped checkpoint data.
+    pub inner: D,
+}
+
+impl<D: ToBlockTime> ToBlockTime for WithMtp<D> {
+    fn to_blocktime(&self) -> u32 {
+        self.inner.to_blocktime()
+    }
+}
+
+impl<D: ToBlockHash> ToBlockHash for WithMtp<D> {
+    fn to_blockhash(&self) -> BlockHash {
+        self.inner.to_blockhash()
+    }
+}
+
 impl<D> PartialEq for CheckPoint<D> {
     fn eq(&self, other: &Self) -> bool {
         let self_cps = self.iter().map(|cp| cp.block_id());
@@ -221,17 +248,21 @@ where
         }))
     }
 
-    /// Calculate the median time past (MTP) for this checkpoint.
+    /// Computes the median-time-past (MTP) for this checkpoint by walking back through the chain.
     ///
-    /// Uses 11 blocks (heights h-10 through h, where h is the current height) to compute the MTP
-    /// for the current block. This is used in Bitcoin's consensus rules for time-based validations
-    /// (BIP-0113).
+    /// Uses 11 blocks (heights `h-10` through `h`, where `h` is this checkpoint's height) to
+    /// compute the MTP. This is used in Bitcoin's consensus rules for time-based validations
+    /// (see [BIP-0113](https://github.com/bitcoin/bips/blob/master/bip-0113.mediawiki)).
     ///
-    /// Note: This is a pseudo-median that doesn't average the two middle values.
+    /// Note: This is a pseudo-median that takes the higher of the two middle values rather than
+    /// averaging them. This matches the BIP-0113 specification.
     ///
-    /// Returns `None` if the data type doesn't support block times or if any of the required
-    /// 11 sequential blocks are missing.
-    pub fn median_time_past(&self) -> Option<u32>
+    /// Returns `None` if any of the 11 required ancestor checkpoints are missing from the chain.
+    ///
+    /// If you want a compile-time guarantee that MTP is always available without walking the
+    /// chain, store it directly on each checkpoint via [`WithMtp`] and use
+    /// [`CheckPoint::mtp`] instead.
+    pub fn compute_mtp(&self) -> Option<u32>
     where
         D: ToBlockTime,
     {
@@ -317,7 +348,6 @@ where
         base.extend(core::iter::once((height, data)).chain(tail.into_iter().rev()))
             .expect("tail is in order")
     }
-
     /// Puts another checkpoint onto the linked list representing the blockchain.
     ///
     /// Returns an `Err(self)` if the block you are pushing on is not at a greater height that the
@@ -335,6 +365,16 @@ where
         } else {
             Err(self)
         }
+    }
+}
+
+impl<D> CheckPoint<WithMtp<D>> {
+    /// Returns the precomputed median-time-past (MTP) stored on this checkpoint.
+    ///
+    /// Unlike [`CheckPoint::compute_mtp`], this does not walk the chain — the MTP was computed
+    /// when the checkpoint was constructed and is guaranteed to be present by the type system.
+    pub fn mtp(&self) -> u32 {
+        self.data_ref().mtp
     }
 }
 
