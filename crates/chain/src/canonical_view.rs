@@ -21,14 +21,19 @@
 //! }
 //! ```
 
-use crate::collections::HashMap;
-use alloc::sync::Arc;
+use crate::{
+    collections::{HashMap, HashSet},
+    AncestorPackage,
+};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    vec::Vec,
+};
 use core::{fmt, ops::RangeBounds};
 
-use alloc::vec::Vec;
-
 use bdk_core::BlockId;
-use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, Txid};
+use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, Txid, Weight};
 
 use crate::{
     spk_txout::SpkTxOutIndex, tx_graph::TxNode, Anchor, Balance, CanonicalIter, CanonicalReason,
@@ -447,5 +452,135 @@ impl<A: Anchor> CanonicalView<A> {
                 .map(|(_, spk)| (spk, c_tx.txid))
                 .collect()
         })
+    }
+
+    /// Compute ancestor packages for all unconfirmed and unspent outpoints.
+    ///
+    /// Returns a map from [`OutPoint`] to its [`AncestorPackage`].
+    pub fn ancestor_packages(&self) -> BTreeMap<OutPoint, AncestorPackage> {
+        let mut fee_cache: HashMap<Txid, Option<Amount>> = HashMap::new();
+        let mut package_cache: HashMap<Txid, Option<(Weight, Amount)>> = HashMap::new();
+        let mut result = BTreeMap::new();
+
+        for (&txid, (tx, pos)) in &self.txs {
+            if pos.is_confirmed() {
+                continue;
+            }
+
+            for (vout, _) in tx.output.iter().enumerate() {
+                let outpoint = OutPoint::new(txid, vout as u32);
+
+                if self.spends.contains_key(&outpoint) {
+                    continue;
+                }
+
+                let pkg = match package_cache.get(&txid) {
+                    Some(cached) => *cached,
+                    None => {
+                        let pkg = self.compute_package(core::iter::once(txid), &mut fee_cache);
+                        package_cache.insert(txid, pkg);
+                        pkg
+                    }
+                };
+
+                if let Some((weight, fee)) = pkg {
+                    result.insert(outpoint, AncestorPackage::new(weight, fee));
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Compute a deduplicated ancestor package for a set of outpoints.
+    ///
+    /// Each ancestor txid is counted exactly once across all outpoints.
+    /// Used after coin selection to verify the true aggregate deficit.
+    pub fn aggregate_ancestor_package(
+        &self,
+        outpoints: impl IntoIterator<Item = OutPoint>,
+    ) -> Option<AncestorPackage> {
+        let mut fee_cache = HashMap::new();
+        let (weight, fee) =
+            self.compute_package(outpoints.into_iter().map(|op| op.txid), &mut fee_cache)?;
+
+        if weight == Weight::ZERO {
+            return None;
+        }
+
+        Some(AncestorPackage::new(weight, fee))
+    }
+
+    /// Compute the aggregate `(weight, fee)` for the unconfirmed ancestor
+    /// chain rooted at `txid`, including `txid` itself.
+    ///
+    /// Returns `None` if any ancestor's fee cannot be computed.
+    fn compute_package(
+        &self,
+        txids: impl IntoIterator<Item = Txid>,
+        fee_cache: &mut HashMap<Txid, Option<Amount>>,
+    ) -> Option<(Weight, Amount)> {
+        let mut visited = HashSet::new();
+        let mut total_weight = Weight::ZERO;
+        let mut total_fee = Amount::ZERO;
+        let mut queue = VecDeque::new();
+
+        for txid in txids {
+            queue.push_back(txid);
+        }
+
+        while let Some(current) = queue.pop_front() {
+            if !visited.insert(current) {
+                continue;
+            }
+
+            let (tx, pos) = match self.txs.get(&current) {
+                Some(entry) => entry,
+                None => continue,
+            };
+
+            // Confirmed txs don't need fee bumping.
+            if pos.is_confirmed() {
+                continue;
+            }
+
+            let fee = match fee_cache.get(&current) {
+                Some(cached) => *cached,
+                None => {
+                    let fee = self.package_tx_fee(tx);
+                    fee_cache.insert(current, fee);
+                    fee
+                }
+            };
+
+            total_fee += fee?;
+            total_weight += tx.weight();
+
+            for txin in &tx.input {
+                queue.push_back(txin.previous_output.txid);
+            }
+        }
+
+        Some((total_weight, total_fee))
+    }
+
+    /// Compute the fee for a transaction.
+    ///
+    /// Returns `None` if any input's previous output is not found.
+    fn package_tx_fee(&self, tx: &Transaction) -> Option<Amount> {
+        if tx.is_coinbase() {
+            return Some(Amount::ZERO);
+        }
+
+        let inputs_sum = tx.input.iter().try_fold(Amount::ZERO, |sum, txin| {
+            let prev_op = txin.previous_output;
+            let (parent_tx, _) = self.txs.get(&prev_op.txid)?;
+            let txout = parent_tx.output.get(prev_op.vout as usize)?;
+            Some(sum + txout.value)
+        })?;
+
+        let outputs_sum: Amount = tx.output.iter().map(|o| o.value).sum();
+
+        inputs_sum.checked_sub(outputs_sum)
     }
 }
