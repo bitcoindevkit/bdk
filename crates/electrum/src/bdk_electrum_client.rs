@@ -78,6 +78,12 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         drop(tx_cache);
 
         let tx = Arc::new(self.inner.transaction_get(&txid)?);
+        let returned_txid = tx.compute_txid();
+        if returned_txid != txid {
+            return Err(Error::Message(format!(
+                "electrum server returned transaction with unexpected txid: expected {txid}, got {returned_txid}"
+            )));
+        }
 
         self.tx_cache.lock().unwrap().insert(txid, Arc::clone(&tx));
 
