@@ -15,15 +15,6 @@ fn create_checkpoint_chain(length: u32) -> CheckPoint<BlockHash> {
 
 /// Benchmark get() operations at various depths
 fn bench_checkpoint_get(c: &mut Criterion) {
-    // Small chain - get near start
-    c.bench_function("get_100_near_start", |b: &mut Bencher| {
-        let cp = create_checkpoint_chain(100);
-        let target = 10;
-        b.iter(|| {
-            black_box(cp.get(target));
-        });
-    });
-
     // Medium chain - get middle
     c.bench_function("get_1000_middle", |b: &mut Bencher| {
         let cp = create_checkpoint_chain(1000);
@@ -33,10 +24,12 @@ fn bench_checkpoint_get(c: &mut Criterion) {
         });
     });
 
-    // Large chain - get near end
+    // Large chain - get near end. Target is deliberately not a power of two or a multiple of
+    // common skiplist intervals (e.g. 1000), so neither pskip nor a fixed-stride scheme gets a
+    // free 1-hop hit on a "lucky" alignment.
     c.bench_function("get_10000_near_end", |b: &mut Bencher| {
         let cp = create_checkpoint_chain(10000);
-        let target = 9000;
+        let target = 9123;
         b.iter(|| {
             black_box(cp.get(target));
         });
@@ -99,24 +92,6 @@ fn bench_checkpoint_range(c: &mut Criterion) {
             black_box(range);
         });
     });
-
-    // Range near tip (minimal skip pointer usage)
-    c.bench_function("range_10000_near_tip", |b: &mut Bencher| {
-        let cp = create_checkpoint_chain(10000);
-        b.iter(|| {
-            let range: Vec<_> = cp.range(9900..).collect();
-            black_box(range);
-        });
-    });
-
-    // Single element range (edge case)
-    c.bench_function("range_single_element", |b: &mut Bencher| {
-        let cp = create_checkpoint_chain(10000);
-        b.iter(|| {
-            let range: Vec<_> = cp.range(5000..=5000).collect();
-            black_box(range);
-        });
-    });
 }
 
 /// Benchmark insert() operations
@@ -140,84 +115,56 @@ fn bench_checkpoint_insert(c: &mut Criterion) {
     });
 }
 
-/// Compare linear traversal vs skiplist-enhanced get()
-fn bench_traversal_comparison(c: &mut Criterion) {
-    // Linear traversal benchmark
-    c.bench_function("linear_traversal_10000", |b: &mut Bencher| {
-        let cp = create_checkpoint_chain(10000);
-        let target = 100; // Near the beginning
+/// Random-access lookups over a realistic-size chain, comparing skiplist-enhanced
+/// `get()` against a plain linear walk. Targets are drawn from a deterministic
+/// xorshift sequence so the same query stream is used for both benches.
+///
+/// Chain length is sized to the order of a full Bitcoin chain (~1M blocks) so the log-scale
+/// advantage of pskip is visible.
+fn bench_random_access(c: &mut Criterion) {
+    const CHAIN_LEN: u32 = 1_000_000;
+    const QUERIES: usize = 256;
 
+    let cp = create_checkpoint_chain(CHAIN_LEN);
+
+    // Deterministic xorshift64* over the height range.
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let targets: Vec<u32> = (0..QUERIES)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % (CHAIN_LEN as u64 + 1)) as u32
+        })
+        .collect();
+
+    {
+        let cp = cp.clone();
+        let targets = targets.clone();
+        c.bench_function("random_access_skiplist_1m", move |b: &mut Bencher| {
+            let mut i = 0usize;
+            b.iter(|| {
+                let target = targets[i % QUERIES];
+                i = i.wrapping_add(1);
+                black_box(cp.get(target));
+            });
+        });
+    }
+
+    c.bench_function("random_access_linear_1m", move |b: &mut Bencher| {
+        let mut i = 0usize;
         b.iter(|| {
+            let target = targets[i % QUERIES];
+            i = i.wrapping_add(1);
+
             let mut current = cp.clone();
             while current.height() > target {
-                if let Some(prev) = current.prev() {
-                    current = prev;
-                } else {
-                    break;
+                match current.prev() {
+                    Some(prev) => current = prev,
+                    None => break,
                 }
             }
             black_box(current);
-        });
-    });
-
-    // Skiplist-enhanced get() for comparison
-    c.bench_function("skiplist_get_10000", |b: &mut Bencher| {
-        let cp = create_checkpoint_chain(10000);
-        let target = 100; // Same target
-
-        b.iter(|| {
-            black_box(cp.get(target));
-        });
-    });
-}
-
-/// Analyze skip pointer distribution and usage
-fn bench_skip_pointer_analysis(c: &mut Criterion) {
-    c.bench_function("count_skip_pointers_10000", |b: &mut Bencher| {
-        let cp = create_checkpoint_chain(10000);
-
-        b.iter(|| {
-            let mut count = 0;
-            let mut current = cp.clone();
-            loop {
-                if current.skip().is_some() {
-                    count += 1;
-                }
-                if let Some(prev) = current.prev() {
-                    current = prev;
-                } else {
-                    break;
-                }
-            }
-            black_box(count);
-        });
-    });
-
-    // Measure actual skip pointer usage during traversal
-    c.bench_function("skip_usage_in_traversal", |b: &mut Bencher| {
-        let cp = create_checkpoint_chain(10000);
-        let target = 100;
-
-        b.iter(|| {
-            let mut current = cp.clone();
-            let mut skips_used = 0;
-
-            while current.height() > target {
-                if let Some(skip_cp) = current.skip() {
-                    if skip_cp.height() >= target {
-                        current = skip_cp;
-                        skips_used += 1;
-                        continue;
-                    }
-                }
-
-                if let Some(prev) = current.prev() {
-                    current = prev;
-                } else {
-                    break;
-                }
-            }
-            black_box((current, skips_used));
         });
     });
 }
@@ -228,8 +175,7 @@ criterion_group!(
     bench_checkpoint_floor_at,
     bench_checkpoint_range,
     bench_checkpoint_insert,
-    bench_traversal_comparison,
-    bench_skip_pointer_analysis
+    bench_random_access
 );
 
 criterion_main!(benches);
