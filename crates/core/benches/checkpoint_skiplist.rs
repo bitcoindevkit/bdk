@@ -171,6 +171,57 @@ fn bench_traversal_comparison(c: &mut Criterion) {
     });
 }
 
+/// Random-access lookups over a realistic-size chain, comparing skiplist-enhanced
+/// `get()` against a plain linear walk. Targets are drawn from a deterministic
+/// xorshift sequence so the same query stream is used for both benches.
+fn bench_random_access(c: &mut Criterion) {
+    const CHAIN_LEN: u32 = 100_000;
+    const QUERIES: usize = 256;
+
+    let cp = create_checkpoint_chain(CHAIN_LEN);
+
+    // Deterministic xorshift64* over the height range.
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let targets: Vec<u32> = (0..QUERIES)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % (CHAIN_LEN as u64 + 1)) as u32
+        })
+        .collect();
+
+    {
+        let cp = cp.clone();
+        let targets = targets.clone();
+        c.bench_function("random_access_skiplist_100k", move |b: &mut Bencher| {
+            let mut i = 0usize;
+            b.iter(|| {
+                let target = targets[i % QUERIES];
+                i = i.wrapping_add(1);
+                black_box(cp.get(target));
+            });
+        });
+    }
+
+    c.bench_function("random_access_linear_100k", move |b: &mut Bencher| {
+        let mut i = 0usize;
+        b.iter(|| {
+            let target = targets[i % QUERIES];
+            i = i.wrapping_add(1);
+
+            let mut current = cp.clone();
+            while current.height() > target {
+                match current.prev() {
+                    Some(prev) => current = prev,
+                    None => break,
+                }
+            }
+            black_box(current);
+        });
+    });
+}
+
 /// Analyze skip pointer distribution and usage
 fn bench_skip_pointer_analysis(c: &mut Criterion) {
     c.bench_function("count_skip_pointers_10000", |b: &mut Bencher| {
@@ -229,6 +280,7 @@ criterion_group!(
     bench_checkpoint_range,
     bench_checkpoint_insert,
     bench_traversal_comparison,
+    bench_random_access,
     bench_skip_pointer_analysis
 );
 
