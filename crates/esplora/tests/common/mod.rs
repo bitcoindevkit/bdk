@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use bdk_core::bitcoin::key::{Secp256k1, UntweakedPublicKey};
 use bdk_core::bitcoin::{Address, ScriptBuf};
 use std::str::FromStr;
@@ -7,7 +9,6 @@ const PK_BYTES: &[u8] = &[
     114, 89, 165, 83, 141, 8, 203, 93, 240, 53, 101,
 ];
 
-#[allow(dead_code)]
 pub fn get_test_spk() -> ScriptBuf {
     let secp = Secp256k1::new();
     let pk = UntweakedPublicKey::from_slice(PK_BYTES).expect("Must be valid PK");
