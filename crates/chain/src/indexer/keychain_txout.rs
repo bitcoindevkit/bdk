@@ -1128,7 +1128,11 @@ pub trait FullScanRequestBuilderExt<K> {
 impl<K: Clone + Ord + core::fmt::Debug> FullScanRequestBuilderExt<K> for FullScanRequestBuilder<K> {
     fn spks_from_indexer(mut self, indexer: &KeychainTxOutIndex<K>) -> Self {
         for (keychain, spks) in indexer.all_unbounded_spk_iters() {
-            self = self.spks_for_keychain(keychain, spks);
+            let last_revealed = indexer.last_revealed_index(keychain.clone());
+            self = self.spks_for_keychain(keychain.clone(), spks);
+            if let Some(index) = last_revealed {
+                self = self.last_revealed_for_keychain(keychain, index);
+            }
         }
         self
     }

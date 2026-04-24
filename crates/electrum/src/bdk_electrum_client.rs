@@ -136,6 +136,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut last_active_indices = BTreeMap::<K, u32>::default();
         let mut pending_anchors = Vec::new();
         for keychain in request.keychains() {
+            let last_revealed = request.last_revealed(&keychain);
             let spks = request
                 .iter_spks(keychain.clone())
                 .map(|(spk_i, spk)| (spk_i, SpkWithExpectedTxids::from(spk)));
@@ -144,6 +145,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 &mut tx_update,
                 spks,
                 stop_gap,
+                last_revealed,
                 batch_size,
                 &mut pending_anchors,
             )? {
@@ -225,6 +227,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .enumerate()
                 .map(|(i, spk)| (i as u32, spk)),
             usize::MAX,
+            None,
             batch_size,
             &mut pending_anchors,
         )?;
@@ -273,12 +276,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// Transactions that contains an output with requested spk, or spends form an output with
     /// requested spk will be added to `tx_update`. Anchors of the aforementioned transactions are
     /// also included.
+    #[allow(clippy::too_many_arguments)]
     fn populate_with_spks(
         &self,
         start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         mut spks_with_expected_txids: impl Iterator<Item = (u32, SpkWithExpectedTxids)>,
         stop_gap: usize,
+        last_revealed: Option<u32>,
         batch_size: usize,
         pending_anchors: &mut Vec<(Txid, usize)>,
     ) -> Result<Option<u32>, Error> {
@@ -298,14 +303,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .batch_script_get_history(spks.iter().map(|(_, s)| s.spk.as_script()))?;
 
             for ((spk_index, spk), spk_history) in spks.into_iter().zip(spk_histories) {
-                if spk_history.is_empty() {
-                    match unused_spk_count.checked_add(1) {
-                        Some(i) if i < stop_gap => unused_spk_count = i,
-                        _ => return Ok(last_active_index),
-                    };
-                } else {
+                let beyond_revealed = last_revealed.is_none_or(|lr| spk_index > lr);
+
+                if !spk_history.is_empty() {
                     last_active_index = Some(spk_index);
                     unused_spk_count = 0;
+                } else if beyond_revealed {
+                    unused_spk_count = unused_spk_count.saturating_add(1);
+                    if unused_spk_count >= stop_gap {
+                        return Ok(last_active_index);
+                    }
                 }
 
                 let spk_history_set = spk_history
