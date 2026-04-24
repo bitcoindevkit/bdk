@@ -1,4 +1,4 @@
-use bdk_core::{CheckPoint, ToBlockHash, ToBlockTime};
+use bdk_core::{CheckPoint, MissingBlocks, ToBlockHash, ToBlockTime, WithMtp};
 use bdk_testenv::{block_id, hash};
 use bitcoin::hashes::Hash;
 use bitcoin::BlockHash;
@@ -86,19 +86,19 @@ fn test_median_time_past_with_timestamps() {
     let cp = CheckPoint::from_blocks(blocks).expect("must construct valid chain");
 
     // Height 11: 11 previous blocks (11..=1), pseudo-median at index 6 = 1060
-    assert_eq!(cp.median_time_past(), Some(1060));
+    assert_eq!(cp.compute_mtp(), Ok(1060));
 
     // Height 10: 11 previous blocks (10..=0), pseudo-median at index 5 = 1050
-    assert_eq!(cp.get(10).unwrap().median_time_past(), Some(1050));
+    assert_eq!(cp.get(10).unwrap().compute_mtp(), Ok(1050));
 
     // Height 5: 6 previous blocks (5..=0), pseudo-median at index 3 = 1030
-    assert_eq!(cp.get(5).unwrap().median_time_past(), Some(1030));
+    assert_eq!(cp.get(5).unwrap().compute_mtp(), Ok(1030));
 
     // Height 3: 4 previous blocks (3..=0), pseudo-median at index 2 = 1020
-    assert_eq!(cp.get(3).unwrap().median_time_past(), Some(1020));
+    assert_eq!(cp.get(3).unwrap().compute_mtp(), Ok(1020));
 
     // Height 0: 1 block at index 0 = 1000
-    assert_eq!(cp.get(0).unwrap().median_time_past(), Some(1000));
+    assert_eq!(cp.get(0).unwrap().compute_mtp(), Ok(1000));
 }
 
 #[test]
@@ -113,14 +113,14 @@ fn test_previous_median_time_past_edge_cases() {
     // At height 10: next_mtp uses all 11 blocks (0-10)
     // Times: [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000]
     // Median at index 5 = 1500
-    assert_eq!(cp.median_time_past(), Some(1500));
+    assert_eq!(cp.compute_mtp(), Ok(1500));
 
     // At height 9: mtp uses blocks 0-9 (10 blocks)
     // Times: [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900]
     // Median at index 5 = 1400
-    assert_eq!(cp.get(9).unwrap().median_time_past(), Some(1500));
+    assert_eq!(cp.get(9).unwrap().compute_mtp(), Ok(1500));
 
-    // Test sparse chain where next_mtp returns None due to missing blocks
+    // Test sparse chain where compute_mtp reports the missing heights
     let sparse = vec![
         (0, BlockWithTime(0, 1000)),
         (5, BlockWithTime(5, 1050)),
@@ -128,8 +128,13 @@ fn test_previous_median_time_past_edge_cases() {
     ];
     let sparse_cp = CheckPoint::from_blocks(sparse).expect("must construct valid chain");
 
-    // At height 10: next_mtp needs blocks 0-10 but many are missing
-    assert_eq!(sparse_cp.median_time_past(), None);
+    // At height 10: window is 0..=10; only 0, 5, 10 are present.
+    assert_eq!(
+        sparse_cp.compute_mtp(),
+        Err(MissingBlocks {
+            heights: vec![1, 2, 3, 4, 6, 7, 8, 9],
+        })
+    );
 }
 
 #[test]
@@ -155,18 +160,18 @@ fn test_mtp_with_non_monotonic_times() {
     // Height 10:
     // mtp uses blocks 0-10: sorted
     // [1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000] Median at index 5 = 1500
-    assert_eq!(cp.get(10).unwrap().median_time_past(), Some(1500));
+    assert_eq!(cp.get(10).unwrap().compute_mtp(), Ok(1500));
 
     // Height 11:
     // mtp uses blocks 1-11: sorted
     // [1000,1100,1200,1300,1400,1600,1650,1700,1800,1900,2000] Median at index 5 = 1600
-    assert_eq!(cp.median_time_past(), Some(1600));
+    assert_eq!(cp.compute_mtp(), Ok(1600));
 
     // Test with smaller chain to verify sorting at different heights
     let cp3 = cp.get(3).unwrap();
     // Height 3: timestamps [1100, 1800, 1200, 1500] -> sorted [1100, 1200, 1500, 1800]
     // Pseudo-median at index 2 = 1500
-    assert_eq!(cp3.median_time_past(), Some(1500));
+    assert_eq!(cp3.compute_mtp(), Ok(1500));
 }
 
 #[test]
@@ -182,9 +187,60 @@ fn test_mtp_sparse_chain() {
 
     let cp = CheckPoint::from_blocks(blocks).expect("must construct valid chain");
 
-    // All heights should return None due to missing sequential blocks
-    assert_eq!(cp.median_time_past(), None);
-    assert_eq!(cp.get(11).unwrap().median_time_past(), None);
+    // Tip is at height 15, window is 5..=15; present in window: 7, 11, 15.
+    assert_eq!(
+        cp.compute_mtp(),
+        Err(MissingBlocks {
+            heights: vec![5, 6, 8, 9, 10, 12, 13, 14],
+        })
+    );
+    // At height 11 the window is 1..=11; present in window: 3, 7, 11.
+    assert_eq!(
+        cp.get(11).unwrap().compute_mtp(),
+        Err(MissingBlocks {
+            heights: vec![1, 2, 4, 5, 6, 8, 9, 10],
+        })
+    );
+}
+
+#[test]
+fn test_with_mtp_returns_stored_value() {
+    let blocks: Vec<(u32, WithMtp<BlockHash>)> = vec![
+        (
+            0,
+            WithMtp {
+                mtp: 1000,
+                inner: hash!("a"),
+            },
+        ),
+        (
+            1,
+            WithMtp {
+                mtp: 1010,
+                inner: hash!("b"),
+            },
+        ),
+        (
+            2,
+            WithMtp {
+                mtp: 1020,
+                inner: hash!("c"),
+            },
+        ),
+        (
+            3,
+            WithMtp {
+                mtp: 1030,
+                inner: hash!("d"),
+            },
+        ),
+    ];
+
+    let cp = CheckPoint::from_blocks(blocks).expect("must construct valid chain");
+
+    assert_eq!(cp.mtp(), 1030);
+    assert_eq!(cp.get(2).unwrap().mtp(), 1020);
+    assert_eq!(cp.get(0).unwrap().mtp(), 1000);
 }
 
 // Custom struct for testing with prev_blockhash
