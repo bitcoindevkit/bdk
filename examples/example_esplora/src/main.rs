@@ -235,8 +235,8 @@ fn main() -> anyhow::Result<()> {
             // Get a short lock on the structures to get spks, utxos, and txs that we are interested
             // in.
             {
-                let graph = graph.lock().unwrap();
-                let chain = chain.lock().unwrap();
+                let graph = graph.lock().expect("mutex poisoned");
+                let chain = chain.lock().expect("mutex poisoned");
                 let canonical_view = graph.canonical_view(
                     &*chain,
                     local_tip.block_id(),
@@ -290,7 +290,7 @@ fn main() -> anyhow::Result<()> {
     println!();
 
     // We persist the changes
-    let mut db = db.lock().unwrap();
+    let mut db = db.lock().expect("mutex poisoned");
     db.append(&ChangeSet {
         local_chain: local_chain_changeset,
         tx_graph: indexed_tx_graph_changeset.tx_graph,
