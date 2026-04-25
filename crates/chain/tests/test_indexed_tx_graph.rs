@@ -261,26 +261,24 @@ fn insert_relevant_txs() {
 
     let txs = [tx_c, tx_b, tx_a];
 
-    let changeset = indexed_tx_graph::ChangeSet {
-        tx_graph: tx_graph::ChangeSet {
-            txs: txs.iter().cloned().map(Arc::new).collect(),
-            ..Default::default()
-        },
-        indexer: keychain_txout::ChangeSet {
-            last_revealed: [(descriptor.descriptor_id(), 9_u32)].into(),
-            spk_cache: [(descriptor.descriptor_id(), {
-                let index_after_spk_1 = 9 /* index of spk_1 */ + 1;
-                SpkIterator::new_with_range(
-                    &descriptor,
-                    // This will also persist the staged spk cache inclusions from prev call to
-                    // `.insert_descriptor`.
-                    0..index_after_spk_1 + lookahead,
-                )
-                .collect()
-            })]
-            .into(),
-        },
-    };
+    let mut tx_graph_changeset = tx_graph::ChangeSet::default();
+    tx_graph_changeset.txs = txs.iter().cloned().map(Arc::new).collect();
+
+    let mut indexer_changeset = keychain_txout::ChangeSet::default();
+    indexer_changeset.last_revealed = [(descriptor.descriptor_id(), 9_u32)].into();
+    indexer_changeset.spk_cache = [(descriptor.descriptor_id(), {
+        let index_after_spk_1 = 9 /* index of spk_1 */ + 1;
+        SpkIterator::new_with_range(
+            &descriptor,
+            // This will also persist the staged spk cache inclusions from prev call to
+            // `.insert_descriptor`.
+            0..index_after_spk_1 + lookahead,
+        )
+        .collect()
+    })]
+    .into();
+
+    let changeset = indexed_tx_graph::ChangeSet::from((tx_graph_changeset, indexer_changeset));
 
     assert_eq!(
         graph.batch_insert_relevant(txs.iter().cloned().map(|tx| (tx, None))),
@@ -288,18 +286,16 @@ fn insert_relevant_txs() {
     );
 
     // The initial changeset will also contain info about the keychain we added
-    let initial_changeset = indexed_tx_graph::ChangeSet {
-        tx_graph: changeset.tx_graph,
-        indexer: keychain_txout::ChangeSet {
-            last_revealed: changeset.indexer.last_revealed,
-            spk_cache: [(
-                descriptor.descriptor_id(),
-                SpkIterator::new_with_range(&descriptor, 0..=9 /* index of spk_1*/  + lookahead)
-                    .collect(),
-            )]
-            .into(),
-        },
-    };
+    let mut initial_indexer_changeset = keychain_txout::ChangeSet::default();
+    initial_indexer_changeset.last_revealed = changeset.indexer.last_revealed;
+    initial_indexer_changeset.spk_cache = [(
+        descriptor.descriptor_id(),
+        SpkIterator::new_with_range(&descriptor, 0..=9 /* index of spk_1*/  + lookahead).collect(),
+    )]
+    .into();
+
+    let initial_changeset =
+        indexed_tx_graph::ChangeSet::from((changeset.tx_graph, initial_indexer_changeset));
 
     assert_eq!(graph.initial_changeset(), initial_changeset);
 }
