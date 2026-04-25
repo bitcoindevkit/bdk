@@ -7,7 +7,7 @@ use bdk_core::{
     bitcoin::{BlockHash, OutPoint, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
 };
-use esplora_client::Sleeper;
+use esplora_client::{EsploraTx, Sleeper};
 use futures::{stream::FuturesOrdered, TryStreamExt};
 
 use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
@@ -314,7 +314,7 @@ where
     I: Iterator<Item = Indexed<SpkWithExpectedTxids>> + Send,
     S: Sleeper + Clone + Send + Sync,
 {
-    type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
+    type TxsOfSpkIndex = (u32, Vec<EsploraTx>, HashSet<Txid>);
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     let mut last_active_index = Option::<u32>::None;
@@ -335,7 +335,7 @@ where
                     let mut last_seen = None;
                     let mut spk_txs = Vec::new();
                     loop {
-                        let txs = client.scripthash_txs(&spk, last_seen).await?;
+                        let txs = client.get_scripthash_txs(&spk, last_seen).await?;
                         let tx_count = txs.len();
                         last_seen = txs.last().map(|tx| tx.txid);
                         spk_txs.extend(txs);
