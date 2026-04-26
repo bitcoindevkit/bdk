@@ -1,4 +1,12 @@
-use bdk_chain::bitcoin;
+use bdk_chain::{
+    bitcoin,
+    miniscript::{Descriptor, DescriptorPublicKey},
+    BlockId,
+};
+use bitcoin::{
+    absolute::LockTime, constants, hashes::Hash, key::Secp256k1, transaction::Version, BlockHash,
+    Network, ScriptBuf, Transaction, TxOut,
+};
 
 #[allow(unused_macros)]
 #[macro_export]
@@ -67,14 +75,59 @@ macro_rules! changeset {
     }};
 }
 
+/// Generate a dummy script pubkey.
+#[allow(unused_macros)]
+#[macro_export]
+macro_rules! spk {
+    () => {{
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let (x_only_pk, _) = bitcoin::secp256k1::SecretKey::new(&mut rand::thread_rng())
+            .public_key(&secp)
+            .x_only_public_key();
+        bitcoin::ScriptBuf::new_p2tr(&secp, x_only_pk, None)
+    }};
+}
+
 #[allow(unused)]
-pub fn new_tx(lt: u32) -> bitcoin::Transaction {
-    bitcoin::Transaction {
+pub fn new_tx(lt: u32) -> Transaction {
+    Transaction {
         version: bitcoin::transaction::Version::non_standard(0x00),
         lock_time: bitcoin::absolute::LockTime::from_consensus(lt),
         input: vec![],
         output: vec![],
     }
+}
+
+/// Initialize a standard transaction with a guaranteed output.
+pub fn new_standard_tx(lt: u32) -> Transaction {
+    Transaction {
+        version: Version::TWO,
+        lock_time: LockTime::from_consensus(lt),
+        input: vec![],
+        output: vec![TxOut::NULL],
+    }
+}
+
+pub fn genesis_block_id() -> BlockId {
+    BlockId {
+        height: 0,
+        hash: constants::genesis_block(Network::Regtest).block_hash(),
+    }
+}
+
+pub fn tip_block_id(height: u32) -> BlockId {
+    BlockId {
+        height,
+        hash: BlockHash::all_zeros(),
+    }
+}
+
+/// Derives a [`ScriptBuf`] (scriptPubkey) from the provided descriptor at a specific index.
+pub fn spk_at_index(descriptor: &Descriptor<DescriptorPublicKey>, index: u32) -> ScriptBuf {
+    descriptor
+        .derived_descriptor(&Secp256k1::verification_only(), index)
+        .expect("must derive")
+        .script_pubkey()
 }
 
 #[allow(unused)]

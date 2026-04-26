@@ -1,7 +1,5 @@
 #![cfg(feature = "miniscript")]
 
-#[macro_use]
-mod common;
 use bdk_chain::{collections::*, BlockId, CanonicalizationParams, ConfirmationBlockTime};
 use bdk_chain::{
     local_chain::LocalChain,
@@ -10,13 +8,13 @@ use bdk_chain::{
     Anchor, ChainOracle, ChainPosition, Merge,
 };
 use bdk_testenv::{block_id, hash, utils::new_tx};
+use bdk_testenv::{init_graph, TxInTemplate, TxOutTemplate, TxTemplate};
 use bitcoin::hex::FromHex;
 use bitcoin::Witness;
 use bitcoin::{
     absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf, SignedAmount,
     Transaction, TxIn, TxOut, Txid,
 };
-use common::*;
 use core::iter;
 use rand::RngCore;
 use std::sync::Arc;
@@ -1097,9 +1095,7 @@ fn test_chain_spends() {
 
         // Because this tx conflicts with an already confirmed transaction, chain position should
         // return none.
-        assert!(canonical_positions
-            .get(&tx_1_conflict.compute_txid())
-            .is_none());
+        assert!(!canonical_positions.contains_key(&tx_1_conflict.compute_txid()));
     }
 
     // Another conflicting tx that conflicts with tx_2.
@@ -1143,7 +1139,7 @@ fn test_chain_spends() {
         );
 
         // Chain position of the `tx_2` is now none, as it is older than `tx_2_conflict`
-        assert!(canonical_positions.get(&tx_2.compute_txid()).is_none());
+        assert!(!canonical_positions.contains_key(&tx_2.compute_txid()));
     }
 }
 
@@ -1282,30 +1278,20 @@ fn call_map_anchors_with_non_deterministic_anchor() {
     }
 
     let template = [
-        TxTemplate {
-            tx_name: "tx1",
-            inputs: &[TxInTemplate::Bogus],
-            outputs: &[TxOutTemplate::new(10000, Some(1))],
-            anchors: &[block_id!(1, "A")],
-            last_seen: None,
-            ..Default::default()
-        },
-        TxTemplate {
-            tx_name: "tx2",
-            inputs: &[TxInTemplate::PrevTx("tx1", 0)],
-            outputs: &[TxOutTemplate::new(20000, Some(2))],
-            anchors: &[block_id!(2, "B")],
-            ..Default::default()
-        },
-        TxTemplate {
-            tx_name: "tx3",
-            inputs: &[TxInTemplate::PrevTx("tx2", 0)],
-            outputs: &[TxOutTemplate::new(30000, Some(3))],
-            anchors: &[block_id!(3, "C"), block_id!(4, "D")],
-            ..Default::default()
-        },
+        TxTemplate::new("tx1")
+            .with_inputs(vec![TxInTemplate::Bogus])
+            .with_outputs(vec![TxOutTemplate::new(10_000, Some(1))])
+            .with_anchors(vec![block_id!(1, "A")]),
+        TxTemplate::new("tx2")
+            .with_inputs(vec![TxInTemplate::PrevTx("tx1".into(), 0)])
+            .with_outputs(vec![TxOutTemplate::new(20_000, Some(2))])
+            .with_anchors(vec![block_id!(2, "B")]),
+        TxTemplate::new("tx3")
+            .with_inputs(vec![TxInTemplate::PrevTx("tx2".into(), 0)])
+            .with_outputs(vec![TxOutTemplate::new(30_000, Some(3))])
+            .with_anchors(vec![block_id!(3, "C"), block_id!(4, "D")]),
     ];
-    let graph = init_graph(&template).tx_graph;
+    let graph = init_graph(template).tx_graph;
     let new_graph = graph.clone().map_anchors(|a| NonDeterministicAnchor {
         anchor_block: a,
         // A non-deterministic value

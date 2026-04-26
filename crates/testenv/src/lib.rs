@@ -1,6 +1,8 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+pub mod tx_template;
 pub mod utils;
+pub use tx_template::*;
 
 use anyhow::Context;
 use bdk_chain::bitcoin::{
