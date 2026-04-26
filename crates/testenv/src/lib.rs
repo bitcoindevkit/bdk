@@ -538,3 +538,5 @@ mod test {
         Ok(())
     }
 }
+
+pub mod tx_template;
