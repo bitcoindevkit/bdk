@@ -53,7 +53,7 @@ cargo update -p unicode-ident --precise "1.0.13"
 cargo update -p hyper-util --precise "0.1.6"
 cargo update -p pin-project --precise "1.1.5"
 cargo update -p pin-project-internal --precise "1.1.5"
-cargo update -p "rustls@0.23.38" --precise "0.23.26"
+cargo update -p "rustls@0.23.39" --precise "0.23.26"
 cargo update -p "libc" --precise "0.2.183"
 cargo update -p "semver" --precise "1.0.27"
 
