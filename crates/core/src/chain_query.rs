@@ -28,6 +28,7 @@ pub trait ChainQuery {
     fn tip(&self) -> BlockId;
 
     /// Returns the next query needed, or `None` if no more queries are required.
+    #[must_use]
     fn next_query(&mut self) -> Option<ChainRequest>;
 
     /// Resolves a query with the given response.
