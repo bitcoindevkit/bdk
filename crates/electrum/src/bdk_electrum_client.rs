@@ -1,5 +1,9 @@
 use bdk_core::{
-    bitcoin::{block::Header, BlockHash, OutPoint, Transaction, Txid},
+    bitcoin::{
+        block::Header,
+        opcodes::{all::OP_RETURN, OP_FALSE},
+        BlockHash, OutPoint, Transaction, Txid,
+    },
     collections::{BTreeMap, HashMap, HashSet},
     spk_client::{
         FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
@@ -443,12 +447,39 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         for txid in txids {
             match self.fetch_tx(txid) {
                 Ok(tx) => {
-                    let spk = tx
-                        .output
-                        .first()
-                        .map(|txo| &txo.script_pubkey)
-                        .expect("tx must have an output")
-                        .clone();
+                    // pick the first output Electrum will return history for
+                    let mut spk = tx.output.iter().find_map(|txo| {
+                        let script = &txo.script_pubkey;
+                        (!script.is_op_return()
+                            && !script
+                                .as_bytes()
+                                .starts_with(&[OP_FALSE.to_u8(), OP_RETURN.to_u8()]))
+                        .then(|| script.clone())
+                    });
+
+                    // fallback: if no output is indexable, use the spk of any input's
+                    // previous output, its history includes our tx since we spend from it
+                    if spk.is_none() && !tx.is_coinbase() {
+                        for txin in &tx.input {
+                            match self.fetch_tx(txin.previous_output.txid) {
+                                Ok(parent) => {
+                                    if let Some(prev_out) =
+                                        parent.output.get(txin.previous_output.vout as usize)
+                                    {
+                                        spk = Some(prev_out.script_pubkey.clone());
+                                        break;
+                                    }
+                                }
+                                Err(electrum_client::Error::Protocol(_)) => continue,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                    }
+
+                    let spk = match spk {
+                        Some(spk) => spk,
+                        None => continue,
+                    };
                     txs.push((txid, tx));
                     scripts.push(spk);
                 }
