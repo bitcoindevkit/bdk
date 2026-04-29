@@ -9,7 +9,7 @@ use bdk_chain::{
 };
 use bdk_testenv::{
     anyhow,
-    corepc_node::{Input, Output},
+    bitcoind::{Input, Output},
     TestEnv,
 };
 use bitcoin::{hashes::Hash, Block, Network, ScriptBuf, WScriptHash};
