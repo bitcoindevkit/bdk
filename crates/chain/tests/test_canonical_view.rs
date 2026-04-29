@@ -1,10 +1,155 @@
 #![cfg(feature = "miniscript")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use bdk_chain::{local_chain::LocalChain, CanonicalizationParams, ConfirmationBlockTime, TxGraph};
 use bdk_testenv::{hash, utils::new_tx};
-use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid};
+
+// =============================================================================
+// Test case pattern for extract_subgraph tests
+// =============================================================================
+
+#[derive(Clone, Copy)]
+struct TestTx {
+    /// Name to identify this tx
+    name: &'static str,
+    /// Which tx outputs this tx spends: &[(parent_name, vout)]
+    spends: &'static [(&'static str, u32)],
+    /// Number of outputs to create
+    num_outputs: u32,
+    /// Anchor height (None = unconfirmed, use seen_at)
+    anchor_height: Option<u32>,
+}
+
+struct ExtractSubgraphTestCase {
+    /// Transactions in the graph
+    txs: &'static [TestTx],
+    /// Names of transactions to extract
+    extract: &'static [&'static str],
+    /// Expected tx names in extracted view
+    expect_extracted: &'static [&'static str],
+    /// Expected tx names remaining in original view
+    expect_remaining: &'static [&'static str],
+}
+
+fn build_chain(max_height: u32) -> LocalChain {
+    use bitcoin::hashes::Hash;
+    let blocks: BTreeMap<u32, BlockHash> = (0..=max_height)
+        .map(|h| (h, BlockHash::hash(format!("block{}", h).as_bytes())))
+        .collect();
+    LocalChain::from_blocks(blocks).unwrap()
+}
+
+fn build_test_graph(
+    chain: &LocalChain,
+    txs: &[TestTx],
+) -> (TxGraph<ConfirmationBlockTime>, HashMap<&'static str, Txid>) {
+    let mut tx_graph = TxGraph::default();
+    let mut name_to_txid = HashMap::new();
+
+    for (i, test_tx) in txs.iter().enumerate() {
+        let inputs: Vec<TxIn> = test_tx
+            .spends
+            .iter()
+            .map(|(parent, vout)| TxIn {
+                previous_output: OutPoint::new(name_to_txid[parent], *vout),
+                ..Default::default()
+            })
+            .collect();
+
+        let tx = Transaction {
+            input: inputs,
+            output: (0..test_tx.num_outputs)
+                .map(|_| TxOut {
+                    value: Amount::from_sat(10_000),
+                    script_pubkey: ScriptBuf::new(),
+                })
+                .collect(),
+            ..new_tx(i as u32)
+        };
+
+        let txid = tx.compute_txid();
+        name_to_txid.insert(test_tx.name, txid);
+        let _ = tx_graph.insert_tx(tx);
+
+        match test_tx.anchor_height {
+            Some(h) => {
+                let _ = tx_graph.insert_anchor(
+                    txid,
+                    ConfirmationBlockTime {
+                        block_id: chain.get(h).unwrap().block_id(),
+                        confirmation_time: h as u64 * 100,
+                    },
+                );
+            }
+            None => {
+                let _ = tx_graph.insert_seen_at(txid, 1000);
+            }
+        }
+    }
+
+    (tx_graph, name_to_txid)
+}
+
+fn run_extract_subgraph_test(case: &ExtractSubgraphTestCase) {
+    let max_height = case
+        .txs
+        .iter()
+        .filter_map(|tx| tx.anchor_height)
+        .max()
+        .unwrap_or(0);
+    let chain = build_chain(max_height + 1);
+
+    let (tx_graph, name_to_txid) = build_test_graph(&chain, case.txs);
+    let mut view = tx_graph.canonical_view(&chain, chain.tip().block_id(), Default::default());
+
+    // Extract
+    let extract_txids = case
+        .extract
+        .iter()
+        .filter_map(|name| name_to_txid.get(name).copied());
+    let extracted = view.extract_descendant_subgraph(extract_txids);
+
+    // Verify extracted
+    for name in case.expect_extracted {
+        assert!(
+            extracted.tx(name_to_txid[name]).is_some(),
+            "{} should be in extracted",
+            name
+        );
+    }
+
+    // Verify not in extracted (should be remaining)
+    for name in case.expect_remaining {
+        assert!(
+            extracted.tx(name_to_txid[name]).is_none(),
+            "{} should not be in extracted",
+            name
+        );
+    }
+
+    // Verify remaining
+    for name in case.expect_remaining {
+        assert!(
+            view.tx(name_to_txid[name]).is_some(),
+            "{} should remain",
+            name
+        );
+    }
+
+    // Verify not remaining (should be extracted)
+    for name in case.expect_extracted {
+        assert!(
+            view.tx(name_to_txid[name]).is_none(),
+            "{} should not remain",
+            name
+        );
+    }
+
+    verify_spends_consistency(&extracted);
+    verify_spends_consistency(&view);
+}
 
 #[test]
 fn test_min_confirmations_parameter() {
@@ -300,4 +445,183 @@ fn test_min_confirmations_multiple_transactions() {
         Amount::from_sat(20_000 + 30_000) // tx1 + tx2
     );
     assert_eq!(balance_high.untrusted_pending, Amount::ZERO);
+}
+
+#[test]
+fn test_extract_subgraph_basic_chain() {
+    // tx0 -> tx1 -> tx2
+    run_extract_subgraph_test(&ExtractSubgraphTestCase {
+        txs: &[
+            TestTx {
+                name: "tx0",
+                spends: &[],
+                num_outputs: 1,
+                anchor_height: Some(1),
+            },
+            TestTx {
+                name: "tx1",
+                spends: &[("tx0", 0)],
+                num_outputs: 1,
+                anchor_height: Some(2),
+            },
+            TestTx {
+                name: "tx2",
+                spends: &[("tx1", 0)],
+                num_outputs: 1,
+                anchor_height: None,
+            },
+        ],
+        extract: &["tx1"],
+        expect_extracted: &["tx1", "tx2"],
+        expect_remaining: &["tx0"],
+    });
+}
+
+#[test]
+fn test_extract_subgraph_diamond_graph() {
+    //     tx0 (2 outputs)
+    //    /    \
+    //  tx1    tx2
+    //    \    /
+    //     tx3
+    //      |
+    //     tx4
+    run_extract_subgraph_test(&ExtractSubgraphTestCase {
+        txs: &[
+            TestTx {
+                name: "tx0",
+                spends: &[],
+                num_outputs: 2,
+                anchor_height: Some(1),
+            },
+            TestTx {
+                name: "tx1",
+                spends: &[("tx0", 0)],
+                num_outputs: 1,
+                anchor_height: Some(2),
+            },
+            TestTx {
+                name: "tx2",
+                spends: &[("tx0", 1)],
+                num_outputs: 1,
+                anchor_height: Some(2),
+            },
+            TestTx {
+                name: "tx3",
+                spends: &[("tx1", 0), ("tx2", 0)],
+                num_outputs: 1,
+                anchor_height: Some(3),
+            },
+            TestTx {
+                name: "tx4",
+                spends: &[("tx3", 0)],
+                num_outputs: 1,
+                anchor_height: None,
+            },
+        ],
+        extract: &["tx1", "tx2"],
+        expect_extracted: &["tx1", "tx2", "tx3", "tx4"],
+        expect_remaining: &["tx0"],
+    });
+}
+
+#[test]
+fn test_extract_subgraph_nonexistent_tx() {
+    run_extract_subgraph_test(&ExtractSubgraphTestCase {
+        txs: &[TestTx {
+            name: "tx0",
+            spends: &[],
+            num_outputs: 1,
+            anchor_height: Some(1),
+        }],
+        extract: &["fake"],
+        expect_extracted: &[],
+        expect_remaining: &["tx0"],
+    });
+}
+
+#[test]
+fn test_extract_subgraph_partial_chain() {
+    // tx0 -> tx1 -> tx2 -> tx3
+    run_extract_subgraph_test(&ExtractSubgraphTestCase {
+        txs: &[
+            TestTx {
+                name: "tx0",
+                spends: &[],
+                num_outputs: 1,
+                anchor_height: Some(1),
+            },
+            TestTx {
+                name: "tx1",
+                spends: &[("tx0", 0)],
+                num_outputs: 1,
+                anchor_height: Some(2),
+            },
+            TestTx {
+                name: "tx2",
+                spends: &[("tx1", 0)],
+                num_outputs: 1,
+                anchor_height: Some(3),
+            },
+            TestTx {
+                name: "tx3",
+                spends: &[("tx2", 0)],
+                num_outputs: 1,
+                anchor_height: Some(4),
+            },
+        ],
+        extract: &["tx1"],
+        expect_extracted: &["tx1", "tx2", "tx3"],
+        expect_remaining: &["tx0"],
+    });
+}
+
+// Helper function to verify spends field consistency
+fn verify_spends_consistency<A: bdk_chain::Anchor>(view: &bdk_chain::CanonicalView<A>) {
+    // Verify each transaction's outputs and their spent status
+    for tx in view.txs() {
+        // Verify the transaction exists
+        assert!(view.tx(tx.txid).is_some());
+
+        // For each output, check if it's properly tracked as spent
+        for vout in 0..tx.tx.output.len() {
+            let op = OutPoint::new(tx.txid, vout as u32);
+            if let Some(txout) = view.txout(op) {
+                // If this output is spent, verify the spending tx exists
+                if let Some((_, spending_txid)) = txout.spent_by {
+                    assert!(
+                        view.tx(spending_txid).is_some(),
+                        "Spending tx {spending_txid} not found in view"
+                    );
+
+                    // Verify the spending tx actually has this input
+                    let spending_tx = view.tx(spending_txid).unwrap();
+                    assert!(
+                        spending_tx
+                            .tx
+                            .input
+                            .iter()
+                            .any(|input| input.previous_output == op),
+                        "Transaction {spending_txid} doesn't actually spend outpoint {op}"
+                    );
+                }
+            }
+        }
+
+        // For each input (except coinbase), verify it references valid outpoints
+        if !tx.tx.is_coinbase() {
+            for input in &tx.tx.input {
+                // If the parent tx is in this view, verify the output exists and shows as spent
+                if let Some(parent_txout) = view.txout(input.previous_output) {
+                    assert_eq!(
+                        parent_txout.spent_by.as_ref().map(|(_, txid)| *txid),
+                        Some(tx.txid),
+                        "Output {:?} should be marked as spent by tx {}",
+                        input.previous_output,
+                        tx.txid
+                    );
+                }
+            }
+        }
+    }
 }
