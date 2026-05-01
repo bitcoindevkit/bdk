@@ -15,9 +15,8 @@ use bdk_chain::{
 };
 use bdk_testenv::{
     anyhow::{self},
-    block_id,
-    corepc_node::{Input, Output},
-    hash,
+    bitcoind::{Input, Output},
+    block_id, hash,
     utils::{new_tx, DESCRIPTORS},
     TestEnv,
 };

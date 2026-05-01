@@ -4,7 +4,7 @@ use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
 use bdk_chain::spk_txout::SpkTxOutIndex;
 use bdk_chain::{ConfirmationBlockTime, IndexedTxGraph, TxGraph};
 use bdk_esplora::EsploraAsyncExt;
-use bdk_testenv::corepc_node::{Input, Output};
+use bdk_testenv::bitcoind::{Input, Output};
 use bdk_testenv::{anyhow, TestEnv};
 use esplora_client::{self, Builder};
 use std::collections::{BTreeSet, HashSet};
@@ -62,7 +62,7 @@ pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
 
     // Create and sign the `send_tx` that sends funds to the receiver address.
     let address = receiver_addr;
-    let value = selected_utxo.amount.to_unsigned()? - SEND_TX_FEE;
+    let value = selected_utxo.amount - SEND_TX_FEE;
     let send_tx_outputs = Output::new(address, value);
 
     let send_tx = rpc_client
@@ -78,7 +78,7 @@ pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     // address.
     let undo_send_outputs = [Output::new(
         sender_addr,
-        selected_utxo.amount.to_unsigned()? - UNDO_SEND_TX_FEE,
+        selected_utxo.amount - UNDO_SEND_TX_FEE,
     )];
     let undo_send_tx = rpc_client
         .create_raw_transaction(&inputs, &undo_send_outputs)?

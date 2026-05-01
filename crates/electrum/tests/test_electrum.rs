@@ -13,7 +13,7 @@ use bdk_core::bitcoin::{
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{
     anyhow,
-    corepc_node::{Input, Output},
+    bitcoind::{Input, Output},
     TestEnv,
 };
 use core::time::Duration;
@@ -141,7 +141,7 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     // Create and sign the `send_tx` that sends funds to the receiver address.
     let send_tx_outputs = [Output::new(
         receiver_addr,
-        selected_utxo.amount.to_unsigned()? - SEND_TX_FEE,
+        selected_utxo.amount - SEND_TX_FEE,
     )];
     let send_tx = rpc_client
         .create_raw_transaction(&inputs, &send_tx_outputs)?
@@ -156,7 +156,7 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
     // address.
     let undo_send_outputs = [Output::new(
         sender_addr,
-        selected_utxo.amount.to_unsigned()? - UNDO_SEND_TX_FEE,
+        selected_utxo.amount - UNDO_SEND_TX_FEE,
     )];
     let undo_send_tx = rpc_client
         .create_raw_transaction(&inputs, &undo_send_outputs)?

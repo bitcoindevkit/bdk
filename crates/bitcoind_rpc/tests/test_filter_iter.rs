@@ -1,6 +1,6 @@
 use bdk_bitcoind_rpc::bip158::{Error, FilterIter};
 use bdk_core::CheckPoint;
-use bdk_testenv::{anyhow, corepc_node, TestEnv};
+use bdk_testenv::{anyhow, bitcoind, TestEnv};
 use bitcoin::{Address, Amount, Network, ScriptBuf};
 use bitcoincore_rpc::RpcApi;
 
@@ -9,7 +9,7 @@ use crate::common::ClientExt;
 mod common;
 
 fn testenv() -> anyhow::Result<TestEnv> {
-    let mut conf = corepc_node::Conf::default();
+    let mut conf = bitcoind::Conf::default();
     conf.args.push("-blockfilterindex=1");
     conf.args.push("-peerblockfilters=1");
     TestEnv::new_with_config(bdk_testenv::Config {

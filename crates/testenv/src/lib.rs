@@ -11,28 +11,28 @@ use bdk_chain::CheckPoint;
 use bitcoin::address::NetworkChecked;
 use bitcoin::hex::HexToBytesError;
 use core::time::Duration;
-use electrsd::corepc_node::mtype::GetBlockTemplate;
-use electrsd::corepc_node::{TemplateRequest, TemplateRules};
+use electrsd::bitcoind::mtype::GetBlockTemplate;
+use electrsd::bitcoind::{TemplateRequest, TemplateRules};
 
 pub use electrsd;
+pub use electrsd::bitcoind;
+pub use electrsd::bitcoind::anyhow;
 pub use electrsd::corepc_client;
-pub use electrsd::corepc_node;
-pub use electrsd::corepc_node::anyhow;
 pub use electrsd::electrum_client;
 use electrsd::electrum_client::ElectrumApi;
 
 /// Struct for running a regtest environment with a single `bitcoind` node with an `electrs`
 /// instance connected to it.
 pub struct TestEnv {
-    pub bitcoind: electrsd::corepc_node::Node,
+    pub bitcoind: electrsd::bitcoind::BitcoinD,
     pub electrsd: electrsd::ElectrsD,
 }
 
 /// Configuration parameters.
 #[derive(Debug)]
 pub struct Config<'a> {
-    /// [`corepc_node::Conf`]
-    pub bitcoind: corepc_node::Conf<'a>,
+    /// [`bitcoind::Conf`]
+    pub bitcoind: bitcoind::Conf<'a>,
     /// [`electrsd::Conf`]
     pub electrsd: electrsd::Conf<'a>,
 }
@@ -42,7 +42,7 @@ impl Default for Config<'_> {
     /// which is required for testing `bdk_esplora`.
     fn default() -> Self {
         Self {
-            bitcoind: corepc_node::Conf::default(),
+            bitcoind: bitcoind::Conf::default(),
             electrsd: {
                 let mut conf = electrsd::Conf::default();
                 conf.http_enabled = true;
@@ -88,11 +88,11 @@ impl TestEnv {
     pub fn new_with_config(config: Config) -> anyhow::Result<Self> {
         let bitcoind_exe = match std::env::var("BITCOIND_EXE") {
             Ok(path) => path,
-            Err(_) => corepc_node::downloaded_exe_path().context(
+            Err(_) => bitcoind::downloaded_exe_path().context(
                 "you need to provide an env var BITCOIND_EXE or specify a bitcoind version feature",
             )?,
         };
-        let bitcoind = corepc_node::Node::with_conf(bitcoind_exe, &config.bitcoind)?;
+        let bitcoind = bitcoind::BitcoinD::with_conf(bitcoind_exe, &config.bitcoind)?;
 
         let electrs_exe = match std::env::var("ELECTRS_EXE") {
             Ok(path) => path,
@@ -110,7 +110,7 @@ impl TestEnv {
     }
 
     /// Exposes the RPC calls from [`corepc_client`].
-    pub fn rpc_client(&self) -> &corepc_node::Client {
+    pub fn rpc_client(&self) -> &bitcoind::Client {
         &self.bitcoind.client
     }
 
@@ -428,7 +428,7 @@ mod test {
     use bdk_chain::bitcoin::opcodes::OP_TRUE;
     use bdk_chain::bitcoin::Amount;
     use core::time::Duration;
-    use electrsd::corepc_node::anyhow::Result;
+    use electrsd::bitcoind::anyhow::Result;
     use std::collections::BTreeSet;
 
     /// This checks that reorgs initiated by `bitcoind` is detected by our `electrsd` instance.
