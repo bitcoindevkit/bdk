@@ -9,7 +9,7 @@ fn test_btree_map_merge() {
     let mut map2: BTreeMap<i32, &str> = BTreeMap::new();
     map2.insert(2, "b");
 
-    map1.merge(map2);
+    Merge::merge(&mut map1, map2);
 
     let expected: BTreeMap<i32, &str> = BTreeMap::from([(1, "a"), (2, "b")]);
     assert_eq!(map1, expected);
@@ -89,7 +89,7 @@ fn test_btree_map_merge_conflict() {
     let mut map2: BTreeMap<i32, &str> = BTreeMap::new();
     map2.insert(1, "b");
 
-    map1.merge(map2);
+    Merge::merge(&mut map1, map2);
 
     let expected: BTreeMap<i32, &str> = BTreeMap::from([(1, "b")]);
     assert_eq!(map1, expected);
