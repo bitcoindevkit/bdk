@@ -374,7 +374,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             .inner
             .batch_script_get_history(unique_spks.iter().map(|spk| spk.as_script()))?;
         let mut spk_map = HashMap::new();
-        for (spk, history) in unique_spks.into_iter().zip(histories.into_iter()) {
+        for (spk, history) in unique_spks.into_iter().zip(histories) {
             spk_map.insert(spk, history);
         }
 
@@ -540,7 +540,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let proofs = self.inner.batch_transaction_get_merkle(to_fetch.iter())?;
 
         // Validate each proof, retrying once for each stale header.
-        for ((txid, height), proof) in to_fetch.into_iter().zip(proofs.into_iter()) {
+        for ((txid, height), proof) in to_fetch.into_iter().zip(proofs) {
             let mut header = {
                 let cache = self.block_header_cache.lock().unwrap();
                 cache
