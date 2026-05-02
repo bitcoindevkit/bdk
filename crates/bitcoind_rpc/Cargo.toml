@@ -17,7 +17,7 @@ workspace = true
 
 [dependencies]
 bitcoin = { version = "0.32.0", default-features = false }
-bitcoincore-rpc = { version = "0.19.0" }
+bdk_bitcoind_client ={ version = "0.1.0", default-features = false }
 bdk_core = { path = "../core", version = "0.6.1", default-features = false }
 
 [dev-dependencies]
@@ -26,9 +26,12 @@ bdk_testenv = { path = "../testenv" }
 bdk_chain = { path = "../chain" }
 
 [features]
-default = ["std"]
+default = ["std", "bitcoind_28_0"]
 std = ["bitcoin/std", "bdk_core/std"]
 serde = ["bitcoin/serde", "bdk_core/serde"]
+bitcoind_28_0 =["bdk_bitcoind_client/28_0"] 
+bitcoind_29_0 = ["bdk_bitcoind_client/29_0"]
+bitcoind_30_0 = ["bdk_bitcoind_client/30_0"]
 
 [[example]]
 name = "filter_iter"
