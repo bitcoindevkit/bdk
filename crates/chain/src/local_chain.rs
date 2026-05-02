@@ -441,6 +441,7 @@ where
 /// The [`ChangeSet`] represents changes to [`LocalChain`].
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[non_exhaustive]
 pub struct ChangeSet<D = BlockHash> {
     /// Changes to the [`LocalChain`] blocks.
     ///
