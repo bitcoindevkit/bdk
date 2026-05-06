@@ -470,17 +470,17 @@ fn test_list_owned_txouts() {
                 .map(|cp| cp.block_id())
                 .unwrap_or_else(|| panic!("block must exist at {height}"));
             let txouts = local_chain
-                .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
+                .canonicalize(graph.graph(), chain_tip, CanonicalParams::default())
                 .filter_outpoints(graph.index.outpoints().iter().cloned())
                 .collect::<Vec<_>>();
 
             let utxos = local_chain
-                .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
+                .canonicalize(graph.graph(), chain_tip, CanonicalParams::default())
                 .filter_unspent_outpoints(graph.index.outpoints().iter().cloned())
                 .collect::<Vec<_>>();
 
             let balance = local_chain
-                .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
+                .canonicalize(graph.graph(), chain_tip, CanonicalParams::default())
                 .balance(
                     graph.index.outpoints().iter().cloned(),
                     |_, txout| trusted_spks.contains(&txout.txout.script_pubkey),
@@ -790,7 +790,7 @@ fn test_get_chain_position() {
         // check chain position
         let chain_tip = chain.tip().block_id();
         let chain_pos = chain
-            .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
+            .canonicalize(graph.graph(), chain_tip, CanonicalParams::default())
             .txs()
             .find_map(|canon_tx| {
                 if canon_tx.txid == txid {

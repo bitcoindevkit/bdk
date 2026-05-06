@@ -238,7 +238,7 @@ fn main() -> anyhow::Result<()> {
                 let graph = graph.lock().unwrap();
                 let chain = chain.lock().unwrap();
                 let local_tip_block = local_tip.block_id();
-                let canonical_view = chain.canonical_view(
+                let canonical_view = chain.canonicalize(
                     graph.graph(),
                     local_tip_block,
                     CanonicalParams::default(),

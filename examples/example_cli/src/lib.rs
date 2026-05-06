@@ -426,7 +426,7 @@ pub fn planned_utxos(
     let chain_tip = chain.tip().block_id();
     let outpoints = graph.index.outpoints();
     chain
-        .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
+        .canonicalize(graph.graph(), chain_tip, CanonicalParams::default())
         .filter_unspent_outpoints(outpoints.iter().cloned())
         .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
             let desc = graph
@@ -520,7 +520,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
 
             let chain_tip = chain.tip().block_id();
             let balance = chain
-                .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
+                .canonicalize(graph.graph(), chain_tip, CanonicalParams::default())
                 .balance(
                     graph.index.outpoints().iter().cloned(),
                     |(k, _), _| k == &Keychain::Internal,
@@ -563,7 +563,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     unconfirmed,
                 } => {
                     let txouts = chain
-                        .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
+                        .canonicalize(graph.graph(), chain_tip, CanonicalParams::default())
                         .filter_outpoints(outpoints.iter().cloned())
                         .filter(|(_, full_txo)| match (spent, unspent) {
                             (true, false) => full_txo.spent_by.is_some(),

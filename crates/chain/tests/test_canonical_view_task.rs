@@ -97,7 +97,7 @@ fn test_assumed_canonical_scenarios() {
         // build task & canonicalize
         let canonical_params = env.canonicalization_params;
         let canonical_task = env.tx_graph.canonical_task(chain_tip, canonical_params);
-        let (canonical_txs, queries) = local_chain.canonicalize(canonical_task);
+        let (canonical_txs, queries) = local_chain.run_task(canonical_task);
 
         // assert canonical transactions
         let exp_canonical_txids: HashSet<Txid> = scenario
@@ -176,7 +176,7 @@ fn test_assumed_canonical_scenarios() {
 
         // build task & resolve positions
         let view_task = canonical_txs.view_task(&env.tx_graph, queries);
-        let canonical_view = local_chain.canonicalize(view_task);
+        let canonical_view = local_chain.run_task(view_task);
 
         // assert final positions
         for (tx_name, exp_position) in exp_positions {

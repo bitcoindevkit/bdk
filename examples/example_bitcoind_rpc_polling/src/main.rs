@@ -145,7 +145,7 @@ fn main() -> anyhow::Result<()> {
                     chain.tip(),
                     fallback_height,
                     chain
-                        .canonical_view(
+                        .canonicalize(
                             graph.graph(),
                             chain.tip().block_id(),
                             CanonicalParams::default(),
@@ -197,7 +197,7 @@ fn main() -> anyhow::Result<()> {
                     let synced_to = chain.tip();
                     let balance = {
                         chain
-                            .canonical_view(
+                            .canonicalize(
                                 graph.graph(),
                                 synced_to.block_id(),
                                 CanonicalParams::default(),
@@ -250,7 +250,7 @@ fn main() -> anyhow::Result<()> {
                     chain.tip(),
                     fallback_height,
                     chain
-                        .canonical_view(
+                        .canonicalize(
                             graph.graph(),
                             chain.tip().block_id(),
                             CanonicalParams::default(),
@@ -357,7 +357,7 @@ fn main() -> anyhow::Result<()> {
                     let synced_to = chain.tip();
                     let balance = {
                         chain
-                            .canonical_view(
+                            .canonicalize(
                                 graph.graph(),
                                 synced_to.block_id(),
                                 CanonicalParams::default(),

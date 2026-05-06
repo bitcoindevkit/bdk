@@ -101,7 +101,7 @@ pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
         .spks_with_indexes(graph.index.all_spks().clone())
         .expected_spk_txids(
             chain
-                .canonical_view(graph.graph(), chain.tip().block_id(), Default::default())
+                .canonicalize(graph.graph(), chain.tip().block_id(), Default::default())
                 .list_expected_spk_txids(&graph.index, ..),
         );
     let sync_response = client.sync(sync_request, 1).await?;
@@ -131,7 +131,7 @@ pub async fn detect_receive_tx_cancel() -> anyhow::Result<()> {
         .spks_with_indexes(graph.index.all_spks().clone())
         .expected_spk_txids(
             chain
-                .canonical_view(graph.graph(), chain.tip().block_id(), Default::default())
+                .canonicalize(graph.graph(), chain.tip().block_id(), Default::default())
                 .list_expected_spk_txids(&graph.index, ..),
         );
     let sync_response = client.sync(sync_request, 1).await?;

@@ -229,7 +229,7 @@ fn main() -> anyhow::Result<()> {
 
             let chain_tip_block = chain_tip.block_id();
             let canonical_view =
-                chain.canonical_view(graph.graph(), chain_tip_block, CanonicalParams::default());
+                chain.canonicalize(graph.graph(), chain_tip_block, CanonicalParams::default());
 
             request = request
                 .expected_spk_txids(canonical_view.list_expected_spk_txids(&graph.index, ..));

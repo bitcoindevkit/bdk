@@ -413,13 +413,13 @@ where
             .map(|cp| cp.hash() == block.hash)
     }
 
-    /// Canonicalize a transaction graph using this chain.
+    /// Drive a [`ChainTask<D>`] to completion against this chain.
     ///
     /// This method processes any type implementing [`ChainTask<D>`], handling all its requests
-    /// to determine which transactions are canonical, and returns the query's output.
-    /// The chain responds with its data type `D`, so `LocalChain<Header>` responds with
-    /// headers and `LocalChain<BlockHash>` responds with hashes.
-    pub fn canonicalize<Q>(&self, mut task: Q) -> Q::Output
+    /// against this chain and returning the task's output. The chain responds with its data
+    /// type `D`, so `LocalChain<Header>` responds with headers and `LocalChain<BlockHash>`
+    /// responds with hashes.
+    pub fn run_task<Q>(&self, mut task: Q) -> Q::Output
     where
         Q: ChainTask<D>,
         D: Clone,
@@ -445,24 +445,24 @@ where
         }
     }
 
-    /// Convenience method that runs both canonicalization phases and returns a [`CanonicalView`].
+    /// Canonicalize a transaction graph against this chain and return a [`CanonicalView`].
     ///
     /// This is equivalent to:
     /// ```ignore
-    /// let (txs, queries) = chain.canonicalize(CanonicalTask::new(&tx_graph, tip, params));
-    /// let view = chain.canonicalize(txs.view_task(tx_graph, queries));
+    /// let (txs, queries) = chain.run_task(CanonicalTask::new(&tx_graph, tip, params));
+    /// let view = chain.run_task(txs.view_task(tx_graph, queries));
     /// ```
-    pub fn canonical_view<A: Anchor>(
+    pub fn canonicalize<A: Anchor>(
         &self,
         tx_graph: &TxGraph<A>,
         tip: BlockId,
         params: CanonicalParams,
     ) -> CanonicalView<A> {
-        let (txs, queries) = self.canonicalize(CanonicalTask::new(tx_graph, tip, params));
-        self.canonicalize(txs.view_task(tx_graph, queries))
+        let (txs, queries) = self.run_task(CanonicalTask::new(tx_graph, tip, params));
+        self.run_task(txs.view_task(tx_graph, queries))
     }
 
-    /// Like [`canonical_view`](Self::canonical_view), but also computes median-time-past (MTP)
+    /// Like [`canonicalize`](Self::canonicalize), but also computes median-time-past (MTP)
     /// values for confirmed transactions and the chain tip.
     ///
     /// Requires `D: ToBlockTime` (e.g. `LocalChain<Header>`).
@@ -470,7 +470,7 @@ where
     /// The resulting [`CanonicalView`] will have per-tx MTP on
     /// [`CanonicalTx::mtp`](crate::CanonicalTx::mtp) and the tip MTP accessible via
     /// [`tip_mtp()`](crate::Canonical::tip_mtp).
-    pub fn canonical_view_with_mtp<A: Anchor>(
+    pub fn canonicalize_with_mtp<A: Anchor>(
         &self,
         tx_graph: &TxGraph<A>,
         tip: BlockId,
@@ -479,8 +479,8 @@ where
     where
         D: ToBlockTime,
     {
-        let (txs, queries) = self.canonicalize(CanonicalTask::new(tx_graph, tip, params));
-        self.canonicalize(txs.view_task(tx_graph, queries).with_mtp())
+        let (txs, queries) = self.run_task(CanonicalTask::new(tx_graph, tip, params));
+        self.run_task(txs.view_task(tx_graph, queries).with_mtp())
     }
 
     fn _check_changeset_is_applied(&self, changeset: &ChangeSet<D>) -> bool {

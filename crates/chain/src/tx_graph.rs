@@ -28,7 +28,7 @@
 //!    that encapsulates the canonicalization logic without performing any I/O operations.
 //!
 //! 2. **Execute the task** with a chain oracle to obtain a [`CanonicalView`]: ```ignore let view =
-//!    chain.canonicalize(task); ``` The chain oracle (such as
+//!    chain.run_task(task); ``` The chain oracle (such as
 //!    [`LocalChain`](crate::local_chain::LocalChain)) handles all anchor verification queries from
 //!    the task.
 //!

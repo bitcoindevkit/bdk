@@ -494,9 +494,9 @@ mod tests {
         // Create canonicalization task and canonicalize using the two-step pipeline
         let params = CanonicalParams::default();
         let task = CanonicalTask::new(&tx_graph, chain_tip, params);
-        let (txs, queries) = chain.canonicalize(task);
+        let (txs, queries) = chain.run_task(task);
         let view_task = txs.view_task(&tx_graph, queries);
-        let canonical_view = chain.canonicalize(view_task);
+        let canonical_view = chain.run_task(view_task);
 
         // Should have one canonical transaction
         assert_eq!(canonical_view.txs().len(), 1);
@@ -567,9 +567,9 @@ mod tests {
         // Run the two-phase pipeline with MTP enabled
         let params = CanonicalParams::default();
         let task = CanonicalTask::new(&tx_graph, chain_tip, params);
-        let (txs, queries) = chain.canonicalize(task);
+        let (txs, queries) = chain.run_task(task);
         let view_task = txs.view_task(&tx_graph, queries).with_mtp();
-        let view = chain.canonicalize(view_task);
+        let view = chain.run_task(view_task);
 
         // Should have one tx
         assert_eq!(view.txs().len(), 1);
