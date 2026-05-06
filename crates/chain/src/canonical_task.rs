@@ -1,14 +1,14 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
 use crate::tx_graph::{TxAncestors, TxDescendants};
-use crate::{Anchor, CanonicalTxs, TxGraph};
+use crate::{canonical::CanonicalEntry, Anchor, CanonicalTxs, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bdk_core::{BlockId, ChainQuery, ChainRequest, ChainResponse};
+use bdk_core::{BlockId, BlockQueries, ChainTask, TaskProgress, ToBlockHash};
 use bitcoin::{Transaction, Txid};
 
-type CanonicalMap<A> = HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>;
+type CanonicalMap<A> = HashMap<Txid, CanonicalEntry<CanonicalReason<A>>>;
 type NotCanonicalSet = HashSet<Txid>;
 
 /// Represents the current stage of canonicalization processing.
@@ -28,7 +28,7 @@ enum CanonicalStage {
 }
 
 impl CanonicalStage {
-    fn advance(&mut self) {
+    fn next_stage(&mut self) {
         *self = match self {
             CanonicalStage::AssumedTxs => Self::AnchoredTxs,
             CanonicalStage::AnchoredTxs => Self::SeenTxs,
@@ -56,9 +56,11 @@ pub struct CanonicalParams {
 /// (via [`CanonicalReason`](crate::CanonicalReason)). The output is a [`CanonicalTxs`] which can
 /// then be further processed by [`CanonicalViewTask`](crate::CanonicalViewTask) to resolve reasons
 /// into [`ChainPosition`](crate::ChainPosition)s.
-pub struct CanonicalTask<'g, A> {
+pub struct CanonicalTask<'g, A, B> {
     tx_graph: &'g TxGraph<A>,
     chain_tip: BlockId,
+
+    queries: BlockQueries<B>,
 
     unprocessed_assumed_txs: Box<dyn Iterator<Item = (Txid, Arc<Transaction>)> + 'g>,
     unprocessed_anchored_txs: VecDeque<(Txid, Arc<Transaction>, &'g BTreeSet<A>)>,
@@ -75,153 +77,176 @@ pub struct CanonicalTask<'g, A> {
     current_stage: CanonicalStage,
 }
 
-impl<'g, A: Anchor> ChainQuery for CanonicalTask<'g, A> {
-    type Output = CanonicalTxs<A>;
+impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalTask<'g, A, B> {
+    type Output = (CanonicalTxs<A>, BlockQueries<B>);
 
     fn tip(&self) -> BlockId {
         self.chain_tip
     }
 
-    fn next_query(&mut self) -> Option<ChainRequest> {
-        loop {
-            match self.current_stage {
-                CanonicalStage::AssumedTxs => {
-                    if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
-                        if !self.is_canonicalized(txid) {
-                            self.mark_canonical(txid, tx, CanonicalReason::assumed());
-                        }
-                        continue;
-                    }
-                }
-                CanonicalStage::AnchoredTxs => {
-                    if let Some((_txid, _, anchors)) = self.unprocessed_anchored_txs.front() {
-                        let block_ids =
-                            anchors.iter().map(|anchor| anchor.anchor_block()).collect();
-                        return Some(block_ids);
-                    }
-                }
-                CanonicalStage::SeenTxs => {
-                    if let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
-                        // A coinbase tx cannot be in the mempool, so a `last_seen` value on one is
-                        // not evidence of it being canonical.
-                        if !self.is_canonicalized(txid) && !tx.is_coinbase() {
-                            let observed_in = ObservedIn::Mempool(last_seen);
-                            self.mark_canonical(
-                                txid,
-                                tx,
-                                CanonicalReason::from_observed_in(observed_in),
-                            );
-                        }
-                        continue;
-                    }
-                }
-                CanonicalStage::LeftOverTxs => {
-                    if let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
-                        let is_evicted = self
-                            .tx_graph
-                            .get_tx_node(txid)
-                            .expect("leftover transaction must exist")
-                            .is_evicted();
-                        if !self.is_canonicalized(txid) && !tx.is_coinbase() && !is_evicted {
-                            let observed_in = ObservedIn::Block(height);
-                            self.mark_canonical(
-                                txid,
-                                tx,
-                                CanonicalReason::from_observed_in(observed_in),
-                            );
-                        }
-                        continue;
-                    }
-                }
-                CanonicalStage::Finished => return None,
-            }
+    fn unresolved_queries<'a>(&'a self) -> impl Iterator<Item = u32> + 'a {
+        self.queries.unresolved()
+    }
 
-            self.current_stage.advance();
+    fn poll(&mut self) -> TaskProgress {
+        match self.current_stage {
+            CanonicalStage::AssumedTxs => {
+                if let Some((txid, tx)) = self.unprocessed_assumed_txs.next() {
+                    if !self.is_canonicalized(txid) {
+                        self.mark_canonical(txid, tx, CanonicalReason::assumed());
+                    }
+                } else {
+                    self.current_stage.next_stage();
+                }
+                TaskProgress::Advanced
+            }
+            CanonicalStage::AnchoredTxs => {
+                // We query block data lazily, one frontier tx at a time, rather than batching all
+                // anchor heights up front. This is deliberate: anchored txs are processed
+                // latest-first, and marking one canonical sweeps all its ancestors transitively
+                // (see `mark_canonical`) without any further queries. So the number of queries is
+                // bounded by the *frontier* of each confirmed subgraph, not the total tx count.
+                // Eager batching would over-query heights for ancestors that transitivity covers
+                // for free.
+                //
+                // The trade-off: a driver where each query is a network round-trip (e.g. a future
+                // Bitcoin Core RPC driver) sees one serial round-trip per frontier tx, instead of
+                // a hashmap lookup. Batching these is tracked in #2403.
+                if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.pop_front() {
+                    if self.is_canonicalized(txid) {
+                        return TaskProgress::Advanced;
+                    }
+
+                    let mut best_anchor = Option::<A>::None;
+                    for a in anchors.iter() {
+                        let h = a.anchor_block().height;
+                        // A block that is either unresolved (`None`), absent at this height
+                        // (`Some(None)`), or present but mismatched does not confirm this anchor.
+                        if let Some(Some(b)) = self.queries.get(h) {
+                            if b.to_blockhash() == a.anchor_block().hash {
+                                best_anchor = Some(a.clone());
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(a) = best_anchor {
+                        self.mark_canonical(txid, tx, CanonicalReason::from_anchor(a));
+                        return TaskProgress::Advanced;
+                    }
+
+                    // No resolved anchor matched. `request` returns only heights that are neither
+                    // resolved nor already in-flight, so a non-empty result is genuinely new work
+                    // to fetch. This keeps `Query` additive and never empty.
+                    let heights = self
+                        .queries
+                        .request(anchors.iter().map(|a| a.anchor_block().height));
+                    if !heights.is_empty() {
+                        self.unprocessed_anchored_txs
+                            .push_front((txid, tx, anchors));
+                        return TaskProgress::Query(heights);
+                    }
+
+                    // No new heights to request. If any anchor height is still in-flight (requested
+                    // but unresolved), we can't decide this tx yet — wait for the driver. Otherwise
+                    // every anchor height is resolved and none matched, so the tx is not confirmed.
+                    if anchors
+                        .iter()
+                        .any(|a| self.queries.get(a.anchor_block().height).is_none())
+                    {
+                        self.unprocessed_anchored_txs
+                            .push_front((txid, tx, anchors));
+                        return TaskProgress::Blocked;
+                    }
+
+                    // No confirmed anchor found.
+                    self.unprocessed_leftover_txs.push_back((
+                        txid,
+                        tx,
+                        anchors
+                            .iter()
+                            .last()
+                            .expect("must have at least one anchor")
+                            .anchor_block()
+                            .height,
+                    ));
+                } else {
+                    self.current_stage.next_stage();
+                }
+                TaskProgress::Advanced
+            }
+            CanonicalStage::SeenTxs => {
+                if let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
+                    // A coinbase tx cannot be in the mempool, so a `last_seen` value on one is
+                    // not evidence of it being canonical.
+                    if !self.is_canonicalized(txid) && !tx.is_coinbase() {
+                        let observed_in = ObservedIn::Mempool(last_seen);
+                        self.mark_canonical(
+                            txid,
+                            tx,
+                            CanonicalReason::from_observed_in(observed_in),
+                        );
+                    }
+                } else {
+                    self.current_stage.next_stage();
+                }
+                TaskProgress::Advanced
+            }
+            CanonicalStage::LeftOverTxs => {
+                if let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
+                    let is_evicted = self
+                        .tx_graph
+                        .get_tx_node(txid)
+                        .expect("leftover transaction must exist")
+                        .is_evicted();
+                    if !self.is_canonicalized(txid) && !tx.is_coinbase() && !is_evicted {
+                        let observed_in = ObservedIn::Block(height);
+                        self.mark_canonical(
+                            txid,
+                            tx,
+                            CanonicalReason::from_observed_in(observed_in),
+                        );
+                    }
+                } else {
+                    self.current_stage.next_stage();
+                }
+                TaskProgress::Advanced
+            }
+            CanonicalStage::Finished => TaskProgress::Done,
         }
     }
 
-    fn resolve_query(&mut self, response: ChainResponse) {
-        match self.current_stage {
-            CanonicalStage::AnchoredTxs => {
-                // Process directly anchored transaction response
-                if let Some((txid, tx, anchors)) = self.unprocessed_anchored_txs.pop_front() {
-                    // Find the anchor that matches the confirmed BlockId
-                    let best_anchor = response.and_then(|block_id| {
-                        anchors
-                            .iter()
-                            .find(|anchor| anchor.anchor_block() == block_id)
-                            .cloned()
-                    });
-
-                    match best_anchor {
-                        Some(best_anchor) => {
-                            // Transaction has a confirmed anchor
-                            if !self.is_canonicalized(txid) {
-                                self.mark_canonical(
-                                    txid,
-                                    tx,
-                                    CanonicalReason::from_anchor(best_anchor),
-                                );
-                            }
-                        }
-                        None => {
-                            // No confirmed anchor found, add to leftover transactions for later
-                            // processing
-                            self.unprocessed_leftover_txs.push_back((
-                                txid,
-                                tx,
-                                anchors
-                                    .iter()
-                                    .last()
-                                    .expect(
-                                        "tx taken from `unprocessed_anchored_txs` so it must have at least one anchor",
-                                    )
-                                    .anchor_block()
-                                    .height,
-                            ))
-                        }
-                    }
-                }
-            }
-            CanonicalStage::AssumedTxs
-            | CanonicalStage::SeenTxs
-            | CanonicalStage::LeftOverTxs
-            | CanonicalStage::Finished => {
-                // These stages don't generate queries and shouldn't receive responses
-                debug_assert!(
-                    false,
-                    "resolve_query called for stage {:?} which doesn't generate queries",
-                    self.current_stage
-                );
-            }
-        }
+    fn resolve_query(&mut self, height: u32, block: Option<B>) {
+        self.queries.resolve(height, block);
     }
 
     fn finish(self) -> Self::Output {
-        let mut view_order = Vec::new();
-        let mut view_txs = HashMap::new();
         let mut view_spends = HashMap::new();
 
         for txid in &self.canonical_order {
-            if let Some((tx, reason)) = self.canonical.get(txid) {
-                view_order.push(*txid);
-
-                // Add spends
-                if !tx.is_coinbase() {
-                    for input in &tx.input {
+            if let Some(entry) = self.canonical.get(txid) {
+                if !entry.tx.is_coinbase() {
+                    for input in &entry.tx.input {
                         view_spends.insert(input.previous_output, *txid);
                     }
                 }
-
-                view_txs.insert(*txid, (tx.clone(), reason.clone()));
             }
         }
 
-        CanonicalTxs::new(self.chain_tip, view_order, view_txs, view_spends)
+        (
+            CanonicalTxs::new(
+                self.chain_tip,
+                self.canonical_order,
+                self.canonical,
+                view_spends,
+                None,
+            ),
+            self.queries,
+        )
     }
 }
 
-impl<'g, A: Anchor> CanonicalTask<'g, A> {
+impl<'g, A: Anchor, B: ToBlockHash> CanonicalTask<'g, A, B> {
     /// Creates a new canonicalization task.
     pub fn new(tx_graph: &'g TxGraph<A>, chain_tip: BlockId, params: CanonicalParams) -> Self {
         let anchors = tx_graph.all_anchors();
@@ -256,6 +281,8 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
 
             canonical_order: Vec::new(),
             current_stage: CanonicalStage::default(),
+
+            queries: BlockQueries::new(),
         }
     }
 
@@ -321,7 +348,11 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
                 }
 
                 staged_canonical.push((this_txid, tx.clone(), this_reason.clone()));
-                canonical_entry.insert((tx.clone(), this_reason));
+                canonical_entry.insert(CanonicalEntry {
+                    tx: tx.clone(),
+                    pos: this_reason,
+                    prev_mtp: None,
+                });
                 Some(this_txid)
             },
         )
@@ -490,9 +521,9 @@ mod tests {
         // Create canonicalization task and canonicalize using the two-step pipeline
         let params = CanonicalParams::default();
         let task = CanonicalTask::new(&tx_graph, chain_tip, params);
-        let canonical_txs = chain.canonicalize(task);
-        let view_task = canonical_txs.view_task(&tx_graph);
-        let canonical_view = chain.canonicalize(view_task);
+        let (txs, queries) = chain.run_task(task);
+        let view_task = txs.view_task(&tx_graph, queries);
+        let canonical_view = chain.run_task(view_task);
 
         // Should have one canonical transaction
         assert_eq!(canonical_view.txs().len(), 1);
