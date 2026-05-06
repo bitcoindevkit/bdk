@@ -1003,7 +1003,7 @@ fn test_tx_conflict_handling() {
     for scenario in scenarios {
         let env = init_graph(scenario.tx_templates.iter());
 
-        let canonical_view = local_chain.canonical_view(
+        let canonical_view = local_chain.canonicalize(
             &env.tx_graph,
             chain_tip,
             env.canonicalization_params.clone(),
@@ -1078,7 +1078,7 @@ fn test_tx_conflict_handling() {
 /// height is only an upper bound until its own anchor is known.
 #[test]
 fn transitively_confirmed_tx_reports_descendant_anchor_height() {
-    let chain = local_chain![
+    let chain: LocalChain<BlockHash> = local_chain![
         (0, hash!("genesis")),
         (1, hash!("parent_block")),
         (5, hash!("child_block"))
@@ -1110,7 +1110,7 @@ fn transitively_confirmed_tx_reports_descendant_anchor_height() {
 
     let parent_position = |tx_graph: &TxGraph<BlockId>| {
         chain
-            .canonical_view(tx_graph, tip, Default::default())
+            .canonicalize(tx_graph, tip, Default::default())
             .txs()
             .find(|tx| tx.txid == parent_txid)
             .expect("parent must be canonical")

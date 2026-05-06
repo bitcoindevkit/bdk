@@ -90,8 +90,7 @@ fn test_is_settled_boundary() {
     };
     let _ = tx_graph.insert_anchor(txid, anchor_height_5);
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let canonical_view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = canonical_view.tip().height;
 
     // Test min_confirmations = 1: Should be confirmed (has 6 confirmations)
@@ -195,8 +194,7 @@ fn test_min_confirmations_with_untrusted_tx() {
     };
     let _ = tx_graph.insert_anchor(txid, anchor);
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let canonical_view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = canonical_view.tip().height;
 
     // Test with min_confirmations = 5 and everything tainted
@@ -358,8 +356,7 @@ fn test_min_confirmations_multiple_transactions() {
     );
     outpoints.push(outpoint2);
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let canonical_view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = canonical_view.tip().height;
 
     // Test with min_confirmations = 5
@@ -496,7 +493,7 @@ fn test_balance_taint_propagates_through_unconfirmed_ancestry() {
     .into_iter()
     .collect::<HashSet<_>>();
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // Our unspent owned outputs: `trusted` and `chained` (the others are spent).
     let utxos = [
@@ -549,7 +546,7 @@ fn test_balance_is_settled_is_authoritative_for_unconfirmed() {
     let _ = tx_graph.insert_tx(tx);
     let _ = tx_graph.insert_seen_at(txid, 1000);
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // An `is_settled` that claims everything is settled counts the (mature, non-coinbase)
     // unconfirmed output as settled rather than dropping it, even when it is tainted.
@@ -621,7 +618,7 @@ fn test_balance_taint_stops_at_settled_ancestor() {
     .into_iter()
     .collect::<HashSet<_>>();
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // `child` is the only UTXO (`settled_foreign:0` is spent by it).
     let by_op = view
@@ -696,7 +693,7 @@ fn test_classify_immature_and_settled() {
         );
     }
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let ops = [
         OutPoint::new(coinbase_txid, 0),
         OutPoint::new(normal_txid, 0),
@@ -790,7 +787,7 @@ fn test_balance_taint_shared_ancestor() {
     .into_iter()
     .collect::<HashSet<_>>();
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // Both children descend from the same tainting `foreign`, so both are untrusted.
     let balance = view.balance(
@@ -850,7 +847,7 @@ fn test_classify_skips_spent_and_unknown() {
         let _ = tx_graph.insert_seen_at(tx.compute_txid(), 1000);
     }
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     let classified = view
         .classify_outpoints(
@@ -898,7 +895,7 @@ fn test_immature_coinbase_stays_immature_when_unsettled() {
         },
     );
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = view.tip().height;
 
     // Require 3 confirmations to be settled.
@@ -945,7 +942,7 @@ fn test_mature_coinbase_is_settled_not_immature() {
         },
     );
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = view.tip().height;
 
     let by_op = view
@@ -1002,7 +999,7 @@ fn test_unsettled_unknown_when_parent_root_missing() {
     }
     // `missing_root` is not inserted.
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     let by_op = view
         .classify_outpoints(
@@ -1057,7 +1054,7 @@ fn test_evicted_stale_anchored_tx_not_canonical() {
     let _ = tx_graph.insert_seen_at(txid, 100);
     let _ = tx_graph.insert_evicted_at(txid, 200);
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     assert!(
         !view.txs().any(|tx| tx.txid == txid),
         "evicted leftover tx must not be canonical"
@@ -1095,7 +1092,7 @@ fn test_classify_locked() {
         },
     );
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let ops = [OutPoint::new(txid, 0)];
 
     // Timelock unmet
@@ -1159,7 +1156,7 @@ fn test_classify_locked_descriptor_timelocks() {
     let _ = tx_graph.insert_seen_at(txid, 100);
 
     let classify = |chain: &LocalChain, tx_graph: &TxGraph<ConfirmationBlockTime>| {
-        let view = chain.canonical_view(tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(tx_graph, chain.tip().block_id(), Default::default());
         let tip = view.tip().height;
         let ops = [OutPoint::new(txid, 0), OutPoint::new(txid, 1)];
         view.classify_outpoints(

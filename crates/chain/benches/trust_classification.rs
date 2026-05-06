@@ -420,7 +420,7 @@ fn bench_fan_in(c: &mut Criterion) {
     for (width, depth) in [(10, 3), (50, 5), (100, 10), (500, 20)] {
         let label = format!("{width}w×{depth}d");
         let (chain, tx_graph, utxo_txids, owned) = setup_fan_in(width, depth);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
@@ -433,7 +433,7 @@ fn bench_disjoint(c: &mut Criterion) {
     for (width, depth) in [(10, 3), (50, 5), (100, 10), (500, 20)] {
         let label = format!("{width}w×{depth}d");
         let (chain, tx_graph, utxo_txids, owned) = setup_disjoint(width, depth);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
@@ -446,7 +446,7 @@ fn bench_untrusted_fan_in(c: &mut Criterion) {
     for (width, depth) in [(10, 3), (50, 5), (100, 10), (500, 20)] {
         let label = format!("{width}w×{depth}d");
         let (chain, tx_graph, utxo_txids, owned) = setup_untrusted_fan_in(width, depth);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
@@ -459,7 +459,7 @@ fn bench_diamond(c: &mut Criterion) {
     for (shared, utxos) in [(5, 20), (10, 50), (20, 100), (50, 500)] {
         let label = format!("{shared}s×{utxos}u");
         let (chain, tx_graph, utxo_txids, owned) = setup_diamond(shared, utxos);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
@@ -472,7 +472,7 @@ fn bench_tainted_midchain(c: &mut Criterion) {
     for (width, depth) in [(10, 3), (50, 5), (100, 10), (500, 20)] {
         let label = format!("{width}w×{depth}d");
         let (chain, tx_graph, utxo_txids, owned) = setup_tainted_midchain(width, depth);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
