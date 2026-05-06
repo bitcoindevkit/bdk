@@ -70,7 +70,7 @@ fn main() -> anyhow::Result<()> {
     println!("Local tip: {}", chain.tip().height());
 
     let canonical_view =
-        chain.canonical_view(graph.graph(), chain.tip().block_id(), Default::default());
+        chain.canonicalize(graph.graph(), chain.tip().block_id(), Default::default());
 
     let unspent: Vec<_> = canonical_view
         .filter_unspent_outpoints(graph.index.outpoints().clone())

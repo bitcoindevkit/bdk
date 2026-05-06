@@ -320,7 +320,7 @@ fn get_balance(
 ) -> anyhow::Result<Balance> {
     let outpoints = recv_graph.index.outpoints().clone();
     let balance = recv_chain
-        .canonical_view(
+        .canonicalize(
             recv_graph.graph(),
             recv_chain.tip().block_id(),
             Default::default(),
@@ -635,7 +635,7 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
 
     // Retrieve the expected unconfirmed txids and spks from the graph.
     let exp_spk_txids = chain
-        .canonical_view(graph.graph(), chain_tip, Default::default())
+        .canonicalize(graph.graph(), chain_tip, Default::default())
         .list_expected_spk_txids(&graph.index, ..)
         .collect::<Vec<_>>();
     assert_eq!(exp_spk_txids, vec![(spk, txid_1)]);
@@ -651,7 +651,7 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     let _ = graph.batch_insert_relevant_evicted_at(mempool_event.evicted);
 
     let canonical_txids = chain
-        .canonical_view(graph.graph(), chain_tip, Default::default())
+        .canonicalize(graph.graph(), chain_tip, Default::default())
         .txs()
         .map(|tx| tx.txid)
         .collect::<Vec<_>>();

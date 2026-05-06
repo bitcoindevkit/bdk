@@ -97,7 +97,7 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
         .chain_tip(chain.tip())
         .spks_with_indexes(graph.index.all_spks().clone())
         .expected_spk_txids(
-            { chain.canonical_view(graph.graph(), chain.tip().block_id(), Default::default()) }
+            { chain.canonicalize(graph.graph(), chain.tip().block_id(), Default::default()) }
                 .list_expected_spk_txids(&graph.index, ..),
         );
     let sync_response = client.sync(sync_request, 1)?;
@@ -126,7 +126,7 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
         .chain_tip(chain.tip())
         .spks_with_indexes(graph.index.all_spks().clone())
         .expected_spk_txids(
-            { chain.canonical_view(graph.graph(), chain.tip().block_id(), Default::default()) }
+            { chain.canonicalize(graph.graph(), chain.tip().block_id(), Default::default()) }
                 .list_expected_spk_txids(&graph.index, ..),
         );
     let sync_response = client.sync(sync_request, 1)?;

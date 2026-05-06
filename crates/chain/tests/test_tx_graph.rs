@@ -1015,7 +1015,7 @@ fn test_chain_spends() {
     let build_canonical_spends =
         |chain: &LocalChain, tx_graph: &TxGraph<ConfirmationBlockTime>| -> HashMap<OutPoint, _> {
             chain
-                .canonical_view(tx_graph, tip.block_id(), Default::default())
+                .canonicalize(tx_graph, tip.block_id(), Default::default())
                 .filter_outpoints(tx_graph.all_txouts().map(|(op, _)| ((), op)))
                 .filter_map(|(_, full_txo)| Some((full_txo.outpoint, full_txo.spent_by?)))
                 .collect()
@@ -1024,7 +1024,7 @@ fn test_chain_spends() {
                                      tx_graph: &TxGraph<ConfirmationBlockTime>|
      -> HashMap<Txid, ChainPosition<ConfirmationBlockTime>> {
         chain
-            .canonical_view(tx_graph, tip.block_id(), Default::default())
+            .canonicalize(tx_graph, tip.block_id(), Default::default())
             .txs()
             .map(|canon_tx| (canon_tx.txid, canon_tx.pos))
             .collect()
@@ -1198,14 +1198,14 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
     let canonical_txs: Vec<_> = chain
-        .canonical_view(&graph, chain.tip().block_id(), Default::default())
+        .canonicalize(&graph, chain.tip().block_id(), Default::default())
         .txs()
         .collect();
     assert!(canonical_txs.is_empty());
 
     // tx0 with seen_at should be returned by canonical txs
     let _ = graph.insert_seen_at(txids[0], 2);
-    let view = chain.canonical_view(&graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&graph, chain.tip().block_id(), Default::default());
     let mut canonical_txs = view.txs();
     assert_eq!(canonical_txs.next().map(|tx| tx.txid).unwrap(), txids[0]);
     drop(canonical_txs);
@@ -1213,7 +1213,7 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
     // tx1 with anchor is also canonical
     let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
     let canonical_txids: Vec<_> = chain
-        .canonical_view(&graph, chain.tip().block_id(), Default::default())
+        .canonicalize(&graph, chain.tip().block_id(), Default::default())
         .txs()
         .map(|tx| tx.txid)
         .collect();
