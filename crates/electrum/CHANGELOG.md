@@ -7,6 +7,14 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [electrum-0.24.0]
+
+### Changed
+
+- fix(ci): pin `openssl`, and `rustls`.
+- chore(deps): bump `electrum-client` to 0.25.0.
+- chore: update to use new `electrum-client` features without `use-` prefix.
+
 ## [electrum-0.23.2]
 
 ### Added
@@ -76,3 +84,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [electrum-0.23.0]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.0
 [electrum-0.23.1]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.1
 [electrum-0.23.2]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.2
+[electrum-0.24.0]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.24.0

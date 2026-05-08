@@ -1,6 +1,6 @@
 [package]
 name = "bdk_electrum"
-version = "0.23.2"
+version = "0.24.0"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"
@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 bdk_core = { path = "../core", version = "0.6.1" }
-electrum-client = { version = "0.24.0", features = [ "proxy" ], default-features = false }
+electrum-client = { version = "0.25.0", features = [ "proxy" ], default-features = false }
 
 [dev-dependencies]
 bdk_testenv = { path = "../testenv" }
@@ -23,9 +23,9 @@ criterion = { version = "0.2" }
 
 [features]
 default = ["use-rustls"]
-use-rustls = ["electrum-client/use-rustls"]
-use-rustls-ring = ["electrum-client/use-rustls-ring"]
-use-openssl = ["electrum-client/use-openssl"]
+use-rustls = ["electrum-client/rustls"]
+use-rustls-ring = ["electrum-client/rustls-ring"]
+use-openssl = ["electrum-client/openssl"]
 
 [[test]]
 name = "test_electrum"
