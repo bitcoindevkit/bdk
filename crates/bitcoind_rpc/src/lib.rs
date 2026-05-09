@@ -282,7 +282,7 @@ where
     let client = &*emitter.client;
 
     if let Some(last_res) = &emitter.last_block {
-        let next_hash = if last_res.height < emitter.start_height as _ {
+        let next_hash = if last_res.height + 1 < emitter.start_height as _ {
             // enforce start height
             let next_hash = client.get_block_hash(emitter.start_height as _)?;
             // make sure last emission is still in best chain
@@ -362,6 +362,13 @@ where
                 continue;
             }
             PollResponse::AgreementFound(res, cp) => {
+                // When a reorg happens, the agreement point drops below `last_cp`. We
+                // override `start_height` so the emitter revisits the invalidated heights.
+                if (res.height as u32) < emitter.start_height
+                    && (res.height as u32) < emitter.last_cp.height()
+                {
+                    emitter.start_height = res.height as _;
+                }
                 // get rid of evicted blocks
                 emitter.last_cp = cp;
                 emitter.last_block = Some(res);
