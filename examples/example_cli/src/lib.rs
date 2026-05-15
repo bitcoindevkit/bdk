@@ -1,6 +1,7 @@
 use bdk_chain::keychain_txout::DEFAULT_LOOKAHEAD;
 use serde_json::json;
 use std::cmp;
+use std::convert::Infallible;
 use std::env;
 use std::fmt;
 use std::str::FromStr;
@@ -18,12 +19,12 @@ use bdk_chain::miniscript::{
     psbt::PsbtExt,
     Descriptor, DescriptorPublicKey, ForEachKey,
 };
-use bdk_chain::CanonicalizationParams;
+use bdk_chain::CanonicalParams;
 use bdk_chain::ConfirmationBlockTime;
 use bdk_chain::{
     indexer::keychain_txout::{self, KeychainTxOutIndex},
     local_chain::{self, LocalChain},
-    tx_graph, ChainOracle, DescriptorExt, FullTxOut, IndexedTxGraph, Merge,
+    tx_graph, CanonicalTxOut, ChainPosition, DescriptorExt, IndexedTxGraph, Merge,
 };
 use bdk_coin_select::{
     metrics::LowestFee, Candidate, ChangePolicy, CoinSelector, DrainWeights, FeeRate, Target,
@@ -258,18 +259,15 @@ pub struct ChangeInfo {
     pub index: u32,
 }
 
-pub fn create_tx<O: ChainOracle>(
+pub fn create_tx(
     graph: &mut KeychainTxGraph,
-    chain: &O,
+    chain: &LocalChain,
     assets: &Assets,
     cs_algorithm: CoinSelectionAlgo,
     address: Address,
     value: u64,
     feerate: f32,
-) -> anyhow::Result<(Psbt, Option<ChangeInfo>)>
-where
-    O::Error: core::error::Error + Send + Sync + 'static,
-{
+) -> anyhow::Result<(Psbt, Option<ChangeInfo>)> {
     let mut changeset = keychain_txout::ChangeSet::default();
 
     // get planned utxos
@@ -281,9 +279,9 @@ where
             plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.txout.value))
         }
         CoinSelectionAlgo::SmallestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.txout.value),
-        CoinSelectionAlgo::OldestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.chain_position),
+        CoinSelectionAlgo::OldestFirst => plan_utxos.sort_by_key(|(_, utxo)| utxo.pos),
         CoinSelectionAlgo::NewestFirst => {
-            plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.chain_position))
+            plan_utxos.sort_by_key(|(_, utxo)| cmp::Reverse(utxo.pos))
         }
         CoinSelectionAlgo::BranchAndBound => plan_utxos.shuffle(&mut thread_rng()),
     }
@@ -392,9 +390,7 @@ where
         version: transaction::Version::TWO,
         lock_time: assets
             .absolute_timelock
-            .unwrap_or(absolute::LockTime::from_height(
-                chain.get_chain_tip()?.height,
-            )?),
+            .unwrap_or(absolute::LockTime::from_height(chain.chain_tip().height)?),
         input: selected
             .iter()
             .map(|(plan, utxo)| TxIn {
@@ -420,17 +416,17 @@ where
 }
 
 // Alias the elements of `planned_utxos`
-pub type PlanUtxo = (Plan, FullTxOut<ConfirmationBlockTime>);
+pub type PlanUtxo = (Plan, CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>);
 
-pub fn planned_utxos<O: ChainOracle>(
+pub fn planned_utxos(
     graph: &KeychainTxGraph,
-    chain: &O,
+    chain: &LocalChain,
     assets: &Assets,
-) -> Result<Vec<PlanUtxo>, O::Error> {
-    let chain_tip = chain.get_chain_tip()?;
+) -> Result<Vec<PlanUtxo>, Infallible> {
+    let chain_tip = chain.tip().block_id();
     let outpoints = graph.index.outpoints();
-    graph
-        .try_canonical_view(chain, chain_tip, CanonicalizationParams::default())?
+    chain
+        .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
         .filter_unspent_outpoints(outpoints.iter().cloned())
         .filter_map(|((k, i), full_txo)| -> Option<Result<PlanUtxo, _>> {
             let desc = graph
@@ -522,12 +518,9 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                 }
             }
 
-            let balance = graph
-                .try_canonical_view(
-                    chain,
-                    chain.get_chain_tip()?,
-                    CanonicalizationParams::default(),
-                )?
+            let chain_tip = chain.tip().block_id();
+            let balance = chain
+                .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
                 .balance(
                     graph.index.outpoints().iter().cloned(),
                     |(k, _), _| k == &Keychain::Internal,
@@ -559,7 +552,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
         Commands::TxOut { txout_cmd } => {
             let graph = &*graph.lock().unwrap();
             let chain = &*chain.lock().unwrap();
-            let chain_tip = chain.get_chain_tip()?;
+            let chain_tip = chain.chain_tip();
             let outpoints = graph.index.outpoints();
 
             match txout_cmd {
@@ -569,8 +562,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                     confirmed,
                     unconfirmed,
                 } => {
-                    let txouts = graph
-                        .try_canonical_view(chain, chain_tip, CanonicalizationParams::default())?
+                    let txouts = chain
+                        .canonical_view(graph.graph(), chain_tip, CanonicalParams::default())
                         .filter_outpoints(outpoints.iter().cloned())
                         .filter(|(_, full_txo)| match (spent, unspent) {
                             (true, false) => full_txo.spent_by.is_some(),
@@ -578,8 +571,8 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
                             _ => true,
                         })
                         .filter(|(_, full_txo)| match (confirmed, unconfirmed) {
-                            (true, false) => full_txo.chain_position.is_confirmed(),
-                            (false, true) => !full_txo.chain_position.is_confirmed(),
+                            (true, false) => full_txo.pos.is_confirmed(),
+                            (false, true) => !full_txo.pos.is_confirmed(),
                             _ => true,
                         })
                         .collect::<Vec<_>>();
@@ -629,7 +622,7 @@ pub fn handle_commands<CS: clap::Subcommand, S: clap::Args>(
 
                     create_tx(
                         &mut graph,
-                        &*chain,
+                        &chain,
                         &assets,
                         coin_select,
                         address,

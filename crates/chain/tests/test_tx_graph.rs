@@ -2,12 +2,12 @@
 
 #[macro_use]
 mod common;
-use bdk_chain::{collections::*, BlockId, CanonicalizationParams, ConfirmationBlockTime};
+use bdk_chain::{collections::*, BlockId, CanonicalParams, ConfirmationBlockTime};
 use bdk_chain::{
     local_chain::LocalChain,
     tx_graph::{self, CalculateFeeError},
     tx_graph::{ChangeSet, TxGraph},
-    Anchor, ChainOracle, ChainPosition, Merge,
+    Anchor, ChainPosition, Merge,
 };
 use bdk_testenv::{block_id, hash, utils::new_tx};
 use bitcoin::hex::FromHex;
@@ -758,7 +758,7 @@ fn test_walk_ancestors() {
                 let tx_node = graph.get_tx_node(tx.compute_txid())?;
                 for block in tx_node.anchors {
                     match local_chain.is_block_in_chain(block.anchor_block(), tip.block_id()) {
-                        Ok(Some(true)) => return None,
+                        Some(true) => return None,
                         _ => continue,
                     }
                 }
@@ -1014,8 +1014,8 @@ fn test_chain_spends() {
 
     let build_canonical_spends =
         |chain: &LocalChain, tx_graph: &TxGraph<ConfirmationBlockTime>| -> HashMap<OutPoint, _> {
-            tx_graph
-                .canonical_view(chain, tip.block_id(), CanonicalizationParams::default())
+            chain
+                .canonical_view(tx_graph, tip.block_id(), CanonicalParams::default())
                 .filter_outpoints(tx_graph.all_txouts().map(|(op, _)| ((), op)))
                 .filter_map(|(_, full_txo)| Some((full_txo.outpoint, full_txo.spent_by?)))
                 .collect()
@@ -1023,8 +1023,8 @@ fn test_chain_spends() {
     let build_canonical_positions = |chain: &LocalChain,
                                      tx_graph: &TxGraph<ConfirmationBlockTime>|
      -> HashMap<Txid, ChainPosition<ConfirmationBlockTime>> {
-        tx_graph
-            .canonical_view(chain, tip.block_id(), CanonicalizationParams::default())
+        chain
+            .canonical_view(tx_graph, tip.block_id(), CanonicalParams::default())
             .txs()
             .map(|canon_tx| (canon_tx.txid, canon_tx.pos))
             .collect()
@@ -1197,35 +1197,26 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
         .into_iter()
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
-    let canonical_txs: Vec<_> = graph
-        .canonical_view(
-            &chain,
-            chain.tip().block_id(),
-            CanonicalizationParams::default(),
-        )
+    let chain_tip = chain.tip().block_id();
+    let canonical_txs: Vec<_> = chain
+        .canonical_view(&graph, chain_tip, CanonicalParams::default())
         .txs()
         .collect();
     assert!(canonical_txs.is_empty());
 
     // tx0 with seen_at should be returned by canonical txs
     let _ = graph.insert_seen_at(txids[0], 2);
-    let canonical_view = graph.canonical_view(
-        &chain,
-        chain.tip().block_id(),
-        CanonicalizationParams::default(),
-    );
+    let chain_tip = chain.tip().block_id();
+    let canonical_view = chain.canonical_view(&graph, chain_tip, CanonicalParams::default());
     let mut canonical_txs = canonical_view.txs();
     assert_eq!(canonical_txs.next().map(|tx| tx.txid).unwrap(), txids[0]);
     drop(canonical_txs);
 
     // tx1 with anchor is also canonical
     let _ = graph.insert_anchor(txids[1], block_id!(2, "B"));
-    let canonical_txids: Vec<_> = graph
-        .canonical_view(
-            &chain,
-            chain.tip().block_id(),
-            CanonicalizationParams::default(),
-        )
+    let chain_tip = chain.tip().block_id();
+    let canonical_txids: Vec<_> = chain
+        .canonical_view(&graph, chain_tip, CanonicalParams::default())
         .txs()
         .map(|tx| tx.txid)
         .collect();
