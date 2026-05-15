@@ -11,8 +11,6 @@
 //! Use [`CheckPoint::entry_iter`] to iterate over entries, which yields placeholders for any
 //! gaps where `prev_blockhash` implies a block.
 
-use core::ops::RangeBounds;
-
 use bitcoin::BlockHash;
 
 use crate::{BlockId, CheckPoint, ToBlockHash};
@@ -137,62 +135,6 @@ impl<D: ToBlockHash> CheckPointEntry<D> {
             },
             checkpoint_above: checkpoint.clone(),
         })
-    }
-
-    /// Iterate over checkpoint entries backwards.
-    pub fn iter(&self) -> CheckPointEntryIter<D>
-    where
-        D: Clone,
-    {
-        self.clone().into_iter()
-    }
-
-    /// Get checkpoint entry at `height`.
-    ///
-    /// Returns `None` if checkpoint at `height` does not exist.
-    pub fn get(&self, height: u32) -> Option<Self>
-    where
-        D: Clone,
-    {
-        self.range(height..=height).next()
-    }
-
-    /// Iterate checkpoints over a height range.
-    pub fn range<R>(&self, range: R) -> impl Iterator<Item = CheckPointEntry<D>>
-    where
-        D: Clone,
-        R: RangeBounds<u32>,
-    {
-        let start_bound = range.start_bound().cloned();
-        let end_bound = range.end_bound().cloned();
-        self.iter()
-            .skip_while(move |cp_entry| match end_bound {
-                core::ops::Bound::Included(inc_bound) => cp_entry.height() > inc_bound,
-                core::ops::Bound::Excluded(exc_bound) => cp_entry.height() >= exc_bound,
-                core::ops::Bound::Unbounded => false,
-            })
-            .take_while(move |cp_entry| match start_bound {
-                core::ops::Bound::Included(inc_bound) => cp_entry.height() >= inc_bound,
-                core::ops::Bound::Excluded(exc_bound) => cp_entry.height() > exc_bound,
-                core::ops::Bound::Unbounded => true,
-            })
-    }
-
-    /// Returns the entry at `height` if one exists, otherwise the nearest checkpoint at a lower
-    /// height.
-    pub fn floor_at(&self, height: u32) -> Option<Self>
-    where
-        D: Clone,
-    {
-        self.range(..=height).next()
-    }
-
-    /// Returns the entry located a number of heights below this one.
-    pub fn floor_below(&self, offset: u32) -> Option<Self>
-    where
-        D: Clone,
-    {
-        self.floor_at(self.height().checked_sub(offset)?)
     }
 }
 

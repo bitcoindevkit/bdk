@@ -953,8 +953,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// a [`TxOut`] with it's script pubkey.
     pub fn last_used_indices(&self) -> BTreeMap<K, u32> {
         self.keychain_to_descriptor_id
-            .iter()
-            .filter_map(|(keychain, _)| {
+            .keys()
+            .filter_map(|keychain| {
                 self.last_used_index(keychain.clone())
                     .map(|index| (keychain.clone(), index))
             })
