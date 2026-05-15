@@ -35,3 +35,4 @@ required-features = ["use-rustls"]
 [[bench]]
 name = "test_sync"
 harness = false
+required-features = ["use-rustls"]
