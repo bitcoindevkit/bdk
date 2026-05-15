@@ -569,7 +569,45 @@ impl<D> Iterator for CheckPointIter<D> {
         self.next.clone_from(&current.prev);
         Some(CheckPoint(current))
     }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        // Take `self.next` since if the `n`th is not found, `.next` should return `None`.
+        let current = self.next.take()?;
+
+        let target_index = current.index.checked_sub(n.try_into().ok()?)?;
+        let inner = ancestor_by_index(&current, target_index);
+
+        // Advance `self.next`.
+        self.next.clone_from(&inner.prev);
+
+        Some(CheckPoint(inner))
+    }
+
+    fn last(self) -> Option<Self::Item>
+    where
+        Self: Sized,
+    {
+        Some(CheckPoint(ancestor_by_index(&self.next?, 0)))
+    }
+
+    fn count(self) -> usize
+    where
+        Self: Sized,
+    {
+        self.next
+            .map_or(0, |cp_inner| (cp_inner.index as usize).saturating_add(1))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self
+            .next
+            .as_ref()
+            .map_or(0, |cp_inner| (cp_inner.index as usize).saturating_add(1));
+        (n, Some(n))
+    }
 }
+
+impl<D> ExactSizeIterator for CheckPointIter<D> {}
 
 impl<D> IntoIterator for CheckPoint<D> {
     type Item = CheckPoint<D>;

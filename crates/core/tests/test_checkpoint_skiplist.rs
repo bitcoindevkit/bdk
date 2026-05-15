@@ -137,6 +137,35 @@ fn test_range_edge_cases() {
     assert_eq!(from_genesis[2].height(), 0);
 }
 
+#[test]
+fn test_iter_overrides() {
+    const N: u32 = 200;
+    let mut cp = CheckPoint::new(0, BlockHash::all_zeros());
+    for height in 1..=N {
+        let hash = BlockHash::from_byte_array([(height % 256) as u8; 32]);
+        cp = cp.push(height, hash).unwrap();
+    }
+    let len = (N + 1) as usize;
+
+    // Fresh iterator: count, last, size_hint, len.
+    // (nth correctness is covered by the `iter_nth_matches_collected` proptest).
+    assert_eq!(cp.iter().count(), len);
+    assert_eq!(cp.iter().last().unwrap().height(), 0);
+    assert_eq!(cp.iter().size_hint(), (len, Some(len)));
+    assert_eq!(cp.iter().len(), len);
+
+    // After nth(k), the iterator must resume from element k+1 and len shrinks accordingly.
+    let mut it = cp.iter();
+    assert_eq!(it.nth(3).unwrap().height(), N - 3);
+    assert_eq!(it.next().unwrap().height(), N - 4);
+    assert_eq!(it.len(), len - 5);
+
+    // Out-of-range nth drains the iterator.
+    let mut it = cp.iter();
+    assert!(it.nth(usize::MAX).is_none());
+    assert_eq!(it.len(), 0);
+}
+
 /// Build a sparse chain at the given heights (genesis at 0 is implicit; `heights` must be a
 /// strictly increasing sequence of positive heights).
 fn build_chain(heights: &[u32]) -> CheckPoint<BlockHash> {
@@ -203,6 +232,19 @@ proptest! {
         cases: 64,
         ..ProptestConfig::default()
     })]
+
+    /// `iter().nth(n)` matches indexing into the fully-collected chain for arbitrary n.
+    #[test]
+    fn iter_nth_matches_collected(
+        heights in arbitrary_sparse_heights(),
+        n in 0usize..=300,
+    ) {
+        let cp = build_chain(&heights);
+        let collected: Vec<u32> = cp.iter().map(|c| c.height()).collect();
+        let got = cp.iter().nth(n).map(|c| c.height());
+        let expected = collected.get(n).copied();
+        prop_assert_eq!(got, expected);
+    }
 
     /// `get(h)` matches a linear scan for any chain and any query height (existing, missing,
     /// genesis, beyond tip, etc.).
