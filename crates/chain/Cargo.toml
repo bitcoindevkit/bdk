@@ -29,6 +29,8 @@ rand = "0.8"
 proptest = "1.2.0"
 bdk_testenv = { path = "../testenv" }
 criterion = { version = "0.7" }
+tempfile = "3"
+anyhow = "1.0.102"
 
 [features]
 default = ["std", "miniscript"]
