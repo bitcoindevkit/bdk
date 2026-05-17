@@ -20,9 +20,10 @@ use bitcoincore_rpc::{json::GetBlockHeaderResult, RpcApi};
 ///   [`bitcoincore_rpc::Client`].
 /// * Collect the script pubkeys (SPKs) you want to watch. These will usually correspond to wallet
 ///   addresses that have been handed out for receiving payments.
-/// * Construct `FilterIter` with the RPC client, SPKs, and [`CheckPoint`]. The checkpoint tip
-///   informs `FilterIter` of the height to begin scanning from. An error is thrown if `FilterIter`
-///   is unable to find a common ancestor with the remote node.
+/// * Construct `FilterIter` with the RPC client, SPKs, [`CheckPoint`] and `start_height`.
+///   The checkpoint tip informs `FilterIter` of the height to begin scanning from.
+///   In case of deep reorgs where no common ancestor is found above `start_height`,
+///   scanning resumes from `start_height`.
 /// * Scan blocks by calling `next` in a loop and processing the [`Event`]s. If a filter matched any
 ///   of the watched scripts, then the relevant [`Block`] is returned. Note that false positives may
 ///   occur. `FilterIter` will continue to yield events until it reaches the latest chain tip.
@@ -38,13 +39,18 @@ pub struct FilterIter<'a> {
     cp: CheckPoint<BlockHash>,
     /// Header info, contains the prev and next hashes for each header.
     header: Option<GetBlockHeaderResult>,
+    /// Earliest height to resume scanning from in case of deep reorgs.
+    start_height: u32,
 }
 
 impl<'a> FilterIter<'a> {
-    /// Construct [`FilterIter`] with checkpoint, RPC client and SPKs.
+    /// Construct [`FilterIter`] with checkpoint, RPC client, start height and SPKs.
+    /// `start_height` is the earliest height to resume scanning from in case
+    /// a reorg invalidates the local tip.
     pub fn new(
         client: &'a bitcoincore_rpc::Client,
         cp: CheckPoint,
+        start_height: u32,
         spks: impl IntoIterator<Item = ScriptBuf>,
     ) -> Self {
         Self {
@@ -52,6 +58,7 @@ impl<'a> FilterIter<'a> {
             spks: spks.into_iter().collect(),
             cp,
             header: None,
+            start_height,
         }
     }
 
@@ -60,6 +67,10 @@ impl<'a> FilterIter<'a> {
     /// Error if no agreement header is found.
     fn find_base(&self) -> Result<GetBlockHeaderResult, Error> {
         for cp in self.cp.iter() {
+            if cp.height() < self.start_height {
+                break;
+            }
+
             match self.client.get_block_header_info(&cp.hash()) {
                 Err(e) if is_not_found(&e) => continue,
                 Ok(header) if header.confirmations <= 0 => continue,
@@ -67,7 +78,16 @@ impl<'a> FilterIter<'a> {
                 Err(e) => return Err(Error::Rpc(e)),
             }
         }
-        Err(Error::ReorgDepthExceeded)
+
+        let hash = self.client.get_block_hash(self.start_height.into())?;
+
+        let header = self.client.get_block_header_info(&hash)?;
+
+        if header.confirmations <= 0 {
+            return Err(Error::ReorgDepthExceeded);
+        }
+
+        Ok(header)
     }
 }
 
