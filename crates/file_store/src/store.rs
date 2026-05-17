@@ -295,9 +295,9 @@ mod test {
     const TEST_MAGIC_BYTES: [u8; TEST_MAGIC_BYTES_LEN] =
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
 
-    use bdk_chain::{keychain_txout, local_chain, tx_graph, ConfirmationBlockTime};
     use bdk_testenv::persist_test_utils::{
-        persist_indexer_changeset, persist_local_chain_changeset, persist_txgraph_changeset,
+        assert_persist_changesets, keychain_txout_changesets, local_chain_changesets,
+        tx_graph_changesets,
     };
 
     type TestChangeSet = BTreeSet<String>;
@@ -608,12 +608,8 @@ mod test {
     #[test]
     fn txgraph_is_persisted() -> anyhow::Result<()> {
         let temp_dir = tempfile::tempdir().unwrap();
-        Ok(persist_txgraph_changeset::<
-            Store<tx_graph::ChangeSet<ConfirmationBlockTime>>,
-            _,
-            _,
-            _,
-        >(
+        let changesets = tx_graph_changesets();
+        Ok(assert_persist_changesets(
             || {
                 Ok(Store::create(
                     &TEST_MAGIC_BYTES,
@@ -622,18 +618,15 @@ mod test {
             },
             |db| Ok(db.dump().map(Option::unwrap_or_default)?),
             |db, changeset| Ok(db.append(changeset)?),
+            &changesets,
         )?)
     }
 
     #[test]
     fn indexer_is_persisted() -> anyhow::Result<()> {
         let temp_dir = tempfile::tempdir().unwrap();
-        Ok(persist_indexer_changeset::<
-            Store<keychain_txout::ChangeSet>,
-            _,
-            _,
-            _,
-        >(
+        let changesets = keychain_txout_changesets();
+        Ok(assert_persist_changesets(
             || {
                 Ok(Store::create(
                     &TEST_MAGIC_BYTES,
@@ -642,18 +635,15 @@ mod test {
             },
             |db| Ok(db.dump().map(Option::unwrap_or_default)?),
             |db, changeset| Ok(db.append(changeset)?),
+            &changesets,
         )?)
     }
 
     #[test]
     fn local_chain_is_persisted() -> anyhow::Result<()> {
         let temp_dir = tempfile::tempdir().unwrap();
-        Ok(persist_local_chain_changeset::<
-            Store<local_chain::ChangeSet>,
-            _,
-            _,
-            _,
-        >(
+        let changesets = local_chain_changesets();
+        Ok(assert_persist_changesets(
             || {
                 Ok(Store::create(
                     &TEST_MAGIC_BYTES,
@@ -662,6 +652,7 @@ mod test {
             },
             |db| Ok(db.dump().map(Option::unwrap_or_default)?),
             |db, changeset| Ok(db.append(changeset)?),
+            &changesets,
         )?)
     }
 }

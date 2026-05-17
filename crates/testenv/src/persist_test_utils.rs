@@ -65,7 +65,7 @@ impl<C: Debug> Err for PersistErr<C> {}
 /// We create a dummy `ChangeSet`, persist it and check if loaded `ChangeSet` matches
 /// the persisted one. We then create another such dummy `ChangeSet`, persist it and load it to
 /// check if merged `ChangeSet` is returned.
-pub fn persist_changeset<CS, Store, CreateStore, Initialize, Persist>(
+pub fn assert_persist_changesets<CS, Store, CreateStore, Initialize, Persist>(
     create_store: CreateStore,
     initialize: Initialize,
     persist: Persist,
@@ -107,93 +107,8 @@ where
     Ok(())
 }
 
-/// Tests if [`TxGraph`](tx_graph::TxGraph) is being persisted correctly.
-///
-/// We create a dummy [`tx_graph::ChangeSet`], persist it and check if loaded
-/// `ChangeSet` matches the persisted one. We then create another such dummy `ChangeSet`, persist it
-/// and load it to check if merged `ChangeSet` is returned.
-pub fn persist_txgraph_changeset<Store, CreateStore, Initialize, Persist>(
-    create_store: CreateStore,
-    initialize: Initialize,
-    persist: Persist,
-) -> Result<(), PersistErr<tx_graph::ChangeSet<ConfirmationBlockTime>>>
-where
-    CreateStore: Fn() -> Result<Store, Box<dyn Err + 'static + Send + Sync>>,
-    Initialize: Fn(
-        &mut Store,
-    ) -> Result<
-        tx_graph::ChangeSet<ConfirmationBlockTime>,
-        Box<dyn Err + 'static + Send + Sync>,
-    >,
-    Persist: Fn(
-        &mut Store,
-        &tx_graph::ChangeSet<ConfirmationBlockTime>,
-    ) -> Result<(), Box<dyn Err + 'static + Send + Sync>>,
-{
-    let changesets = tx_graph_changesets();
-    persist_changeset::<
-        tx_graph::ChangeSet<ConfirmationBlockTime>,
-        Store,
-        CreateStore,
-        Initialize,
-        Persist,
-    >(create_store, initialize, persist, &changesets)
-}
-
-/// Tests if [`KeychainTxOutIndex`](keychain_txout::KeychainTxOutIndex) is being persisted
-/// correctly.
-///
-/// See [`persist_txgraph_changeset`].
-#[cfg(feature = "miniscript")]
-pub fn persist_indexer_changeset<Store, CreateStore, Initialize, Persist>(
-    create_store: CreateStore,
-    initialize: Initialize,
-    persist: Persist,
-) -> Result<(), PersistErr<keychain_txout::ChangeSet>>
-where
-    CreateStore: Fn() -> Result<Store, Box<dyn Err + 'static + Send + Sync>>,
-    Initialize:
-        Fn(&mut Store) -> Result<keychain_txout::ChangeSet, Box<dyn Err + 'static + Send + Sync>>,
-    Persist: Fn(
-        &mut Store,
-        &keychain_txout::ChangeSet,
-    ) -> Result<(), Box<dyn Err + 'static + Send + Sync>>,
-{
-    let changesets = keychain_txout_changesets();
-    persist_changeset::<keychain_txout::ChangeSet, Store, CreateStore, Initialize, Persist>(
-        create_store,
-        initialize,
-        persist,
-        &changesets,
-    )
-}
-
-/// Tests if [`LocalChain`](local_chain::LocalChain) is being persisted correctly.
-///
-/// See [`persist_txgraph_changeset`].
-pub fn persist_local_chain_changeset<Store, CreateStore, Initialize, Persist>(
-    create_store: CreateStore,
-    initialize: Initialize,
-    persist: Persist,
-) -> Result<(), PersistErr<local_chain::ChangeSet>>
-where
-    CreateStore: Fn() -> Result<Store, Box<dyn Err + 'static + Send + Sync>>,
-    Initialize:
-        Fn(&mut Store) -> Result<local_chain::ChangeSet, Box<dyn Err + 'static + Send + Sync>>,
-    Persist:
-        Fn(&mut Store, &local_chain::ChangeSet) -> Result<(), Box<dyn Err + 'static + Send + Sync>>,
-{
-    let changesets = local_chain_changesets();
-    persist_changeset::<local_chain::ChangeSet, Store, CreateStore, Initialize, Persist>(
-        create_store,
-        initialize,
-        persist,
-        &changesets,
-    )
-}
-
-/// Get two [`tx_graph::ChangeSet`](tx_graph::ChangeSet)s.
-fn tx_graph_changesets() -> [tx_graph::ChangeSet<ConfirmationBlockTime>; 2] {
+/// Get two [`tx_graph::ChangeSet`]s.
+pub fn tx_graph_changesets() -> [tx_graph::ChangeSet<ConfirmationBlockTime>; 2] {
     use tx_graph::ChangeSet;
 
     let tx1 = Arc::new(create_test_tx(
@@ -256,9 +171,9 @@ fn tx_graph_changesets() -> [tx_graph::ChangeSet<ConfirmationBlockTime>; 2] {
     [tx_graph_changeset1, tx_graph_changeset2]
 }
 
-/// Get two [`keychain_txout::ChangeSet`](keychain_txout::ChangeSet)s.
+/// Get two [`keychain_txout::ChangeSet`]s.
 #[cfg(feature = "miniscript")]
-fn keychain_txout_changesets() -> [keychain_txout::ChangeSet; 2] {
+pub fn keychain_txout_changesets() -> [keychain_txout::ChangeSet; 2] {
     use crate::utils::DESCRIPTORS;
     use keychain_txout::ChangeSet;
 
@@ -292,8 +207,8 @@ fn keychain_txout_changesets() -> [keychain_txout::ChangeSet; 2] {
     [changeset, changeset_new]
 }
 
-/// Get two [`local_chain::ChangeSet`](local_chain::ChangeSet)s.
-fn local_chain_changesets() -> [local_chain::ChangeSet; 2] {
+/// Get two [`local_chain::ChangeSet`]s.
+pub fn local_chain_changesets() -> [local_chain::ChangeSet; 2] {
     use local_chain::ChangeSet;
 
     let changeset = ChangeSet {
