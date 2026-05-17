@@ -44,8 +44,10 @@ fn main() -> anyhow::Result<()> {
     // Configure RPC client
     let url = std::env::var("RPC_URL").context("must set RPC_URL")?;
     let cookie = std::env::var("RPC_COOKIE").context("must set RPC_COOKIE")?;
-    let rpc_client =
-        bitcoincore_rpc::Client::new(&url, bitcoincore_rpc::Auth::CookieFile(cookie.into()))?;
+    let rpc_client = bdk_bitcoind_client::Client::with_auth(
+        &url,
+        bdk_bitcoind_client::Auth::CookieFile(cookie.into()),
+    )?;
 
     // Initialize `FilterIter`
     let mut spks = vec![];

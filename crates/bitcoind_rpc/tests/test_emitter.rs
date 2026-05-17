@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, ops::Deref};
+use std::collections::BTreeSet;
 
 use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
 use bdk_chain::{
@@ -298,15 +298,11 @@ fn process_block(
     Ok(())
 }
 
-fn sync_from_emitter<C>(
+fn sync_from_emitter(
     recv_chain: &mut LocalChain,
     recv_graph: &mut IndexedTxGraph<BlockId, SpkTxOutIndex<()>>,
-    emitter: &mut Emitter<C>,
-) -> anyhow::Result<()>
-where
-    C: Deref,
-    C::Target: bitcoincore_rpc::RpcApi,
-{
+    emitter: &mut Emitter,
+) -> anyhow::Result<()> {
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
         process_block(recv_chain, recv_graph, emission.block, height)?;
@@ -557,7 +553,6 @@ fn no_agreement_point() -> anyhow::Result<()> {
 /// 3. Insert the eviction into the graph and assert tx1 is no longer canonical.
 #[test]
 fn test_expect_tx_evicted() -> anyhow::Result<()> {
-    use bdk_bitcoind_rpc::bitcoincore_rpc::bitcoin;
     use bdk_chain::miniscript;
     use bdk_chain::spk_txout::SpkTxOutIndex;
     use bitcoin::constants::genesis_block;
