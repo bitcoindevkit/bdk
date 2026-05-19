@@ -305,7 +305,7 @@ impl<'g, A: Anchor> ChainQuery for CanonicalizationTask<'g, A> {
             }
         }
 
-        CanonicalView::from_parts(self.chain_tip, view_order, view_txs, view_spends)
+        CanonicalView::new(self.chain_tip, view_order, view_txs, view_spends)
     }
 }
 

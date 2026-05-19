@@ -127,12 +127,9 @@
 //! [`insert_txout`]: TxGraph::insert_txout
 
 use crate::collections::*;
-use crate::BlockId;
-use crate::CanonicalIter;
-use crate::CanonicalView;
 use crate::CanonicalizationParams;
 use crate::CanonicalizationTask;
-use crate::{Anchor, ChainOracle, Merge};
+use crate::{Anchor, BlockId, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -140,10 +137,7 @@ use bdk_core::ConfirmationBlockTime;
 pub use bdk_core::TxUpdate;
 use bitcoin::{Amount, OutPoint, SignedAmount, Transaction, TxOut, Txid};
 use core::fmt::{self, Formatter};
-use core::{
-    convert::Infallible,
-    ops::{Deref, RangeInclusive},
-};
+use core::ops::{Deref, RangeInclusive};
 
 impl<A: Ord> From<TxGraph<A>> for TxUpdate<A> {
     fn from(graph: TxGraph<A>) -> Self {
@@ -1021,36 +1015,6 @@ impl<A: Anchor> TxGraph<A> {
                 Some(last_evicted) => last_evicted < last_seen,
                 None => true,
             })
-    }
-
-    /// Returns a [`CanonicalIter`].
-    pub fn canonical_iter<'a, C: ChainOracle>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> CanonicalIter<'a, A, C> {
-        CanonicalIter::new(self, chain, chain_tip, params)
-    }
-
-    /// Returns a [`CanonicalView`].
-    pub fn try_canonical_view<'a, C: ChainOracle>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> Result<CanonicalView<A>, C::Error> {
-        CanonicalView::new(self, chain, chain_tip, params)
-    }
-
-    /// Returns a [`CanonicalView`].
-    pub fn canonical_view<'a, C: ChainOracle<Error = Infallible>>(
-        &'a self,
-        chain: &'a C,
-        chain_tip: BlockId,
-        params: CanonicalizationParams,
-    ) -> CanonicalView<A> {
-        CanonicalView::new(self, chain, chain_tip, params).expect("infallible")
     }
 
     /// Construct a `TxGraph` from a `changeset`.
