@@ -1,6 +1,6 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
 use crate::tx_graph::{TxAncestors, TxDescendants};
-use crate::{Anchor, ChainOracle, TxGraph};
+use crate::{Anchor, CanonicalReason, CanonicalizationParams, ChainOracle, ObservedIn, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
@@ -10,16 +10,6 @@ use bitcoin::{Transaction, Txid};
 
 type CanonicalMap<A> = HashMap<Txid, (Arc<Transaction>, CanonicalReason<A>)>;
 type NotCanonicalSet = HashSet<Txid>;
-
-/// Modifies the canonicalization algorithm.
-#[derive(Debug, Default, Clone)]
-pub struct CanonicalizationParams {
-    /// Transactions that will supercede all other transactions.
-    ///
-    /// In case of conflicting transactions within `assume_canonical`, transactions that appear
-    /// later in the list (have higher index) have precedence.
-    pub assume_canonical: Vec<Txid>,
-}
 
 /// Iterates over canonical txs.
 pub struct CanonicalIter<'g, A, C> {
@@ -250,95 +240,6 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
             }
 
             return None;
-        }
-    }
-}
-
-/// Represents when and where a transaction was last observed in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ObservedIn {
-    /// The transaction was last observed in a block of height.
-    Block(u32),
-    /// The transaction was last observed in the mempool at the given unix timestamp.
-    Mempool(u64),
-}
-
-/// The reason why a transaction is canonical.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CanonicalReason<A> {
-    /// This transaction is explicitly assumed to be canonical by the caller, superceding all other
-    /// canonicalization rules.
-    Assumed {
-        /// Whether it is a descendant that is assumed to be canonical.
-        descendant: Option<Txid>,
-    },
-    /// This transaction is anchored in the best chain by `A`, and therefore canonical.
-    Anchor {
-        /// The anchor that anchored the transaction in the chain.
-        anchor: A,
-        /// Whether the anchor is of the transaction's descendant.
-        descendant: Option<Txid>,
-    },
-    /// This transaction does not conflict with any other transaction with a more recent
-    /// [`ObservedIn`] value or one that is anchored in the best chain.
-    ObservedIn {
-        /// The [`ObservedIn`] value of the transaction.
-        observed_in: ObservedIn,
-        /// Whether the [`ObservedIn`] value is of the transaction's descendant.
-        descendant: Option<Txid>,
-    },
-}
-
-impl<A: Clone> CanonicalReason<A> {
-    /// Constructs a [`CanonicalReason`] for a transaction that is assumed to supercede all other
-    /// transactions.
-    pub fn assumed() -> Self {
-        Self::Assumed { descendant: None }
-    }
-
-    /// Constructs a [`CanonicalReason`] from an `anchor`.
-    pub fn from_anchor(anchor: A) -> Self {
-        Self::Anchor {
-            anchor,
-            descendant: None,
-        }
-    }
-
-    /// Constructs a [`CanonicalReason`] from an `observed_in` value.
-    pub fn from_observed_in(observed_in: ObservedIn) -> Self {
-        Self::ObservedIn {
-            observed_in,
-            descendant: None,
-        }
-    }
-
-    /// Contruct a new [`CanonicalReason`] from the original which is transitive to `descendant`.
-    ///
-    /// This signals that either the [`ObservedIn`] or [`Anchor`] value belongs to the transaction's
-    /// descendant, but is transitively relevant.
-    pub fn to_transitive(&self, descendant: Txid) -> Self {
-        match self {
-            CanonicalReason::Assumed { .. } => Self::Assumed {
-                descendant: Some(descendant),
-            },
-            CanonicalReason::Anchor { anchor, .. } => Self::Anchor {
-                anchor: anchor.clone(),
-                descendant: Some(descendant),
-            },
-            CanonicalReason::ObservedIn { observed_in, .. } => Self::ObservedIn {
-                observed_in: *observed_in,
-                descendant: Some(descendant),
-            },
-        }
-    }
-
-    /// This signals that either the [`ObservedIn`] or [`Anchor`] value belongs to the transaction's
-    /// descendant.
-    pub fn descendant(&self) -> &Option<Txid> {
-        match self {
-            CanonicalReason::Assumed { descendant, .. } => descendant,
-            CanonicalReason::Anchor { descendant, .. } => descendant,
-            CanonicalReason::ObservedIn { descendant, .. } => descendant,
         }
     }
 }

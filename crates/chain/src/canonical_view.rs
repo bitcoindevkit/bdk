@@ -91,6 +91,26 @@ pub struct CanonicalView<A> {
 }
 
 impl<A: Anchor> CanonicalView<A> {
+    /// Creates a [`CanonicalView`] from its constituent parts.
+    ///
+    /// This internal constructor is used by [`CanonicalizationTask`] to build the view
+    /// after completing the canonicalization process. It takes the processed transaction
+    /// data including the canonical ordering, transaction map with chain positions, and
+    /// spend information.
+    pub(crate) fn from_parts(
+        tip: BlockId,
+        order: Vec<Txid>,
+        txs: HashMap<Txid, (Arc<Transaction>, ChainPosition<A>)>,
+        spends: HashMap<OutPoint, Txid>,
+    ) -> Self {
+        Self {
+            tip,
+            order,
+            txs,
+            spends,
+        }
+    }
+
     /// Create a new canonical view from a transaction graph.
     ///
     /// This constructor analyzes the given [`TxGraph`] and creates a canonical view of all

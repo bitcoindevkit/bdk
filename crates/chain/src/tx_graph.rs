@@ -21,18 +21,26 @@
 //! Conflicting transactions are allowed to coexist within a [`TxGraph`]. A process called
 //! canonicalization is required to get a conflict-free view of transactions.
 //!
-//! * [`canonical_iter`](TxGraph::canonical_iter) returns a [`CanonicalIter`] which performs
-//!   incremental canonicalization. This is useful when you only need to check specific transactions
-//!   (e.g., verifying whether a few unconfirmed transactions are canonical) without computing the
-//!   entire canonical view.
-//! * [`canonical_view`](TxGraph::canonical_view) returns a [`CanonicalView`] which provides a
-//!   complete canonical view of the graph. This is required for typical wallet operations like
-//!   querying balances, listing outputs, transactions, and UTXOs. You must construct this first
-//!   before performing these operations.
+//! The canonicalization process uses a two-step, sans-IO approach:
 //!
-//! All these methods require a `chain` and `chain_tip` argument. The `chain` must be a
-//! [`ChainOracle`] implementation (such as [`LocalChain`](crate::local_chain::LocalChain)) which
-//! identifies which blocks exist under a given `chain_tip`.
+//! 1. **Create a canonicalization task** using
+//!    [`canonicalization_task`](TxGraph::canonicalization_task): ```ignore let task =
+//!    tx_graph.canonicalization_task(params); ``` This creates a [`CanonicalizationTask`] that
+//!    encapsulates the canonicalization logic without performing any I/O operations.
+//!
+//! 2. **Execute the task** with a chain oracle to obtain a [`CanonicalView`]: ```ignore let view =
+//!    chain.canonicalize(task); ``` The chain oracle (such as
+//!    [`LocalChain`](crate::local_chain::LocalChain)) handles all anchor verification queries from
+//!    the task.
+//!
+//! The [`CanonicalView`] provides a complete canonical view of the graph. This is required for
+//! typical wallet operations like querying balances, listing outputs, transactions, and UTXOs.
+//! You must construct this view before performing these operations.
+//!
+//! The separation between task creation and execution (sans-IO pattern) enables:
+//! * Better testability - tasks can be tested without a real chain
+//! * Flexibility - different chain oracle implementations can be used
+//! * Clean separation of concerns - canonicalization logic is isolated from I/O
 //!
 //! The canonicalization algorithm uses the following associated data to determine which
 //! transactions have precedence over others:
@@ -123,6 +131,7 @@ use crate::BlockId;
 use crate::CanonicalIter;
 use crate::CanonicalView;
 use crate::CanonicalizationParams;
+use crate::CanonicalizationTask;
 use crate::{Anchor, ChainOracle, Merge};
 use alloc::collections::vec_deque::VecDeque;
 use alloc::sync::Arc;
@@ -971,6 +980,20 @@ impl<A: Anchor> TxGraph<A> {
         for (txid, evicted_at) in changeset.last_evicted {
             let _ = self.insert_evicted_at(txid, evicted_at);
         }
+    }
+
+    /// Creates a [`CanonicalizationTask`] to determine the [`CanonicalView`] of transactions.
+    ///
+    /// This method delegates to the underlying [`TxGraph`] to create a [`CanonicalizationTask`]
+    /// that can be used to determine which transactions are canonical based on the provided
+    /// parameters. The task handles the stateless canonicalization logic and can be polled
+    /// for anchor verification requests.
+    pub fn canonicalization_task(
+        &'_ self,
+        chain_tip: BlockId,
+        params: CanonicalizationParams,
+    ) -> CanonicalizationTask<'_, A> {
+        CanonicalizationTask::new(self, chain_tip, params)
     }
 }
 

@@ -7,8 +7,8 @@ use bitcoin::{Block, OutPoint, Transaction, TxOut, Txid};
 
 use crate::{
     tx_graph::{self, TxGraph},
-    Anchor, BlockId, CanonicalView, CanonicalizationParams, ChainOracle, Indexer, Merge,
-    TxPosInBlock,
+    Anchor, BlockId, CanonicalView, CanonicalizationParams, CanonicalizationTask, ChainOracle,
+    Indexer, Merge, TxPosInBlock,
 };
 
 /// A [`TxGraph<A>`] paired with an indexer `I`, enforcing that every insertion into the graph is
@@ -451,6 +451,20 @@ where
         params: CanonicalizationParams,
     ) -> CanonicalView<A> {
         self.graph.canonical_view(chain, chain_tip, params)
+    }
+
+    /// Creates a [`CanonicalizationTask`] to determine the [`CanonicalView`] of transactions.
+    ///
+    /// This method delegates to the underlying [`TxGraph`] to create a [`CanonicalizationTask`]
+    /// that can be used to determine which transactions are canonical based on the provided
+    /// parameters. The task handles the stateless canonicalization logic and can be polled
+    /// for anchor verification requests.
+    pub fn canonicalization_task(
+        &'_ self,
+        chain_tip: BlockId,
+        params: CanonicalizationParams,
+    ) -> CanonicalizationTask<'_, A> {
+        self.graph.canonicalization_task(chain_tip, params)
     }
 }
 
