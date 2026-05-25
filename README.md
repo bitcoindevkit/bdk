@@ -41,13 +41,6 @@ The workspace in this repository contains several crates in the `/crates` direct
 
 The [`bdk_wallet`] repository and crate contains a higher level `Wallet` type that depends on the above lower-level mechanism crates.
 
-Fully working examples of how to use these components are in `/examples`:
-
-- [`example_cli`](examples/example_cli): Library used by the `example_*` crates. Provides utilities for syncing, showing the balance, generating addresses and creating transactions without using the bdk_wallet `Wallet`.
-- [`example_electrum`](examples/example_electrum): A command line Bitcoin wallet application built on top of `example_cli` and the `electrum` crate. It shows the power of the bdk tools (`chain` + `file_store` + `electrum`), without depending on the main `bdk_wallet` library.
-- [`example_esplora`](examples/example_esplora): A command line Bitcoin wallet application built on top of `example_cli` and the `esplora` crate. It shows the power of the bdk tools (`chain` + `file_store` + `esplora`), without depending on the main `bdk_wallet` library.
-- [`example_bitcoind_rpc_polling`](examples/example_bitcoind_rpc_polling): A command line Bitcoin wallet application built on top of `example_cli` and the `bitcoind_rpc` crate. It shows the power of the bdk tools (`chain` + `file_store` + `bitcoind_rpc`), without depending on the main `bdk_wallet` library.
-
 [`rust-miniscript`]: https://github.com/rust-bitcoin/rust-miniscript
 [`rust-bitcoin`]: https://github.com/rust-bitcoin/rust-bitcoin
 [`esplora-client`]: https://docs.rs/esplora-client/
