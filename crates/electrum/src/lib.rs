@@ -11,9 +11,6 @@
 //! where the range of possibly used scripts is not known. In this case it is necessary to scan all
 //! keychain scripts until a number (the "stop gap") of unused scripts is discovered.
 //!
-//! Refer to [`example_electrum`] for a complete example.
-//!
-//! [`example_electrum`]: https://github.com/bitcoindevkit/bdk/tree/master/examples/example_electrum
 //! [`SyncResponse`]: bdk_core::spk_client::SyncResponse
 //! [`FullScanResponse`]: bdk_core::spk_client::FullScanResponse
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
