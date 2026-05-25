@@ -498,6 +498,24 @@ impl<A: Clone + Ord> TxGraph<A> {
         TxAncestors::new_exclude_root(self, tx, walk_map)
     }
 
+    /// Creates an iterator that filters and maps ancestor transactions.
+    ///
+    /// Similar to [`Self::walk_ancestors`] but includes the starting `tx` in the iteration at
+    /// `depth` 0.
+    ///
+    /// Refer to [`Self::walk_ancestors`] for `walk_map` usage.
+    pub fn walk_ancestors_from_root<'g, T, F, O>(
+        &'g self,
+        tx: T,
+        walk_map: F,
+    ) -> TxAncestors<'g, A, F, O>
+    where
+        T: Into<Arc<Transaction>>,
+        F: FnMut(usize, Arc<Transaction>) -> Option<O> + 'g,
+    {
+        TxAncestors::new_include_root(self, tx, walk_map)
+    }
+
     /// Creates an iterator that filters and maps descendants from the starting `txid`.
     ///
     /// The supplied closure takes in two inputs `(depth, descendant_txid)`:
