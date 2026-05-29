@@ -1027,15 +1027,12 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
 
-        let balance = canonical_view.balance(
-            env.indexer.outpoints().iter().cloned(),
-            |_, txout| {
+        let balance =
+            canonical_view.balance(env.indexer.outpoints().iter().cloned(), |_, txout| {
                 env.indexer
                     .index_of_spk(txout.txout.script_pubkey.as_script())
                     .is_some()
-            },
-            0,
-        );
+            });
         assert_eq!(
             balance, scenario.exp_balance,
             "\n[{}] 'balance' failed",

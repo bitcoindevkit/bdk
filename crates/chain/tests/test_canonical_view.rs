@@ -53,42 +53,67 @@ fn test_min_confirmations_parameter() {
     };
     let _ = tx_graph.insert_anchor(txid, anchor_height_5);
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let min_confirmations = 1;
+    let min_conf_height = chain.tip().height() - min_confirmations + 1;
+    let min_conf_tip = chain.get(min_conf_height).expect("block should exist");
 
-    // Test min_confirmations = 1: Should be confirmed (has 6 confirmations)
+    let canonical_view =
+        chain.canonical_view(&tx_graph, min_conf_tip.block_id(), Default::default());
+
+    // Test min_confirmations = 1: Should be confirmed (has 5 confirmations)
     let balance_1_conf = canonical_view.balance(
         [((), outpoint)],
         |_, _| true, // trust all
-        1,
     );
 
     assert_eq!(balance_1_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_1_conf.trusted_pending, Amount::ZERO);
 
-    // Test min_confirmations = 6: Should be confirmed (has exactly 6 confirmations)
+    let min_confirmations = 6;
+    let min_conf_height = chain.tip().height() - min_confirmations + 1;
+    let min_conf_tip = chain.get(min_conf_height).expect("block should exist");
+
+    let canonical_view =
+        chain.canonical_view(&tx_graph, min_conf_tip.block_id(), Default::default());
+
+    // Test min_confirmations = 6: Should be confirmed (has exactly 1 confirmations)
     let balance_6_conf = canonical_view.balance(
         [((), outpoint)],
         |_, _| true, // trust all
-        6,
     );
     assert_eq!(balance_6_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_6_conf.trusted_pending, Amount::ZERO);
+
+    let min_confirmations = 7;
+    let min_conf_height = chain.tip().height() - min_confirmations + 1;
+    let min_conf_tip = chain.get(min_conf_height).expect("block should exist");
+
+    let canonical_view =
+        chain.canonical_view(&tx_graph, min_conf_tip.block_id(), Default::default());
 
     // Test min_confirmations = 7: Should be trusted pending (only has 6 confirmations)
     let balance_7_conf = canonical_view.balance(
         [((), outpoint)],
         |_, _| true, // trust all
-        7,
     );
     assert_eq!(balance_7_conf.confirmed, Amount::ZERO);
     assert_eq!(balance_7_conf.trusted_pending, Amount::from_sat(50_000));
+
+    let min_confirmations = 0;
+    let min_conf_tip = if min_confirmations == 0 {
+        chain.tip()
+    } else {
+        let min_conf_height = chain.tip().height() - min_confirmations + 1;
+        chain.get(min_conf_height).expect("block should exist")
+    };
+
+    let canonical_view =
+        chain.canonical_view(&tx_graph, min_conf_tip.block_id(), Default::default());
 
     // Test min_confirmations = 0: Should behave same as 1 (confirmed)
     let balance_0_conf = canonical_view.balance(
         [((), outpoint)],
         |_, _| true, // trust all
-        0,
     );
     assert_eq!(balance_0_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_0_conf.trusted_pending, Amount::ZERO);
@@ -141,14 +166,17 @@ fn test_min_confirmations_with_untrusted_tx() {
     };
     let _ = tx_graph.insert_anchor(txid, anchor);
 
+    let min_confirmations = 5;
+    let min_conf_height = chain.tip().height() - min_confirmations + 1;
+    let min_conf_tip = chain.get(min_conf_height).expect("block should exist");
+
     let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        chain.canonical_view(&tx_graph, min_conf_tip.block_id(), Default::default());
 
     // Test with min_confirmations = 5 and untrusted predicate
     let balance = canonical_view.balance(
         [((), outpoint)],
         |_, _| false, // don't trust
-        5,
     );
 
     // Should be untrusted pending (not enough confirmations and not trusted)
@@ -259,14 +287,18 @@ fn test_min_confirmations_multiple_transactions() {
     );
     outpoints.push(((), outpoint2));
 
+    let min_confirmations = 5;
+    let min_conf_height = chain.tip().height() - min_confirmations + 1;
+    let min_conf_tip = chain.get(min_conf_height).expect("block should exist");
+
     let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        chain.canonical_view(&tx_graph, min_conf_tip.block_id(), Default::default());
 
     // Test with min_confirmations = 5
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> confirmed
     // tx2: 3 confirmations -> trusted pending
-    let balance = canonical_view.balance(outpoints.clone(), |_, _| true, 5);
+    let balance = canonical_view.balance(outpoints.clone(), |_, _| true);
 
     assert_eq!(
         balance.confirmed,
@@ -278,11 +310,18 @@ fn test_min_confirmations_multiple_transactions() {
     );
     assert_eq!(balance.untrusted_pending, Amount::ZERO);
 
+    let min_confirmations = 10;
+    let min_conf_height = chain.tip().height() - min_confirmations + 1;
+    let min_conf_tip = chain.get(min_conf_height).expect("block should exist");
+
+    let canonical_view =
+        chain.canonical_view(&tx_graph, min_conf_tip.block_id(), Default::default());
+
     // Test with min_confirmations = 10
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> trusted pending
     // tx2: 3 confirmations -> trusted pending
-    let balance_high = canonical_view.balance(outpoints, |_, _| true, 10);
+    let balance_high = canonical_view.balance(outpoints, |_, _| true);
 
     assert_eq!(
         balance_high.confirmed,

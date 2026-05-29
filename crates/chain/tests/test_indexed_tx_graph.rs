@@ -480,11 +480,10 @@ fn test_list_owned_txouts() {
                 .filter_unspent_outpoints(graph.index.outpoints().iter().cloned())
                 .collect::<Vec<_>>();
 
-            let balance = canonical_view.balance(
-                graph.index.outpoints().iter().cloned(),
-                |_, txout| trusted_spks.contains(&txout.txout.script_pubkey),
-                0,
-            );
+            let balance = canonical_view
+                .balance(graph.index.outpoints().iter().cloned(), |_, txout| {
+                    trusted_spks.contains(&txout.txout.script_pubkey)
+                });
 
             let confirmed_txouts_txid = txouts
                 .iter()
