@@ -56,6 +56,12 @@ cargo update -p pin-project-internal --precise "1.1.5"
 cargo update -p "rustls@0.23.40" --precise "0.23.26"
 cargo update -p "libc" --precise "0.2.183"
 cargo update -p "semver" --precise "1.0.27"
+cargo update -p bitcoin --precise "0.32.10"
+cargo update -p bitcoin_hashes --precise "0.14.2"
+cargo update -p base58ck --precise "0.1.1"
+cargo update -p bitcoin-io --precise "0.1.4"
+cargo update -p bitcoin-units --precise "0.1.4"
+cargo update -p filetime --precise "0.2.27"
 
 # all pinning required due to `clap` usage in `example_cli`
 cargo update -p "clap@4.6.1" --precise "4.5.17"
