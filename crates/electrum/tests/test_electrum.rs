@@ -514,11 +514,16 @@ pub fn test_stop_gap_past_last_revealed() -> anyhow::Result<()> {
         .collect();
 
     // Receive coins at index 9.
-    let txid_last_addr = env
-        .bitcoind
-        .client
-        .send_to_address(&addresses[9], Amount::from_sat(10000))?
-        .txid()?;
+    let txid_last_addr = env.bitcoind.client.send_to_address(
+        &addresses[9],
+        Amount::from_sat(10000),
+        None,
+        None,
+        None,
+        None,
+        Some(1),
+        None,
+    )?;
     env.mine_blocks(1, None)?;
     env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
 

@@ -361,7 +361,7 @@ where
             if !txs.is_empty() {
                 consecutive_unused = 0;
                 last_active_index = Some(index);
-            } else if last_revealed.is_none_or(|lr| index > lr) {
+            } else if last_revealed.map_or(true, |lr| index > lr) {
                 consecutive_unused = consecutive_unused.saturating_add(1);
             }
 

@@ -301,7 +301,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .batch_script_get_history(spks.iter().map(|(_, s)| s.spk.as_script()))?;
 
             for ((spk_index, spk), spk_history) in spks.into_iter().zip(spk_histories) {
-                let beyond_revealed = last_revealed.is_none_or(|lr| spk_index > lr);
+                let beyond_revealed = last_revealed.map_or(true, |lr| spk_index > lr);
 
                 if !spk_history.is_empty() {
                     last_active_index = Some(spk_index);
