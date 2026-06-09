@@ -7,6 +7,11 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [bitcoind_rpc-0.22.1]
+
+### Fixed:
+- `Emitter` producing un-connectable checkpoints when `start_height` is above the agreement point after a reorg. #2198
+
 ## [bitcoind_rpc-0.22.0]
 
 ### Fixed
@@ -76,3 +81,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [bitcoind_rpc-0.20.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.20.0
 [bitcoind_rpc-0.21.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.21.0
 [bitcoind_rpc-0.22.0]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.22.0
+[bitcoind_rpc-0.22.1]: https://github.com/bitcoindevkit/bdk/releases/tag/bitcoind_rpc-0.22.1
