@@ -1,6 +1,6 @@
 [package]
 name = "bdk_esplora"
-version = "0.22.2"
+version = "0.22.3"
 edition = "2021"
 homepage = "https://bitcoindevkit.org"
 repository = "https://github.com/bitcoindevkit/bdk"

@@ -7,6 +7,14 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [electrum-0.24.1]
+
+### Fixed:
+
+- `BdkElectrumClient::sync` now correctly retrieves confirmation status for transactions which first output is an `OP_RETURN` or `OP_FALSE OP_RETURN` #2197
+- Fixed `full_scan` now always scans the full revealed range before applying `stop_gap` past `last_revealed` #2222
+- Add a verification check that `tx.compute_txid() == txid` after fetching from the server, returning an error on mismatch #2228
+
 ## [electrum-0.24.0]
 
 ### Changed
@@ -85,3 +93,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [electrum-0.23.1]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.1
 [electrum-0.23.2]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.23.2
 [electrum-0.24.0]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.24.0
+[electrum-0.24.1]: https://github.com/bitcoindevkit/bdk/releases/tag/electrum-0.24.1
