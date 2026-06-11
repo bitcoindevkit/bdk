@@ -1038,6 +1038,7 @@ fn test_tx_conflict_handling() {
                         .is_some()
                 },
                 0,
+                None,
             );
         assert_eq!(
             balance, scenario.exp_balance,

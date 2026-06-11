@@ -62,6 +62,7 @@ fn test_min_confirmations_parameter() {
         [((), outpoint)],
         |_, _| true, // trust all
         1,
+        None,
     );
 
     assert_eq!(balance_1_conf.confirmed, Amount::from_sat(50_000));
@@ -72,6 +73,7 @@ fn test_min_confirmations_parameter() {
         [((), outpoint)],
         |_, _| true, // trust all
         6,
+        None,
     );
     assert_eq!(balance_6_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_6_conf.trusted_pending, Amount::ZERO);
@@ -81,6 +83,7 @@ fn test_min_confirmations_parameter() {
         [((), outpoint)],
         |_, _| true, // trust all
         7,
+        None,
     );
     assert_eq!(balance_7_conf.confirmed, Amount::ZERO);
     assert_eq!(balance_7_conf.trusted_pending, Amount::from_sat(50_000));
@@ -90,6 +93,7 @@ fn test_min_confirmations_parameter() {
         [((), outpoint)],
         |_, _| true, // trust all
         0,
+        None,
     );
     assert_eq!(balance_0_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_0_conf.trusted_pending, Amount::ZERO);
@@ -153,6 +157,7 @@ fn test_min_confirmations_with_untrusted_tx() {
         [((), outpoint)],
         |_, _| false, // don't trust
         5,
+        None,
     );
 
     // Should be untrusted pending (not enough confirmations and not trusted)
@@ -273,7 +278,7 @@ fn test_min_confirmations_multiple_transactions() {
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> confirmed
     // tx2: 3 confirmations -> trusted pending
-    let balance = canonical_view.balance(outpoints.clone(), |_, _| true, 5);
+    let balance = canonical_view.balance(outpoints.clone(), |_, _| true, 5, None);
 
     assert_eq!(
         balance.confirmed,
@@ -289,7 +294,7 @@ fn test_min_confirmations_multiple_transactions() {
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> trusted pending
     // tx2: 3 confirmations -> trusted pending
-    let balance_high = canonical_view.balance(outpoints, |_, _| true, 10);
+    let balance_high = canonical_view.balance(outpoints, |_, _| true, 10, None);
 
     assert_eq!(
         balance_high.confirmed,

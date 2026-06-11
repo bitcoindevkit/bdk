@@ -236,6 +236,7 @@ impl<A: Anchor> CanonicalView<A> {
             txout: txout.clone(),
             spent_by,
             is_on_coinbase: tx.is_coinbase(),
+            lock_time: tx.lock_time,
         })
     }
 
@@ -362,11 +363,12 @@ impl<A: Anchor> CanonicalView<A> {
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
     /// # let view = CanonicalView::new(&tx_graph, &chain, chain.tip().block_id(), Default::default()).unwrap();
     /// # let indexer = KeychainTxOutIndex::<&str>::default();
-    /// // Calculate balance with 6 confirmations, trusting all outputs
+    /// // Calculate balance with 6 confirmations, trusting all outputs, and no MTP
     /// let balance = view.balance(
     ///     indexer.outpoints().into_iter().map(|(k, op)| (k.clone(), *op)),
     ///     |_keychain, _script| true,  // Trust all outputs
     ///     6,  // Require 6 confirmations
+    ///     None, // No MTP provided
     /// );
     /// ```
     pub fn balance<'v, O: Clone + 'v>(
@@ -374,6 +376,7 @@ impl<A: Anchor> CanonicalView<A> {
         outpoints: impl IntoIterator<Item = (O, OutPoint)> + 'v,
         mut trust_predicate: impl FnMut(&O, &FullTxOut<A>) -> bool,
         min_confirmations: u32,
+        mtp: Option<u32>,
     ) -> Balance {
         let mut immature = Amount::ZERO;
         let mut trusted_pending = Amount::ZERO;
@@ -398,9 +401,9 @@ impl<A: Anchor> CanonicalView<A> {
                         } else {
                             untrusted_pending += txout.txout.value;
                         }
-                    } else if txout.is_confirmed_and_spendable(self.tip.height) {
+                    } else if txout.is_confirmed_and_spendable_at_mtp(self.tip.height, mtp) {
                         confirmed += txout.txout.value;
-                    } else if !txout.is_mature(self.tip.height) {
+                    } else if !txout.is_mature_at_mtp(self.tip.height, mtp) {
                         immature += txout.txout.value;
                     }
                 }
