@@ -485,6 +485,7 @@ fn test_list_owned_txouts() {
                     graph.index.outpoints().iter().cloned(),
                     |_, txout| trusted_spks.contains(&txout.txout.script_pubkey),
                     1,
+                    None,
                 );
 
             let confirmed_txouts_txid = txouts
@@ -886,4 +887,85 @@ fn test_get_chain_position() {
     ]
     .into_iter()
     .for_each(|t| run(&chain, &mut graph, t));
+}
+
+#[test]
+fn test_balance_mtp_maturity() {
+    use bdk_chain::Balance;
+    use bitcoin::locktime::absolute::LockTime;
+
+    let blocks = [
+        (0, hash!("genesis")),
+        (1, hash!("b1")),
+        (2, hash!("b2")),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+
+    let mut tx_graph = TxGraph::default();
+
+    let tx_time_locked = Transaction {
+        lock_time: LockTime::from_time(500_000_100).expect("valid time"),
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("parent0"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(10_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let txid_time_locked = tx_time_locked.compute_txid();
+    let outpoint = OutPoint::new(txid_time_locked, 0);
+
+    let _ = tx_graph.insert_tx(tx_time_locked);
+    // Anchor it so it is "confirmed" based on height alone.
+    let _ = tx_graph.insert_anchor(
+        txid_time_locked,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 123456,
+        },
+    );
+
+    let canonical_view = tx_graph.canonical_view(
+        &chain,
+        chain.tip().block_id(),
+        CanonicalizationParams::default(),
+    );
+
+    // MTP is less than locktime, so it should be immature
+    let balance_immature = canonical_view.balance(
+        [((), outpoint)],
+        |_, _| true, // trust all
+        1,
+        Some(500_000_000), // MTP < 500_000_100
+    );
+
+    assert_eq!(balance_immature.immature, Amount::from_sat(10_000));
+    assert_eq!(balance_immature.confirmed, Amount::ZERO);
+
+    // MTP is greater than or equal to locktime, so it should be mature
+    let balance_mature = canonical_view.balance(
+        [((), outpoint)],
+        |_, _| true, // trust all
+        1,
+        Some(500_000_200), // MTP > 500_000_100
+    );
+
+    assert_eq!(balance_mature.immature, Amount::ZERO);
+    assert_eq!(balance_mature.confirmed, Amount::from_sat(10_000));
+    
+    // No MTP provided: conservatively treated as immature
+    let balance_no_mtp = canonical_view.balance(
+        [((), outpoint)],
+        |_, _| true, // trust all
+        1,
+        None,
+    );
+
+    assert_eq!(balance_no_mtp.immature, Amount::from_sat(10_000));
+    assert_eq!(balance_no_mtp.confirmed, Amount::ZERO);
 }

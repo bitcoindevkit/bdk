@@ -1,4 +1,4 @@
-use bitcoin::{constants::COINBASE_MATURITY, OutPoint, TxOut, Txid};
+use bitcoin::{constants::COINBASE_MATURITY, locktime::absolute::LockTime, OutPoint, TxOut, Txid};
 
 use crate::Anchor;
 
@@ -174,6 +174,8 @@ pub struct FullTxOut<A> {
     pub spent_by: Option<(ChainPosition<A>, Txid)>,
     /// Whether this output is on a coinbase transaction.
     pub is_on_coinbase: bool,
+    /// The lock_time of the transaction containing this output.
+    pub lock_time: LockTime,
 }
 
 impl<A: Ord> Ord for FullTxOut<A> {
@@ -229,6 +231,65 @@ impl<A: Anchor> FullTxOut<A> {
     /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
     pub fn is_confirmed_and_spendable(&self, tip: u32) -> bool {
         if !self.is_mature(tip) {
+            return false;
+        }
+
+        let conf_height = match self.chain_position.confirmation_height_upper_bound() {
+            Some(height) => height,
+            None => return false,
+        };
+        if conf_height > tip {
+            return false;
+        }
+
+        // if the spending tx is confirmed within tip height, the txout is no longer spendable
+        if let Some(spend_height) = self
+            .spent_by
+            .as_ref()
+            .and_then(|(pos, _)| pos.confirmation_height_upper_bound())
+        {
+            if spend_height <= tip {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Whether the `txout` is considered mature, taking MTP into account.
+    ///
+    /// In addition to coinbase maturity (100 confirmations), this also checks
+    /// time-based locktime maturity. A transaction with a time-based locktime
+    /// (>= 500_000_000) is considered immature if the MTP at the chain tip
+    /// hasn't reached the locktime value.
+    ///
+    /// If `mtp` is `None` (missing block timestamps), time-locked transactions
+    /// are conservatively treated as immature.
+    pub fn is_mature_at_mtp(&self, tip: u32, mtp: Option<u32>) -> bool {
+        // Check coinbase maturity first
+        if !self.is_mature(tip) {
+            return false;
+        }
+
+        // Check time-based locktime maturity
+        match self.lock_time {
+            LockTime::Seconds(time) => {
+                match mtp {
+                    Some(mtp_val) => mtp_val >= time.to_consensus_u32(),
+                    // Missing MTP = worst case = treat as immature
+                    None => false,
+                }
+            }
+            // Height-based locktimes or no locktime: already satisfied if confirmed
+            _ => true,
+        }
+    }
+
+    /// Whether the utxo is/was/will be spendable with chain `tip` and `mtp`.
+    ///
+    /// Like `is_confirmed_and_spendable`, but uses `is_mature_at_mtp` instead of `is_mature`.
+    pub fn is_confirmed_and_spendable_at_mtp(&self, tip: u32, mtp: Option<u32>) -> bool {
+        if !self.is_mature_at_mtp(tip, mtp) {
             return false;
         }
 
