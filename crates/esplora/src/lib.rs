@@ -43,6 +43,7 @@ fn insert_anchor_or_seen_at_from_status(
     start_time: u64,
     txid: Txid,
     status: TxStatus,
+    target: Option<BlockId>,
 ) {
     if let TxStatus {
         block_height: Some(height),
@@ -51,14 +52,16 @@ fn insert_anchor_or_seen_at_from_status(
         ..
     } = status
     {
-        let anchor = ConfirmationBlockTime {
-            block_id: BlockId { height, hash },
-            confirmation_time: time,
-        };
-        update.anchors.insert((anchor, txid));
-    } else {
-        update.seen_ats.insert((txid, start_time));
+        if target.map_or(true, |t| height <= t.height) {
+            let anchor = ConfirmationBlockTime {
+                block_id: BlockId { height, hash },
+                confirmation_time: time,
+            };
+            update.anchors.insert((anchor, txid));
+            return;
+        }
     }
+    update.seen_ats.insert((txid, start_time));
 }
 
 /// Inserts floating txouts into `tx_graph` using [`Vin`](esplora_client::api::Vin)s returned by
