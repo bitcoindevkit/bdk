@@ -621,6 +621,55 @@ impl<D> IntoIterator for CheckPoint<D> {
     }
 }
 
+/// Serializes a [`CheckPoint`] as a flat sequence of `(height, data)` pairs, ordered from tip to
+/// base (descending height).
+///
+/// Iterates rather than recursing over the linked list, so long chains can't overflow the stack.
+/// The `skip`/`index` topology isn't serialized; it is rebuilt on deserialization.
+#[cfg(feature = "serde")]
+impl<D> serde::Serialize for CheckPoint<D>
+where
+    D: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        // `index` is the number of checkpoints below the tip, so the chain has `index + 1` nodes.
+        let mut seq = serializer.serialize_seq(Some(self.0.index as usize + 1))?;
+        for cp in self.iter() {
+            seq.serialize_element(&(cp.height(), cp.data_ref()))?;
+        }
+        seq.end()
+    }
+}
+
+/// Deserializes a [`CheckPoint`] from the flat sequence of `(height, data)` pairs produced by its
+/// [`Serialize`](serde::Serialize) implementation.
+///
+/// The chain is rebuilt iteratively with [`CheckPoint::from_blocks`] (which re-derives the
+/// `skip`/`index` topology), so deserialization never recurses regardless of chain length.
+#[cfg(feature = "serde")]
+impl<'de, D> serde::Deserialize<'de> for CheckPoint<D>
+where
+    D: serde::Deserialize<'de> + ToBlockHash + Clone + fmt::Debug,
+{
+    fn deserialize<De>(deserializer: De) -> Result<Self, De::Error>
+    where
+        De: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+        // Serialized tip-first (descending height); `from_blocks` expects ascending order.
+        let blocks = Vec::<(u32, D)>::deserialize(deserializer)?;
+        CheckPoint::from_blocks(blocks.into_iter().rev()).map_err(|_| {
+            De::Error::custom(
+                "invalid checkpoint chain: blocks must be non-empty and in ascending height order",
+            )
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,6 +694,65 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    /// Round-trip a long chain on a small stack: (de)serialization must not recurse.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn checkpoint_serde_is_not_recursive() {
+        let run = || {
+            // A recursive impl needs at least one frame (>= 16 bytes) per checkpoint, so 10,240
+            // checkpoints need >= 160 KiB of stack.
+            let mut cp = CheckPoint::new(0, bitcoin::hashes::Hash::hash(b"genesis"));
+            for height in 1u32..=10_240 {
+                let hash: BlockHash = bitcoin::hashes::Hash::hash(height.to_be_bytes().as_slice());
+                cp = cp.push(height, hash).unwrap();
+            }
+
+            let json = serde_json::to_string(&cp).expect("serialization must not recurse");
+            let restored: CheckPoint =
+                serde_json::from_str(&json).expect("deserialization must not recurse");
+            assert_eq!(cp, restored);
+        };
+        // 32 KiB (as in `checkpoint_drop_is_not_recursive`) is enough for the iterative impl and
+        // well short of what a recursive one needs.
+        std::thread::Builder::new()
+            .stack_size(32 * 1024)
+            .spawn(run)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Deserialization must reject headers whose `prev_blockhash` doesn't link.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn checkpoint_serde_rejects_unlinked_headers() {
+        use bitcoin::hashes::Hash;
+
+        let mut blocks = Vec::<(u32, Header)>::new();
+        let mut prev_blockhash = BlockHash::all_zeros();
+        for height in 0..3 {
+            let header = Header {
+                version: bitcoin::block::Version::ONE,
+                prev_blockhash,
+                merkle_root: bitcoin::TxMerkleNode::all_zeros(),
+                time: height,
+                bits: bitcoin::CompactTarget::from_consensus(0),
+                nonce: 0,
+            };
+            prev_blockhash = header.block_hash();
+            blocks.push((height, header));
+        }
+        let cp = CheckPoint::from_blocks(blocks.clone()).unwrap();
+        let json = serde_json::to_string(&cp).unwrap();
+        let restored: CheckPoint<Header> = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, cp);
+
+        // Unlink height 2 from height 1, and serialize tip-first as `CheckPoint` does.
+        blocks[2].1.prev_blockhash = BlockHash::all_zeros();
+        let json = serde_json::to_string(&blocks.iter().rev().collect::<Vec<_>>()).unwrap();
+        assert!(serde_json::from_str::<CheckPoint<Header>>(&json).is_err());
     }
 
     #[test]
