@@ -19,63 +19,223 @@ jobs:
         id: read_toolchain
         run: echo "rust_version=$(cat rust-version)" >> $GITHUB_OUTPUT
 
-  build-test:
-    needs: prepare
-    name: Build & Test
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust:
-          - version: ${{ needs.prepare.outputs.rust_version }}
-          - version: 1.85.0 # MSRV
-        features:
-          - --no-default-features --features bdk_chain/hashbrown
-          - --all-features
-    steps:
-      - name: checkout
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-            toolchain: ${{ matrix.rust.version }}
-            override: true
-            cache: true
-      - name: Pin dependencies for MSRV
-        if: matrix.rust.version == '1.85.0'
-        run: ./ci/pin-msrv.sh
-      - name: Build + Test
-        env:
-          MATRIX_RUST_VERSION: ${{ matrix.rust.version }}
-        run: |
-            cargo build --workspace ${{ matrix.features }}
-            cargo test --workspace ${{ matrix.features }}
-
-  check-no-std:
-    needs: prepare
-    name: Check no_std
+  msrv:
+    name: MSRV
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.85.0 # MSRV
+          cache: true
+      - name: Pin dependencies for MSRV
+        run: ./ci/pin-msrv.sh
+      - name: Build 1.85.0 (no default features)
+        run: cargo build --workspace --all-targets --no-default-features
+      - name: Build 1.85.0 (all features)
+        run: cargo build --workspace --all-targets --all-features
+      - name: Test 1.85.0 (all features)
+        run: cargo test --workspace --lib --tests --all-features
+
+  build-core:
+    needs: prepare
+    name: bdk_core
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./crates/core
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
-          override: true
           cache: true
-          # target: "thumbv6m-none-eabi"
-      - name: Check bdk_chain
+      - name: Build (default features)
+        run: cargo build
+      - name: Build (no default features)
+        run: cargo build --no-default-features
+      - name: Build (serde)
+        run: cargo build --no-default-features --features serde
+      - name: Build (all features)
+        run: cargo build --all-features
+      - name: Test (all features)
+        run: cargo test --all-features
+
+  build-chain:
+    needs: prepare
+    name: bdk_chain
+    runs-on: ubuntu-latest
+    defaults:
+      run:
         working-directory: ./crates/chain
-        # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features hashbrown
-      - name: Check esplora
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+      - name: Build (default features)
+        run: cargo build
+      - name: Build (no default features)
+        run: cargo build --no-default-features
+      - name: Build (serde)
+        run: cargo build --no-default-features --features serde
+      - name: Build (miniscript)
+        run: cargo build --no-default-features --features miniscript
+      - name: Build (rusqlite)
+        run: cargo build --features rusqlite
+      - name: Build (all features)
+        run: cargo build --all-features
+      - name: Test (all features)
+        run: cargo test --all-features
+
+  build-bitcoind-rpc:
+    needs: prepare
+    name: bdk_bitcoind_rpc
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./crates/bitcoind_rpc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+      - name: Build (default features)
+        run: cargo build
+      - name: Build (no default features)
+        run: cargo build --no-default-features
+      - name: Build (serde)
+        run: cargo build --no-default-features --features serde
+      - name: Build (all features)
+        run: cargo build --all-features
+      - name: Test (all features)
+        run: cargo test --all-features
+
+  build-electrum:
+    needs: prepare
+    name: bdk_electrum
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./crates/electrum
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+      - name: Build (default features)
+        run: cargo build
+      - name: Build (use-rustls)
+        run: cargo build --no-default-features --features use-rustls
+      - name: Build (use-rustls-ring)
+        run: cargo build --no-default-features --features use-rustls-ring
+      - name: Build (use-openssl)
+        run: cargo build --no-default-features --features use-openssl
+      - name: Test (default features)
+        run: cargo test
+      - name: Test (all features)
+        run: cargo test --all-features
+
+  build-esplora:
+    needs: prepare
+    name: bdk_esplora
+    runs-on: ubuntu-latest
+    defaults:
+      run:
         working-directory: ./crates/esplora
-        # TODO "--target thumbv6m-none-eabi" should work but currently does not
-        run: cargo check --no-default-features --features bdk_chain/hashbrown
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+      - name: Build (default features)
+        run: cargo build
+      - name: Build (no default features)
+        run: cargo build --no-default-features
+      - name: Build (async)
+        run: cargo build --no-default-features --features std,async
+      - name: Build (blocking)
+        run: cargo build --no-default-features --features std,blocking
+      - name: Build (async-https-native)
+        run: cargo build --no-default-features --features std,async-https-native
+      - name: Build (blocking-https-native)
+        run: cargo build --no-default-features --features std,blocking-https-native
+      - name: Build (all features)
+        run: cargo build --all-features
+      - name: Test (default features)
+        run: cargo test
+      - name: Test (all features)
+        run: cargo test --all-features
+
+  build-file-store:
+    needs: prepare
+    name: bdk_file_store
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./crates/file_store
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+      - name: Build (default features)
+        run: cargo build
+      - name: Test (all features)
+        run: cargo test --all-features
+
+  build-testenv:
+    needs: prepare
+    name: bdk_testenv
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./crates/testenv
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+      - name: Build (default features)
+        run: cargo build
+      - name: Build (no default features)
+        run: cargo build --no-default-features
+      - name: Build (std, no download)
+        run: cargo build --no-default-features --features std
+      - name: Build (all features)
+        run: cargo build --all-features
+      - name: Test (all features)
+        run: cargo test --all-features
 
   check-wasm:
     needs: prepare
@@ -97,12 +257,33 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
             toolchain: ${{ needs.prepare.outputs.rust_version }}
-            override: true
             cache: true
             target: "wasm32-unknown-unknown"
       - name: Check esplora
         working-directory: ./crates/esplora
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features bdk_core/hashbrown,async
+
+  check-no-std:
+    needs: prepare
+    name: Check no-std
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+          # TODO: `--target thumbv6m-none-eabi` should work but currently does not
+          # target: thumbv6m-none-eabi
+      - name: Check bdk_core (no-std, hashbrown)
+        working-directory: ./crates/core
+        run: cargo check --no-default-features --features hashbrown
+      - name: Check bdk_chain (no-std, hashbrown + miniscript)
+        working-directory: ./crates/chain
+        run: cargo check --no-default-features --features hashbrown,miniscript
 
   fmt:
     name: Rust fmt
@@ -116,7 +297,6 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
             toolchain: nightly
-            override: true
             cache: true
             components: rustfmt
       - name: Check fmt
@@ -132,13 +312,13 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-            toolchain: ${{ needs.prepare.outputs.rust_version }}
-            components: clippy
-            override: true
-            cache: true
-      - name: Clippy
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+          components: clippy
+      - name: Check clippy
         run: cargo clippy --all-features --all-targets -- -D warnings
 
   check-docs:
@@ -154,7 +334,6 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
-          override: true
           cache: true
       - name: Check docs
-        run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
+        run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
