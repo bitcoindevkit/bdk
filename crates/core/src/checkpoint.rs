@@ -621,6 +621,56 @@ impl<D> IntoIterator for CheckPoint<D> {
     }
 }
 
+/// Serializes a [`CheckPoint`] as a flat sequence of `(height, data)` pairs, ordered from tip to
+/// base (descending height).
+///
+/// Iterates rather than recursing over the linked list, so long chains can't overflow the stack.
+/// The `skip`/`index` topology isn't serialized; it is rebuilt on deserialization.
+#[cfg(feature = "serde")]
+impl<D> serde::Serialize for CheckPoint<D>
+where
+    D: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        // `index` is the number of checkpoints below the tip, so the chain has `index + 1` nodes.
+        let mut seq = serializer.serialize_seq(Some(self.0.index as usize + 1))?;
+        for cp in self.iter() {
+            seq.serialize_element(&(cp.height(), cp.data_ref()))?;
+        }
+        seq.end()
+    }
+}
+
+/// Deserializes a [`CheckPoint`] from the flat sequence of `(height, data)` pairs produced by its
+/// [`Serialize`](serde::Serialize) implementation.
+///
+/// The chain is rebuilt iteratively with [`CheckPoint::from_blocks`] (which re-derives the
+/// `skip`/`index` topology), so deserialization never recurses regardless of chain length.
+#[cfg(feature = "serde")]
+impl<'de, D> serde::Deserialize<'de> for CheckPoint<D>
+where
+    D: serde::Deserialize<'de> + ToBlockHash + Clone + fmt::Debug,
+{
+    fn deserialize<De>(deserializer: De) -> Result<Self, De::Error>
+    where
+        De: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+        // Serialized tip-first (descending height); `from_blocks` expects ascending order.
+        let mut blocks = Vec::<(u32, D)>::deserialize(deserializer)?;
+        blocks.reverse();
+        CheckPoint::from_blocks(blocks).map_err(|_| {
+            De::Error::custom(
+                "invalid checkpoint chain: blocks must be non-empty and in ascending height order",
+            )
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -641,6 +691,30 @@ mod tests {
         std::thread::Builder::new()
             // Restrict stack size.
             .stack_size(32 * 1024)
+            .spawn(run)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Round-trip a long chain on a small stack: (de)serialization must not recurse.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn checkpoint_serde_is_not_recursive() {
+        let run = || {
+            let mut cp = CheckPoint::new(0, bitcoin::hashes::Hash::hash(b"genesis"));
+            for height in 1u32..=(1024 * 10) {
+                let hash: BlockHash = bitcoin::hashes::Hash::hash(height.to_be_bytes().as_slice());
+                cp = cp.push(height, hash).unwrap();
+            }
+
+            let json = serde_json::to_string(&cp).expect("serialization must not recurse");
+            let restored: CheckPoint =
+                serde_json::from_str(&json).expect("deserialization must not recurse");
+            assert_eq!(cp, restored);
+        };
+        std::thread::Builder::new()
+            .stack_size(128 * 1024)
             .spawn(run)
             .unwrap()
             .join()

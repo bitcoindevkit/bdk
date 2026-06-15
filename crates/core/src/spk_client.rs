@@ -404,6 +404,15 @@ impl<I, D> SyncRequest<I, D> {
 /// See also [`SyncRequest`].
 #[must_use]
 #[derive(Debug)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(bound(
+        serialize = "A: serde::Serialize, D: serde::Serialize",
+        deserialize = "A: Ord + serde::Deserialize<'de>, \
+                       D: crate::ToBlockHash + Clone + core::fmt::Debug + serde::Deserialize<'de>"
+    ))
+)]
 pub struct SyncResponse<A = ConfirmationBlockTime, D = BlockHash> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,
@@ -687,5 +696,28 @@ impl<I, D> Iterator for SyncIter<'_, I, D, OutPoint> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.request.outpoints.len();
         (remaining, Some(remaining))
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod test {
+    use super::*;
+    use bitcoin::hashes::Hash;
+
+    #[test]
+    fn sync_response_serde_round_trip() {
+        let cp = CheckPoint::new(0, Hash::hash(b"genesis"))
+            .push(1, Hash::hash(b"block"))
+            .unwrap();
+        let response: SyncResponse = SyncResponse {
+            tx_update: crate::TxUpdate::default(),
+            chain_update: Some(cp),
+        };
+
+        let json = serde_json::to_string(&response).expect("serialization must succeed");
+        let restored: SyncResponse =
+            serde_json::from_str(&json).expect("deserialization must succeed");
+
+        assert_eq!(response.chain_update, restored.chain_update);
     }
 }
