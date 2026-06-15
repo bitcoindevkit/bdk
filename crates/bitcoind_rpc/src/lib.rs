@@ -101,12 +101,42 @@ where
 
     /// Emit mempool transactions and any evicted [`Txid`]s.
     ///
-    /// This method returns a [`MempoolEvent`] containing the full transactions (with their
-    /// first-seen unix timestamps) that were emitted, and [`MempoolEvent::evicted`] which are
-    /// any [`Txid`]s which were previously seen in the mempool and are now missing. Evicted txids
+    /// This method returns a [`MempoolEvent`] containing the full transactions that were emitted,
+    /// each stamped with the call's `sync_time` (unix seconds captured at the start of the call,
+    /// not when the node first saw the transaction), and [`MempoolEvent::evicted`] which are any
+    /// [`Txid`]s which were previously seen in the mempool and are now missing. The timestamp
+    /// advances on each poll, so callers should treat it as a "last seen" value. Evicted txids
     /// are only reported once the emitter’s checkpoint matches the RPC’s best block in both height
     /// and hash. Until `next_block()` advances the checkpoint to tip, `mempool()` will always
     /// return an empty `evicted` set.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bdk_bitcoind_rpc::{
+    ///     bitcoincore_rpc::{Auth, Client},
+    ///     Emitter, NO_EXPECTED_MEMPOOL_TXS,
+    /// };
+    /// # use bdk_core::CheckPoint;
+    /// # use bitcoin::{constants::genesis_block, Network};
+    ///
+    /// let client = Client::new("127.0.0.1:8332", Auth::None)?;
+    /// # let last_cp = CheckPoint::new(0, genesis_block(Network::Bitcoin).block_hash());
+    /// // Use the checkpoint from your receiving structure (e.g. `LocalChain::tip()`).
+    /// let mut emitter = Emitter::new(&client, last_cp, 0, NO_EXPECTED_MEMPOOL_TXS);
+    ///
+    /// // Drain blocks first so evictions can be reported once the checkpoint reaches tip.
+    /// while emitter.next_block()?.is_some() {}
+    ///
+    /// let event = emitter.mempool()?;
+    /// for (tx, seen_at) in event.update {
+    ///     // index unconfirmed `tx` (last seen at `seen_at`)
+    /// }
+    /// for (txid, evicted_at) in event.evicted {
+    ///     // mark `txid` as evicted from the mempool at `evicted_at`
+    /// }
+    /// # Ok::<_, bdk_bitcoind_rpc::bitcoincore_rpc::Error>(())
+    /// ```
     #[cfg(feature = "std")]
     pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let sync_time = std::time::UNIX_EPOCH
@@ -199,6 +229,34 @@ where
     }
 
     /// Emit the next block height and block (if any).
+    ///
+    /// Call this repeatedly until it returns `Ok(None)`, which means the chain tip has been
+    /// reached. Each [`BlockEvent`] carries the block alongside the [`CheckPoint`] it connects to,
+    /// so it can be applied to BDK structures that require block connectivity.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bdk_bitcoind_rpc::{
+    ///     bitcoincore_rpc::{Auth, Client},
+    ///     Emitter, NO_EXPECTED_MEMPOOL_TXS,
+    /// };
+    /// # use bdk_core::CheckPoint;
+    /// # use bitcoin::{constants::genesis_block, Network};
+    ///
+    /// let client = Client::new("127.0.0.1:8332", Auth::None)?;
+    /// let start_height = 0;
+    /// # let last_cp = CheckPoint::new(0, genesis_block(Network::Bitcoin).block_hash());
+    /// // Use the checkpoint from your receiving structure (e.g. `LocalChain::tip()`).
+    /// let mut emitter = Emitter::new(&client, last_cp, start_height, NO_EXPECTED_MEMPOOL_TXS);
+    ///
+    /// while let Some(event) = emitter.next_block()? {
+    ///     let height = event.block_height();
+    ///     let connected_to = event.connected_to();
+    ///     // apply `event.block` to your chain and tx graph here
+    /// }
+    /// # Ok::<_, bdk_bitcoind_rpc::bitcoincore_rpc::Error>(())
+    /// ```
     pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
         if let Some((checkpoint, block)) = poll(self, move |hash, client| client.get_block(hash))? {
             // Stop tracking unconfirmed transactions that have been confirmed in this block.
