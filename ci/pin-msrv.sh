@@ -62,6 +62,7 @@ cargo update -p base58ck --precise "0.1.1"
 cargo update -p bitcoin-io --precise "0.1.4"
 cargo update -p bitcoin-units --precise "0.1.4"
 cargo update -p filetime --precise "0.2.27"
+cargo update -p zeroize --precise "1.8.2"
 
 # all pinning required due to `clap` usage in `example_cli`
 cargo update -p "clap@4.6.1" --precise "4.5.17"
