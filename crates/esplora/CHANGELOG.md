@@ -7,6 +7,16 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [esplora-0.22.3]
+
+### Fixed
+
+- Fixed `full_scan` now always scans the full revealed range before applying `stop_gap` past `last_revealed` #2222
+
+### Changed
+
+- Use `HashSet` instead of `Vec` to track `missing_txs` in bdk_esplora, it deduplicates txids. #2230
+
 ## [esplora-0.22.2]
 
 ### Fixed
@@ -53,3 +63,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [esplora-0.22.0]: https://github.com/bitcoindevkit/bdk/releases/tag/esplora-0.22.0
 [esplora-0.22.1]: https://github.com/bitcoindevkit/bdk/releases/tag/esplora-0.22.1
 [esplora-0.22.2]: https://github.com/bitcoindevkit/bdk/releases/tag/esplora-0.22.2
+[esplora-0.22.3]: https://github.com/bitcoindevkit/bdk/releases/tag/esplora-0.22.3

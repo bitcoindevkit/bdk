@@ -7,7 +7,11 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [core-0.6.4]
+
+### Fixed
+
+- Fixed `full_scan` now always scans the full revealed range before applying `stop_gap` past `last_revealed` #2222
 
 ## [core-0.6.3]
 
@@ -64,3 +68,4 @@ This is because requests now have a `start_time`, instead of specifying a `seen_
 [core-0.6.1]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.1
 [core-0.6.2]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.2
 [core-0.6.3]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.3
+[core-0.6.4]: https://github.com/bitcoindevkit/bdk/releases/tag/core-0.6.4
