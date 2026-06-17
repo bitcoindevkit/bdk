@@ -148,7 +148,7 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
                         }
                         BlockCandidateResolution::Awaiting => {
                             self.unprocessed_anchor_checks.push_front((txid, anchors));
-                            return TaskProgress::AwaitingQueries;
+                            return TaskProgress::Blocked;
                         }
                         // No anchor confirms this tx; leave it without a direct anchor.
                         BlockCandidateResolution::NotConfirmed => {}
@@ -185,7 +185,7 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
                 // No new heights. If any required height is still in-flight, wait for the driver;
                 // otherwise every MTP block is resolved and we can finish.
                 if required.iter().any(|h| self.queries.get(*h).is_none()) {
-                    return TaskProgress::AwaitingQueries;
+                    return TaskProgress::Blocked;
                 }
 
                 self.current_stage = ViewStage::Finished;

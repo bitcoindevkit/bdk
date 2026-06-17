@@ -443,7 +443,7 @@ where
                 }
                 // This is a synchronous driver: every `Query` height is resolved before the next
                 // poll, so the task never has an in-flight query and cannot return this variant.
-                TaskProgress::AwaitingQueries => {
+                TaskProgress::Blocked => {
                     unreachable!(
                         "run_task resolves queries synchronously; nothing is ever in-flight"
                     )

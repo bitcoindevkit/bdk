@@ -148,7 +148,7 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalTask<'g, A, B> {
                         BlockCandidateResolution::Awaiting => {
                             self.unprocessed_anchored_txs
                                 .push_front((txid, tx, anchors));
-                            return TaskProgress::AwaitingQueries;
+                            return TaskProgress::Blocked;
                         }
                         BlockCandidateResolution::NotConfirmed => {
                             // No anchor confirms this tx; defer to the leftover stage.

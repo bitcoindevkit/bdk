@@ -39,8 +39,8 @@ pub enum TaskProgress {
     /// A synchronous driver that resolves every [`Query`](Self::Query) height before re-polling
     /// never observes this variant (nothing is ever in-flight). It exists for streaming drivers
     /// that issue fetches without blocking and poll opportunistically: `Query` says "launch I/O",
-    /// `AwaitingQueries` says "block until some lands".
-    AwaitingQueries,
+    /// `Blocked` says "block until some lands".
+    Blocked,
     /// The task is complete. The driver should call [`finish`](ChainTask::finish).
     Done,
 }
@@ -71,13 +71,13 @@ pub enum TaskProgress {
 ///         }
 ///         // A synchronous driver resolves every query before re-polling, so nothing is
 ///         // ever in-flight and this variant cannot occur.
-///         TaskProgress::AwaitingQueries => unreachable!(),
+///         TaskProgress::Blocked => unreachable!(),
 ///     }
 /// }
 /// ```
 ///
 /// A **streaming** driver instead launches fetches on [`Query`](TaskProgress::Query) without
-/// blocking and re-polls; when the task returns [`AwaitingQueries`](TaskProgress::AwaitingQueries)
+/// blocking and re-polls; when the task returns [`Blocked`](TaskProgress::Blocked)
 /// it blocks on the next fetch to complete, resolves it, and re-polls.
 ///
 /// # The block type `B`
@@ -95,8 +95,8 @@ pub enum TaskProgress {
 ///   - [`TaskProgress::Query`] when the task needs block data at one or more *newly requested*
 ///     heights. Dedup against already-requested heights so each height is announced once and the
 ///     vector is never empty.
-///   - [`TaskProgress::AwaitingQueries`] when the task has no new heights to request but cannot
-///     progress until previously requested heights are resolved.
+///   - [`TaskProgress::Blocked`] when the task has no new heights to request but cannot progress
+///     until previously requested heights are resolved.
 ///   - [`TaskProgress::Done`] when all processing is complete.
 /// - Prefer returning [`TaskProgress::Advanced`] over looping internally. This gives the driver
 ///   control between steps for progress reporting, cancellation, or logging.
