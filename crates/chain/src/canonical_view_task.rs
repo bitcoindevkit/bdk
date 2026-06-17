@@ -6,7 +6,10 @@ use crate::tx_graph::TxDescendants;
 use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
-use bdk_core::{BlockId, BlockQueries, ChainTask, TaskProgress, ToBlockHash, ToBlockTime};
+use bdk_core::{
+    BlockCandidateResolution, BlockId, BlockQueries, ChainTask, TaskProgress, ToBlockHash,
+    ToBlockTime,
+};
 use bitcoin::{OutPoint, Txid};
 
 use crate::{canonical::CanonicalEntry, Anchor, CanonicalView, ChainPosition, TxGraph};
@@ -132,44 +135,24 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
         match self.current_stage {
             ViewStage::ResolvingPositions => {
                 if let Some((txid, anchors)) = self.unprocessed_anchor_checks.pop_front() {
-                    let mut best_anchor = Option::<A>::None;
-                    for a in anchors.iter() {
-                        let h = a.anchor_block().height;
-                        // Only a resolved, present, matching block confirms this anchor.
-                        if let Some(Some(b)) = self.queries.get(h) {
-                            if b.to_blockhash() == a.anchor_block().hash {
-                                best_anchor = Some(a.clone());
-                                break;
-                            }
-                        }
-                    }
-
-                    if let Some(anchor) = best_anchor {
-                        self.direct_anchors.insert(txid, anchor);
-                        return TaskProgress::Advanced;
-                    }
-
-                    // No resolved anchor matched. `request` is additive, so a non-empty result is
-                    // genuinely new work to fetch and is never empty.
-                    let heights = self
+                    match self
                         .queries
-                        .request(anchors.iter().map(|a| a.anchor_block().height));
-                    if !heights.is_empty() {
-                        self.unprocessed_anchor_checks.push_front((txid, anchors));
-                        return TaskProgress::Query(heights);
-                    }
-
-                    // No new heights. If any anchor height is still in-flight, wait for the driver;
-                    // otherwise all are resolved and none matched (no direct anchor for this tx).
-                    if anchors
-                        .iter()
-                        .any(|a| self.queries.get(a.anchor_block().height).is_none())
+                        .resolve_candidates(anchors.iter().map(|a| (a, a.anchor_block())))
                     {
-                        self.unprocessed_anchor_checks.push_front((txid, anchors));
-                        return TaskProgress::AwaitingQueries;
+                        BlockCandidateResolution::Confirmed(anchor) => {
+                            self.direct_anchors.insert(txid, anchor.clone());
+                        }
+                        BlockCandidateResolution::Query(heights) => {
+                            self.unprocessed_anchor_checks.push_front((txid, anchors));
+                            return TaskProgress::Query(heights);
+                        }
+                        BlockCandidateResolution::Awaiting => {
+                            self.unprocessed_anchor_checks.push_front((txid, anchors));
+                            return TaskProgress::AwaitingQueries;
+                        }
+                        // No anchor confirms this tx; leave it without a direct anchor.
+                        BlockCandidateResolution::NotConfirmed => {}
                     }
-
-                    // No confirmed anchor found for this tx
                     TaskProgress::Advanced
                 } else {
                     self.current_stage = ViewStage::FetchingMtpBlocks;

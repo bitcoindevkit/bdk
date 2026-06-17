@@ -5,7 +5,9 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bdk_core::{BlockId, BlockQueries, ChainTask, TaskProgress, ToBlockHash};
+use bdk_core::{
+    BlockCandidateResolution, BlockId, BlockQueries, ChainTask, TaskProgress, ToBlockHash,
+};
 use bitcoin::{Transaction, Txid};
 
 type CanonicalMap<A> = HashMap<Txid, CanonicalEntry<CanonicalReason<A>>>;
@@ -131,58 +133,36 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalTask<'g, A, B> {
                         return TaskProgress::Advanced;
                     }
 
-                    let mut best_anchor = Option::<A>::None;
-                    for a in anchors.iter() {
-                        let h = a.anchor_block().height;
-                        // A block that is either unresolved (`None`), absent at this height
-                        // (`Some(None)`), or present but mismatched does not confirm this anchor.
-                        if let Some(Some(b)) = self.queries.get(h) {
-                            if b.to_blockhash() == a.anchor_block().hash {
-                                best_anchor = Some(a.clone());
-                                break;
-                            }
+                    match self
+                        .queries
+                        .resolve_candidates(anchors.iter().map(|a| (a, a.anchor_block())))
+                    {
+                        BlockCandidateResolution::Confirmed(a) => {
+                            self.mark_canonical(txid, tx, CanonicalReason::from_anchor(a.clone()));
+                        }
+                        BlockCandidateResolution::Query(heights) => {
+                            self.unprocessed_anchored_txs
+                                .push_front((txid, tx, anchors));
+                            return TaskProgress::Query(heights);
+                        }
+                        BlockCandidateResolution::Awaiting => {
+                            self.unprocessed_anchored_txs
+                                .push_front((txid, tx, anchors));
+                            return TaskProgress::AwaitingQueries;
+                        }
+                        BlockCandidateResolution::NotConfirmed => {
+                            // No anchor confirms this tx; defer to the leftover stage.
+                            self.unprocessed_leftover_txs.push_back((
+                                txid,
+                                tx,
+                                anchors
+                                    .iter()
+                                    .last()
+                                    .expect("must have at least one anchor")
+                                    .confirmation_height_upper_bound(),
+                            ));
                         }
                     }
-
-                    if let Some(a) = best_anchor {
-                        self.mark_canonical(txid, tx, CanonicalReason::from_anchor(a));
-                        return TaskProgress::Advanced;
-                    }
-
-                    // No resolved anchor matched. `request` returns only heights that are neither
-                    // resolved nor already in-flight, so a non-empty result is genuinely new work
-                    // to fetch. This keeps `Query` additive and never empty.
-                    let heights = self
-                        .queries
-                        .request(anchors.iter().map(|a| a.anchor_block().height));
-                    if !heights.is_empty() {
-                        self.unprocessed_anchored_txs
-                            .push_front((txid, tx, anchors));
-                        return TaskProgress::Query(heights);
-                    }
-
-                    // No new heights to request. If any anchor height is still in-flight (requested
-                    // but unresolved), we can't decide this tx yet — wait for the driver. Otherwise
-                    // every anchor height is resolved and none matched, so the tx is not confirmed.
-                    if anchors
-                        .iter()
-                        .any(|a| self.queries.get(a.anchor_block().height).is_none())
-                    {
-                        self.unprocessed_anchored_txs
-                            .push_front((txid, tx, anchors));
-                        return TaskProgress::AwaitingQueries;
-                    }
-
-                    // No confirmed anchor found.
-                    self.unprocessed_leftover_txs.push_back((
-                        txid,
-                        tx,
-                        anchors
-                            .iter()
-                            .last()
-                            .expect("must have at least one anchor")
-                            .confirmation_height_upper_bound(),
-                    ));
                 } else {
                     self.current_stage.next_stage();
                 }
