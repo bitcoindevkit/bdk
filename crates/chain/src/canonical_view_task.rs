@@ -7,8 +7,8 @@ use alloc::collections::BTreeSet;
 use alloc::vec::Vec;
 
 use bdk_core::{
-    BlockCandidateResolution, BlockId, BlockQueries, ChainTask, TaskProgress, ToBlockHash,
-    ToBlockTime,
+    median_time_past, BlockCandidateResolution, BlockId, BlockQueries, ChainTask, TaskProgress,
+    ToBlockHash, ToBlockTime,
 };
 use bitcoin::{OutPoint, Txid};
 
@@ -200,14 +200,11 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
     }
 
     fn finish(self) -> Self::Output {
-        // Helper: compute MTP for a given height from the blocks map.
+        // Helper: compute MTP for a given height from the blocks fetched into `queries`.
         let compute_mtp_at = |h: u32, f: fn(&B) -> u32| -> Option<u32> {
-            let start = h.saturating_sub(10);
-            let mut ts: Vec<u32> = (start..=h)
-                .map(|mtp_h| self.queries.get(mtp_h).and_then(|b| b.as_ref()).map(f))
-                .collect::<Option<Vec<_>>>()?;
-            ts.sort_unstable();
-            Some(ts[ts.len() / 2])
+            median_time_past(h, |mtp_h| {
+                self.queries.get(mtp_h).and_then(|b| b.as_ref()).map(f)
+            })
         };
 
         let extract_time = self.extract_time;
