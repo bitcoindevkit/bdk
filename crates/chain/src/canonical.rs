@@ -529,6 +529,9 @@ impl<A: Anchor> CanonicalTxs<A> {
     ///
     /// This is the second phase of the canonicalization pipeline. Blocks fetched during
     /// phase 1 are passed through so they can be reused without redundant queries.
+    ///
+    /// To also compute median-time-past (MTP) values for the resulting view, call
+    /// [`CanonicalViewTask::with_mtp`] on the returned task.
     pub fn view_task<'g, B>(
         self,
         tx_graph: &'g TxGraph<A>,
