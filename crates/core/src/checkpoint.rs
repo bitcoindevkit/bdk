@@ -194,6 +194,26 @@ impl ToBlockTime for Header {
     }
 }
 
+/// Number of blocks used to compute the median time past (BIP-0113).
+const MTP_BLOCK_COUNT: u32 = 11;
+
+/// Compute the median time past (MTP) at `height` from block timestamps (BIP-0113).
+///
+/// MTP is the median of the timestamps of the 11 blocks at heights `height-10..=height`.
+/// `block_time` returns the timestamp of the block at a given height, or `None` if it is
+/// unavailable; if any of the 11 blocks is missing this returns `None`.
+///
+/// Note: this is a pseudo-median — for an even count it takes the higher of the two middle values
+/// rather than averaging them, per the BIP-0113 specification.
+pub fn median_time_past(height: u32, block_time: impl Fn(u32) -> Option<u32>) -> Option<u32> {
+    let start = height.saturating_sub(MTP_BLOCK_COUNT - 1);
+    let mut timestamps = (start..=height)
+        .map(block_time)
+        .collect::<Option<Vec<u32>>>()?;
+    timestamps.sort_unstable();
+    Some(timestamps[timestamps.len() / 2])
+}
+
 impl<D> PartialEq for CheckPoint<D> {
     fn eq(&self, other: &Self) -> bool {
         let self_cps = self.iter().map(|cp| cp.block_id());
@@ -360,8 +380,6 @@ impl<D> CheckPoint<D>
 where
     D: ToBlockHash + fmt::Debug + Clone,
 {
-    const MTP_BLOCK_COUNT: u32 = 11;
-
     /// Construct a new base [`CheckPoint`] from given `height` and `data` at the front of a linked
     /// list.
     pub fn new(height: u32, data: D) -> Self {
@@ -391,22 +409,9 @@ where
     where
         D: ToBlockTime,
     {
-        let current_height = self.height();
-        let earliest_height = current_height.saturating_sub(Self::MTP_BLOCK_COUNT - 1);
-
-        let mut timestamps = (earliest_height..=current_height)
-            .map(|height| {
-                // Return `None` for missing blocks or missing block times
-                let cp = self.get(height)?;
-                let block_time = cp.data_ref().to_blocktime();
-                Some(block_time)
-            })
-            .collect::<Option<Vec<u32>>>()?;
-        timestamps.sort_unstable();
-
-        // If there are more than 1 middle values, use the higher middle value.
-        // This is mathematically incorrect, but this is the BIP-0113 specification.
-        Some(timestamps[timestamps.len() / 2])
+        median_time_past(self.height(), |height| {
+            Some(self.get(height)?.data_ref().to_blocktime())
+        })
     }
 
     /// Construct from an iterator of block data.
