@@ -21,8 +21,12 @@
 //!     println!("Transaction {}: {:?}", tx.txid, tx.pos);
 //! }
 //! ```
+//!
+//! For an ordering where every transaction appears after the transactions it spends from, see
+//! [`CanonicalView::txs_in_topological_order`].
 
 use crate::collections::HashMap;
+use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::{fmt, ops::RangeBounds};
@@ -169,7 +173,7 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
 
 /// Canonical set of transactions from a [`TxGraph`].
 ///
-/// `Canonical` provides a conflict-resolved list of transactions. It determines
+/// `Canonical` provides an ordered, conflict-resolved set of transactions. It determines
 /// which transactions are canonical (non-conflicted) based on the current chain state and
 /// provides methods to query transaction data, unspent outputs, and balances.
 ///
@@ -179,14 +183,18 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
 ///   [`CanonicalTxs`])
 ///
 /// The view maintains:
-/// - A list of canonical transactions
+/// - A list of canonical transactions in canonical order
 /// - A mapping of outpoints to the transactions that spend them
 /// - The chain tip used for canonicalization
+///
+/// Use [`txs`](Self::txs) to iterate in canonical order, or
+/// [`txs_in_topological_order`](Self::txs_in_topological_order) for an ordering where every
+/// transaction appears after the transactions it spends from.
 ///
 /// [`TxGraph`]: crate::TxGraph
 #[derive(Debug)]
 pub struct Canonical<A, P> {
-    /// List of canonical transaction IDs.
+    /// List of canonical transaction IDs in canonical order.
     pub(crate) order: Vec<Txid>,
     /// Map of transaction IDs to their transaction data and position.
     pub(crate) txs: HashMap<Txid, (Arc<Transaction>, P)>,
@@ -269,10 +277,13 @@ impl<A, P: Clone> Canonical<A, P> {
         })
     }
 
-    /// Get an iterator over all canonical transactions in order.
+    /// Get an iterator over all canonical transactions in canonical order.
     ///
     /// Transactions are returned in canonical order, with confirmed transactions ordered by
     /// block height and position, followed by unconfirmed transactions.
+    ///
+    /// For an ordering where every transaction appears after the transactions it spends from, see
+    /// [`txs_in_topological_order`](Self::txs_in_topological_order).
     ///
     /// # Example
     ///
@@ -394,6 +405,107 @@ impl<A, P: Clone> Canonical<A, P> {
 }
 
 impl<A: Anchor> CanonicalView<A> {
+    /// Returns the canonical [`Txid`]s in topological order.
+    ///
+    /// The topological order guarantees:
+    ///
+    /// - every transaction appears after the transactions whose outputs it spends (if `B` spends an
+    ///   output of `A`, then `A` comes before `B`)
+    /// - sources (transactions with no canonical parent) keep their relative [canonical
+    ///   order](Self::txs)
+    ///
+    /// The ordering is computed with Kahn's algorithm.
+    fn topological_sort(&self) -> Vec<Txid> {
+        // Map each canonical parent to the txs that spend its outputs. The spending tx is always
+        // canonical, so only the parent needs checking.
+        let children: HashMap<Txid, Vec<Txid>> = self
+            .spends
+            .iter()
+            .filter(|(outpoint, _)| self.txs.contains_key(&outpoint.txid))
+            .fold(HashMap::new(), |mut children, (outpoint, &child)| {
+                children.entry(outpoint.txid).or_default().push(child);
+                children
+            });
+
+        // Count how many canonical parents each tx has. Txs missing from the map have none, so they
+        // are the initial sources.
+        let mut in_degree: HashMap<Txid, usize> =
+            children
+                .values()
+                .flatten()
+                .fold(HashMap::new(), |mut in_degree, &child| {
+                    *in_degree.entry(child).or_insert(0) += 1;
+                    in_degree
+                });
+
+        // Begin with the sources, in canonical order.
+        let mut sources: VecDeque<Txid> = self
+            .order
+            .iter()
+            .copied()
+            .filter(|txid| !in_degree.contains_key(txid))
+            .collect();
+
+        // Emit each source and remove its outgoing edges. A child becomes a source once its last
+        // parent has been emitted.
+        let mut sorted = Vec::with_capacity(self.order.len());
+        while let Some(txid) = sources.pop_front() {
+            sorted.push(txid);
+            for &child in children.get(&txid).into_iter().flatten() {
+                if let Some(degree) = in_degree.get_mut(&child) {
+                    *degree -= 1;
+                    if *degree == 0 {
+                        sources.push_back(child);
+                    }
+                }
+            }
+        }
+
+        // The tx graph is a DAG, so every tx must be placed. A shorter result indicates a cycle.
+        debug_assert_eq!(
+            sorted.len(),
+            self.order.len(),
+            "topological sort dropped transactions; dependency cycle?"
+        );
+
+        sorted
+    }
+
+    /// Get an iterator over all canonical transactions in topological order.
+    ///
+    /// Unlike [`txs`](Self::txs), which yields transactions in canonical order, this method
+    /// guarantees that for every spending relationship `A -> B` (where `B` spends an output of
+    /// `A`), `A` appears before `B`. This is useful when transactions must be replayed or
+    /// rebroadcast, since a parent must be processed before its children.
+    ///
+    /// Sources (transactions with no canonical parent) keep their relative
+    /// [canonical order](Self::txs).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalParams, TxGraph, local_chain::LocalChain};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// # let chain_tip = chain.tip().block_id();
+    /// # let view = chain.canonical_view(&tx_graph, chain_tip, CanonicalParams::default());
+    /// // Iterate over canonical transactions, parents before children
+    /// for tx in view.txs_in_topological_order() {
+    ///     println!("TX {}: {:?}", tx.txid, tx.pos);
+    /// }
+    /// ```
+    pub fn txs_in_topological_order(
+        &self,
+    ) -> impl ExactSizeIterator<Item = CanonicalTx<ChainPosition<A>>> + DoubleEndedIterator + '_
+    {
+        self.topological_sort().into_iter().map(|txid| {
+            let (tx, pos) = self.txs[&txid].clone();
+            CanonicalTx { pos, txid, tx }
+        })
+    }
+
     /// Calculate the total balance of the given outpoints.
     ///
     /// This method computes a detailed balance breakdown for a set of outpoints, categorizing
