@@ -291,9 +291,16 @@ mod test {
         io::{Seek, Write},
     };
 
+    use anyhow::anyhow;
+
     const TEST_MAGIC_BYTES_LEN: usize = 12;
     const TEST_MAGIC_BYTES: [u8; TEST_MAGIC_BYTES_LEN] =
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
+
+    use bdk_testenv::persist_test_utils::{
+        assert_persist_changesets, keychain_txout_changesets, local_chain_changesets,
+        tx_graph_changesets,
+    };
 
     type TestChangeSet = BTreeSet<String>;
 
@@ -598,5 +605,44 @@ mod test {
 
         // current position matches EOF
         assert_eq!(current_pointer, expected_pointer);
+    }
+
+    #[test]
+    fn txgraph_is_persisted() -> anyhow::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let changesets = tx_graph_changesets();
+        assert_persist_changesets(
+            || Ok(Store::load_or_create(&TEST_MAGIC_BYTES, temp_dir.path().join("store.db"))?.0),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+            &changesets,
+        )
+        .map_err(|err| anyhow!(err))
+    }
+
+    #[test]
+    fn indexer_is_persisted() -> anyhow::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let changesets = keychain_txout_changesets();
+        assert_persist_changesets(
+            || Ok(Store::load_or_create(&TEST_MAGIC_BYTES, temp_dir.path().join("store.db"))?.0),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+            &changesets,
+        )
+        .map_err(|err| anyhow!(err))
+    }
+
+    #[test]
+    fn local_chain_is_persisted() -> anyhow::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let changesets = local_chain_changesets();
+        assert_persist_changesets(
+            || Ok(Store::load_or_create(&TEST_MAGIC_BYTES, temp_dir.path().join("store.db"))?.0),
+            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+            |db, changeset| Ok(db.append(changeset)?),
+            &changesets,
+        )
+        .map_err(|err| anyhow!(err))
     }
 }
