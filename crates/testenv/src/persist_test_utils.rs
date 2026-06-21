@@ -8,10 +8,7 @@ use bdk_chain::{
 
 #[cfg(feature = "miniscript")]
 use bdk_chain::{indexer::keychain_txout, DescriptorExt, SpkIterator};
-use core::{
-    cmp::PartialEq,
-    fmt::{Debug, Display},
-};
+use core::{cmp::PartialEq, fmt::Debug};
 
 use core::error::Error as Err;
 
@@ -25,83 +22,79 @@ const ADDRS: [&str; 2] = [
     "bcrt1q8an5jfmpq8w2hr648nn34ecf9zdtxk0qyqtrfl",
 ];
 
-/// Errors caused by a failed persister test.
-#[derive(Debug)]
-pub enum PersistErr<C: Debug> {
-    /// ChangeSet Mismatch
-    ChangeSetMismatch {
-        /// the resulting changeset
-        got: Box<C>,
-        /// the expected changeset
-        expected: Box<C>,
-    },
-    /// Errors thrown by underlying persistence backend.
-    Persister(Box<dyn Err + 'static + Send + Sync>),
-}
+/// A helper to check if a custom persistence backend persists `ChangeSet`s correctly.
+///
+/// This first tries to create a `Store` using `init`, `load`s from it and checks if
+/// the result is an empty `ChangeSet`.
+/// It then tries to `persist` each `ChangeSet` in `changesets` one by one, doing a `load`
+/// each time and checks that the aggregated `ChangeSet` matches the one loaded.
+///
+/// Finally it closes the `Store`, reopens it using `init`, `load`s from it and checks if the loaded
+/// `ChangeSet` matches the final aggregated `ChangeSet`.
+pub fn assert_persist_changesets<C, Store, Init, Load, Persist>(
+    init: Init,
+    load: Load,
+    persist: Persist,
+    changesets: &[C],
+) -> Result<(), String>
+where
+    C: Debug + PartialEq + Default + Merge + Clone,
+    Init: Fn() -> Result<Store, Box<dyn Err>>,
+    Load: Fn(&mut Store) -> Result<C, Box<dyn Err>>,
+    Persist: Fn(&mut Store, &C) -> Result<(), Box<dyn Err>>,
+{
+    let mut merged_changeset = C::default();
+    {
+        let mut store = init().map_err(|err| {
+            format!(
+                "Encountered an error from the persister while initializing the store.\nGot:\n{}",
+                err
+            )
+        })?;
 
-impl<C: Debug> From<Box<dyn Err + 'static + Send + Sync>> for PersistErr<C> {
-    fn from(value: Box<dyn Err + 'static + Send + Sync>) -> Self {
-        PersistErr::Persister(value)
-    }
-}
+        let init_changeset = load(&mut store).map_err(|err| format!("Encountered an error from the persister while loading from the new store.\nGot:\n{}",err))?;
 
-impl<C: Debug> Display for PersistErr<C> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            PersistErr::ChangeSetMismatch { got, expected } => write!(
-                f,
-                "ChangeSet mismatch! Got: {:?}, Expected: {:?}",
-                got, expected
-            ),
-            PersistErr::Persister(err) => write!(f, "{err}"),
+        if init_changeset != C::default() {
+            Err("Loading from a new store should return an empty changeset.")?;
+        }
+
+        for (i, changeset) in changesets.iter().enumerate() {
+            persist(&mut store, changeset).map_err(|err| format!("Persisting changeset no. {} failed. Got an error from the persister instead:\n{} ", i+1, err) )?;
+
+            merged_changeset.merge(changeset.clone());
+
+            let persisted_changeset = load(&mut store).map_err(|err| format!("Encountered an error from the persister while loading (after persisting changeset no. {}).\nGot:\n {}", i+1, err))?;
+
+            if persisted_changeset != merged_changeset {
+                Err(format!(
+                    "Persisting changeset no. {} failed.\nExpected:\n\n{:?}\n\n\nLoaded:\n\n{:?};",
+                    i + 1,
+                    merged_changeset,
+                    persisted_changeset
+                ))?;
+            }
         }
     }
-}
 
-impl<C: Debug> Err for PersistErr<C> {}
+    let mut store = init().map_err(|err| {
+        format!(
+            "Encountered an error while reopening the store.\nGot:\n{}",
+            err
+        )
+    })?;
 
-/// Tests if `ChangeSet` is being persisted correctly.
-///
-/// We create a dummy `ChangeSet`, persist it and check if loaded `ChangeSet` matches
-/// the persisted one. We then create another such dummy `ChangeSet`, persist it and load it to
-/// check if merged `ChangeSet` is returned.
-pub fn assert_persist_changesets<CS, Store, CreateStore, Initialize, Persist>(
-    create_store: CreateStore,
-    initialize: Initialize,
-    persist: Persist,
-    changesets: &[CS],
-) -> Result<(), PersistErr<CS>>
-where
-    CS: Debug + PartialEq + Default + Merge + Clone,
-    CreateStore: Fn() -> Result<Store, Box<dyn Err + 'static + Send + Sync>>,
-    Initialize: Fn(&mut Store) -> Result<CS, Box<dyn Err + 'static + Send + Sync>>,
-    Persist: Fn(&mut Store, &CS) -> Result<(), Box<dyn Err + 'static + Send + Sync>>,
-{
-    let mut store = create_store()?;
-
-    let init_changeset = initialize(&mut store)?;
-
-    if init_changeset != CS::default() {
-        return Err(PersistErr::ChangeSetMismatch {
-            expected: Box::new(CS::default()),
-            got: Box::new(init_changeset),
-        });
-    }
-
-    let mut merged_changeset = CS::default();
-
-    for changeset in changesets {
-        persist(&mut store, changeset)?;
-        merged_changeset.merge(changeset.clone());
-    }
-
-    let persisted_changeset = initialize(&mut store)?;
+    let persisted_changeset = load(&mut store).map_err(|err| {
+        format!(
+            "Unable to load the persisted changeset after reopening the store.\nGot an error from the persister:\n{}",
+            err
+        )
+    })?;
 
     if persisted_changeset != merged_changeset {
-        return Err(PersistErr::ChangeSetMismatch {
-            expected: Box::new(merged_changeset),
-            got: Box::new(persisted_changeset),
-        });
+        Err(format!(
+            "Did not get the expected changeset after reopening the store and loading.\nExpected:\n\n{:?}\n\n\nLoaded:\n\n{:?};",
+            merged_changeset, persisted_changeset
+        ))?;
     }
 
     Ok(())
