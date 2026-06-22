@@ -2047,3 +2047,83 @@ fn test_list_ordered_canonical_txs() {
         );
     }
 }
+
+/// `txs_in_topological_order` must be deterministic and order same-level txs by confirmation block.
+///
+/// `b0`, `c0` and `d0` each spend a different output of the same parent `a0`, so nothing orders
+/// them topologically relative to one another. They are confirmed in different blocks, so they must
+/// come out by ascending confirmation block (`c0` @3, `d0` @4, `b0` @5), and the same way on every
+/// run. With a non-deterministic implementation (children collected in `HashMap` iteration order)
+/// this would vary across runs.
+#[test]
+fn test_topological_order_deterministic() {
+    let local_chain: LocalChain = local_chain!(
+        (0, hash!("A")),
+        (1, hash!("B")),
+        (2, hash!("C")),
+        (3, hash!("D")),
+        (4, hash!("E")),
+        (5, hash!("F"))
+    );
+    let chain_tip = local_chain.tip().block_id();
+
+    let tx_templates = [
+        TxTemplate {
+            tx_name: "a0",
+            inputs: &[],
+            outputs: &[
+                TxOutTemplate::new(10_000, None),
+                TxOutTemplate::new(10_000, None),
+                TxOutTemplate::new(10_000, None),
+            ],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+        TxTemplate {
+            tx_name: "b0",
+            inputs: &[TxInTemplate::PrevTx("a0", 0)],
+            outputs: &[TxOutTemplate::new(9_000, None)],
+            anchors: &[block_id!(5, "F")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+        TxTemplate {
+            tx_name: "c0",
+            inputs: &[TxInTemplate::PrevTx("a0", 1)],
+            outputs: &[TxOutTemplate::new(9_000, None)],
+            anchors: &[block_id!(3, "D")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+        TxTemplate {
+            tx_name: "d0",
+            inputs: &[TxInTemplate::PrevTx("a0", 2)],
+            outputs: &[TxOutTemplate::new(9_000, None)],
+            anchors: &[block_id!(4, "E")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+    ];
+
+    // Each `init_graph` builds fresh `txs`/`spends` HashMaps (random seed), so a non-deterministic
+    // implementation would yield different sibling orders across iterations.
+    for _ in 0..20 {
+        let env = init_graph(tx_templates.iter());
+        let name_of: HashMap<Txid, &str> = env
+            .txid_to_name
+            .iter()
+            .map(|(&name, &txid)| (txid, name))
+            .collect();
+        let order: Vec<&str> = local_chain
+            .canonical_view(&env.tx_graph, chain_tip, env.canonicalization_params)
+            .txs_in_topological_order()
+            .map(|tx| name_of[&tx.txid])
+            .collect();
+        assert_eq!(
+            order,
+            vec!["a0", "c0", "d0", "b0"],
+            "topological order must be deterministic and confirmation-ordered"
+        );
+    }
+}

@@ -26,10 +26,10 @@
 //! [`CanonicalView::txs_in_topological_order`].
 
 use crate::collections::HashMap;
-use alloc::collections::VecDeque;
+use alloc::collections::{BTreeSet, BinaryHeap};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::{fmt, ops::RangeBounds};
+use core::{cmp::Reverse, fmt, ops::RangeBounds};
 
 use bdk_core::BlockId;
 use bitcoin::{
@@ -411,19 +411,20 @@ impl<A: Anchor> CanonicalView<A> {
     ///
     /// - every transaction appears after the transactions whose outputs it spends (if `B` spends an
     ///   output of `A`, then `A` comes before `B`)
-    /// - sources (transactions with no canonical parent) keep their relative [canonical
-    ///   order](Self::txs)
+    /// - transactions not constrained by a spending relationship are ordered by chain position
+    ///   (confirmed transactions by block height, then unconfirmed) and then by txid
     ///
-    /// The ordering is computed with Kahn's algorithm.
+    /// The result is therefore deterministic. The ordering is computed with Kahn's algorithm.
     fn topological_sort(&self) -> Vec<Txid> {
         // Map each canonical parent to the txs that spend its outputs. The spending tx is always
-        // canonical, so only the parent needs checking.
-        let children: HashMap<Txid, Vec<Txid>> = self
+        // canonical, so only the parent needs checking. A `BTreeSet` dedups multi-output spends
+        // from the same parent.
+        let children: HashMap<Txid, BTreeSet<Txid>> = self
             .spends
             .iter()
             .filter(|(outpoint, _)| self.txs.contains_key(&outpoint.txid))
             .fold(HashMap::new(), |mut children, (outpoint, &child)| {
-                children.entry(outpoint.txid).or_default().push(child);
+                children.entry(outpoint.txid).or_default().insert(child);
                 children
             });
 
@@ -438,24 +439,28 @@ impl<A: Anchor> CanonicalView<A> {
                     in_degree
                 });
 
-        // Begin with the sources, in canonical order.
-        let mut sources: VecDeque<Txid> = self
-            .order
-            .iter()
+        // Ready set ordered by `(chain position, txid)` via a min-heap (`Reverse`): among txs not
+        // constrained by a spending relationship, confirmed txs are emitted first (by block), then
+        // unconfirmed, with txid as a tiebreaker. This makes the result deterministic.
+        let ready_key = |txid: Txid| Reverse((self.txs[&txid].1.clone(), txid));
+        let mut ready: BinaryHeap<Reverse<(ChainPosition<A>, Txid)>> = self
+            .txs
+            .keys()
             .copied()
             .filter(|txid| !in_degree.contains_key(txid))
+            .map(ready_key)
             .collect();
 
-        // Emit each source and remove its outgoing edges. A child becomes a source once its last
-        // parent has been emitted.
+        // Emit the smallest ready tx, then remove its outgoing edges. A child becomes ready once
+        // its last parent has been emitted.
         let mut sorted = Vec::with_capacity(self.order.len());
-        while let Some(txid) = sources.pop_front() {
+        while let Some(Reverse((_, txid))) = ready.pop() {
             sorted.push(txid);
             for &child in children.get(&txid).into_iter().flatten() {
                 if let Some(degree) = in_degree.get_mut(&child) {
                     *degree -= 1;
                     if *degree == 0 {
-                        sources.push_back(child);
+                        ready.push(ready_key(child));
                     }
                 }
             }
@@ -478,8 +483,9 @@ impl<A: Anchor> CanonicalView<A> {
     /// `A`), `A` appears before `B`. This is useful when transactions must be replayed or
     /// rebroadcast, since a parent must be processed before its children.
     ///
-    /// Sources (transactions with no canonical parent) keep their relative
-    /// [canonical order](Self::txs).
+    /// Transactions not constrained by a spending relationship are ordered by chain position
+    /// (confirmed transactions by block height, then unconfirmed) and then by txid, so the result
+    /// is deterministic.
     ///
     /// # Example
     ///
