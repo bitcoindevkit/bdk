@@ -64,9 +64,9 @@ impl<B> BlockQueries<B> {
 impl<B: ToBlockHash> BlockQueries<B> {
     /// Resolves a set of candidate blocks against the blocks fetched so far.
     ///
-    /// Each candidate's [`BlockId`] is obtained via `block_id`. A candidate is *in-chain* when the
-    /// block resolved at its height is present and its hash matches the candidate's; the first such
-    /// candidate is returned as [`Confirmed`](BlockCandidateResolution::Confirmed).
+    /// Each candidate is a pair of an opaque payload and a [`BlockId`]. A candidate is *in-chain*
+    /// when the block resolved at that `BlockId`'s height is present and its hash matches; the first
+    /// such candidate's payload is returned as [`Confirmed`](BlockCandidateResolution::Confirmed).
     ///
     /// When no candidate is confirmed, the result tells the caller how to make progress:
     /// - [`Query`](BlockCandidateResolution::Query) — heights that still need fetching. These come
