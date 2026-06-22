@@ -62,7 +62,11 @@ fn get_balance(
             recv_chain.tip().block_id(),
             Default::default(),
         )
-        .balance(outpoints, |_, _| true, 0);
+        .balance(
+            outpoints.into_iter().map(|(_, op)| op),
+            |_| false,
+            |pos| pos.is_confirmed(),
+        );
     Ok(balance)
 }
 

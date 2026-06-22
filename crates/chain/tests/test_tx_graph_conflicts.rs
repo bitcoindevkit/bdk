@@ -1028,13 +1028,10 @@ fn test_tx_conflict_handling() {
         );
 
         let balance = canonical_view.balance(
-            env.indexer.outpoints().iter().cloned(),
-            |_, txout| {
-                env.indexer
-                    .index_of_spk(txout.txout.script_pubkey.as_script())
-                    .is_some()
-            },
-            0,
+            env.indexer.outpoints().iter().map(|(_, op)| *op),
+            // All these outpoints are owned (so were "trusted" under the old predicate); taint none.
+            |_| false,
+            |pos| pos.is_confirmed(),
         );
         assert_eq!(
             balance, scenario.exp_balance,
