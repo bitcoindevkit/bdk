@@ -46,6 +46,8 @@ mod canonical_task;
 pub use canonical_task::*;
 mod canonical;
 pub use canonical::*;
+mod canonical_ancestors;
+pub use canonical_ancestors::*;
 mod canonical_view_task;
 pub use canonical_view_task::*;
 
