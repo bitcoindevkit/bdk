@@ -13,35 +13,12 @@ use crate::{Canonical, CanonicalTx, Merge};
 impl<A, P> Canonical<A, P> {
     /// Walk the canonical ancestors of the given `seeds`, accumulating a [`Merge`]able value.
     ///
-    /// Ancestors are yielded in reverse topological order — each transaction is visited only after
-    /// every descendant within the traversed set that spends it has been visited — and each
-    /// transaction is visited exactly once.
+    /// The `seeds` are the txids of the starting transactions — the leaf-most transactions whose
+    /// ancestry is walked. The walk proceeds *backwards* from the seeds towards their ancestors
+    /// (the transactions they spend, transitively). The seeds are *not* yielded; see
+    /// [`ancestors_inclusive`](Self::ancestors_inclusive) for a variant that yields them too.
     ///
-    /// Accumulation is a fold over the ancestor DAG:
-    ///
-    /// * `map` computes a transaction's *own* contribution from the transaction.
-    /// * A transaction's final accumulator is its own contribution [merged](Merge::merge) with the
-    ///   final accumulators of every descendant within the traversed set. Where multiple descendant
-    ///   paths converge on the same ancestor, their accumulators are all merged in.
-    ///
-    /// `should_walk` controls pruning: returning `false` for a transaction stops the traversal from
-    /// descending into *its* ancestors (the transaction itself is still visited). The decision is
-    /// made from the transaction (and its [position](CanonicalTx::pos)) alone, so it is
-    /// well-defined before any accumulation happens.
-    ///
-    /// The `seeds` are the txids of the starting transactions. Seeds that are not part of this
-    /// canonical set are ignored. Seeds are not yielded; they only seed the traversal and propagate
-    /// their accumulators into their ancestors.
-    ///
-    /// Each item is a `(accumulator, ancestor)` pair, where `accumulator` is the ancestor's final
-    /// (fully merged) accumulator.
-    ///
-    /// # Note on merge order
-    ///
-    /// The order in which descendant accumulators are merged into a shared ancestor is unspecified.
-    /// For order-independent (idempotent / commutative) [`Merge`] implementations the result is
-    /// deterministic regardless; for order-sensitive implementations (e.g. last-write-wins) the
-    /// outcome at a convergence point may depend on traversal order.
+    /// See [`CanonicalAncestors`] for the traversal order and accumulation semantics.
     pub fn ancestors<T, M, S>(
         &self,
         seeds: impl IntoIterator<Item = Txid>,
@@ -54,25 +31,60 @@ impl<A, P> Canonical<A, P> {
         M: FnMut(CanonicalTx<P>) -> T,
         S: FnMut(CanonicalTx<P>) -> bool,
     {
-        CanonicalAncestors::new(self, seeds, map, should_walk)
+        CanonicalAncestors::new(self, seeds, map, should_walk, false)
+    }
+
+    /// Like [`ancestors`](Self::ancestors), but the `seeds` are also yielded (each with its own
+    /// final accumulator).
+    pub fn ancestors_inclusive<T, M, S>(
+        &self,
+        seeds: impl IntoIterator<Item = Txid>,
+        map: M,
+        should_walk: S,
+    ) -> CanonicalAncestors<'_, A, P, T>
+    where
+        P: Clone,
+        T: Merge + Clone,
+        M: FnMut(CanonicalTx<P>) -> T,
+        S: FnMut(CanonicalTx<P>) -> bool,
+    {
+        CanonicalAncestors::new(self, seeds, map, should_walk, true)
     }
 }
 
 /// An iterator over the canonical ancestors of a set of seed transactions.
 ///
-/// Created by [`Canonical::ancestors`]. Ancestors are yielded in reverse topological order (each
-/// transaction is visited only after every descendant within the traversed set that spends it has
-/// been visited) and each transaction is visited exactly once. Each transaction's accumulator is
-/// its own contribution (from `map`) [merged](Merge::merge) with the accumulators of all its
-/// descendants within the traversed set.
+/// Created by [`Canonical::ancestors`] / [`Canonical::ancestors_inclusive`]. Transactions are
+/// yielded in reverse topological order (each transaction is visited only after every descendant
+/// within the traversed set that spends it has been visited) and each is visited exactly once.
 ///
-/// The seed transactions themselves are *not* yielded; they only seed the accumulation.
+/// Accumulation is a fold over the ancestor DAG:
 ///
-/// Each item is a `(accumulator, ancestor)` pair.
+/// * `map` computes a transaction's *own* contribution from the transaction (and its
+///   [position](CanonicalTx::pos)).
+/// * A transaction's final accumulator is its own contribution [merged](Merge::merge) with the
+///   final accumulators of every descendant within the traversed set. Where multiple descendant
+///   paths converge on the same ancestor, their accumulators are all merged in.
+///
+/// `should_walk` controls pruning: returning `false` for a transaction stops the traversal from
+/// descending into *its* ancestors (the transaction itself is still visited). The decision is made
+/// from the transaction alone, so it is well-defined before any accumulation happens.
+///
+/// Each item is a `(accumulator, transaction)` pair, where `accumulator` is the transaction's final
+/// (fully merged) accumulator.
+///
+/// # Note on merge order
+///
+/// The order in which descendant accumulators are merged into a shared ancestor is unspecified. For
+/// order-independent (idempotent / commutative) [`Merge`] implementations the result is
+/// deterministic regardless; for order-sensitive implementations (e.g. last-write-wins) the outcome
+/// at a convergence point may depend on traversal order.
 pub struct CanonicalAncestors<'c, A, P, T> {
     canonical: &'c Canonical<A, P>,
-    /// The set of seed txids, excluded from emission.
+    /// The set of seed txids.
     seeds: HashSet<Txid>,
+    /// Whether seeds are yielded (in addition to seeding the accumulation).
+    include_seeds: bool,
     /// For each visited tx, the distinct in-set parents reached *through* it (empty if pruned).
     parents: HashMap<Txid, Vec<Txid>>,
     /// Remaining number of in-set descendants for each tx; a tx is ready once this hits zero.
@@ -81,7 +93,7 @@ pub struct CanonicalAncestors<'c, A, P, T> {
     acc: HashMap<Txid, T>,
     /// Txs whose `in_degree` has reached zero and are ready to be finalized/emitted.
     ready: VecDeque<Txid>,
-    /// Number of non-seed transactions yet to be yielded.
+    /// Number of transactions yet to be yielded.
     remaining: usize,
 }
 
@@ -91,6 +103,7 @@ impl<'c, A, P, T> CanonicalAncestors<'c, A, P, T> {
         seeds: impl IntoIterator<Item = Txid>,
         mut map: M,
         mut should_walk: S,
+        include_seeds: bool,
     ) -> Self
     where
         P: Clone,
@@ -158,11 +171,16 @@ impl<'c, A, P, T> CanonicalAncestors<'c, A, P, T> {
             }
         }
 
-        let remaining = reachable.len() - seeds_set.len();
+        let remaining = if include_seeds {
+            reachable.len()
+        } else {
+            reachable.len() - seeds_set.len()
+        };
 
         Self {
             canonical,
             seeds: seeds_set,
+            include_seeds,
             parents,
             in_degree,
             acc,
@@ -207,8 +225,8 @@ where
                 }
             }
 
-            // Seeds seed the accumulation but are not themselves yielded.
-            if self.seeds.contains(&txid) {
+            // Seeds propagate their accumulation but are only yielded when requested.
+            if !self.include_seeds && self.seeds.contains(&txid) {
                 continue;
             }
 
