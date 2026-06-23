@@ -65,8 +65,9 @@ impl<B: ToBlockHash> BlockQueries<B> {
     /// Resolves a set of candidate blocks against the blocks fetched so far.
     ///
     /// Each candidate is a pair of an opaque payload and a [`BlockId`]. A candidate is *in-chain*
-    /// when the block resolved at that `BlockId`'s height is present and its hash matches; the first
-    /// such candidate's payload is returned as [`Confirmed`](BlockCandidateResolution::Confirmed).
+    /// when the block resolved at that `BlockId`'s height is present and its hash matches; the
+    /// first such candidate's payload is returned as
+    /// [`Confirmed`](BlockCandidateResolution::Confirmed).
     ///
     /// When no candidate is confirmed, the result tells the caller how to make progress:
     /// - [`Query`](BlockCandidateResolution::Query) — heights that still need fetching. These come
@@ -154,74 +155,89 @@ mod test {
         }
     }
 
-    fn candidates<const N: usize>(
-        ids: [BlockId; N],
-    ) -> impl Iterator<Item = (BlockId, BlockId)> + Clone {
-        ids.into_iter().map(|id| (id, id))
-    }
-
     #[test]
-    fn confirmed_when_block_resolved_and_matches() {
-        let mut q = BlockQueries::<BlockHash>::new();
-        q.request([5].into_iter());
-        q.resolve(5, Some(bhash(5)));
+    fn resolve_candidates_scenarios() {
+        struct Case {
+            name: &'static str,
+            /// Pre-populate the `BlockQueries` to set up the scenario.
+            setup: fn(&mut BlockQueries<BlockHash>),
+            candidates: Vec<BlockId>,
+            expected: BlockCandidateResolution<BlockId>,
+            /// Heights still outstanding after the call.
+            expected_unresolved: Vec<u32>,
+        }
 
-        let cands = candidates([id(5, 5)]);
-        let res = q.resolve_candidates(cands);
-        assert_eq!(res, BlockCandidateResolution::Confirmed(id(5, 5)));
-    }
+        let cases = [
+            Case {
+                name: "confirmed when the block is resolved and its hash matches",
+                setup: |q| {
+                    q.request([5].into_iter());
+                    q.resolve(5, Some(bhash(5)));
+                },
+                candidates: vec![id(5, 5)],
+                expected: BlockCandidateResolution::Confirmed(id(5, 5)),
+                expected_unresolved: vec![],
+            },
+            Case {
+                name: "confirmed picks the matching candidate among several",
+                setup: |q| {
+                    q.request([4, 5].into_iter());
+                    q.resolve(4, Some(bhash(99))); // resolved but mismatched
+                    q.resolve(5, Some(bhash(5))); // matches
+                },
+                candidates: vec![id(4, 4), id(5, 5)],
+                expected: BlockCandidateResolution::Confirmed(id(5, 5)),
+                expected_unresolved: vec![],
+            },
+            Case {
+                name: "query for a height not yet requested",
+                setup: |_q| {},
+                candidates: vec![id(7, 7)],
+                expected: BlockCandidateResolution::Query(vec![7]),
+                expected_unresolved: vec![7], // the call records the request
+            },
+            Case {
+                name: "awaiting when a requested height is still in-flight",
+                setup: |q| {
+                    q.request([7].into_iter());
+                },
+                candidates: vec![id(7, 7)],
+                expected: BlockCandidateResolution::Awaiting,
+                expected_unresolved: vec![7],
+            },
+            Case {
+                name: "not confirmed when the block is resolved but mismatched",
+                setup: |q| {
+                    q.request([7].into_iter());
+                    q.resolve(7, Some(bhash(99)));
+                },
+                candidates: vec![id(7, 7)],
+                expected: BlockCandidateResolution::NotConfirmed,
+                expected_unresolved: vec![],
+            },
+            Case {
+                name: "not confirmed when the block is absent",
+                setup: |q| {
+                    q.request([7].into_iter());
+                    q.resolve(7, None);
+                },
+                candidates: vec![id(7, 7)],
+                expected: BlockCandidateResolution::NotConfirmed,
+                expected_unresolved: vec![],
+            },
+        ];
 
-    #[test]
-    fn confirmed_picks_matching_candidate_among_many() {
-        let mut q = BlockQueries::<BlockHash>::new();
-        q.request([4, 5].into_iter());
-        q.resolve(4, Some(bhash(99))); // height 4 resolved but mismatched
-        q.resolve(5, Some(bhash(5))); // height 5 matches
+        for case in cases {
+            let mut q = BlockQueries::<BlockHash>::new();
+            (case.setup)(&mut q);
 
-        let cands = candidates([id(4, 4), id(5, 5)]);
-        let res = q.resolve_candidates(cands);
-        assert_eq!(res, BlockCandidateResolution::Confirmed(id(5, 5)));
-    }
-
-    #[test]
-    fn query_returns_unrequested_heights() {
-        let mut q = BlockQueries::<BlockHash>::new();
-        let cands = candidates([id(7, 7)]);
-        let res = q.resolve_candidates(cands);
-        assert_eq!(res, BlockCandidateResolution::Query(vec![7]));
-        // The request is recorded, so it is now reported as outstanding.
-        assert!(q.unresolved().eq([7]));
-    }
-
-    #[test]
-    fn awaiting_when_heights_in_flight() {
-        let mut q = BlockQueries::<BlockHash>::new();
-        q.request([7].into_iter()); // requested but not resolved
-
-        let cands = candidates([id(7, 7)]);
-        let res = q.resolve_candidates(cands);
-        assert_eq!(res, BlockCandidateResolution::Awaiting);
-    }
-
-    #[test]
-    fn not_confirmed_when_resolved_and_mismatched() {
-        let mut q = BlockQueries::<BlockHash>::new();
-        q.request([7].into_iter());
-        q.resolve(7, Some(bhash(99))); // present but wrong hash
-
-        let cands = candidates([id(7, 7)]);
-        let res = q.resolve_candidates(cands);
-        assert_eq!(res, BlockCandidateResolution::NotConfirmed);
-    }
-
-    #[test]
-    fn not_confirmed_when_block_absent() {
-        let mut q = BlockQueries::<BlockHash>::new();
-        q.request([7].into_iter());
-        q.resolve(7, None); // chain source has no block at this height
-
-        let cands = candidates([id(7, 7)]);
-        let res = q.resolve_candidates(cands);
-        assert_eq!(res, BlockCandidateResolution::NotConfirmed);
+            let res = q.resolve_candidates(case.candidates.iter().map(|id| (*id, *id)));
+            assert_eq!(res, case.expected, "scenario: {}", case.name);
+            assert!(
+                q.unresolved().eq(case.expected_unresolved.iter().copied()),
+                "scenario: {} (unresolved mismatch)",
+                case.name
+            );
+        }
     }
 }
