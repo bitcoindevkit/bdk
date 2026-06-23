@@ -579,7 +579,7 @@ fn test_list_owned_txouts() {
                 immature: Amount::from_sat(70000),        // immature coinbase
                 trusted_pending: Amount::from_sat(45000), // tx3, tx4, tx5 (nothing tainted)
                 untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO // Nothing is confirmed yet
+                settled: Amount::ZERO // Nothing is confirmed yet
             }
         );
     }
@@ -617,7 +617,7 @@ fn test_list_owned_txouts() {
                 immature: Amount::from_sat(70000),        // immature coinbase
                 trusted_pending: Amount::from_sat(45000), // tx3, tx4, tx5 (nothing tainted)
                 untrusted_pending: Amount::ZERO,
-                confirmed: Amount::from_sat(0) // tx2 got confirmed (but spent by 3)
+                settled: Amount::from_sat(0) // tx2 got confirmed (but spent by 3)
             }
         );
     }
@@ -658,7 +658,7 @@ fn test_list_owned_txouts() {
                 immature: Amount::from_sat(70000),        // immature coinbase
                 trusted_pending: Amount::from_sat(35000), // tx4, tx5 (nothing tainted)
                 untrusted_pending: Amount::ZERO,
-                confirmed: Amount::from_sat(10000) // tx3 got confirmed
+                settled: Amount::from_sat(10000) // tx3 got confirmed
             }
         );
     }
@@ -699,7 +699,7 @@ fn test_list_owned_txouts() {
                 immature: Amount::from_sat(70000),        // immature coinbase
                 trusted_pending: Amount::from_sat(35000), // tx4, tx5 (nothing tainted)
                 untrusted_pending: Amount::ZERO,
-                confirmed: Amount::from_sat(10000) // tx3 is confirmed
+                settled: Amount::from_sat(10000) // tx3 is confirmed
             }
         );
     }
@@ -715,7 +715,7 @@ fn test_list_owned_txouts() {
                 immature: Amount::ZERO,                   // coinbase matured
                 trusted_pending: Amount::from_sat(35000), // tx4, tx5 (nothing tainted)
                 untrusted_pending: Amount::ZERO,
-                confirmed: Amount::from_sat(80000) // tx1 + tx3
+                settled: Amount::from_sat(80000) // tx1 + tx3
             }
         );
     }

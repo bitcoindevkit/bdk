@@ -76,7 +76,7 @@ fn test_min_confirmations_parameter() {
         settled(tip_height, 1),
     );
 
-    assert_eq!(balance_1_conf.confirmed, Amount::from_sat(50_000));
+    assert_eq!(balance_1_conf.settled, Amount::from_sat(50_000));
     assert_eq!(balance_1_conf.trusted_pending, Amount::ZERO);
 
     // Test min_confirmations = 6: Should be confirmed (has exactly 6 confirmations)
@@ -85,7 +85,7 @@ fn test_min_confirmations_parameter() {
         |_| false, // taint nothing
         settled(tip_height, 6),
     );
-    assert_eq!(balance_6_conf.confirmed, Amount::from_sat(50_000));
+    assert_eq!(balance_6_conf.settled, Amount::from_sat(50_000));
     assert_eq!(balance_6_conf.trusted_pending, Amount::ZERO);
 
     // Test min_confirmations = 7: Should be trusted pending (only has 6 confirmations)
@@ -94,7 +94,7 @@ fn test_min_confirmations_parameter() {
         |_| false, // taint nothing
         settled(tip_height, 7),
     );
-    assert_eq!(balance_7_conf.confirmed, Amount::ZERO);
+    assert_eq!(balance_7_conf.settled, Amount::ZERO);
     assert_eq!(balance_7_conf.trusted_pending, Amount::from_sat(50_000));
 
     // Test min_confirmations = 0: Should behave same as 1 (confirmed)
@@ -103,7 +103,7 @@ fn test_min_confirmations_parameter() {
         |_| false, // taint nothing
         settled(tip_height, 0),
     );
-    assert_eq!(balance_0_conf.confirmed, Amount::from_sat(50_000));
+    assert_eq!(balance_0_conf.settled, Amount::from_sat(50_000));
     assert_eq!(balance_0_conf.trusted_pending, Amount::ZERO);
     assert_eq!(balance_0_conf, balance_1_conf);
 }
@@ -167,7 +167,7 @@ fn test_min_confirmations_with_untrusted_tx() {
     );
 
     // Should be untrusted pending (not deep enough to be settled, and tainted)
-    assert_eq!(balance.confirmed, Amount::ZERO);
+    assert_eq!(balance.settled, Amount::ZERO);
     assert_eq!(balance.trusted_pending, Amount::ZERO);
     assert_eq!(balance.untrusted_pending, Amount::from_sat(25_000));
 }
@@ -285,7 +285,7 @@ fn test_min_confirmations_multiple_transactions() {
     let balance = canonical_view.balance(outpoints.clone(), |_| false, settled(tip_height, 5));
 
     assert_eq!(
-        balance.confirmed,
+        balance.settled,
         Amount::from_sat(10_000 + 20_000) // tx0 + tx1
     );
     assert_eq!(
@@ -301,7 +301,7 @@ fn test_min_confirmations_multiple_transactions() {
     let balance_high = canonical_view.balance(outpoints, |_| false, settled(tip_height, 10));
 
     assert_eq!(
-        balance_high.confirmed,
+        balance_high.settled,
         Amount::from_sat(10_000) // only tx0
     );
     assert_eq!(
@@ -424,7 +424,7 @@ fn test_balance_taint_propagates_through_unconfirmed_ancestry() {
         |pos| pos.is_confirmed(),
     );
 
-    assert_eq!(balance.confirmed, Amount::ZERO);
+    assert_eq!(balance.settled, Amount::ZERO);
     assert_eq!(balance.immature, Amount::ZERO);
     // `trusted` spends only our own (confirmed) coin -> trusted.
     assert_eq!(balance.trusted_pending, Amount::from_sat(40_000));
@@ -461,7 +461,7 @@ fn test_balance_is_settled_is_authoritative_for_unconfirmed() {
     // An `is_settled` that claims everything is settled counts the (mature, non-coinbase)
     // unconfirmed output as settled rather than dropping it.
     let balance = view.balance([OutPoint::new(txid, 0)], |_| false, |_| true);
-    assert_eq!(balance.confirmed, Amount::from_sat(50_000));
+    assert_eq!(balance.settled, Amount::from_sat(50_000));
     assert_eq!(balance.immature, Amount::ZERO);
     assert_eq!(balance.trusted_pending, Amount::ZERO);
     assert_eq!(balance.untrusted_pending, Amount::ZERO);

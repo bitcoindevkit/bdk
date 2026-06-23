@@ -409,15 +409,16 @@ impl<A: Anchor> CanonicalView<A> {
     ///   of its unsettled ancestors, taints; otherwise it counts toward `trusted_pending`. See
     ///   [Taint](#taint) below.
     /// * `is_settled` - Function that returns `true` for the [position](ChainPosition) of an output
-    ///   that should be treated as settled (i.e. confirmed deeply enough to count toward
-    ///   `confirmed`/`immature`). Outputs whose position is not settled are pending. `is_settled` is
-    ///   the sole authority on this boundary — a settled output is never dropped or tainted. See
-    ///   [Settled](#settled) below.
+    ///   whose transaction is considered settled — unlikely to be replaced (e.g. confirmed deeply
+    ///   enough). Settled outputs count toward `settled`/`immature`; the rest are pending.
+    ///   `is_settled` is the sole authority on this boundary — a settled output is never dropped or
+    ///   tainted. See [Settled](#settled) below.
     ///
     /// # Settled
     ///
-    /// `is_settled` controls the boundary between confirmed and pending outputs. Typically it
-    /// checks that an output has at least some number of confirmations, for example:
+    /// `is_settled` controls the boundary between settled and pending outputs — i.e. whether we are
+    /// confident a transaction will not be replaced. Typically it checks that an output has at
+    /// least some number of confirmations, for example:
     ///
     /// ```
     /// # use bdk_chain::ChainPosition;
@@ -507,7 +508,7 @@ impl<A: Anchor> CanonicalView<A> {
         let mut immature = Amount::ZERO;
         let mut trusted_pending = Amount::ZERO;
         let mut untrusted_pending = Amount::ZERO;
-        let mut confirmed = Amount::ZERO;
+        let mut settled = Amount::ZERO;
 
         for txout in utxos {
             if is_settled(&txout.pos) {
@@ -515,7 +516,7 @@ impl<A: Anchor> CanonicalView<A> {
                 // `is_settled` alone (not on a confirmation height), so a caller is free to treat
                 // unconfirmed outputs as settled without their value being dropped.
                 if txout.is_mature(self.tip.height) {
-                    confirmed += txout.txout.value;
+                    settled += txout.txout.value;
                 } else {
                     immature += txout.txout.value;
                 }
@@ -530,7 +531,7 @@ impl<A: Anchor> CanonicalView<A> {
             immature,
             trusted_pending,
             untrusted_pending,
-            confirmed,
+            settled,
         }
     }
 }

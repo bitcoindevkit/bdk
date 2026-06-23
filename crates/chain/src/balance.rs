@@ -10,22 +10,23 @@ pub struct Balance {
     pub trusted_pending: Amount,
     /// Unconfirmed UTXOs received from an external wallet
     pub untrusted_pending: Amount,
-    /// Confirmed and immediately spendable balance
-    pub confirmed: Amount,
+    /// Settled balance: outputs whose transaction we are confident will not be replaced (e.g.
+    /// confirmed deeply enough), as determined by the balance query's `is_settled` predicate.
+    pub settled: Amount,
 }
 
 impl Balance {
-    /// Get sum of trusted_pending and confirmed coins.
+    /// Get sum of trusted_pending and settled coins.
     ///
     /// This is the balance you can spend right now that shouldn't get cancelled via another party
     /// double spending it.
     pub fn trusted_spendable(&self) -> Amount {
-        self.confirmed + self.trusted_pending
+        self.settled + self.trusted_pending
     }
 
     /// Get the whole balance visible to the wallet.
     pub fn total(&self) -> Amount {
-        self.confirmed + self.trusted_pending + self.untrusted_pending + self.immature
+        self.settled + self.trusted_pending + self.untrusted_pending + self.immature
     }
 }
 
@@ -33,8 +34,8 @@ impl core::fmt::Display for Balance {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "{{ immature: {}, trusted_pending: {}, untrusted_pending: {}, confirmed: {} }}",
-            self.immature, self.trusted_pending, self.untrusted_pending, self.confirmed
+            "{{ immature: {}, trusted_pending: {}, untrusted_pending: {}, settled: {} }}",
+            self.immature, self.trusted_pending, self.untrusted_pending, self.settled
         )
     }
 }
@@ -47,7 +48,7 @@ impl core::ops::Add for Balance {
             immature: self.immature + other.immature,
             trusted_pending: self.trusted_pending + other.trusted_pending,
             untrusted_pending: self.untrusted_pending + other.untrusted_pending,
-            confirmed: self.confirmed + other.confirmed,
+            settled: self.settled + other.settled,
         }
     }
 }
