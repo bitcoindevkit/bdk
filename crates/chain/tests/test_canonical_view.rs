@@ -53,8 +53,7 @@ fn test_min_confirmations_parameter() {
     };
     let _ = tx_graph.insert_anchor(txid, anchor_height_5);
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let canonical_view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // Test min_confirmations = 1: Should be confirmed (has 6 confirmations)
     let balance_1_conf = canonical_view.balance(
@@ -141,8 +140,7 @@ fn test_min_confirmations_with_untrusted_tx() {
     };
     let _ = tx_graph.insert_anchor(txid, anchor);
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let canonical_view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // Test with min_confirmations = 5 and untrusted predicate
     let balance = canonical_view.balance(
@@ -259,8 +257,7 @@ fn test_min_confirmations_multiple_transactions() {
     );
     outpoints.push(((), outpoint2));
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let canonical_view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // Test with min_confirmations = 5
     // tx0: 11 confirmations -> confirmed

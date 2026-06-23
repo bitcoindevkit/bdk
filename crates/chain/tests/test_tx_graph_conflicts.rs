@@ -970,7 +970,7 @@ fn test_tx_conflict_handling() {
     for scenario in scenarios {
         let env = init_graph(scenario.tx_templates.iter());
 
-        let canonical_view = local_chain.canonical_view(
+        let canonical_view = local_chain.canonicalize(
             &env.tx_graph,
             chain_tip,
             env.canonicalization_params.clone(),
