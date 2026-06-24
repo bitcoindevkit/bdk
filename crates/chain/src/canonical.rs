@@ -29,9 +29,7 @@ use alloc::vec::Vec;
 use core::{fmt, ops::RangeBounds};
 
 use bdk_core::BlockId;
-use bitcoin::{
-    constants::COINBASE_MATURITY, Amount, OutPoint, ScriptBuf, Transaction, TxOut, Txid,
-};
+use bitcoin::{constants::COINBASE_MATURITY, OutPoint, ScriptBuf, Transaction, TxOut, Txid};
 
 use crate::{spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalViewTask, ChainPosition, TxGraph};
 
@@ -394,25 +392,45 @@ impl<A, P: Clone> Canonical<A, P> {
     }
 }
 
+/// The spend-eligibility classification of a canonical output, produced by
+/// [`CanonicalView::classify_outpoints`].
+///
+/// This is a *chain-level* classification: it captures only what the chain can determine
+/// (settled-ness, maturity, and taint). It deliberately knows nothing about wallet policies such as
+/// locked or reserved coins — callers layer their own categories on top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Eligibility {
+    /// A settled coinbase output that has not yet matured. Not spendable.
+    Immature,
+    /// Settled: the output's transaction is considered unlikely to be replaced.
+    Settled,
+    /// Pending (not settled), and neither it nor any of its unsettled ancestors taints it.
+    TrustedPending,
+    /// Pending (not settled), and it or one of its unsettled ancestors taints it.
+    UntrustedPending,
+}
+
 impl<A: Anchor> CanonicalView<A> {
-    /// Calculate the total balance of the given outpoints.
+    /// Classify each of the given `outpoints` by its [spend eligibility](Eligibility).
     ///
-    /// This method computes a detailed balance breakdown for a set of outpoints, categorizing
-    /// outputs as confirmed, pending (trusted/untrusted), or immature based on their chain
-    /// position and the provided trust predicate.
+    /// This is the primitive behind [`balance`](Self::balance) and is the building block for coin
+    /// selection / coin control: it yields each unspent output paired with a chain-level
+    /// [`Eligibility`], leaving aggregation (and any wallet-specific categories like "locked") to
+    /// the caller. Spent outpoints, and outpoints not in this canonical view, are skipped.
     ///
     /// # Arguments
     ///
-    /// * `outpoints` - Iterator of outpoints to calculate balance for
+    /// * `outpoints` - Iterator of outpoints to classify.
     /// * `does_taint` - Function that returns `true` for transactions that should *taint* their
-    ///   descendants. A pending output counts toward `untrusted_pending` if its transaction, or any
-    ///   of its unsettled ancestors, taints; otherwise it counts toward `trusted_pending`. See
-    ///   [Taint](#taint) below.
+    ///   descendants. A pending output is [`UntrustedPending`](Eligibility::UntrustedPending) if
+    ///   its transaction, or any of its unsettled ancestors, taints; otherwise
+    ///   [`TrustedPending`](Eligibility::TrustedPending). See [Taint](#taint) below.
     /// * `is_settled` - Function that returns `true` for the [position](ChainPosition) of an output
     ///   whose transaction is considered settled — unlikely to be replaced (e.g. confirmed deeply
-    ///   enough). Settled outputs count toward `settled`/`immature`; the rest are pending.
-    ///   `is_settled` is the sole authority on this boundary — a settled output is never dropped or
-    ///   tainted. See [Settled](#settled) below.
+    ///   enough). Settled outputs are [`Settled`](Eligibility::Settled) or
+    ///   [`Immature`](Eligibility::Immature); the rest are pending. `is_settled` is the sole
+    ///   authority on this boundary — a settled output is never tainted. See [Settled](#settled)
+    ///   below.
     ///
     /// # Settled
     ///
@@ -436,42 +454,44 @@ impl<A: Anchor> CanonicalView<A> {
     ///
     /// `does_taint` decides whether a pending output is trusted. The canonical *unsettled* ancestry
     /// of each pending output is walked (stopping at settled transactions); if `does_taint` returns
-    /// `true` for the output's own transaction or any walked ancestor, the output counts toward
-    /// `untrusted_pending`, otherwise toward `trusted_pending`.
+    /// `true` for the output's own transaction or any walked ancestor, the output is
+    /// [`UntrustedPending`](Eligibility::UntrustedPending), otherwise
+    /// [`TrustedPending`](Eligibility::TrustedPending).
     ///
     /// A common use is to taint transactions that spend outputs the wallet does not own while
     /// unconfirmed (i.e. unconfirmed coins received from, or chained on top of, a third party).
-    /// Returning `false` for every transaction treats all pending owned outputs as trusted;
-    /// returning `true` treats them all as untrusted.
+    /// Returning `false` for every transaction treats all pending outputs as trusted; returning
+    /// `true` treats them all as untrusted.
     ///
     /// # Example
     ///
     /// ```
-    /// # use bdk_chain::{CanonicalParams, ChainPosition, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_chain::{CanonicalParams, ChainPosition, Eligibility, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
     /// # use bdk_core::BlockId;
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph = TxGraph::<BlockId>::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
-    /// # let chain_tip = chain.tip().block_id();
-    /// # let view = chain.canonical_view(&tx_graph, chain_tip, CanonicalParams::default());
+    /// # let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), CanonicalParams::default());
     /// # let indexer = KeychainTxOutIndex::<&str>::default();
-    /// let tip_height = view.tip().height;
-    /// // Calculate balance requiring 6 confirmations, tainting nothing (all pending trusted)
-    /// let balance = view.balance(
+    /// // Coin control: prefer settled coins, fall back to trusted-pending; never spend the rest.
+    /// let mut candidates = vec![];
+    /// for (txout, eligibility) in view.classify_outpoints(
     ///     indexer.outpoints().iter().map(|(_, op)| *op),
     ///     |_tx| false, // Never taint
-    ///     |pos: &ChainPosition<_>| {
-    ///         pos.confirmation_height_upper_bound()
-    ///             .is_some_and(|h| tip_height.saturating_sub(h).saturating_add(1) >= 6)
-    ///     },
-    /// );
+    ///     |pos: &ChainPosition<_>| pos.confirmation_height_upper_bound().is_some(),
+    /// ) {
+    ///     match eligibility {
+    ///         Eligibility::Settled | Eligibility::TrustedPending => candidates.push(txout.outpoint),
+    ///         Eligibility::Immature | Eligibility::UntrustedPending => {}
+    ///     }
+    /// }
     /// ```
-    pub fn balance(
+    pub fn classify_outpoints(
         &self,
         outpoints: impl IntoIterator<Item = OutPoint>,
         mut does_taint: impl FnMut(CanonicalTx<ChainPosition<A>>) -> bool,
         is_settled: impl Fn(&ChainPosition<A>) -> bool,
-    ) -> Balance {
+    ) -> impl Iterator<Item = (CanonicalTxOut<ChainPosition<A>>, Eligibility)> {
         let utxos = outpoints
             .into_iter()
             .filter_map(|op| self.txout(op))
@@ -505,34 +525,72 @@ impl<A: Anchor> CanonicalView<A> {
             tainted
         };
 
-        let mut immature = Amount::ZERO;
-        let mut trusted_pending = Amount::ZERO;
-        let mut untrusted_pending = Amount::ZERO;
-        let mut settled = Amount::ZERO;
-
-        for txout in utxos {
-            if is_settled(&txout.pos) {
-                // Settled outputs count as settled unless they are an immature coinbase. We rely on
+        let tip = self.tip.height;
+        utxos.into_iter().map(move |txout| {
+            let eligibility = if is_settled(&txout.pos) {
+                // Settled outputs are settled unless they are an immature coinbase. We rely on
                 // `is_settled` alone (not on a confirmation height), so a caller is free to treat
-                // unconfirmed outputs as settled without their value being dropped.
-                if txout.is_mature(self.tip.height) {
-                    settled += txout.txout.value;
+                // unconfirmed outputs as settled.
+                if txout.is_mature(tip) {
+                    Eligibility::Settled
                 } else {
-                    immature += txout.txout.value;
+                    Eligibility::Immature
                 }
             } else if tainted.contains(&txout.outpoint.txid) {
-                untrusted_pending += txout.txout.value;
+                Eligibility::UntrustedPending
             } else {
-                trusted_pending += txout.txout.value;
-            }
-        }
+                Eligibility::TrustedPending
+            };
+            (txout, eligibility)
+        })
+    }
 
-        Balance {
-            immature,
-            trusted_pending,
-            untrusted_pending,
-            settled,
+    /// Calculate the total [`Balance`] of the given `outpoints`.
+    ///
+    /// This is a convenience fold over [`classify_outpoints`](Self::classify_outpoints): each
+    /// output's value is added to the [`Balance`] bucket matching its [`Eligibility`]. See
+    /// [`classify_outpoints`](Self::classify_outpoints) for the meaning of `does_taint` and
+    /// `is_settled`, and for richer per-output handling (e.g. coin control).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bdk_chain::{CanonicalParams, ChainPosition, TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_core::BlockId;
+    /// # use bitcoin::hashes::Hash;
+    /// # let tx_graph = TxGraph::<BlockId>::default();
+    /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
+    /// # let chain_tip = chain.tip().block_id();
+    /// # let view = chain.canonical_view(&tx_graph, chain_tip, CanonicalParams::default());
+    /// # let indexer = KeychainTxOutIndex::<&str>::default();
+    /// let tip_height = view.tip().height;
+    /// // Calculate balance requiring 6 confirmations, tainting nothing (all pending trusted)
+    /// let balance = view.balance(
+    ///     indexer.outpoints().iter().map(|(_, op)| *op),
+    ///     |_tx| false, // Never taint
+    ///     |pos: &ChainPosition<_>| {
+    ///         pos.confirmation_height_upper_bound()
+    ///             .is_some_and(|h| tip_height.saturating_sub(h).saturating_add(1) >= 6)
+    ///     },
+    /// );
+    /// ```
+    pub fn balance(
+        &self,
+        outpoints: impl IntoIterator<Item = OutPoint>,
+        does_taint: impl FnMut(CanonicalTx<ChainPosition<A>>) -> bool,
+        is_settled: impl Fn(&ChainPosition<A>) -> bool,
+    ) -> Balance {
+        let mut balance = Balance::default();
+        for (txout, eligibility) in self.classify_outpoints(outpoints, does_taint, is_settled) {
+            let bucket = match eligibility {
+                Eligibility::Immature => &mut balance.immature,
+                Eligibility::Settled => &mut balance.settled,
+                Eligibility::TrustedPending => &mut balance.trusted_pending,
+                Eligibility::UntrustedPending => &mut balance.untrusted_pending,
+            };
+            *bucket += txout.txout.value;
         }
+        balance
     }
 }
 

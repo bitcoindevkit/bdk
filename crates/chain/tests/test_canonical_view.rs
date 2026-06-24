@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use bdk_chain::{local_chain::LocalChain, ConfirmationBlockTime, TxGraph};
+use bdk_chain::{local_chain::LocalChain, ConfirmationBlockTime, Eligibility, TxGraph};
 use bdk_testenv::{hash, utils::new_tx};
 use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
 
@@ -430,6 +430,29 @@ fn test_balance_taint_propagates_through_unconfirmed_ancestry() {
     assert_eq!(balance.trusted_pending, Amount::from_sat(40_000));
     // `chained` inherits taint from its foreign-funded ancestor `foreign`.
     assert_eq!(balance.untrusted_pending, Amount::from_sat(25_000));
+
+    // `balance` is a fold over `classify_outpoints`; the per-output classification agrees.
+    let by_op = view
+        .classify_outpoints(
+            utxos,
+            |c_tx| {
+                c_tx.tx
+                    .input
+                    .iter()
+                    .any(|txin| !owned.contains(&txin.previous_output))
+            },
+            |pos| pos.is_confirmed(),
+        )
+        .map(|(txout, eligibility)| (txout.outpoint, eligibility))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(
+        by_op[&OutPoint::new(trusted_txid, 0)],
+        Eligibility::TrustedPending
+    );
+    assert_eq!(
+        by_op[&OutPoint::new(chained_txid, 0)],
+        Eligibility::UntrustedPending
+    );
 }
 
 /// `is_settled` is the sole authority on the settled boundary: a caller may treat an unconfirmed
