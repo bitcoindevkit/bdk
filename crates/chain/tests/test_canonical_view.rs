@@ -489,3 +489,160 @@ fn test_balance_is_settled_is_authoritative_for_unconfirmed() {
     assert_eq!(balance.trusted_pending, Amount::ZERO);
     assert_eq!(balance.untrusted_pending, Amount::ZERO);
 }
+
+/// Taint must not cross the settled boundary: a settled (mined) ancestor that `does_taint` would
+/// flag does not taint its unsettled descendants, because the walk stops at — and never taints —
+/// settled transactions.
+#[test]
+fn test_balance_taint_stops_at_settled_ancestor() {
+    use std::collections::HashSet;
+
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("g")), (1, hash!("b1")), (2, hash!("tip"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+    let owned_spk = ScriptBuf::new();
+
+    // A *settled* (confirmed) tx that itself spends a third-party coin — `does_taint` would flag
+    // it.
+    let settled_foreign = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("third_party"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: owned_spk.clone(),
+        }],
+        ..new_tx(0)
+    };
+    let settled_foreign_txid = settled_foreign.compute_txid();
+
+    // Unconfirmed child spending our own (settled) output.
+    let child = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(settled_foreign_txid, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(45_000),
+            script_pubkey: owned_spk.clone(),
+        }],
+        ..new_tx(1)
+    };
+    let child_txid = child.compute_txid();
+
+    let _ = tx_graph.insert_tx(settled_foreign.clone());
+    let _ = tx_graph.insert_anchor(
+        settled_foreign_txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+    let _ = tx_graph.insert_tx(child.clone());
+    let _ = tx_graph.insert_seen_at(child_txid, 1000);
+
+    let owned = [
+        OutPoint::new(settled_foreign_txid, 0),
+        OutPoint::new(child_txid, 0),
+    ]
+    .into_iter()
+    .collect::<HashSet<_>>();
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+
+    // `child` is the only UTXO (`settled_foreign:0` is spent by it).
+    let by_op = view
+        .classify_outpoints(
+            [OutPoint::new(child_txid, 0)],
+            |c_tx| {
+                c_tx.tx
+                    .input
+                    .iter()
+                    .any(|txin| !owned.contains(&txin.previous_output))
+            },
+            |pos| pos.is_confirmed(),
+        )
+        .map(|(txout, eligibility)| (txout.outpoint, eligibility))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    // The foreign-spending ancestor is settled, so the walk stops there and never taints `child`.
+    assert_eq!(
+        by_op[&OutPoint::new(child_txid, 0)],
+        Eligibility::TrustedPending
+    );
+}
+
+/// `classify_outpoints` distinguishes an immature coinbase from a settled output.
+#[test]
+fn test_classify_immature_and_settled() {
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("g")), (1, hash!("b1")), (2, hash!("tip"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+    let spk = ScriptBuf::new();
+
+    // Coinbase confirmed at height 1; far below `COINBASE_MATURITY` → immature.
+    let coinbase = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::null(),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: spk.clone(),
+        }],
+        ..new_tx(0)
+    };
+    let coinbase_txid = coinbase.compute_txid();
+    assert!(coinbase.is_coinbase());
+
+    // A normal (non-coinbase) confirmed output.
+    let normal = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("ext"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(30_000),
+            script_pubkey: spk.clone(),
+        }],
+        ..new_tx(1)
+    };
+    let normal_txid = normal.compute_txid();
+
+    for (txid, tx) in [(coinbase_txid, &coinbase), (normal_txid, &normal)] {
+        let _ = tx_graph.insert_tx(tx.clone());
+        let _ = tx_graph.insert_anchor(
+            txid,
+            ConfirmationBlockTime {
+                block_id: chain.get(1).unwrap().block_id(),
+                confirmation_time: 100,
+            },
+        );
+    }
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let ops = [
+        OutPoint::new(coinbase_txid, 0),
+        OutPoint::new(normal_txid, 0),
+    ];
+
+    let by_op = view
+        .classify_outpoints(ops, |_| false, |pos| pos.is_confirmed())
+        .map(|(txout, eligibility)| (txout.outpoint, eligibility))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(
+        by_op[&OutPoint::new(coinbase_txid, 0)],
+        Eligibility::Immature
+    );
+    assert_eq!(by_op[&OutPoint::new(normal_txid, 0)], Eligibility::Settled);
+
+    // The balance buckets reflect the same classification.
+    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed());
+    assert_eq!(balance.immature, Amount::from_sat(50_000));
+    assert_eq!(balance.settled, Amount::from_sat(30_000));
+}

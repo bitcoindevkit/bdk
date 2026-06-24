@@ -210,3 +210,57 @@ fn ancestors_pruning_stops_a_branch() {
             .collect::<BTreeSet<_>>()
     );
 }
+
+#[test]
+fn ancestors_inclusive_yields_seeds() {
+    let (chain, tx_graph, [_tx_a, _tx_b, _tx_c, tx_d]) = diamond();
+    let txid_d = tx_d.compute_txid();
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+
+    let result: Vec<_> = view
+        .ancestors_inclusive([txid_d], collect_self, |_ctx| true)
+        .collect();
+
+    // All four transactions are yielded (the seed `tx_d` plus its three ancestors), once each.
+    let yielded: HashSet<Txid> = result.iter().map(|(_, ct)| ct.txid).collect();
+    assert_eq!(yielded.len(), 4);
+    assert!(yielded.contains(&txid_d));
+
+    // The seed is yielded with only its own contribution (it has no in-set descendants).
+    let acc_of_d = &result.iter().find(|(_, ct)| ct.txid == txid_d).unwrap().0;
+    assert_eq!(*acc_of_d, [txid_d].into_iter().collect::<BTreeSet<_>>());
+
+    // `len()` accounts for the seed too.
+    let it = view.ancestors_inclusive([txid_d], collect_self, |_ctx| true);
+    assert_eq!(it.len(), 4);
+    assert_eq!(it.count(), 4);
+}
+
+#[test]
+fn ancestors_multiple_seeds_dedup_shared_ancestor() {
+    let (chain, tx_graph, [tx_a, tx_b, tx_c, _tx_d]) = diamond();
+    let (txid_a, txid_b, txid_c) = (
+        tx_a.compute_txid(),
+        tx_b.compute_txid(),
+        tx_c.compute_txid(),
+    );
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+
+    // `tx_b` and `tx_c` both spend `tx_a`. Their shared ancestor must be visited once.
+    let result: Vec<_> = view
+        .ancestors([txid_b, txid_c], collect_self, |_ctx| true)
+        .collect();
+
+    // Only `tx_a` is yielded (the two seeds are excluded), exactly once.
+    let order: Vec<Txid> = result.iter().map(|(_, ct)| ct.txid).collect();
+    assert_eq!(order, vec![txid_a]);
+    // Both seeds merged into it.
+    assert_eq!(
+        result[0].0,
+        [txid_a, txid_b, txid_c]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+    );
+}
