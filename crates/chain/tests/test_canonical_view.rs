@@ -2,9 +2,21 @@
 
 use std::collections::BTreeMap;
 
-use bdk_chain::{local_chain::LocalChain, ConfirmationBlockTime, TxGraph};
+use bdk_chain::{local_chain::LocalChain, ConfirmationBlockTime, Eligibility, TxGraph};
 use bdk_testenv::{hash, utils::new_tx};
 use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+
+/// Builds an `is_settled` predicate requiring at least `min_confirmations` confirmations.
+fn settled<A: bdk_chain::Anchor>(
+    tip_height: u32,
+    min_confirmations: u32,
+) -> impl Fn(&bdk_chain::ChainPosition<A>) -> bool {
+    move |pos| {
+        pos.confirmation_height_upper_bound().is_some_and(|h| {
+            tip_height.saturating_sub(h).saturating_add(1) >= min_confirmations.max(1)
+        })
+    }
+}
 
 #[test]
 fn test_min_confirmations_parameter() {
@@ -55,42 +67,43 @@ fn test_min_confirmations_parameter() {
 
     let canonical_view =
         chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let tip_height = canonical_view.tip().height;
 
     // Test min_confirmations = 1: Should be confirmed (has 6 confirmations)
     let balance_1_conf = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| true, // trust all
-        1,
+        [outpoint],
+        |_| false, // taint nothing
+        settled(tip_height, 1),
     );
 
-    assert_eq!(balance_1_conf.confirmed, Amount::from_sat(50_000));
+    assert_eq!(balance_1_conf.settled, Amount::from_sat(50_000));
     assert_eq!(balance_1_conf.trusted_pending, Amount::ZERO);
 
     // Test min_confirmations = 6: Should be confirmed (has exactly 6 confirmations)
     let balance_6_conf = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| true, // trust all
-        6,
+        [outpoint],
+        |_| false, // taint nothing
+        settled(tip_height, 6),
     );
-    assert_eq!(balance_6_conf.confirmed, Amount::from_sat(50_000));
+    assert_eq!(balance_6_conf.settled, Amount::from_sat(50_000));
     assert_eq!(balance_6_conf.trusted_pending, Amount::ZERO);
 
     // Test min_confirmations = 7: Should be trusted pending (only has 6 confirmations)
     let balance_7_conf = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| true, // trust all
-        7,
+        [outpoint],
+        |_| false, // taint nothing
+        settled(tip_height, 7),
     );
-    assert_eq!(balance_7_conf.confirmed, Amount::ZERO);
+    assert_eq!(balance_7_conf.settled, Amount::ZERO);
     assert_eq!(balance_7_conf.trusted_pending, Amount::from_sat(50_000));
 
     // Test min_confirmations = 0: Should behave same as 1 (confirmed)
     let balance_0_conf = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| true, // trust all
-        0,
+        [outpoint],
+        |_| false, // taint nothing
+        settled(tip_height, 0),
     );
-    assert_eq!(balance_0_conf.confirmed, Amount::from_sat(50_000));
+    assert_eq!(balance_0_conf.settled, Amount::from_sat(50_000));
     assert_eq!(balance_0_conf.trusted_pending, Amount::ZERO);
     assert_eq!(balance_0_conf, balance_1_conf);
 }
@@ -143,16 +156,18 @@ fn test_min_confirmations_with_untrusted_tx() {
 
     let canonical_view =
         chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let tip_height = canonical_view.tip().height;
 
-    // Test with min_confirmations = 5 and untrusted predicate
+    // Test with min_confirmations = 5. The output has only 3 confirmations, so it is unsettled and
+    // treated as pending. Tainting everything demotes the pending output to untrusted.
     let balance = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| false, // don't trust
-        5,
+        [outpoint],
+        |_| true, // taint everything
+        settled(tip_height, 5),
     );
 
-    // Should be untrusted pending (not enough confirmations and not trusted)
-    assert_eq!(balance.confirmed, Amount::ZERO);
+    // Should be untrusted pending (not deep enough to be settled, and tainted)
+    assert_eq!(balance.settled, Amount::ZERO);
     assert_eq!(balance.trusted_pending, Amount::ZERO);
     assert_eq!(balance.untrusted_pending, Amount::from_sat(25_000));
 }
@@ -209,7 +224,7 @@ fn test_min_confirmations_multiple_transactions() {
             confirmation_time: 123456,
         },
     );
-    outpoints.push(((), outpoint0));
+    outpoints.push(outpoint0);
 
     // Transaction 1: anchored at height 10, has 6 confirmations (15-10+1 = 6)
     let tx1 = Transaction {
@@ -233,7 +248,7 @@ fn test_min_confirmations_multiple_transactions() {
             confirmation_time: 123457,
         },
     );
-    outpoints.push(((), outpoint1));
+    outpoints.push(outpoint1);
 
     // Transaction 2: anchored at height 13, has 3 confirmations (15-13+1 = 3)
     let tx2 = Transaction {
@@ -257,19 +272,20 @@ fn test_min_confirmations_multiple_transactions() {
             confirmation_time: 123458,
         },
     );
-    outpoints.push(((), outpoint2));
+    outpoints.push(outpoint2);
 
     let canonical_view =
         chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let tip_height = canonical_view.tip().height;
 
     // Test with min_confirmations = 5
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> confirmed
     // tx2: 3 confirmations -> trusted pending
-    let balance = canonical_view.balance(outpoints.clone(), |_, _| true, 5);
+    let balance = canonical_view.balance(outpoints.clone(), |_| false, settled(tip_height, 5));
 
     assert_eq!(
-        balance.confirmed,
+        balance.settled,
         Amount::from_sat(10_000 + 20_000) // tx0 + tx1
     );
     assert_eq!(
@@ -282,10 +298,10 @@ fn test_min_confirmations_multiple_transactions() {
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> trusted pending
     // tx2: 3 confirmations -> trusted pending
-    let balance_high = canonical_view.balance(outpoints, |_, _| true, 10);
+    let balance_high = canonical_view.balance(outpoints, |_| false, settled(tip_height, 10));
 
     assert_eq!(
-        balance_high.confirmed,
+        balance_high.settled,
         Amount::from_sat(10_000) // only tx0
     );
     assert_eq!(
@@ -293,4 +309,340 @@ fn test_min_confirmations_multiple_transactions() {
         Amount::from_sat(20_000 + 30_000) // tx1 + tx2
     );
     assert_eq!(balance_high.untrusted_pending, Amount::ZERO);
+}
+
+/// A pending output is `untrusted_pending` if it, or any of its unsettled ancestors, taints; the
+/// taint propagates from a foreign-funded unconfirmed ancestor down to its descendants.
+#[test]
+fn test_balance_taint_propagates_through_unconfirmed_ancestry() {
+    use std::collections::HashSet;
+
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("g")), (1, hash!("b1")), (2, hash!("tip"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+
+    let owned_spk = ScriptBuf::new();
+
+    // A confirmed coin we own.
+    let coin = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("coinbase"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(100_000),
+            script_pubkey: owned_spk.clone(),
+        }],
+        ..new_tx(0)
+    };
+    let coin_txid = coin.compute_txid();
+
+    // Unconfirmed, spends our own confirmed coin -> not tainted -> trusted_pending.
+    let trusted = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(coin_txid, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(40_000),
+            script_pubkey: owned_spk.clone(),
+        }],
+        ..new_tx(1)
+    };
+    let trusted_txid = trusted.compute_txid();
+
+    // Unconfirmed, funded by a third party (spends a foreign outpoint) -> taints itself.
+    let foreign = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("third_party"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(30_000),
+            script_pubkey: owned_spk.clone(),
+        }],
+        ..new_tx(2)
+    };
+    let foreign_txid = foreign.compute_txid();
+
+    // Unconfirmed, spends our own `foreign` output -> tainted via its ancestor `foreign`.
+    let chained = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(foreign_txid, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(25_000),
+            script_pubkey: owned_spk.clone(),
+        }],
+        ..new_tx(3)
+    };
+    let chained_txid = chained.compute_txid();
+
+    let _ = tx_graph.insert_tx(coin.clone());
+    let _ = tx_graph.insert_anchor(
+        coin_txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+    for tx in [&trusted, &foreign, &chained] {
+        let _ = tx_graph.insert_tx(tx.clone());
+        let _ = tx_graph.insert_seen_at(tx.compute_txid(), 1000);
+    }
+
+    // The set of outpoints we own.
+    let owned = [
+        OutPoint::new(coin_txid, 0),
+        OutPoint::new(trusted_txid, 0),
+        OutPoint::new(foreign_txid, 0),
+        OutPoint::new(chained_txid, 0),
+    ]
+    .into_iter()
+    .collect::<HashSet<_>>();
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+
+    // Our unspent owned outputs: `trusted` and `chained` (the others are spent).
+    let utxos = [
+        OutPoint::new(trusted_txid, 0),
+        OutPoint::new(chained_txid, 0),
+    ];
+
+    let balance = view.balance(
+        utxos,
+        // Taint any transaction that spends an outpoint we do not own.
+        |c_tx| {
+            c_tx.tx
+                .input
+                .iter()
+                .any(|txin| !owned.contains(&txin.previous_output))
+        },
+        |pos| pos.is_confirmed(),
+    );
+
+    assert_eq!(balance.settled, Amount::ZERO);
+    assert_eq!(balance.immature, Amount::ZERO);
+    // `trusted` spends only our own (confirmed) coin -> trusted.
+    assert_eq!(balance.trusted_pending, Amount::from_sat(40_000));
+    // `chained` inherits taint from its foreign-funded ancestor `foreign`.
+    assert_eq!(balance.untrusted_pending, Amount::from_sat(25_000));
+
+    // `balance` is a fold over `classify_outpoints`; the per-output classification agrees.
+    let by_op = view
+        .classify_outpoints(
+            utxos,
+            |c_tx| {
+                c_tx.tx
+                    .input
+                    .iter()
+                    .any(|txin| !owned.contains(&txin.previous_output))
+            },
+            |pos| pos.is_confirmed(),
+        )
+        .map(|(txout, eligibility)| (txout.outpoint, eligibility))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(
+        by_op[&OutPoint::new(trusted_txid, 0)],
+        Eligibility::TrustedPending
+    );
+    assert_eq!(
+        by_op[&OutPoint::new(chained_txid, 0)],
+        Eligibility::UntrustedPending
+    );
+}
+
+/// `is_settled` is the sole authority on the settled boundary: a caller may treat an unconfirmed
+/// output as settled, and its value must be counted (as settled), never silently dropped.
+#[test]
+fn test_balance_is_settled_is_authoritative_for_unconfirmed() {
+    let blocks: BTreeMap<u32, BlockHash> =
+        [(0, hash!("g")), (1, hash!("tip"))].into_iter().collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+
+    let tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("parent"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let txid = tx.compute_txid();
+    let _ = tx_graph.insert_tx(tx);
+    let _ = tx_graph.insert_seen_at(txid, 1000);
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+
+    // An `is_settled` that claims everything is settled counts the (mature, non-coinbase)
+    // unconfirmed output as settled rather than dropping it.
+    let balance = view.balance([OutPoint::new(txid, 0)], |_| false, |_| true);
+    assert_eq!(balance.settled, Amount::from_sat(50_000));
+    assert_eq!(balance.immature, Amount::ZERO);
+    assert_eq!(balance.trusted_pending, Amount::ZERO);
+    assert_eq!(balance.untrusted_pending, Amount::ZERO);
+}
+
+/// Taint must not cross the settled boundary: a settled (mined) ancestor that `does_taint` would
+/// flag does not taint its unsettled descendants, because the walk stops at — and never taints —
+/// settled transactions.
+#[test]
+fn test_balance_taint_stops_at_settled_ancestor() {
+    use std::collections::HashSet;
+
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("g")), (1, hash!("b1")), (2, hash!("tip"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+    let owned_spk = ScriptBuf::new();
+
+    // A *settled* (confirmed) tx that itself spends a third-party coin — `does_taint` would flag
+    // it.
+    let settled_foreign = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("third_party"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: owned_spk.clone(),
+        }],
+        ..new_tx(0)
+    };
+    let settled_foreign_txid = settled_foreign.compute_txid();
+
+    // Unconfirmed child spending our own (settled) output.
+    let child = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(settled_foreign_txid, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(45_000),
+            script_pubkey: owned_spk.clone(),
+        }],
+        ..new_tx(1)
+    };
+    let child_txid = child.compute_txid();
+
+    let _ = tx_graph.insert_tx(settled_foreign.clone());
+    let _ = tx_graph.insert_anchor(
+        settled_foreign_txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+    let _ = tx_graph.insert_tx(child.clone());
+    let _ = tx_graph.insert_seen_at(child_txid, 1000);
+
+    let owned = [
+        OutPoint::new(settled_foreign_txid, 0),
+        OutPoint::new(child_txid, 0),
+    ]
+    .into_iter()
+    .collect::<HashSet<_>>();
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+
+    // `child` is the only UTXO (`settled_foreign:0` is spent by it).
+    let by_op = view
+        .classify_outpoints(
+            [OutPoint::new(child_txid, 0)],
+            |c_tx| {
+                c_tx.tx
+                    .input
+                    .iter()
+                    .any(|txin| !owned.contains(&txin.previous_output))
+            },
+            |pos| pos.is_confirmed(),
+        )
+        .map(|(txout, eligibility)| (txout.outpoint, eligibility))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    // The foreign-spending ancestor is settled, so the walk stops there and never taints `child`.
+    assert_eq!(
+        by_op[&OutPoint::new(child_txid, 0)],
+        Eligibility::TrustedPending
+    );
+}
+
+/// `classify_outpoints` distinguishes an immature coinbase from a settled output.
+#[test]
+fn test_classify_immature_and_settled() {
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("g")), (1, hash!("b1")), (2, hash!("tip"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+    let spk = ScriptBuf::new();
+
+    // Coinbase confirmed at height 1; far below `COINBASE_MATURITY` → immature.
+    let coinbase = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::null(),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: spk.clone(),
+        }],
+        ..new_tx(0)
+    };
+    let coinbase_txid = coinbase.compute_txid();
+    assert!(coinbase.is_coinbase());
+
+    // A normal (non-coinbase) confirmed output.
+    let normal = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("ext"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(30_000),
+            script_pubkey: spk.clone(),
+        }],
+        ..new_tx(1)
+    };
+    let normal_txid = normal.compute_txid();
+
+    for (txid, tx) in [(coinbase_txid, &coinbase), (normal_txid, &normal)] {
+        let _ = tx_graph.insert_tx(tx.clone());
+        let _ = tx_graph.insert_anchor(
+            txid,
+            ConfirmationBlockTime {
+                block_id: chain.get(1).unwrap().block_id(),
+                confirmation_time: 100,
+            },
+        );
+    }
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let ops = [
+        OutPoint::new(coinbase_txid, 0),
+        OutPoint::new(normal_txid, 0),
+    ];
+
+    let by_op = view
+        .classify_outpoints(ops, |_| false, |pos| pos.is_confirmed())
+        .map(|(txout, eligibility)| (txout.outpoint, eligibility))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(
+        by_op[&OutPoint::new(coinbase_txid, 0)],
+        Eligibility::Immature
+    );
+    assert_eq!(by_op[&OutPoint::new(normal_txid, 0)], Eligibility::Settled);
+
+    // The balance buckets reflect the same classification.
+    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed());
+    assert_eq!(balance.immature, Amount::from_sat(50_000));
+    assert_eq!(balance.settled, Amount::from_sat(30_000));
 }

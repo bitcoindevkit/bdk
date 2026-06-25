@@ -481,9 +481,11 @@ fn test_list_owned_txouts() {
                 .collect::<Vec<_>>();
 
             let balance = canonical_view.balance(
-                graph.index.outpoints().iter().cloned(),
-                |_, txout| trusted_spks.contains(&txout.txout.script_pubkey),
-                0,
+                graph.index.outpoints().iter().map(|(_, op)| *op),
+                // None of these transactions spend third-party coins (their inputs are empty or
+                // owned), so nothing is tainted and every pending output is trusted.
+                |_| false,
+                |pos| pos.is_confirmed(),
             );
 
             let confirmed_txouts_txid = txouts
@@ -574,10 +576,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: Amount::from_sat(70000),          // immature coinbase
-                trusted_pending: Amount::from_sat(25000),   // tx3, tx5
-                untrusted_pending: Amount::from_sat(20000), // tx4
-                confirmed: Amount::ZERO                     // Nothing is confirmed yet
+                immature: Amount::from_sat(70000),        // immature coinbase
+                trusted_pending: Amount::from_sat(45000), // tx3, tx4, tx5 (nothing tainted)
+                untrusted_pending: Amount::ZERO,
+                settled: Amount::ZERO // Nothing is confirmed yet
             }
         );
     }
@@ -612,10 +614,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: Amount::from_sat(70000),          // immature coinbase
-                trusted_pending: Amount::from_sat(25000),   // tx3, tx5
-                untrusted_pending: Amount::from_sat(20000), // tx4
-                confirmed: Amount::from_sat(0)              // tx2 got confirmed (but spent by 3)
+                immature: Amount::from_sat(70000),        // immature coinbase
+                trusted_pending: Amount::from_sat(45000), // tx3, tx4, tx5 (nothing tainted)
+                untrusted_pending: Amount::ZERO,
+                settled: Amount::from_sat(0) // tx2 got confirmed (but spent by 3)
             }
         );
     }
@@ -653,10 +655,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: Amount::from_sat(70000),          // immature coinbase
-                trusted_pending: Amount::from_sat(15000),   // tx5
-                untrusted_pending: Amount::from_sat(20000), // tx4
-                confirmed: Amount::from_sat(10000)          // tx3 got confirmed
+                immature: Amount::from_sat(70000),        // immature coinbase
+                trusted_pending: Amount::from_sat(35000), // tx4, tx5 (nothing tainted)
+                untrusted_pending: Amount::ZERO,
+                settled: Amount::from_sat(10000) // tx3 got confirmed
             }
         );
     }
@@ -694,10 +696,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: Amount::from_sat(70000),          // immature coinbase
-                trusted_pending: Amount::from_sat(15000),   // tx5
-                untrusted_pending: Amount::from_sat(20000), // tx4
-                confirmed: Amount::from_sat(10000)          // tx3 is confirmed
+                immature: Amount::from_sat(70000),        // immature coinbase
+                trusted_pending: Amount::from_sat(35000), // tx4, tx5 (nothing tainted)
+                untrusted_pending: Amount::ZERO,
+                settled: Amount::from_sat(10000) // tx3 is confirmed
             }
         );
     }
@@ -710,10 +712,10 @@ fn test_list_owned_txouts() {
         assert_eq!(
             balance,
             Balance {
-                immature: Amount::ZERO,                     // coinbase matured
-                trusted_pending: Amount::from_sat(15000),   // tx5
-                untrusted_pending: Amount::from_sat(20000), // tx4
-                confirmed: Amount::from_sat(80000)          // tx1 + tx3
+                immature: Amount::ZERO,                   // coinbase matured
+                trusted_pending: Amount::from_sat(35000), // tx4, tx5 (nothing tainted)
+                untrusted_pending: Amount::ZERO,
+                settled: Amount::from_sat(80000) // tx1 + tx3
             }
         );
     }
