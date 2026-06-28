@@ -383,14 +383,46 @@ impl<I, D> SyncRequest<I, D> {
         SyncIter::<I, D, SpkWithExpectedTxids>::new(self)
     }
 
-    /// Iterate over [`Txid`]s contained in this request.
-    pub fn iter_txids(&mut self) -> impl ExactSizeIterator<Item = Txid> + '_ {
+    /// Drain and iterate over [`Txid`]s contained in this request, consuming them.
+    pub fn drain_txids(&mut self) -> impl ExactSizeIterator<Item = Txid> + '_ {
         SyncIter::<I, D, Txid>::new(self)
     }
 
-    /// Iterate over [`OutPoint`]s contained in this request.
-    pub fn iter_outpoints(&mut self) -> impl ExactSizeIterator<Item = OutPoint> + '_ {
+    /// Drain and iterate over [`OutPoint`]s contained in this request, consuming them.
+    pub fn drain_outpoints(&mut self) -> impl ExactSizeIterator<Item = OutPoint> + '_ {
         SyncIter::<I, D, OutPoint>::new(self)
+    }
+
+    /// Iterate over [`Txid`]s contained in this request.
+    #[deprecated(
+        note = "use `drain_txids` for consuming iteration or `txids` for read-only iteration"
+    )]
+    pub fn iter_txids(&mut self) -> impl ExactSizeIterator<Item = Txid> + '_ {
+        self.drain_txids()
+    }
+
+    /// Iterate over [`OutPoint`]s contained in this request.
+    #[deprecated(
+        note = "use `drain_outpoints` for consuming iteration or `outpoints` for read-only iteration"
+    )]
+    pub fn iter_outpoints(&mut self) -> impl ExactSizeIterator<Item = OutPoint> + '_ {
+        self.drain_outpoints()
+    }
+
+    /// Iterate over script pubkeys (with indexes) contained in this request, without
+    /// consuming them.
+    pub fn spks(&self) -> impl ExactSizeIterator<Item = &(I, ScriptBuf)> + '_ {
+        self.spks.iter()
+    }
+
+    /// Iterate over [`Txid`]s contained in this request, without consuming them.
+    pub fn txids(&self) -> impl ExactSizeIterator<Item = &Txid> + '_ {
+        self.txids.iter()
+    }
+
+    /// Iterate over [`OutPoint`]s contained in this request, without consuming them.
+    pub fn outpoints(&self) -> impl ExactSizeIterator<Item = &OutPoint> + '_ {
+        self.outpoints.iter()
     }
 
     fn _call_inspect(&mut self, item: SyncItem<I>) {
