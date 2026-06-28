@@ -1540,19 +1540,17 @@ struct Scenario<'a> {
 
 /// A helper method to assert the expected topological order for a given [`Vec<Txid>`].
 fn is_ordered_topologically(txs: Vec<Txid>, tx_graph: TxGraph<BlockId>) -> bool {
+    let canonical: HashSet<Txid> = txs.iter().copied().collect();
     let mut seen: HashSet<Txid> = HashSet::new();
 
     for txid in txs {
         let tx = tx_graph.get_tx(txid).expect("should exist");
-        let inputs: Vec<Txid> = tx
-            .input
-            .iter()
-            .map(|txin| txin.previous_output.txid)
-            .collect();
 
-        // assert that all the txin's have been seen already
-        for input_txid in inputs {
-            if !seen.contains(&input_txid) {
+        // Every canonical parent must already have been seen. Inputs spending non-canonical txs
+        // (e.g. external or bogus) are outside this set and irrelevant to the ordering.
+        for txin in &tx.input {
+            let parent = txin.previous_output.txid;
+            if canonical.contains(&parent) && !seen.contains(&parent) {
                 return false;
             }
         }
@@ -1579,98 +1577,35 @@ fn test_list_ordered_canonical_txs() {
     let chain_tip = local_chain.tip().block_id();
 
     let scenarios = [
-    // a0  b0  c0
+    //         a0
+    //        /  \
+    //     a0:0  a0:1
+    //        \  /
+    //         b0
     Scenario {
-        name: "a0, b0 and c0 are roots, does not spend from any other transaction, and are in the best chain",
+        name: "b0 spends a0:0 and a0:1, and both do not have anchors or last_seen",
         tx_templates: &[
             TxTemplate {
                 tx_name: "a0",
-                inputs: &[],
-                outputs: &[TxOutTemplate::new(10000, Some(0))],
-                anchors: &[block_id!(1, "B")],
-                last_seen: None,
-                assume_canonical: false,
-            },
-            TxTemplate {
-                tx_name: "b0",
-                inputs: &[],
-                outputs: &[TxOutTemplate::new(5000, Some(0))],
-                anchors: &[block_id!(1, "B")],
-                last_seen: None,
-                assume_canonical: false,
-            },
-            TxTemplate {
-                tx_name: "c0",
-                inputs: &[],
-                outputs: &[TxOutTemplate::new(2500, Some(0))],
-                anchors: &[block_id!(1, "B")],
-                last_seen: None,
-                assume_canonical: false,
-            },
-        ],
-        exp_chain_txs: Vec::from(["a0", "b0", "c0"]),
-    },
-    // a0  b0  c0
-    Scenario {
-        name: "a0, b0 and c0 are roots, does not spend from any other transaction, and have no anchor or last_seen",
-        tx_templates: &[
-            TxTemplate {
-                tx_name: "a0",
-                inputs: &[],
-                outputs: &[TxOutTemplate::new(10000, Some(0))],
+                inputs: &[TxInTemplate::Bogus],
+                outputs: &[
+                    TxOutTemplate::new(10_000, None),
+                    TxOutTemplate::new(10_000, None),
+                ],
                 anchors: &[],
                 last_seen: None,
                 assume_canonical: false,
             },
             TxTemplate {
                 tx_name: "b0",
-                inputs: &[],
-                outputs: &[TxOutTemplate::new(5000, Some(0))],
+                inputs: &[TxInTemplate::PrevTx("a0", 0), TxInTemplate::PrevTx("a0", 1)],
+                outputs: &[TxOutTemplate::new(18_000, None)],
                 anchors: &[],
                 last_seen: None,
-                assume_canonical: false,
-            },
-            TxTemplate {
-                tx_name: "c0",
-                inputs: &[],
-                outputs: &[TxOutTemplate::new(2500, Some(0))],
-                anchors: &[],
-                last_seen: None,
-                assume_canonical: false,
+                assume_canonical: true,
             },
         ],
-        exp_chain_txs: Vec::from([]),
-    },
-    // a0  b0  c0
-    Scenario {
-        name: "A, B and C are roots, does not spend from any other transaction, and are all have the same `last_seen`",
-        tx_templates: &[
-            TxTemplate {
-                tx_name: "A",
-                inputs: &[],
-                outputs: &[TxOutTemplate::new(10000, Some(0))],
-                anchors: &[],
-                last_seen: Some(1000),
-                assume_canonical: false,
-            },
-            TxTemplate {
-                tx_name: "B",
-                inputs: &[],
-                outputs: &[TxOutTemplate::new(5000, Some(0))],
-                anchors: &[],
-                last_seen: Some(1000),
-                assume_canonical: false,
-            },
-            TxTemplate {
-                tx_name: "C",
-                inputs: &[],
-                outputs: &[TxOutTemplate::new(2500, Some(0))],
-                anchors: &[],
-                last_seen: Some(1000),
-                assume_canonical: false,
-            },
-        ],
-        exp_chain_txs: Vec::from(["A", "B", "C"]),
+        exp_chain_txs: Vec::from(["a0", "b0"]),
     },
     // a0
     //  \

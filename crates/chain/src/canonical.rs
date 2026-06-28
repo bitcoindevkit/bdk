@@ -171,9 +171,9 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
     }
 }
 
-/// Canonical set of transactions from a [`TxGraph`].
+/// Canonical list of transactions from a [`TxGraph`].
 ///
-/// `Canonical` provides an ordered, conflict-resolved set of transactions. It determines
+/// `Canonical` provides an ordered, conflict-resolved list of transactions. It determines
 /// which transactions are canonical (non-conflicted) based on the current chain state and
 /// provides methods to query transaction data, unspent outputs, and balances.
 ///
