@@ -9,6 +9,7 @@ use bdk_chain::{
     tx_graph::{ChangeSet, TxGraph},
     Anchor, ChainPosition, Merge,
 };
+use bdk_testenv::local_chain;
 use bdk_testenv::{block_id, hash, utils::new_tx};
 use bitcoin::hex::FromHex;
 use bitcoin::Witness;
@@ -1524,4 +1525,540 @@ fn test_get_first_seen_of_a_tx() {
 
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
+}
+
+/// A helper structure to constructs multiple [`TxGraph`] scenarios, used in
+/// `test_list_ordered_canonical_txs`.
+struct Scenario<'a> {
+    /// Name of the test scenario
+    name: &'a str,
+    /// Transaction templates
+    tx_templates: &'a [TxTemplate<'a, BlockId>],
+    /// Names of txs that must exist in the output of `list_canonical_txs`
+    exp_chain_txs: Vec<&'a str>,
+}
+
+/// A helper method to assert the expected topological order for a given [`Vec<Txid>`].
+fn is_ordered_topologically(txs: Vec<Txid>, tx_graph: TxGraph<BlockId>) -> bool {
+    let canonical: HashSet<Txid> = txs.iter().copied().collect();
+    let mut seen: HashSet<Txid> = HashSet::new();
+
+    for txid in txs {
+        let tx = tx_graph.get_tx(txid).expect("should exist");
+
+        // Every canonical parent must already have been seen. Inputs spending non-canonical txs
+        // (e.g. external or bogus) are outside this set and irrelevant to the ordering.
+        for txin in &tx.input {
+            let parent = txin.previous_output.txid;
+            if canonical.contains(&parent) && !seen.contains(&parent) {
+                return false;
+            }
+        }
+
+        // Add current transaction to seen set
+        seen.insert(txid);
+    }
+
+    true
+}
+
+#[test]
+fn test_list_ordered_canonical_txs() {
+    // chain
+    let local_chain: LocalChain = local_chain!(
+        (0, hash!("A")),
+        (1, hash!("B")),
+        (2, hash!("C")),
+        (3, hash!("D")),
+        (4, hash!("E")),
+        (5, hash!("F")),
+        (6, hash!("G"))
+    );
+    let chain_tip = local_chain.tip().block_id();
+
+    let scenarios = [
+    //         a0
+    //        /  \
+    //     a0:0  a0:1
+    //        \  /
+    //         b0
+    Scenario {
+        name: "b0 spends a0:0 and a0:1, and both do not have anchors or last_seen",
+        tx_templates: &[
+            TxTemplate {
+                tx_name: "a0",
+                inputs: &[TxInTemplate::Bogus],
+                outputs: &[
+                    TxOutTemplate::new(10_000, None),
+                    TxOutTemplate::new(10_000, None),
+                ],
+                anchors: &[],
+                last_seen: None,
+                assume_canonical: false,
+            },
+            TxTemplate {
+                tx_name: "b0",
+                inputs: &[TxInTemplate::PrevTx("a0", 0), TxInTemplate::PrevTx("a0", 1)],
+                outputs: &[TxOutTemplate::new(18_000, None)],
+                anchors: &[],
+                last_seen: None,
+                assume_canonical: true,
+            },
+        ],
+        exp_chain_txs: Vec::from(["a0", "b0"]),
+    },
+    // a0
+    //  \
+    //  b0
+    //    \
+    //     \   c0
+    //      \  /
+    //       d0
+    Scenario {
+        name: "b0 spends a0, d0 spends both b0 and c0, and are in the best chain",
+        tx_templates: &[
+            TxTemplate {
+                tx_name: "a0",
+                inputs: &[],
+                outputs: &[TxOutTemplate::new(10000, Some(0))],
+                anchors: &[block_id!(1, "A")],
+                last_seen: None,
+                assume_canonical: false,
+            },
+            TxTemplate {
+                tx_name: "b0",
+                inputs: &[TxInTemplate::PrevTx("a0", 0)],
+                outputs: &[TxOutTemplate::new(5000, Some(0))],
+                anchors: &[block_id!(2, "B")],
+                last_seen: None,
+                assume_canonical: false,
+            },
+            TxTemplate {
+                tx_name: "c0",
+                inputs: &[],
+                outputs: &[TxOutTemplate::new(5000, Some(0))],
+                anchors: &[block_id!(3, "C")],
+                last_seen: None,
+                assume_canonical: false,
+            },
+            TxTemplate {
+                tx_name: "d0",
+                inputs: &[TxInTemplate::PrevTx("b0", 0), TxInTemplate::PrevTx("c0", 0)],
+                outputs: &[TxOutTemplate::new(5000, Some(0))],
+                anchors: &[block_id!(3, "C")],
+                last_seen: None,
+                assume_canonical: false,
+            },
+        ],
+        exp_chain_txs: Vec::from(["a0", "b0", "c0", "d0"]),
+    },
+    // a0   c0
+    //  \
+    //  b0
+    //    \
+    //     d0
+    Scenario {
+        name: "b0 spends a0, d0 spends b0, and a0, b0 and c0 are in the best chain",
+        tx_templates: &[
+            TxTemplate {
+                tx_name: "a0",
+                inputs: &[],
+                outputs: &[TxOutTemplate::new(10000, Some(0))],
+                anchors: &[block_id!(1, "A")],
+                last_seen: None,
+                assume_canonical: false,
+            },
+            TxTemplate {
+                tx_name: "b0",
+                inputs: &[TxInTemplate::PrevTx("a0", 0)],
+                outputs: &[TxOutTemplate::new(5000, Some(0))],
+                anchors: &[block_id!(2, "B")],
+                last_seen: None,
+                assume_canonical: false,
+            },
+            TxTemplate {
+                tx_name: "c0",
+                inputs: &[],
+                outputs: &[TxOutTemplate::new(5000, Some(0))],
+                anchors: &[block_id!(3, "C")],
+                last_seen: None,
+                assume_canonical: false,
+            },
+            TxTemplate {
+                tx_name: "d0",
+                inputs: &[TxInTemplate::PrevTx("b0", 0)],
+                outputs: &[TxOutTemplate::new(2500, Some(0))],
+                anchors: &[],
+                last_seen: Some(1000),
+                assume_canonical: false,
+            },
+        ],
+        exp_chain_txs: Vec::from(["a0", "b0", "c0", "d0"]),
+    },
+    // a0
+    //  \
+    //   b0
+    //    \
+    //     c0
+    Scenario {
+        name: "c0 spend a0, b0 spend a0, and a0, b0 are in the best chain",
+        tx_templates: &[
+            TxTemplate {
+                tx_name: "a0",
+                inputs: &[],
+                outputs: &[TxOutTemplate::new(10000, Some(0))],
+                anchors: &[block_id!(1, "B")],
+                last_seen: None,
+                assume_canonical: false,
+            },
+            TxTemplate {
+                tx_name: "b0",
+                inputs: &[TxInTemplate::PrevTx("a0", 0)],
+                outputs: &[TxOutTemplate::new(5000, Some(0))],
+                anchors: &[block_id!(1, "B")],
+                last_seen: None,
+                assume_canonical: false,
+            },
+            TxTemplate {
+                tx_name: "c0",
+                inputs: &[TxInTemplate::PrevTx("b0", 0)],
+                outputs: &[TxOutTemplate::new(2500, Some(0))],
+                anchors: &[],
+                last_seen: Some(1000),
+                assume_canonical: false,
+            },
+        ],
+        exp_chain_txs: Vec::from(["a0", "b0", "c0"]),
+    },
+    //     a0
+    //    /  \
+    //   b0   b1
+    //  /  \   \
+    // c0   \   c1
+    //       \  /
+    //        d0
+    Scenario {
+        name: "c0 spend b0, b0 spend a0, d0 spends both b0 and c1, c1 spend b1, b1 spend a0, and are all in the best chain",
+        tx_templates: &[TxTemplate {
+            tx_name: "a0",
+            inputs: &[],
+            outputs: &[TxOutTemplate::new(10000, Some(0)), TxOutTemplate::new(10000, Some(1))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        }, TxTemplate {
+            tx_name: "b0",
+            inputs: &[TxInTemplate::PrevTx("a0", 0)],
+            outputs: &[TxOutTemplate::new(10000, Some(0)), TxOutTemplate::new(10000, Some(1))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "c0",
+            inputs: &[TxInTemplate::PrevTx("b0", 0)],
+            outputs: &[TxOutTemplate::new(5000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "b1",
+            inputs: &[TxInTemplate::PrevTx("a0", 1)],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "c1",
+            inputs: &[TxInTemplate::PrevTx("b1", 0)],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "d0",
+            inputs: &[TxInTemplate::PrevTx("b0", 1), TxInTemplate::PrevTx("c1", 0),],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        }],
+        exp_chain_txs: Vec::from(["a0", "b0", "c0", "b1", "c1", "d0"]),
+    },
+    //     a0   d0   e0
+    //    /         /  \
+    //   b0        f0  f1
+    //  /           \  /
+    // c0            g0
+    Scenario {
+        name: "c0 spend b0, b0 spend a0, d0 does not spend any nor is spent by, g0 spends f0, f1, and f0 and f1 spends e0, and a0, d0, and e0 are in the best chain",
+        tx_templates: &[TxTemplate {
+            tx_name: "a0",
+            inputs: &[],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        }, TxTemplate {
+            tx_name: "b0",
+            inputs: &[TxInTemplate::PrevTx("a0", 0)],
+            outputs: &[TxOutTemplate::new(5000, Some(0)), TxOutTemplate::new(10000, Some(1))],
+            anchors: &[block_id!(2, "C")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "c0",
+            inputs: &[TxInTemplate::PrevTx("b0", 0)],
+            outputs: &[TxOutTemplate::new(2500, Some(0))],
+            anchors: &[block_id!(3, "D")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "d0",
+            inputs: &[],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(3, "D")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "e0",
+            inputs: &[],
+            outputs: &[TxOutTemplate::new(10000, Some(0)), TxOutTemplate::new(10000, Some(1))],
+            anchors: &[block_id!(4, "E")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "f0",
+            inputs: &[TxInTemplate::PrevTx("e0", 0)],
+            outputs: &[TxOutTemplate::new(5000, Some(0))],
+            anchors: &[block_id!(5, "F")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "f1",
+            inputs: &[TxInTemplate::PrevTx("e0", 1)],
+            outputs: &[TxOutTemplate::new(5000, Some(0))],
+            anchors: &[block_id!(5, "F")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "g0",
+            inputs: &[TxInTemplate::PrevTx("f0", 0), TxInTemplate::PrevTx("f1", 0)],
+            outputs: &[TxOutTemplate::new(1000, Some(0))],
+            anchors: &[],
+            last_seen: Some(1000),
+            assume_canonical: false,
+        }
+        ],
+        exp_chain_txs: Vec::from(["a0", "b0", "c0", "d0", "e0", "f0", "f1", "g0"]),
+    },
+    //      a0
+    //     / \ \
+    //   e0  /  b1
+    //   /  /    \
+    //  f0 /      \
+    //   \/        \
+    //   b0         \
+    //  /  \        /
+    // c0   \     c1
+    //       \   /
+    //         d0
+    Scenario {
+        name: "c0 spend b0, b0 spends both f0 and a0, f0 spend e0, e0 spend a0, d0 spends both b0 and c1, c1 spend b1, b1 spend a0, and are all in the best chain",
+        tx_templates: &[TxTemplate {
+            tx_name: "a0",
+            inputs: &[],
+            outputs: &[TxOutTemplate::new(10000, Some(0)), TxOutTemplate::new(10000, Some(1)), TxOutTemplate::new(10000, Some(2))],
+            // outputs: &[TxOutTemplate::new(10000, Some(1)), TxOutTemplate::new(10000, Some(2))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+        TxTemplate {
+            tx_name: "e0",
+            inputs: &[TxInTemplate::PrevTx("a0", 0)],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+        TxTemplate {
+            tx_name: "f0",
+            inputs: &[TxInTemplate::PrevTx("e0", 0)],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "b0",
+            inputs: &[TxInTemplate::PrevTx("f0", 0), TxInTemplate::PrevTx("a0", 1)],
+            outputs: &[TxOutTemplate::new(10000, Some(0)), TxOutTemplate::new(10000, Some(1))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "c0",
+            inputs: &[TxInTemplate::PrevTx("b0", 0)],
+            outputs: &[TxOutTemplate::new(5000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "b1",
+            inputs: &[TxInTemplate::PrevTx("a0", 2)],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "c1",
+            inputs: &[TxInTemplate::PrevTx("b1", 0)],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+         TxTemplate {
+            tx_name: "d0",
+            inputs: &[TxInTemplate::PrevTx("b0", 1), TxInTemplate::PrevTx("c1", 0),  ],
+            outputs: &[TxOutTemplate::new(10000, Some(0))],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        }],
+        exp_chain_txs: Vec::from(["a0", "e0", "f0", "b0", "c0", "b1", "c1", "d0"]),
+    }];
+
+    for scenario in scenarios.iter() {
+        let env = init_graph(scenario.tx_templates.iter());
+
+        let canonical_view =
+            local_chain.canonical_view(&env.tx_graph, chain_tip, env.canonicalization_params);
+
+        let canonical_txs: Vec<Txid> = canonical_view.txs().map(|tx| tx.txid).collect();
+        let topological_txs: Vec<Txid> = canonical_view
+            .txs_in_topological_order()
+            .map(|tx| tx.txid)
+            .collect();
+
+        let exp_txs = scenario
+            .exp_chain_txs
+            .iter()
+            .map(|txid| *env.txid_to_name.get(txid).expect("txid must exist"))
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(
+            canonical_txs.iter().copied().collect::<BTreeSet<_>>(),
+            exp_txs,
+            "\n[{}] 'list_canonical_txs' failed",
+            scenario.name
+        );
+
+        // `txs_in_topological_order` must contain the same set as `txs`, only reordered.
+        assert_eq!(
+            topological_txs.iter().copied().collect::<BTreeSet<_>>(),
+            exp_txs,
+            "\n[{}] 'txs_in_topological_order' returned a different set than 'txs'",
+            scenario.name
+        );
+
+        assert!(
+            is_ordered_topologically(topological_txs, env.tx_graph),
+            "\n[{}] 'txs_in_topological_order' failed to output the txs in topological order",
+            scenario.name
+        );
+    }
+}
+
+/// `txs_in_topological_order` must be deterministic and order same-level txs by confirmation block.
+///
+/// `b0`, `c0` and `d0` each spend a different output of the same parent `a0`, so nothing orders
+/// them topologically relative to one another. They are confirmed in different blocks, so they must
+/// come out by ascending confirmation block (`c0` @3, `d0` @4, `b0` @5), and the same way on every
+/// run. With a non-deterministic implementation (children collected in `HashMap` iteration order)
+/// this would vary across runs.
+#[test]
+fn test_topological_order_deterministic() {
+    let local_chain: LocalChain = local_chain!(
+        (0, hash!("A")),
+        (1, hash!("B")),
+        (2, hash!("C")),
+        (3, hash!("D")),
+        (4, hash!("E")),
+        (5, hash!("F"))
+    );
+    let chain_tip = local_chain.tip().block_id();
+
+    let tx_templates = [
+        TxTemplate {
+            tx_name: "a0",
+            inputs: &[],
+            outputs: &[
+                TxOutTemplate::new(10_000, None),
+                TxOutTemplate::new(10_000, None),
+                TxOutTemplate::new(10_000, None),
+            ],
+            anchors: &[block_id!(1, "B")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+        TxTemplate {
+            tx_name: "b0",
+            inputs: &[TxInTemplate::PrevTx("a0", 0)],
+            outputs: &[TxOutTemplate::new(9_000, None)],
+            anchors: &[block_id!(5, "F")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+        TxTemplate {
+            tx_name: "c0",
+            inputs: &[TxInTemplate::PrevTx("a0", 1)],
+            outputs: &[TxOutTemplate::new(9_000, None)],
+            anchors: &[block_id!(3, "D")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+        TxTemplate {
+            tx_name: "d0",
+            inputs: &[TxInTemplate::PrevTx("a0", 2)],
+            outputs: &[TxOutTemplate::new(9_000, None)],
+            anchors: &[block_id!(4, "E")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+    ];
+
+    // Each `init_graph` builds fresh `txs`/`spends` HashMaps (random seed), so a non-deterministic
+    // implementation would yield different sibling orders across iterations.
+    for _ in 0..20 {
+        let env = init_graph(tx_templates.iter());
+        let name_of: HashMap<Txid, &str> = env
+            .txid_to_name
+            .iter()
+            .map(|(&name, &txid)| (txid, name))
+            .collect();
+        let order: Vec<&str> = local_chain
+            .canonical_view(&env.tx_graph, chain_tip, env.canonicalization_params)
+            .txs_in_topological_order()
+            .map(|tx| name_of[&tx.txid])
+            .collect();
+        assert_eq!(
+            order,
+            vec!["a0", "c0", "d0", "b0"],
+            "topological order must be deterministic and confirmation-ordered"
+        );
+    }
 }
