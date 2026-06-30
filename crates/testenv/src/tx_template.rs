@@ -2,8 +2,7 @@
 
 use crate::utils::DESCRIPTORS;
 use bdk_chain::{
-    miniscript::Descriptor, spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor,
-    CanonicalParams,
+    miniscript::Descriptor, spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor, CanonicalParams,
 };
 use bitcoin::{
     locktime::absolute::LockTime, secp256k1::Secp256k1, transaction, Amount, OutPoint, ScriptBuf,
@@ -161,7 +160,7 @@ pub fn init_graph<A: Anchor + Clone>(
     });
     let mut txid_to_name = HashMap::<&'static str, Txid>::new();
     let mut canonicalization_params = CanonicalParams::default();
-    
+
     for (bogus_txin_vout, tx_tmp) in tx_templates.into_iter().enumerate() {
         let tx = Transaction {
             version: transaction::Version::non_standard(0),
