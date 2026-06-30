@@ -1,7 +1,9 @@
 #![cfg(feature = "miniscript")]
 
 use bdk_chain::{CanonicalReason, ChainPosition};
-use bdk_testenv::{block_id, hash, init_graph, local_chain, TxInTemplate, TxOutTemplate, TxTemplate};
+use bdk_testenv::{
+    block_id, hash, init_graph, local_chain, TxInTemplate, TxOutTemplate, TxTemplate,
+};
 use bitcoin::Txid;
 use std::collections::HashSet;
 
