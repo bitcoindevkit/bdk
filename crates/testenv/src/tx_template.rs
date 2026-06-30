@@ -1,69 +1,151 @@
-#![cfg(feature = "miniscript")]
+//! Transaction templates for constructing complex transaction histories for testing purposes.
 
-use bdk_testenv::utils::DESCRIPTORS;
-use rand::distributions::{Alphanumeric, DistString};
-use std::collections::HashMap;
-
-use bdk_chain::{spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor, CanonicalParams};
+use crate::utils::DESCRIPTORS;
+use bdk_chain::{
+    miniscript::Descriptor, spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor,
+    CanonicalParams,
+};
 use bitcoin::{
     locktime::absolute::LockTime, secp256k1::Secp256k1, transaction, Amount, OutPoint, ScriptBuf,
     Sequence, Transaction, TxIn, TxOut, Txid, Witness,
 };
-use miniscript::Descriptor;
+use rand::distributions::{Alphanumeric, DistString};
+use std::collections::HashMap;
 
-/// Template for creating a transaction in `TxGraph`.
+/// Template for creating a transaction in a [`TxGraph`].
 ///
-/// The incentive for transaction templates is to create a transaction history in a simple manner to
-/// avoid having to explicitly hash previous transactions to form previous outpoints of later
-/// transactions.
-#[derive(Clone, Copy, Default)]
-pub struct TxTemplate<'a, A> {
-    /// Uniquely identifies the transaction, before it can have a txid.
-    pub tx_name: &'a str,
-    pub inputs: &'a [TxInTemplate<'a>],
-    pub outputs: &'a [TxOutTemplate],
-    pub anchors: &'a [A],
+/// This is the main building block for constructing complex transaction histories
+/// for tests. It allows you to refer to previous transactions by name instead of
+/// manually managing txids and outpoints.
+#[derive(Clone)]
+pub struct TxTemplate<A> {
+    /// A unique name used to refer to this transaction in other templates.
+    pub tx_name: &'static str,
+
+    /// The inputs of this transaction.
+    pub inputs: Vec<TxInTemplate>,
+
+    /// The outputs of this transaction.
+    pub outputs: Vec<TxOutTemplate>,
+
+    /// Anchors (confirmations) for this transaction.
+    pub anchors: Vec<A>,
+
+    /// Unix timestamp when this transaction was last seen in the mempool.
     pub last_seen: Option<u64>,
+
+    /// If `true`, this transaction will be treated as canonical regardless of
+    /// conflict resolution rules (used for testing forced canonicalization).
     pub assume_canonical: bool,
 }
 
+/// Describes how an input is created in a [`TxTemplate`].
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
-pub enum TxInTemplate<'a> {
-    /// This will give a random txid and vout.
+pub enum TxInTemplate {
+    /// A random (bogus) previous output. Useful when the actual prevout doesn't matter.
     Bogus,
 
-    /// This is used for coinbase transactions because they do not have previous outputs.
+    /// A coinbase input (no previous output).
     Coinbase,
 
-    /// Contains the `tx_name` and `vout` that we are spending. The rule is that we must only spend
-    /// from tx of a previous `TxTemplate`.
-    PrevTx(&'a str, usize),
+    /// Spends from a previous transaction defined in the template list.
+    ///
+    /// The rule is that the referenced transaction (`prev_name`) must appear
+    /// earlier in the list passed to [`init_graph`].
+    PrevTx(&'static str, usize),
 }
 
+/// Describes an output in a [`TxTemplate`].
+#[derive(Clone, Copy, Debug)]
 pub struct TxOutTemplate {
+    /// Value in satoshis.
     pub value: u64,
-    pub spk_index: Option<u32>, // some = get spk from SpkTxOutIndex, none = random spk
+    /// If `Some(index)`, the output will use the script pubkey at that index
+    /// from the test descriptor set. If `None`, a random (empty) script is used.
+    pub spk_index: Option<u32>,
 }
 
-#[allow(unused)]
+impl<A> Default for TxTemplate<A> {
+    fn default() -> Self {
+        Self {
+            tx_name: "",
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            anchors: Vec::new(),
+            last_seen: None,
+            assume_canonical: false,
+        }
+    }
+}
+
+impl<A> TxTemplate<A> {
+    /// Create a new template with a name.
+    pub fn new(tx_name: &'static str) -> Self {
+        Self {
+            tx_name,
+            ..Default::default()
+        }
+    }
+
+    /// Set the inputs of this transaction.
+    pub fn with_inputs(mut self, inputs: Vec<TxInTemplate>) -> Self {
+        self.inputs = inputs;
+        self
+    }
+
+    /// Set the outputs of this transaction.
+    pub fn with_outputs(mut self, outputs: Vec<TxOutTemplate>) -> Self {
+        self.outputs = outputs;
+        self
+    }
+
+    /// Set the anchors (confirmations) of this transaction.
+    pub fn with_anchors(mut self, anchors: Vec<A>) -> Self {
+        self.anchors = anchors;
+        self
+    }
+
+    /// Mark this transaction as canonical.
+    pub fn with_assume_canonical(mut self, assume: bool) -> Self {
+        self.assume_canonical = assume;
+        self
+    }
+
+    /// Set the last-seen mempool timestamp.
+    pub fn with_last_seen(mut self, last_seen: u64) -> Self {
+        self.last_seen = Some(last_seen);
+        self
+    }
+}
+
 impl TxOutTemplate {
     pub fn new(value: u64, spk_index: Option<u32>) -> Self {
         TxOutTemplate { value, spk_index }
     }
 }
 
+/// The result of calling [`init_graph`].
+///
+/// Contains the built [`TxGraph`], the associated indexer, and a mapping from
+/// template names to their final txids.
 #[allow(dead_code)]
-pub struct TxTemplateEnv<'a, A> {
+pub struct TxTemplateEnv<A> {
     pub tx_graph: TxGraph<A>,
     pub indexer: SpkTxOutIndex<u32>,
-    pub txid_to_name: HashMap<&'a str, Txid>,
+    pub txid_to_name: HashMap<&'static str, Txid>,
     pub canonicalization_params: CanonicalParams,
 }
 
+/// Builds a [`TxGraph`] (and associated indexer) from a list of [`TxTemplate`]s.
+///
+/// This is the main entry point for using transaction templates in tests.
+/// It handles txid generation, outpoint wiring, anchor insertion, and last-seen
+/// timestamps automatically.
 #[allow(dead_code)]
-pub fn init_graph<'a, A: Anchor + Clone + 'a>(
-    tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
-) -> TxTemplateEnv<'a, A> {
+pub fn init_graph<A: Anchor + Clone>(
+    tx_templates: impl IntoIterator<Item = TxTemplate<A>>,
+) -> TxTemplateEnv<A> {
     let (descriptor, _) =
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[2]).unwrap();
     let mut tx_graph = TxGraph::<A>::default();
@@ -77,9 +159,9 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
                 .script_pubkey(),
         );
     });
-    let mut txid_to_name = HashMap::<&'a str, Txid>::new();
-
+    let mut txid_to_name = HashMap::<&'static str, Txid>::new();
     let mut canonicalization_params = CanonicalParams::default();
+    
     for (bogus_txin_vout, tx_tmp) in tx_templates.into_iter().enumerate() {
         let tx = Transaction {
             version: transaction::Version::non_standard(0),
