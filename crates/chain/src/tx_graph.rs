@@ -1209,7 +1209,7 @@ where
     F: FnMut(usize, Arc<Transaction>) -> Option<O>,
 {
     /// Creates a `TxAncestors` that includes the starting `Transaction` when iterating.
-    pub(crate) fn new_include_root(
+    pub fn new_include_root(
         graph: &'g TxGraph<A>,
         tx: impl Into<Arc<Transaction>>,
         filter_map: F,
