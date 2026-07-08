@@ -337,3 +337,70 @@ jobs:
           cache: true
       - name: Check docs
         run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
+
+  fuzz:
+    needs: prepare
+    name: Fuzz (${{ matrix.fuzzer }}, ${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzzer: [afl, honggfuzz, libfuzzer]
+        target: [local_chain_apply_update, local_chain_apply_update_header]
+    env:
+      FUZZ_TARGET: ${{ matrix.target }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # cargo-fuzz (libFuzzer) requires nightly; AFL and honggfuzz work on stable.
+          toolchain: ${{ matrix.fuzzer == 'libfuzzer' && 'nightly' || needs.prepare.outputs.rust_version }}
+          override: true
+          cache: true
+      - name: Install honggfuzz build dependencies
+        if: matrix.fuzzer == 'honggfuzz'
+        run: sudo apt-get update && sudo apt-get install -y binutils-dev libunwind-dev
+      - name: Install cargo-afl
+        if: matrix.fuzzer == 'afl'
+        run: |
+          cargo install cargo-afl --force
+          cargo afl config --build --force
+      - name: Install cargo-hfuzz
+        if: matrix.fuzzer == 'honggfuzz'
+        run: cargo install honggfuzz
+      - name: Install cargo-fuzz
+        if: matrix.fuzzer == 'libfuzzer'
+        run: cargo install cargo-fuzz
+      - name: Fuzz for 1 minute (AFL)
+        if: matrix.fuzzer == 'afl'
+        working-directory: ./fuzz
+        env:
+          AFL_NO_UI: 1
+          AFL_SKIP_CPUFREQ: 1
+          AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES: 1
+        run: |
+          mkdir -p ci-seeds && printf 'bdk-fuzz-seed' > ci-seeds/seed
+          cargo afl build --features afl_fuzz --bin "$FUZZ_TARGET"
+          cargo afl fuzz -i ci-seeds -o afl-out -V 60 -- "target/debug/$FUZZ_TARGET"
+          crashes=$(find afl-out -path '*crashes*' -name 'id:*')
+          if [ -n "$crashes" ]; then
+            echo "AFL found crashes:"; echo "$crashes"; exit 1
+          fi
+      - name: Fuzz for 1 minute (honggfuzz)
+        if: matrix.fuzzer == 'honggfuzz'
+        working-directory: ./fuzz
+        env:
+          HFUZZ_BUILD_ARGS: --features honggfuzz_fuzz
+          HFUZZ_RUN_ARGS: --run_time 60 --exit_upon_crash -v
+        run: |
+          cargo hfuzz run "$FUZZ_TARGET"
+          if [ -f "hfuzz_workspace/$FUZZ_TARGET/HONGGFUZZ.REPORT.TXT" ]; then
+            cat "hfuzz_workspace/$FUZZ_TARGET/HONGGFUZZ.REPORT.TXT"; exit 1
+          fi
+      - name: Fuzz for 1 minute (libFuzzer)
+        if: matrix.fuzzer == 'libfuzzer'
+        run: cargo fuzz run "$FUZZ_TARGET" --features libfuzzer_fuzz -- -max_total_time=60 -print_final_stats=1
