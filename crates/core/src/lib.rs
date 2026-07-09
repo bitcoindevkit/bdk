@@ -65,6 +65,9 @@ pub use block_id::*;
 mod checkpoint;
 pub use checkpoint::*;
 
+mod fetch_headers_update;
+pub use fetch_headers_update::*;
+
 mod checkpoint_entry;
 pub use checkpoint_entry::*;
 

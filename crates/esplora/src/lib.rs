@@ -32,6 +32,12 @@ mod blocking_ext;
 #[cfg(feature = "blocking")]
 pub use blocking_ext::*;
 
+mod headers_at_heights;
+#[cfg(feature = "blocking")]
+pub use headers_at_heights::fetch_headers_at_heights_blocking;
+#[cfg(feature = "async")]
+pub use headers_at_heights::async_impl::fetch_headers_at_heights_async;
+
 #[cfg(feature = "async")]
 mod async_ext;
 #[cfg(feature = "async")]

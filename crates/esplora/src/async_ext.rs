@@ -49,6 +49,13 @@ pub trait EsploraAsyncExt {
         request: R,
         parallel_requests: usize,
     ) -> Result<SyncResponse, Error>;
+
+    /// Fetch a reorg-aware [`CheckPoint<Header>`] update covering `heights`.
+    async fn fetch_headers_at_heights(
+        &self,
+        local_tip: CheckPoint<bdk_core::bitcoin::block::Header>,
+        heights: impl IntoIterator<Item = u32> + Send,
+    ) -> Result<CheckPoint<bdk_core::bitcoin::block::Header>, Error>;
 }
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -172,6 +179,17 @@ where
             chain_update,
             tx_update,
         })
+    }
+
+    async fn fetch_headers_at_heights(
+        &self,
+        local_tip: CheckPoint<bdk_core::bitcoin::block::Header>,
+        heights: impl IntoIterator<Item = u32> + Send,
+    ) -> Result<CheckPoint<bdk_core::bitcoin::block::Header>, Error> {
+        crate::headers_at_heights::async_impl::fetch_headers_at_heights_async(
+            self, local_tip, heights,
+        )
+        .await
     }
 }
 

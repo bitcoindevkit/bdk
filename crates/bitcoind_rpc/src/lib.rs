@@ -22,8 +22,12 @@ use bitcoincore_rpc::{bitcoincore_rpc_json, RpcApi};
 use core::ops::Deref;
 
 pub mod bip158;
+mod fetch_headers;
 
 pub use bitcoincore_rpc;
+pub use fetch_headers::{
+    fetch_headers_at_heights, fetch_headers_at_heights_with, FetchHeadersError,
+};
 
 /// The [`Emitter`] is used to emit data sourced from [`bitcoincore_rpc::Client`].
 ///

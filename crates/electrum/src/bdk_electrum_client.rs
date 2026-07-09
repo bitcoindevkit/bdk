@@ -4,7 +4,7 @@ use bdk_core::{
         opcodes::{all::OP_RETURN, OP_FALSE},
         BlockHash, OutPoint, Transaction, Txid,
     },
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     spk_client::{
         FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
     },
@@ -99,6 +99,88 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// This is a re-export of [`ElectrumApi::transaction_broadcast`].
     pub fn transaction_broadcast(&self, tx: &Transaction) -> Result<Txid, Error> {
         self.inner.transaction_broadcast(tx)
+    }
+
+    /// Fetch a reorg-aware [`CheckPoint<Header>`] update covering `heights`.
+    ///
+    /// Heights already present in `local_tip` are not fetched from the network. When every requested
+    /// height is already known and no reorg is detected, returns `local_tip` unchanged.
+    pub fn fetch_headers_at_heights(
+        &self,
+        local_tip: CheckPoint<Header>,
+        heights: impl IntoIterator<Item = u32>,
+    ) -> Result<CheckPoint<Header>, Error> {
+        use bdk_core::{bridge_heights, build_fetch_headers_update};
+
+        let requested: BTreeSet<u32> = heights.into_iter().collect();
+        let requested_vec: Vec<u32> = requested.iter().copied().collect();
+        let missing: Vec<u32> = requested
+            .iter()
+            .copied()
+            .filter(|h| local_tip.get(*h).is_none())
+            .collect();
+
+        let HeaderNotification { height, .. } = self.inner.block_headers_subscribe()?;
+        let tip_height = height as u32;
+
+        let mut point_of_agreement = None;
+        let mut conflicts = Vec::new();
+
+        for local_cp in local_tip.iter() {
+            let h = local_cp.height();
+            if h > tip_height {
+                continue;
+            }
+            let remote_header = self.fetch_header_at_height(h)?;
+            if remote_header.block_hash() == local_cp.hash() {
+                point_of_agreement = Some(local_cp);
+                break;
+            }
+            conflicts.push((h, remote_header));
+        }
+
+        let agreement = point_of_agreement
+            .ok_or_else(|| Error::Message("cannot find agreement block with server".to_string()))?;
+
+        let reorg_detected = !conflicts.is_empty();
+        if missing.is_empty() && !reorg_detected {
+            return Ok(local_tip);
+        }
+
+        let mut fetched = BTreeMap::new();
+        if !missing.is_empty() {
+            let headers = self.inner.batch_block_header(missing.iter().copied())?;
+            if headers.len() != missing.len() {
+                return Err(Error::Message(
+                    "electrum batch_block_header returned unexpected count".to_string(),
+                ));
+            }
+            let mut cache = self.block_header_cache.lock().unwrap();
+            for (&height, header) in missing.iter().zip(headers) {
+                if height > tip_height {
+                    return Err(Error::Message(format!(
+                        "height {height} above electrum tip {tip_height}"
+                    )));
+                }
+                cache.insert(height, header);
+                fetched.insert(height, header);
+            }
+        }
+
+        let bridges = bridge_heights(&local_tip, agreement.height(), &requested_vec);
+        Ok(build_fetch_headers_update(
+            agreement, conflicts, fetched, &local_tip, &bridges,
+        ))
+    }
+
+    /// Fetch a single block header at `height`, using the internal cache when valid.
+    fn fetch_header_at_height(&self, height: u32) -> Result<Header, Error> {
+        let header = self.inner.block_header(height as usize)?;
+        self.block_header_cache
+            .lock()
+            .unwrap()
+            .insert(height, header);
+        Ok(header)
     }
 
     /// Full scan the keychain scripts specified with the blockchain (via an Electrum client) and

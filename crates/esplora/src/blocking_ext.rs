@@ -46,6 +46,13 @@ pub trait EsploraExt {
         request: R,
         parallel_requests: usize,
     ) -> Result<SyncResponse, Error>;
+
+    /// Fetch a reorg-aware [`CheckPoint<Header>`] update covering `heights`.
+    fn fetch_headers_at_heights(
+        &self,
+        local_tip: CheckPoint<bdk_core::bitcoin::block::Header>,
+        heights: impl IntoIterator<Item = u32>,
+    ) -> Result<CheckPoint<bdk_core::bitcoin::block::Header>, Error>;
 }
 
 impl EsploraExt for esplora_client::BlockingClient {
@@ -158,6 +165,14 @@ impl EsploraExt for esplora_client::BlockingClient {
             chain_update,
             tx_update,
         })
+    }
+
+    fn fetch_headers_at_heights(
+        &self,
+        local_tip: CheckPoint<bdk_core::bitcoin::block::Header>,
+        heights: impl IntoIterator<Item = u32>,
+    ) -> Result<CheckPoint<bdk_core::bitcoin::block::Header>, Error> {
+        crate::headers_at_heights::fetch_headers_at_heights_blocking(self, local_tip, heights)
     }
 }
 
