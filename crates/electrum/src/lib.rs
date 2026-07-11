@@ -17,6 +17,7 @@
 #![warn(missing_docs)]
 
 mod bdk_electrum_client;
+mod sync_emit;
 pub use bdk_electrum_client::*;
 
 pub use bdk_core;

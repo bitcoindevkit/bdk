@@ -8,11 +8,15 @@ use bdk_core::{
     spk_client::{
         FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
     },
-    BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate,
+    BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate, TxUpdateCursor,
 };
 use electrum_client::{ElectrumApi, Error, HeaderNotification};
 use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
+
+use crate::sync_emit::{
+    maybe_drain_and_emit_anchors, maybe_drain_and_emit_partial, PartialUpdateSink,
+};
 
 /// We include a chain suffix of a certain length for the purpose of robustness.
 const CHAIN_SUFFIX_LENGTH: u32 = 8;
@@ -139,19 +143,36 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         let mut last_active_indices = BTreeMap::<K, u32>::default();
         let mut pending_anchors = Vec::new();
-        for keychain in request.keychains() {
+
+        let keychains = request.keychains();
+        let mut spk_batches = Vec::with_capacity(keychains.len());
+        for keychain in keychains {
             let last_revealed = request.last_revealed(&keychain);
-            let spks = request
+            let spks: Vec<_> = request
                 .iter_spks(keychain.clone())
-                .map(|(spk_i, spk)| (spk_i, SpkWithExpectedTxids::from(spk)));
+                .map(|(spk_i, spk)| (spk_i, SpkWithExpectedTxids::from(spk)))
+                .collect();
+            spk_batches.push((keychain, last_revealed, spks));
+        }
+
+        let emit_partial = request.emit_partial_updates;
+        let mut cursor = emit_partial.then(TxUpdateCursor::new);
+        let mut full_scan_sink = emit_partial.then(|| request.event_sink());
+        let mut partial_sink: Option<&mut dyn PartialUpdateSink> = full_scan_sink
+            .as_mut()
+            .map(|s| s as &mut dyn PartialUpdateSink);
+
+        for (keychain, last_revealed, spks) in spk_batches {
             if let Some(last_active_index) = self.populate_with_spks(
                 start_time,
                 &mut tx_update,
-                spks,
+                spks.into_iter(),
                 stop_gap,
                 last_revealed,
                 batch_size,
                 &mut pending_anchors,
+                &mut partial_sink,
+                &mut cursor,
             )? {
                 last_active_indices.insert(keychain, last_active_index);
             }
@@ -160,6 +181,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
             self.fetch_prev_txout(&mut tx_update)?;
+            maybe_drain_and_emit_partial(&mut partial_sink, &mut cursor, &mut tx_update);
         }
 
         if !pending_anchors.is_empty() {
@@ -167,6 +189,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             for (txid, anchor) in anchors {
                 tx_update.anchors.insert((anchor, txid));
             }
+            maybe_drain_and_emit_anchors(&mut partial_sink, &mut cursor, &mut tx_update);
         }
 
         let chain_update = match tip_and_latest_blocks {
@@ -223,34 +246,55 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         let mut pending_anchors = Vec::new();
+
+        let spks: Vec<_> = request
+            .iter_spks_with_expected_txids()
+            .enumerate()
+            .map(|(i, spk)| (i as u32, spk))
+            .collect();
+        let txids: Vec<_> = request.iter_txids().collect();
+        let outpoints: Vec<_> = request.iter_outpoints().collect();
+
+        let emit_partial = request.emit_partial_updates;
+        let mut cursor = emit_partial.then(TxUpdateCursor::new);
+        let mut sync_sink = emit_partial.then(|| request.event_sink());
+        let mut partial_sink: Option<&mut dyn PartialUpdateSink> =
+            sync_sink.as_mut().map(|s| s as &mut dyn PartialUpdateSink);
+
         self.populate_with_spks(
             start_time,
             &mut tx_update,
-            request
-                .iter_spks_with_expected_txids()
-                .enumerate()
-                .map(|(i, spk)| (i as u32, spk)),
+            spks.into_iter(),
             usize::MAX,
             None,
             batch_size,
             &mut pending_anchors,
+            &mut partial_sink,
+            &mut cursor,
         )?;
+
         self.populate_with_txids(
             start_time,
             &mut tx_update,
-            request.iter_txids(),
+            txids,
             &mut pending_anchors,
+            &mut partial_sink,
+            &mut cursor,
         )?;
+
         self.populate_with_outpoints(
             start_time,
             &mut tx_update,
-            request.iter_outpoints(),
+            outpoints,
             &mut pending_anchors,
+            &mut partial_sink,
+            &mut cursor,
         )?;
 
         // Fetch previous `TxOut`s for fee calculation if flag is enabled.
         if fetch_prev_txouts {
             self.fetch_prev_txout(&mut tx_update)?;
+            maybe_drain_and_emit_partial(&mut partial_sink, &mut cursor, &mut tx_update);
         }
 
         if !pending_anchors.is_empty() {
@@ -258,6 +302,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             for (txid, anchor) in anchors {
                 tx_update.anchors.insert((anchor, txid));
             }
+            maybe_drain_and_emit_anchors(&mut partial_sink, &mut cursor, &mut tx_update);
         }
 
         let chain_update = match tip_and_latest_blocks {
@@ -290,6 +335,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         last_revealed: Option<u32>,
         batch_size: usize,
         pending_anchors: &mut Vec<(Txid, usize)>,
+        partial_sink: &mut Option<&mut dyn PartialUpdateSink>,
+        cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
     ) -> Result<Option<u32>, Error> {
         let mut unused_spk_count = 0_usize;
         let mut last_active_index = Option::<u32>::None;
@@ -315,6 +362,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 } else if beyond_revealed {
                     unused_spk_count = unused_spk_count.saturating_add(1);
                     if unused_spk_count >= stop_gap {
+                        maybe_drain_and_emit_partial(partial_sink, cursor, tx_update);
                         return Ok(last_active_index);
                     }
                 }
@@ -343,6 +391,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     }
                 }
             }
+
+            maybe_drain_and_emit_partial(partial_sink, cursor, tx_update);
         }
     }
 
@@ -356,6 +406,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
         pending_anchors: &mut Vec<(Txid, usize)>,
+        partial_sink: &mut Option<&mut dyn PartialUpdateSink>,
+        cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
     ) -> Result<(), Error> {
         // Collect valid outpoints with their corresponding `spk` and `tx`.
         let mut ops_spks_txs = Vec::new();
@@ -431,6 +483,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             }
         }
 
+        maybe_drain_and_emit_partial(partial_sink, cursor, tx_update);
         Ok(())
     }
 
@@ -441,6 +494,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
         pending_anchors: &mut Vec<(Txid, usize)>,
+        partial_sink: &mut Option<&mut dyn PartialUpdateSink>,
+        cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
     ) -> Result<(), Error> {
         let mut txs = Vec::<(Txid, Arc<Transaction>)>::new();
         let mut scripts = Vec::new();
@@ -512,6 +567,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             tx_update.txs.push(tx.1);
         }
 
+        maybe_drain_and_emit_partial(partial_sink, cursor, tx_update);
         Ok(())
     }
 

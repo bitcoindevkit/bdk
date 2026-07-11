@@ -1,6 +1,6 @@
 use bdk_chain::bitcoin::{Address, Amount};
 use bdk_chain::local_chain::LocalChain;
-use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
+use bdk_chain::spk_client::{FullScanRequest, SyncRequest, SyncRequestEvent};
 use bdk_chain::spk_txout::SpkTxOutIndex;
 use bdk_chain::{ConfirmationBlockTime, IndexedTxGraph, TxGraph};
 use bdk_esplora::EsploraExt;
@@ -9,6 +9,7 @@ use bdk_testenv::{anyhow, TestEnv};
 use esplora_client::{self, Builder};
 use std::collections::{BTreeSet, HashSet};
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -244,6 +245,78 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         [txid1, txid2].into(),
         "update must include all expected transactions"
     );
+    Ok(())
+}
+
+/// Blocking sync with `.on_event()` streams partial updates before returning.
+#[test]
+pub fn sync_streams_partial_updates() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_blocking();
+
+    let receive_address0 =
+        Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")?.assume_checked();
+    let receive_address1 =
+        Address::from_str("bcrt1qfjg5lv3dvc9az8patec8fjddrs4aqtauadnagr")?.assume_checked();
+
+    let misc_spks = [
+        receive_address0.script_pubkey(),
+        receive_address1.script_pubkey(),
+    ];
+
+    let _block_hashes = env.mine_blocks(101, None)?;
+    let txid1 = env
+        .bitcoind
+        .client
+        .send_to_address(&receive_address1, Amount::from_sat(10000))?
+        .txid()?;
+    let txid2 = env
+        .bitcoind
+        .client
+        .send_to_address(&receive_address0, Amount::from_sat(20000))?
+        .txid()?;
+    let _block_hashes = env.mine_blocks(1, None)?;
+    while client.get_height().unwrap() < 102 {
+        sleep(Duration::from_millis(10))
+    }
+
+    let cp_tip = env.make_checkpoint_tip();
+
+    let partial_count = Arc::new(Mutex::new(0usize));
+    let streamed_txs = Arc::new(Mutex::new(BTreeSet::new()));
+    let partial_count2 = partial_count.clone();
+    let streamed_txs2 = streamed_txs.clone();
+
+    let sync_update = {
+        let request = SyncRequest::builder()
+            .chain_tip(cp_tip)
+            .spks(misc_spks)
+            .on_event(move |event| {
+                if let SyncRequestEvent::PartialUpdate(delta) = event {
+                    *partial_count2.lock().unwrap() += 1;
+                    for tx in &delta.txs {
+                        streamed_txs2.lock().unwrap().insert(tx.compute_txid());
+                    }
+                }
+            });
+        client.sync(request, 1)?
+    };
+
+    assert!(
+        *partial_count.lock().unwrap() > 0,
+        "must emit partial updates during sync"
+    );
+    assert!(
+        sync_update.tx_update.is_empty(),
+        "final tx_update must be empty when events drained all data"
+    );
+    assert_eq!(
+        *streamed_txs.lock().unwrap(),
+        [txid1, txid2].into(),
+        "streamed txs must include all discovered transactions"
+    );
+
     Ok(())
 }
 

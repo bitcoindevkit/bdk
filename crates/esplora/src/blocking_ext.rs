@@ -4,11 +4,12 @@ use bdk_core::spk_client::{
 };
 use bdk_core::{
     bitcoin::{BlockHash, OutPoint, Txid},
-    BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
+    BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate, TxUpdateCursor,
 };
 use esplora_client::{OutputStatus, Tx};
 use std::thread::JoinHandle;
 
+use crate::fetch_emit::EmitPartial;
 use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
 
 /// [`esplora_client::Error`]
@@ -68,22 +69,34 @@ impl EsploraExt for esplora_client::BlockingClient {
         let mut tx_update = TxUpdate::default();
         let mut inserted_txs = HashSet::<Txid>::new();
         let mut last_active_indices = BTreeMap::<K, u32>::new();
-        for keychain in request.keychains() {
+
+        let keychains = request.keychains();
+        let mut spk_batches = Vec::with_capacity(keychains.len());
+        for keychain in keychains {
             let last_revealed = request.last_revealed(&keychain);
-            let keychain_spks = request
+            let spks: Vec<_> = request
                 .iter_spks(keychain.clone())
-                .map(|(spk_i, spk)| (spk_i, spk.into()));
-            let (update, last_active_index) = fetch_txs_with_keychain_spks(
+                .map(|(spk_i, spk)| (spk_i, spk.into()))
+                .collect();
+            spk_batches.push((keychain, last_revealed, spks));
+        }
+
+        let emit_partial = request.emit_partial_updates;
+        let mut cursor = emit_partial.then(TxUpdateCursor::new);
+
+        for (keychain, last_revealed, spks) in spk_batches {
+            if let Some(last_active_index) = fetch_txs_with_keychain_spks(
                 self,
                 start_time,
                 &mut inserted_txs,
-                keychain_spks,
+                &mut tx_update,
+                spks.into_iter(),
                 stop_gap,
                 last_revealed,
                 parallel_requests,
-            )?;
-            tx_update.extend(update);
-            if let Some(last_active_index) = last_active_index {
+                &mut request,
+                &mut cursor,
+            )? {
                 last_active_indices.insert(keychain, last_active_index);
             }
         }
@@ -122,27 +135,44 @@ impl EsploraExt for esplora_client::BlockingClient {
 
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
         let mut inserted_txs = HashSet::<Txid>::new();
-        tx_update.extend(fetch_txs_with_spks(
+
+        let spks: Vec<_> = request.iter_spks_with_expected_txids().collect();
+        let txids: Vec<_> = request.iter_txids().collect();
+        let outpoints: Vec<_> = request.iter_outpoints().collect();
+
+        let emit_partial = request.emit_partial_updates;
+        let mut cursor = emit_partial.then(TxUpdateCursor::new);
+
+        fetch_txs_with_spks(
             self,
             start_time,
             &mut inserted_txs,
-            request.iter_spks_with_expected_txids(),
+            &mut tx_update,
+            spks,
             parallel_requests,
-        )?);
-        tx_update.extend(fetch_txs_with_txids(
+            &mut request,
+            &mut cursor,
+        )?;
+        fetch_txs_with_txids(
             self,
             start_time,
             &mut inserted_txs,
-            request.iter_txids(),
+            &mut tx_update,
+            txids,
             parallel_requests,
-        )?);
-        tx_update.extend(fetch_txs_with_outpoints(
+            &mut request,
+            &mut cursor,
+        )?;
+        fetch_txs_with_outpoints(
             self,
             start_time,
             &mut inserted_txs,
-            request.iter_outpoints(),
+            &mut tx_update,
+            outpoints,
             parallel_requests,
-        )?);
+            &mut request,
+            &mut cursor,
+        )?;
 
         let chain_update = match (chain_tip, latest_blocks) {
             (Some(chain_tip), Some(latest_blocks)) => Some(chain_update(
@@ -273,22 +303,26 @@ fn chain_update(
     Ok(tip)
 }
 
-fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>>>(
+#[allow(clippy::too_many_arguments)]
+fn fetch_txs_with_keychain_spks<I, E: EmitPartial>(
     client: &esplora_client::BlockingClient,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
+    tx_update: &mut TxUpdate<ConfirmationBlockTime>,
     mut keychain_spks: I,
     stop_gap: usize,
     last_revealed: Option<u32>,
     parallel_requests: usize,
-) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error> {
+    emitter: &mut E,
+    cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
+) -> Result<Option<u32>, Error>
+where
+    I: Iterator<Item = Indexed<SpkWithExpectedTxids>>,
+{
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
 
-    let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     let mut last_active_index = Option::<u32>::None;
-    // Use consecutive_unused so unused count drives stop gap.
     let mut consecutive_unused = 0usize;
-    // Treat stop_gap = 0 as 1 while preserving original semantics for other values.
     let gap_limit = stop_gap.max(1);
 
     loop {
@@ -336,22 +370,29 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
 
             for tx in txs {
                 if inserted_txs.insert(tx.txid) {
-                    update.txs.push(tx.to_tx().into());
+                    tx_update.txs.push(tx.to_tx().into());
                 }
-                insert_anchor_or_seen_at_from_status(&mut update, start_time, tx.txid, tx.status);
-                insert_prevouts(&mut update, tx.vin);
+                insert_anchor_or_seen_at_from_status(
+                    &mut *tx_update,
+                    start_time,
+                    tx.txid,
+                    tx.status,
+                );
+                insert_prevouts(&mut *tx_update, tx.vin);
             }
-            update
+            tx_update
                 .evicted_ats
                 .extend(evicted.into_iter().map(|txid| (txid, start_time)));
         }
+
+        emitter.emit_partial(cursor, tx_update);
 
         if consecutive_unused >= gap_limit {
             break;
         }
     }
 
-    Ok((update, last_active_index))
+    Ok(last_active_index)
 }
 
 /// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning `spks`
@@ -362,23 +403,33 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
 /// requests to make in parallel.
 ///
 /// Refer to [crate-level docs](crate) for more.
-fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
+#[allow(clippy::too_many_arguments)]
+fn fetch_txs_with_spks<I, E: EmitPartial>(
     client: &esplora_client::BlockingClient,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
+    tx_update: &mut TxUpdate<ConfirmationBlockTime>,
     spks: I,
     parallel_requests: usize,
-) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
+    emitter: &mut E,
+    cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
+) -> Result<(), Error>
+where
+    I: IntoIterator<Item = SpkWithExpectedTxids>,
+{
     fetch_txs_with_keychain_spks(
         client,
         start_time,
         inserted_txs,
+        tx_update,
         spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
         usize::MAX,
         None,
         parallel_requests,
+        emitter,
+        cursor,
     )
-    .map(|(update, _)| update)
+    .map(|_| ())
 }
 
 /// Fetch transactions and associated [`ConfirmationBlockTime`]s by scanning `txids`
@@ -387,15 +438,20 @@ fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
 /// `parallel_requests` specifies the maximum number of HTTP requests to make in parallel.
 ///
 /// Refer to [crate-level docs](crate) for more.
-fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
+#[allow(clippy::too_many_arguments)]
+fn fetch_txs_with_txids<I, E: EmitPartial>(
     client: &esplora_client::BlockingClient,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
+    tx_update: &mut TxUpdate<ConfirmationBlockTime>,
     txids: I,
     parallel_requests: usize,
-) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
-    let mut update = TxUpdate::<ConfirmationBlockTime>::default();
-    // Only fetch for non-inserted txs.
+    emitter: &mut E,
+    cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
+) -> Result<(), Error>
+where
+    I: IntoIterator<Item = Txid>,
+{
     let mut txids = txids
         .into_iter()
         .filter(|txid| !inserted_txs.contains(txid))
@@ -424,14 +480,21 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
             let (txid, tx_info) = handle.join().expect("thread must not panic")?;
             if let Some(tx_info) = tx_info {
                 if inserted_txs.insert(txid) {
-                    update.txs.push(tx_info.to_tx().into());
+                    tx_update.txs.push(tx_info.to_tx().into());
                 }
-                insert_anchor_or_seen_at_from_status(&mut update, start_time, txid, tx_info.status);
-                insert_prevouts(&mut update, tx_info.vin);
+                insert_anchor_or_seen_at_from_status(
+                    &mut *tx_update,
+                    start_time,
+                    txid,
+                    tx_info.status,
+                );
+                insert_prevouts(&mut *tx_update, tx_info.vin);
             }
         }
     }
-    Ok(update)
+
+    emitter.emit_partial(cursor, tx_update);
+    Ok(())
 }
 
 /// Fetch transactions and [`ConfirmationBlockTime`]s that contain and spend the provided
@@ -440,27 +503,33 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
 /// `parallel_requests` specifies the maximum number of HTTP requests to make in parallel.
 ///
 /// Refer to [crate-level docs](crate) for more.
-fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
+#[allow(clippy::too_many_arguments)]
+fn fetch_txs_with_outpoints<I, E: EmitPartial>(
     client: &esplora_client::BlockingClient,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
+    tx_update: &mut TxUpdate<ConfirmationBlockTime>,
     outpoints: I,
     parallel_requests: usize,
-) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
+    emitter: &mut E,
+    cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
+) -> Result<(), Error>
+where
+    I: IntoIterator<Item = OutPoint>,
+{
     let outpoints = outpoints.into_iter().collect::<Vec<_>>();
-    let mut update = TxUpdate::<ConfirmationBlockTime>::default();
 
-    // make sure txs exists in graph and tx statuses are updated
-    // TODO: We should maintain a tx cache (like we do with Electrum).
-    update.extend(fetch_txs_with_txids(
+    fetch_txs_with_txids(
         client,
         start_time,
         inserted_txs,
+        tx_update,
         outpoints.iter().map(|op| op.txid),
         parallel_requests,
-    )?);
+        emitter,
+        cursor,
+    )?;
 
-    // get outpoint spend-statuses
     let mut outpoints = outpoints.into_iter();
     let mut missing_txs = HashSet::<Txid>::with_capacity(outpoints.len());
     loop {
@@ -492,7 +561,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
                 }
                 if let Some(spend_status) = op_status.status {
                     insert_anchor_or_seen_at_from_status(
-                        &mut update,
+                        &mut *tx_update,
                         start_time,
                         spend_txid,
                         spend_status,
@@ -502,14 +571,16 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
         }
     }
 
-    update.extend(fetch_txs_with_txids(
+    fetch_txs_with_txids(
         client,
         start_time,
         inserted_txs,
+        tx_update,
         missing_txs,
         parallel_requests,
-    )?);
-    Ok(update)
+        emitter,
+        cursor,
+    )
 }
 
 #[cfg(test)]

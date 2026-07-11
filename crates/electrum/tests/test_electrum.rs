@@ -1,7 +1,7 @@
 use bdk_chain::{
     bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
     local_chain::LocalChain,
-    spk_client::{FullScanRequest, SyncRequest, SyncResponse},
+    spk_client::{FullScanRequest, SyncRequest, SyncRequestEvent, SyncResponse},
     spk_txout::SpkTxOutIndex,
     Balance, ConfirmationBlockTime, IndexedTxGraph, Indexer, Merge, TxGraph,
 };
@@ -9,6 +9,7 @@ use bdk_core::bitcoin::{
     key::{Secp256k1, UntweakedPublicKey},
     Denomination,
 };
+use bdk_core::TxUpdate;
 use bdk_electrum::BdkElectrumClient;
 use bdk_testenv::{
     anyhow,
@@ -19,6 +20,7 @@ use core::time::Duration;
 use electrum_client::ElectrumApi;
 use std::collections::{BTreeSet, HashSet};
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 // Batch size for `sync_with_electrum`.
 const BATCH_SIZE: usize = 5;
@@ -390,6 +392,153 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
         [txid1, txid2].into(),
         "update must include all expected transactions",
     );
+    Ok(())
+}
+
+/// Sync with `.on_event()` streams [`PartialUpdate`](SyncRequestEvent::PartialUpdate) events
+/// before returning, and the final [`SyncResponse::tx_update`] is empty when all data was drained.
+#[test]
+pub fn sync_streams_partial_updates() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    let receive_address0 =
+        Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")?.assume_checked();
+    let receive_address1 =
+        Address::from_str("bcrt1qfjg5lv3dvc9az8patec8fjddrs4aqtauadnagr")?.assume_checked();
+
+    let misc_spks = [
+        receive_address0.script_pubkey(),
+        receive_address1.script_pubkey(),
+    ];
+
+    let _block_hashes = env.mine_blocks(101, None)?;
+    let txid1 = env
+        .bitcoind
+        .client
+        .send_to_address(&receive_address1, Amount::from_sat(10000))?
+        .txid()?;
+    let txid2 = env
+        .bitcoind
+        .client
+        .send_to_address(&receive_address0, Amount::from_sat(20000))?
+        .txid()?;
+    env.mine_blocks(1, None)?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    let cp_tip = env.make_checkpoint_tip();
+
+    let partial_count = Arc::new(Mutex::new(0usize));
+    let streamed_txs = Arc::new(Mutex::new(BTreeSet::new()));
+    let streamed_update = Arc::new(Mutex::new(TxUpdate::default()));
+    let partial_count2 = partial_count.clone();
+    let streamed_txs2 = streamed_txs.clone();
+    let streamed_update2 = streamed_update.clone();
+
+    let sync_update = {
+        let request = SyncRequest::builder()
+            .chain_tip(cp_tip)
+            .spks(misc_spks)
+            .on_event(move |event| {
+                if let SyncRequestEvent::PartialUpdate(delta) = event {
+                    *partial_count2.lock().unwrap() += 1;
+                    for tx in &delta.txs {
+                        streamed_txs2.lock().unwrap().insert(tx.compute_txid());
+                    }
+                    streamed_update2.lock().unwrap().extend(delta);
+                }
+            });
+        client.sync(request, 1, true)?
+    };
+
+    assert!(
+        *partial_count.lock().unwrap() > 0,
+        "must emit partial updates during sync"
+    );
+    assert!(
+        sync_update.tx_update.is_empty(),
+        "final tx_update must be empty when events drained all data"
+    );
+    assert_eq!(
+        *streamed_txs.lock().unwrap(),
+        [txid1, txid2].into(),
+        "streamed txs must include all discovered transactions"
+    );
+
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+    let _ = graph.apply_update(streamed_update.lock().unwrap().clone());
+    assert_eq!(
+        graph
+            .full_txs()
+            .map(|tx| tx.compute_txid())
+            .collect::<BTreeSet<_>>(),
+        [txid1, txid2].into(),
+        "reconstructed update from events must match full sync"
+    );
+
+    Ok(())
+}
+
+/// Electrum defers anchor resolution: confirmed txs in
+/// [`PartialUpdate`](SyncRequestEvent::PartialUpdate) lack anchors until
+/// [`AnchorsResolved`](SyncRequestEvent::AnchorsResolved).
+#[test]
+pub fn sync_defers_anchors_until_resolved() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    let receive_address =
+        Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")?.assume_checked();
+    let spk = receive_address.script_pubkey();
+
+    let _block_hashes = env.mine_blocks(101, None)?;
+    let txid = env
+        .bitcoind
+        .client
+        .send_to_address(&receive_address, Amount::from_sat(10000))?
+        .txid()?;
+    env.mine_blocks(1, None)?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    let partial_anchor_txids = Arc::new(Mutex::new(BTreeSet::new()));
+    let resolved_anchor_txids = Arc::new(Mutex::new(BTreeSet::new()));
+    let partial_anchor_txids2 = partial_anchor_txids.clone();
+    let resolved_anchor_txids2 = resolved_anchor_txids.clone();
+
+    let sync_update = {
+        let request = SyncRequest::builder()
+            .spks([spk])
+            .on_event(move |event| match event {
+                SyncRequestEvent::PartialUpdate(delta) => {
+                    for (_, txid) in &delta.anchors {
+                        partial_anchor_txids2.lock().unwrap().insert(*txid);
+                    }
+                }
+                SyncRequestEvent::AnchorsResolved(delta) => {
+                    for (_, txid) in &delta.anchors {
+                        resolved_anchor_txids2.lock().unwrap().insert(*txid);
+                    }
+                }
+                _ => {}
+            });
+        client.sync(request, 1, true)?
+    };
+
+    assert!(
+        partial_anchor_txids.lock().unwrap().is_empty(),
+        "confirmed txs in partial updates must not include anchors"
+    );
+    assert!(
+        resolved_anchor_txids.lock().unwrap().contains(&txid),
+        "AnchorsResolved must add anchor for confirmed tx"
+    );
+    assert!(
+        sync_update.tx_update.is_empty(),
+        "final tx_update must be empty when events drained all data"
+    );
+
     Ok(())
 }
 

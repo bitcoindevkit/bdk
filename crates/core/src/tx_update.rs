@@ -2,6 +2,39 @@ use crate::collections::{BTreeMap, BTreeSet, HashSet};
 use alloc::{sync::Arc, vec::Vec};
 use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 
+/// Tracks fields already drained from a working [`TxUpdate`] via [`TxUpdate::drain_since`].
+///
+/// Create one cursor per sync/full_scan working buffer. Backends pass the same cursor to each
+/// [`TxUpdate::drain_since`] call so partial events do not overlap. After all emissions, the
+/// working buffer contains only undrained remainder (empty when fully streamed).
+#[derive(Debug, Clone)]
+pub struct TxUpdateCursor<A> {
+    txs_len: usize,
+    txouts: BTreeSet<OutPoint>,
+    anchors: BTreeSet<(A, Txid)>,
+    seen_ats: HashSet<(Txid, u64)>,
+    evicted_ats: HashSet<(Txid, u64)>,
+}
+
+impl<A> TxUpdateCursor<A> {
+    /// Create a cursor at the start of a new sync/full_scan working buffer.
+    pub fn new() -> Self {
+        Self {
+            txs_len: 0,
+            txouts: BTreeSet::new(),
+            anchors: BTreeSet::new(),
+            seen_ats: HashSet::new(),
+            evicted_ats: HashSet::new(),
+        }
+    }
+}
+
+impl<A> Default for TxUpdateCursor<A> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Data object used to communicate updates about relevant transactions from some chain data source
 /// to the core model (usually a `bdk_chain::TxGraph`).
 ///
@@ -82,7 +115,7 @@ impl<A> TxUpdate<A> {
     }
 }
 
-impl<A: Ord> TxUpdate<A> {
+impl<A: Ord + Clone> TxUpdate<A> {
     /// Transforms the [`TxUpdate`] to have `anchors` (`A`) of another type (`A2`).
     ///
     /// This takes in a closure with signature `FnMut(A) -> A2` which is called for each anchor to
@@ -108,5 +141,73 @@ impl<A: Ord> TxUpdate<A> {
         self.anchors.extend(other.anchors);
         self.seen_ats.extend(other.seen_ats);
         self.evicted_ats.extend(other.evicted_ats);
+    }
+
+    /// Destructively drain newly accumulated data since the last call.
+    ///
+    /// Returns the delta and advances `cursor`. Whatever remains in `self` at sync end becomes
+    /// `SyncResponse::tx_update` / `FullScanResponse::tx_update`. If everything was streamed via
+    /// events, the remainder is empty and applying it at the end is a no-op.
+    pub fn drain_since(&mut self, cursor: &mut TxUpdateCursor<A>) -> TxUpdate<A> {
+        let mut delta = TxUpdate::default();
+
+        if self.txs.len() > cursor.txs_len {
+            delta.txs = self.txs.drain(cursor.txs_len..).collect();
+            cursor.txs_len = self.txs.len();
+        }
+
+        let new_outpoints: Vec<OutPoint> = self
+            .txouts
+            .keys()
+            .filter(|op| !cursor.txouts.contains(op))
+            .cloned()
+            .collect();
+        for op in new_outpoints {
+            if let Some(txout) = self.txouts.remove(&op) {
+                delta.txouts.insert(op, txout);
+                cursor.txouts.insert(op);
+            }
+        }
+
+        let new_anchors: Vec<(A, Txid)> = self
+            .anchors
+            .iter()
+            .filter(|entry| !cursor.anchors.contains(entry))
+            .cloned()
+            .collect();
+        for entry in new_anchors {
+            if self.anchors.remove(&entry) {
+                delta.anchors.insert(entry.clone());
+                cursor.anchors.insert(entry);
+            }
+        }
+
+        let new_seen: Vec<(Txid, u64)> = self
+            .seen_ats
+            .iter()
+            .filter(|entry| !cursor.seen_ats.contains(*entry))
+            .cloned()
+            .collect();
+        for entry in new_seen {
+            if self.seen_ats.remove(&entry) {
+                delta.seen_ats.insert(entry);
+                cursor.seen_ats.insert(entry);
+            }
+        }
+
+        let new_evicted: Vec<(Txid, u64)> = self
+            .evicted_ats
+            .iter()
+            .filter(|entry| !cursor.evicted_ats.contains(*entry))
+            .cloned()
+            .collect();
+        for entry in new_evicted {
+            if self.evicted_ats.remove(&entry) {
+                delta.evicted_ats.insert(entry);
+                cursor.evicted_ats.insert(entry);
+            }
+        }
+
+        delta
     }
 }

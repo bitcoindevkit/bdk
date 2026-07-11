@@ -2,13 +2,12 @@
 use crate::{
     alloc::{boxed::Box, collections::VecDeque, vec::Vec},
     collections::{BTreeMap, HashMap, HashSet},
-    CheckPoint, ConfirmationBlockTime, Indexed,
+    CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate, TxUpdateCursor,
 };
 use bitcoin::{BlockHash, OutPoint, Script, ScriptBuf, Txid};
 
-type InspectSync<I> = dyn FnMut(SyncItem<I>, SyncProgress) + Send + 'static;
-
-type InspectFullScan<K> = dyn FnMut(K, u32, &Script) + Send + 'static;
+type OnSyncEvent<I, A> = dyn for<'a> FnMut(SyncRequestEvent<'a, I, A>) + Send + 'static;
+type OnFullScanEvent<K, A> = dyn for<'a> FnMut(FullScanRequestEvent<'a, K, A>) + Send + 'static;
 
 /// An item reported to the [`inspect`](SyncRequestBuilder::inspect) closure of [`SyncRequest`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -83,6 +82,117 @@ impl SyncProgress {
     /// Total remaining items of the request.
     pub fn remaining(&self) -> usize {
         self.spks_remaining + self.txids_remaining + self.outpoints_remaining
+    }
+}
+
+/// Progress of a [`FullScanRequest`] (total unknown until `stop_gap` terminates the scan).
+#[derive(Debug, Clone, Default)]
+pub struct FullScanProgress {
+    /// Script pubkeys consumed across all keychains.
+    pub keychain_spks_consumed: usize,
+    /// Consecutive unused script pubkeys past the last-revealed index.
+    pub consecutive_unused: usize,
+    /// Transactions discovered so far.
+    pub txs_discovered: usize,
+}
+
+/// Events emitted during [`SyncRequest`] execution.
+#[derive(Debug)]
+pub enum SyncRequestEvent<'a, I, A = ConfirmationBlockTime> {
+    /// A sync item is about to be fetched from the chain source.
+    ItemStarted(SyncItem<'a, I>, SyncProgress),
+    /// Incremental transaction data safe to pass to
+    /// [`TxGraph::apply_update`](../../bdk_chain/tx_graph/struct.TxGraph.html#method.
+    /// apply_update).
+    ///
+    /// On Electrum, confirmed transactions may lack anchors until [`AnchorsResolved`].
+    PartialUpdate(TxUpdate<A>),
+    /// Anchor-only update after Electrum resolves confirmation proofs.
+    AnchorsResolved(TxUpdate<A>),
+}
+
+/// Events emitted during [`FullScanRequest`] execution.
+#[derive(Debug)]
+pub enum FullScanRequestEvent<'a, K, A = ConfirmationBlockTime> {
+    /// A script pubkey is about to be scanned.
+    SpkStarted {
+        /// Keychain being scanned.
+        keychain: K,
+        /// Derivation index of the script pubkey.
+        index: u32,
+        /// Script pubkey.
+        script: &'a Script,
+        /// Scan progress so far.
+        progress: FullScanProgress,
+    },
+    /// Incremental transaction data safe to pass to
+    /// [`TxGraph::apply_update`](../../bdk_chain/tx_graph/struct.TxGraph.html#method.
+    /// apply_update).
+    ///
+    /// On Electrum, confirmed transactions may lack anchors until [`AnchorsResolved`].
+    PartialUpdate(TxUpdate<A>),
+    /// Anchor-only update after Electrum resolves confirmation proofs.
+    AnchorsResolved(TxUpdate<A>),
+}
+
+/// Backend-facing sink for emitting [`SyncRequestEvent`]s.
+///
+/// Constructed via [`SyncRequest::event_sink`]. Intended for official chain sources.
+pub struct SyncRequestEventSink<'a, I, D = BlockHash> {
+    request: &'a mut SyncRequest<I, D>,
+}
+
+impl<'a, I, D> SyncRequestEventSink<'a, I, D> {
+    /// Emit a [`SyncRequestEvent::PartialUpdate`] if `update` is non-empty.
+    pub fn emit_partial_update(&mut self, update: TxUpdate<ConfirmationBlockTime>) {
+        if !update.is_empty() {
+            (self.request.on_event)(SyncRequestEvent::PartialUpdate(update));
+        }
+    }
+
+    /// Emit a [`SyncRequestEvent::AnchorsResolved`] if `update` is non-empty.
+    pub fn emit_anchors_resolved(&mut self, update: TxUpdate<ConfirmationBlockTime>) {
+        if !update.is_empty() {
+            (self.request.on_event)(SyncRequestEvent::AnchorsResolved(update));
+        }
+    }
+}
+
+/// Backend-facing sink for emitting [`FullScanRequestEvent`]s.
+///
+/// Constructed via [`FullScanRequest::event_sink`]. Intended for official chain sources.
+pub struct FullScanRequestEventSink<'a, K, D = BlockHash> {
+    request: &'a mut FullScanRequest<K, D>,
+}
+
+impl<'a, K: Ord + Clone, D> FullScanRequestEventSink<'a, K, D> {
+    /// Emit a [`FullScanRequestEvent::PartialUpdate`] if `update` is non-empty.
+    pub fn emit_partial_update(&mut self, update: TxUpdate<ConfirmationBlockTime>) {
+        if !update.is_empty() {
+            (self.request.on_event)(FullScanRequestEvent::PartialUpdate(update));
+        }
+    }
+
+    /// Emit a [`FullScanRequestEvent::AnchorsResolved`] if `update` is non-empty.
+    pub fn emit_anchors_resolved(&mut self, update: TxUpdate<ConfirmationBlockTime>) {
+        if !update.is_empty() {
+            (self.request.on_event)(FullScanRequestEvent::AnchorsResolved(update));
+        }
+    }
+
+    /// Update full-scan progress counters (called by chain sources between batches).
+    pub fn set_full_scan_progress(&mut self, progress: FullScanProgress) {
+        self.request.full_scan_progress = progress;
+    }
+
+    /// Access the current full-scan progress.
+    pub fn full_scan_progress(&self) -> &FullScanProgress {
+        &self.request.full_scan_progress
+    }
+
+    /// Mutable access to full-scan progress.
+    pub fn full_scan_progress_mut(&mut self) -> &mut FullScanProgress {
+        &mut self.request.full_scan_progress
     }
 }
 
@@ -202,13 +312,31 @@ impl<I, D> SyncRequestBuilder<I, D> {
         self
     }
 
+    /// Register a callback for sync events including progress and partial transaction updates.
+    ///
+    /// When partial updates are applied during sync, [`SyncResponse::tx_update`] at the end
+    /// contains only undrained remainder (empty when everything was streamed).
+    pub fn on_event<F>(mut self, on_event: F) -> Self
+    where
+        F: for<'a> FnMut(SyncRequestEvent<'a, I>) + Send + 'static,
+    {
+        self.inner.emit_partial_updates = true;
+        self.inner.on_event = Box::new(on_event);
+        self
+    }
+
     /// Set the closure that will inspect every sync item visited.
-    pub fn inspect<F>(mut self, inspect: F) -> Self
+    ///
+    /// This is sugar over [`Self::on_event`] for progress-only callbacks.
+    pub fn inspect<F>(self, mut inspect: F) -> Self
     where
         F: FnMut(SyncItem<I>, SyncProgress) + Send + 'static,
     {
-        self.inner.inspect = Box::new(inspect);
-        self
+        self.on_event(move |event| {
+            if let SyncRequestEvent::ItemStarted(item, progress) = event {
+                inspect(item, progress);
+            }
+        })
     }
 
     /// Build the [`SyncRequest`].
@@ -266,7 +394,10 @@ pub struct SyncRequest<I = (), D = BlockHash> {
     txids_consumed: usize,
     outpoints: VecDeque<OutPoint>,
     outpoints_consumed: usize,
-    inspect: Box<InspectSync<I>>,
+    on_event: Box<OnSyncEvent<I, ConfirmationBlockTime>>,
+    /// Whether to emit partial [`TxUpdate`]s during sync (set by
+    /// [`SyncRequestBuilder::on_event`]).
+    pub emit_partial_updates: bool,
 }
 
 impl<I, D> From<SyncRequestBuilder<I, D>> for SyncRequest<I, D> {
@@ -296,7 +427,8 @@ impl<I, D> SyncRequest<I, D> {
                 txids_consumed: 0,
                 outpoints: VecDeque::new(),
                 outpoints_consumed: 0,
-                inspect: Box::new(|_, _| ()),
+                on_event: Box::new(|_| ()),
+                emit_partial_updates: false,
             },
         }
     }
@@ -393,9 +525,46 @@ impl<I, D> SyncRequest<I, D> {
         SyncIter::<I, D, OutPoint>::new(self)
     }
 
+    /// Returns a sink for emitting sync events from chain sources.
+    pub fn event_sink(&mut self) -> SyncRequestEventSink<'_, I, D> {
+        SyncRequestEventSink { request: self }
+    }
+
+    /// Emit a partial [`TxUpdate`] if [`Self::emit_partial_updates`] is enabled.
+    pub fn try_emit_partial_update(
+        &mut self,
+        cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
+    ) {
+        if !self.emit_partial_updates {
+            return;
+        }
+        let cursor = cursor.get_or_insert_with(TxUpdateCursor::new);
+        let delta = tx_update.drain_since(cursor);
+        if !delta.is_empty() {
+            (self.on_event)(SyncRequestEvent::PartialUpdate(delta));
+        }
+    }
+
+    /// Emit an anchor-only [`TxUpdate`] if [`Self::emit_partial_updates`] is enabled.
+    pub fn try_emit_anchors_resolved(
+        &mut self,
+        cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
+    ) {
+        if !self.emit_partial_updates {
+            return;
+        }
+        let cursor = cursor.get_or_insert_with(TxUpdateCursor::new);
+        let delta = tx_update.drain_since(cursor);
+        if !delta.is_empty() {
+            (self.on_event)(SyncRequestEvent::AnchorsResolved(delta));
+        }
+    }
+
     fn _call_inspect(&mut self, item: SyncItem<I>) {
         let progress = self.progress();
-        (*self.inspect)(item, progress);
+        (self.on_event)(SyncRequestEvent::ItemStarted(item, progress));
     }
 }
 
@@ -468,13 +637,37 @@ impl<K: Ord, D> FullScanRequestBuilder<K, D> {
         self
     }
 
+    /// Register a callback for full-scan events including progress and partial transaction updates.
+    ///
+    /// When partial updates are applied during the scan, [`FullScanResponse::tx_update`] at the end
+    /// contains only undrained remainder (empty when everything was streamed).
+    pub fn on_event<F>(mut self, on_event: F) -> Self
+    where
+        F: for<'a> FnMut(FullScanRequestEvent<'a, K>) + Send + 'static,
+    {
+        self.inner.emit_partial_updates = true;
+        self.inner.on_event = Box::new(on_event);
+        self
+    }
+
     /// Set the closure that will inspect every sync item visited.
-    pub fn inspect<F>(mut self, inspect: F) -> Self
+    ///
+    /// This is sugar over [`Self::on_event`] for progress-only callbacks.
+    pub fn inspect<F>(self, mut inspect: F) -> Self
     where
         F: FnMut(K, u32, &Script) + Send + 'static,
     {
-        self.inner.inspect = Box::new(inspect);
-        self
+        self.on_event(move |event| {
+            if let FullScanRequestEvent::SpkStarted {
+                keychain,
+                index,
+                script,
+                ..
+            } = event
+            {
+                inspect(keychain, index, script);
+            }
+        })
     }
 
     /// Build the [`FullScanRequest`].
@@ -497,7 +690,11 @@ pub struct FullScanRequest<K, D = BlockHash> {
     chain_tip: Option<CheckPoint<D>>,
     spks_by_keychain: BTreeMap<K, Box<dyn Iterator<Item = Indexed<ScriptBuf>> + Send>>,
     last_revealed: BTreeMap<K, u32>,
-    inspect: Box<InspectFullScan<K>>,
+    full_scan_progress: FullScanProgress,
+    on_event: Box<OnFullScanEvent<K, ConfirmationBlockTime>>,
+    /// Whether to emit partial [`TxUpdate`]s during full scan (set by
+    /// [`FullScanRequestBuilder::on_event`]).
+    pub emit_partial_updates: bool,
 }
 
 impl<K, D> From<FullScanRequestBuilder<K, D>> for FullScanRequest<K, D> {
@@ -522,7 +719,9 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
                 chain_tip: None,
                 spks_by_keychain: BTreeMap::new(),
                 last_revealed: BTreeMap::new(),
-                inspect: Box::new(|_, _, _| ()),
+                full_scan_progress: FullScanProgress::default(),
+                on_event: Box::new(|_| ()),
+                emit_partial_updates: false,
             },
         }
     }
@@ -572,12 +771,48 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
 
     /// Iterate over indexed [`ScriptBuf`]s contained in this request of the given `keychain`.
     pub fn iter_spks(&mut self, keychain: K) -> impl Iterator<Item = Indexed<ScriptBuf>> + '_ {
-        let spks = self.spks_by_keychain.get_mut(&keychain);
-        let inspect = &mut self.inspect;
         KeychainSpkIter {
-            keychain,
-            spks,
-            inspect,
+            keychain: keychain.clone(),
+            spks: self.spks_by_keychain.get_mut(&keychain),
+            full_scan_progress: &mut self.full_scan_progress,
+            on_event: &mut self.on_event,
+        }
+    }
+
+    /// Returns a sink for emitting full-scan events from chain sources.
+    pub fn event_sink(&mut self) -> FullScanRequestEventSink<'_, K, D> {
+        FullScanRequestEventSink { request: self }
+    }
+
+    /// Emit a partial [`TxUpdate`] if [`Self::emit_partial_updates`] is enabled.
+    pub fn try_emit_partial_update(
+        &mut self,
+        cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
+    ) {
+        if !self.emit_partial_updates {
+            return;
+        }
+        let cursor = cursor.get_or_insert_with(TxUpdateCursor::new);
+        let delta = tx_update.drain_since(cursor);
+        if !delta.is_empty() {
+            (self.on_event)(FullScanRequestEvent::PartialUpdate(delta));
+        }
+    }
+
+    /// Emit an anchor-only [`TxUpdate`] if [`Self::emit_partial_updates`] is enabled.
+    pub fn try_emit_anchors_resolved(
+        &mut self,
+        cursor: &mut Option<TxUpdateCursor<ConfirmationBlockTime>>,
+        tx_update: &mut TxUpdate<ConfirmationBlockTime>,
+    ) {
+        if !self.emit_partial_updates {
+            return;
+        }
+        let cursor = cursor.get_or_insert_with(TxUpdateCursor::new);
+        let delta = tx_update.drain_since(cursor);
+        if !delta.is_empty() {
+            (self.on_event)(FullScanRequestEvent::AnchorsResolved(delta));
         }
     }
 }
@@ -619,7 +854,8 @@ impl<K, A> FullScanResponse<K, A> {
 struct KeychainSpkIter<'r, K> {
     keychain: K,
     spks: Option<&'r mut Box<dyn Iterator<Item = Indexed<ScriptBuf>> + Send>>,
-    inspect: &'r mut Box<InspectFullScan<K>>,
+    full_scan_progress: &'r mut FullScanProgress,
+    on_event: &'r mut Box<OnFullScanEvent<K, ConfirmationBlockTime>>,
 }
 
 impl<K: Ord + Clone> Iterator for KeychainSpkIter<'_, K> {
@@ -627,7 +863,17 @@ impl<K: Ord + Clone> Iterator for KeychainSpkIter<'_, K> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let (i, spk) = self.spks.as_mut()?.next()?;
-        (*self.inspect)(self.keychain.clone(), i, &spk);
+        self.full_scan_progress.keychain_spks_consumed = self
+            .full_scan_progress
+            .keychain_spks_consumed
+            .saturating_add(1);
+        let progress = self.full_scan_progress.clone();
+        (self.on_event)(FullScanRequestEvent::SpkStarted {
+            keychain: self.keychain.clone(),
+            index: i,
+            script: spk.as_script(),
+            progress,
+        });
         Some((i, spk))
     }
 }

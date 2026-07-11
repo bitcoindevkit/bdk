@@ -27,6 +27,8 @@ use esplora_client::TxStatus;
 
 pub use esplora_client;
 
+mod fetch_emit;
+
 #[cfg(feature = "blocking")]
 mod blocking_ext;
 #[cfg(feature = "blocking")]
