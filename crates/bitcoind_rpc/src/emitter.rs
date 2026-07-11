@@ -18,47 +18,40 @@ const MAX_AGREEMENT_FAILURES: u8 = 3;
 /// [module-level documentation]: crate
 pub struct Emitter<'a> {
     client: &'a Client,
+
+    /// Height from which to start emitting blocks. Defaults to `last_cp.height()`.
     start_height: u32,
 
-    /// The checkpoint of the last-emitted block that is in the best chain. If it is later found
-    /// that the block is no longer in the best chain, it will be popped off from here.
+    /// Checkpoint of the last-emitted block known to be in the best chain, and the tail of the
+    /// linked checkpoint list threaded through each [`BlockEvent`]. Blocks reorged out are popped
+    /// off during agreement scanning.
     last_cp: CheckPoint<BlockHash>,
 
-    /// The block result returned from rpc of the last-emitted block. As this result contains the
-    /// next block's block hash (which we use to fetch the next block), we set this to `None`
-    /// whenever there are no more blocks, or the next block is no longer in the best chain. This
-    /// gives us an opportunity to re-fetch this result.
+    /// RPC result of the last-emitted block, kept for its `nextblockhash` so the next block can be
+    /// fetched without a height-to-hash lookup. `None` before the first emission, at tip, or after
+    /// the last block was reorged out.
     last_block: Option<GetBlockVerboseOne>,
 
-    /// Number of consecutive times polling has failed to find an agreement point. Used to bound
-    /// the retry loop and surface [`EmitterError::AgreementNotFound`] rather than spinning
-    /// forever.
+    /// Consecutive polls that failed to find an agreement point. Bounds the retry loop so the
+    /// emitter surfaces [`EmitterError::AgreementNotFound`] instead of spinning forever.
     agreement_failure_count: u8,
 
-    /// The last snapshot of mempool transactions.
-    ///
-    /// This is used to detect mempool evictions and as a cache for transactions to emit.
-    ///
-    /// For mempool evictions, the latest call to `getrawmempool` is compared against this field.
-    /// Any transaction that is missing from this field is considered evicted. The exception is if
-    /// the transaction is confirmed into a block - therefore, we only emit evictions when we are
-    /// sure the tip block is already emitted. When a block is emitted, the transactions in the
-    /// block are removed from this field.
+    /// Unconfirmed transactions seen so far. Doubles as a fetch cache (avoids re-fetching txs) and
+    /// as the reference set for eviction detection: at tip, any txid here but absent from the
+    /// latest `getrawmempool` is reported evicted. Entries are removed once confirmed in a block.
     mempool_snapshot: HashMap<Txid, Arc<Transaction>>,
 }
 
 impl<'a> Emitter<'a> {
     /// Construct a new [`Emitter`].
     ///
-    /// `last_cp` informs the emitter of the chain we are starting off with. This way, the emitter
-    /// can start emission from a block that connects to the original chain.
+    /// `last_cp` is the chain the emitter starts from: it scans this checkpoint chain to find the
+    /// deepest block still in the node's best chain, then emits forward from there. Emission
+    /// starts at `last_cp.height()` by default; use [`Emitter::start_height`] to skip ahead (for
+    /// example, to a wallet's birthday).
     ///
-    /// By default emission starts from `last_cp.height()`. Use [`Emitter::start_height`] to start
-    /// from a later height (for example, a wallet's birthday).
-    ///
-    /// `expected_mempool_txs` is the initial set of unconfirmed transactions provided by the
-    /// wallet. This allows the [`Emitter`] to inform the wallet about relevant mempool evictions.
-    /// If it is known that the wallet is empty, [`NO_EXPECTED_MEMPOOL_TXS`] can be used.
+    /// `expected_mempool_txs` is the wallet's set of already-known unconfirmed transactions, which
+    /// lets the emitter report evictions for them. Pass `core::iter::empty()` when empty.
     pub fn new(
         client: &'a Client,
         last_cp: CheckPoint<BlockHash>,
@@ -104,14 +97,10 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    /// Emit mempool transactions and any evicted [`Txid`]s.
+    /// Emit a full snapshot of the mempool along with any evicted [`Txid`]s.
     ///
-    /// This method returns a [`MempoolEvent`] containing the full transactions (with their
-    /// first-seen unix timestamps) that were emitted, and [`MempoolEvent::evicted`] which are
-    /// any [`Txid`]s which were previously seen in the mempool and are now missing. Evicted txids
-    /// are only reported once the emitter’s checkpoint matches the RPC’s best block in both height
-    /// and hash. Until `next_block()` advances the checkpoint to tip, `mempool()` will always
-    /// return an empty `evicted` set.
+    /// The returned [`MempoolEvent`] timestamps every entry with the current time (see
+    /// [`mempool_at`](Self::mempool_at) for details on eviction reporting).
     #[cfg(feature = "std")]
     pub fn mempool(&mut self) -> Result<MempoolEvent, EmitterError> {
         let sync_time = std::time::UNIX_EPOCH
@@ -121,11 +110,13 @@ impl<'a> Emitter<'a> {
         self.mempool_at(sync_time)
     }
 
-    /// Emit mempool transactions and any evicted [`Txid`]s at the given `sync_time`.
+    /// Emit a full snapshot of the mempool along with any evicted [`Txid`]s, timestamped with the
+    /// given `sync_time` (unix seconds). This is the no-std version of [`mempool`](Self::mempool).
     ///
-    /// `sync_time` is in unix seconds.
-    ///
-    /// This is the no-std version of [`mempool`](Self::mempool).
+    /// Evictions are only reported once the emitter has caught up to the node's tip (its
+    /// checkpoint hash matches the best block). Until then we cannot tell an evicted transaction
+    /// apart from one confirmed in a not-yet-emitted block, so [`MempoolEvent::evicted`] stays
+    /// empty and transactions accumulate in the snapshot to be reconciled once at tip.
     pub fn mempool_at(&mut self, sync_time: u64) -> Result<MempoolEvent, EmitterError> {
         let (tip_hash, raw_mempool) = self.raw_mempool()?;
 
@@ -161,10 +152,8 @@ impl<'a> Emitter<'a> {
         let at_tip = self.last_cp.hash() == tip_hash;
 
         if at_tip {
-            // We only emit evicted transactions when we have already emitted the RPC tip. This is
-            // because we cannot differentiate between transactions that are confirmed and
-            // transactions that are evicted, so we rely on emitted blocks to remove
-            // transactions from the `mempool_snapshot`.
+            // At tip we can trust that a missing txid was evicted rather than confirmed, so report
+            // evictions and replace the snapshot with the current mempool.
             mempool_event.evicted = self
                 .mempool_snapshot
                 .keys()
@@ -176,9 +165,7 @@ impl<'a> Emitter<'a> {
                 .map(|(txid, tx, _)| (*txid, tx.clone()))
                 .collect();
         } else {
-            // Since we are still catching up to the tip (a.k.a tip has not been emitted), we
-            // accumulate more transactions in `mempool_snapshot` so that we can emit evictions in
-            // a batch once we catch up.
+            // Still catching up: accumulate so evictions can be reconciled in one batch at tip.
             self.mempool_snapshot
                 .extend(mempool_txs.iter().map(|(txid, tx, _)| (*txid, tx.clone())));
         };
@@ -186,10 +173,16 @@ impl<'a> Emitter<'a> {
         Ok(mempool_event)
     }
 
-    /// Emit the next block height and block (if any).
+    /// Emit the next block in chain order, or `Ok(None)` once the tip is reached.
+    ///
+    /// Blocks are emitted consecutively from the agreement point (the deepest checkpoint still in
+    /// the node's best chain). On a reorg the emitter rescans for a new agreement point and
+    /// re-emits from there. Returns [`EmitterError::AgreementNotFound`] if no agreement point can
+    /// be found after multiple consecutive attempts.
     pub fn next_block(&mut self) -> Result<Option<BlockEvent>, EmitterError> {
         if let Some((checkpoint, block)) = self.poll()? {
-            // Stop tracking unconfirmed transactions that have been confirmed in this block.
+            // Confirmed transactions leave the mempool snapshot so they aren't misreported as
+            // evictions on the next mempool() call.
             for tx in &block.txdata {
                 self.mempool_snapshot.remove(&tx.compute_txid());
             }
@@ -202,10 +195,12 @@ impl<'a> Emitter<'a> {
 /// A new emission from mempool.
 #[derive(Debug, Default)]
 pub struct MempoolEvent {
-    /// Transactions currently in the mempool alongside their seen-at timestamp.
+    /// A full snapshot of the current mempool, each transaction paired with the
+    /// `sync_time` of the call that produced it.
     pub update: Vec<(Arc<Transaction>, u64)>,
 
-    /// Transactions evicted from the mempool alongside their evicted-at timestamp.
+    /// Transactions evicted from the mempool since the last call, paired with the call's
+    /// `sync_time`. Only populated once the emitter is at the node's tip; empty while catching up.
     pub evicted: Vec<(Txid, u64)>,
 }
 
@@ -237,17 +232,18 @@ impl BlockEvent {
         self.checkpoint.hash()
     }
 
-    /// The [`BlockId`] of a previous block that this block connects to.
+    /// The [`BlockId`] this block's checkpoint chain connects to.
     ///
-    /// This either returns a [`BlockId`] of a previously emitted block or from the chain we started
-    /// with (passed in as `last_cp` in [`Emitter::new`]).
-    ///
-    /// This value is derived from [`BlockEvent::checkpoint`].
+    /// This is the previous entry in the emitter's checkpoint chain. For consecutive emissions
+    /// it is the Bitcoin parent block; when [`Emitter::start_height`] skips ahead, the first
+    /// emission connects to whatever checkpoint was at the tail of `last_cp` (possibly an
+    /// ancestor further back than the direct parent).
     pub fn connected_to(&self) -> BlockId {
         match self.checkpoint.prev() {
             Some(prev_cp) => prev_cp.block_id(),
-            // No previous checkpoint (e.g. the first emission after a `start_height` skip); derive
-            // the parent from this block's header instead of connecting the block to itself.
+            // No previous checkpoint; derive the parent from this block's header.
+            // This should be unreachable in practice, since every emitted block connects
+            // to `last_cp`.
             None => BlockId {
                 height: self.checkpoint.height().saturating_sub(1),
                 hash: self.block.header.prev_blockhash,
@@ -256,13 +252,14 @@ impl BlockEvent {
     }
 }
 
-/// Internal state machine responses from [`Emitter::poll_once`].
+/// Outcome of a single node poll, driving the [`Emitter`] state machine (see
+/// [`Emitter::poll_once`]).
 enum PollResponse {
-    /// The next consecutive block is ready to be emitted.
+    /// The next consecutive block is ready to emit.
     NextBlock(GetBlockVerboseOne),
-    /// The emitter is current with the node's tip; no next block exists.
+    /// The emitter is current with the node's tip; there is no next block.
     Tip,
-    /// The last emitted block is no longer in the best chain.
+    /// The last emitted block is no longer in the best chain; fall through to agreement scanning.
     Reorged,
     /// A checkpoint still in the best chain was found; resume scanning from here.
     AgreementAt(GetBlockVerboseOne, CheckPoint<BlockHash>),
@@ -271,7 +268,11 @@ enum PollResponse {
 }
 
 impl<'a> Emitter<'a> {
-    /// Probe the node once and return the appropriate [`PollResponse`].
+    /// Probe the node once and return the appropriate `PollResponse`.
+    ///
+    /// `last_block` determines the next phase: when `Some`, follow its `next_block_hash` to the
+    /// next block (reporting `PollResponse::Reorged` if it has been reorged out); when
+    /// `None`, walk `last_cp` backwards to find the nearest checkpoint still in the best chain.
     fn poll_once(&self) -> Result<PollResponse, bitcoind_client::Error> {
         if let Some(last_block_info) = &self.last_block {
             let next_hash = if last_block_info.height + 1 < self.start_height {
@@ -301,21 +302,21 @@ impl<'a> Emitter<'a> {
                     if cp.height() > 0 {
                         continue;
                     }
-                    // if we can't find genesis block, we can't create an update that connects
+                    // genesis not found; cannot form a connected update
                     break;
                 }
                 Err(e) => return Err(e),
             };
 
-            // agreement point found
             return Ok(PollResponse::AgreementAt(block_info, cp));
         }
 
         Ok(PollResponse::AgreementNotFound)
     }
 
-    /// Drive the emitter state machine forward until a block is ready to emit or the tip is
-    /// reached.
+    /// Drive the state machine until a block is ready to emit (`Some`) or the tip is reached
+    /// (`None`). Returns [`EmitterError::AgreementNotFound`] after [`MAX_AGREEMENT_FAILURES`]
+    /// consecutive failures to find an agreement point.
     fn poll(&mut self) -> Result<Option<(CheckPoint<BlockHash>, Block)>, EmitterError> {
         loop {
             match self.poll_once()? {
