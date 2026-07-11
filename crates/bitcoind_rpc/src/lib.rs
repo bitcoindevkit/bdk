@@ -2,7 +2,7 @@
 //! use the wallet RPC API, so this crate can be used with wallet-disabled Bitcoin Core nodes.
 //!
 //! [`Emitter`] is the main structure which sources blockchain data from
-//! [`bitcoincore_rpc::Client`].
+//! [`bitcoind_client::bitreq::Client`].
 //!
 //! To only get block updates (exclude mempool transactions), the caller can use
 //! [`Emitter::next_block`] until it returns `Ok(None)` (which means the chain tip is reached). A
@@ -18,20 +18,22 @@ use alloc::sync::Arc;
 use bdk_core::collections::{HashMap, HashSet};
 use bdk_core::{BlockId, CheckPoint};
 use bitcoin::{Block, BlockHash, Transaction, Txid};
-use bitcoincore_rpc::{bitcoincore_rpc_json, RpcApi};
-use core::ops::Deref;
+use bitcoind_client::bitreq::Client;
+use bitcoind_client::corepc_types::model::GetBlockVerboseOne;
+
+pub extern crate bitcoind_client;
 
 pub mod bip158;
 
-pub use bitcoincore_rpc;
+pub(crate) use bitcoind_client::corepc_types;
 
-/// The [`Emitter`] is used to emit data sourced from [`bitcoincore_rpc::Client`].
+/// The [`Emitter`] is used to emit data sourced from [`bitcoind_client::bitreq::Client`].
 ///
 /// Refer to [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate
-pub struct Emitter<C> {
-    client: C,
+pub struct Emitter<'a> {
+    client: &'a Client,
     start_height: u32,
 
     /// The checkpoint of the last-emitted block that is in the best chain. If it is later found
@@ -42,7 +44,7 @@ pub struct Emitter<C> {
     /// next block's block hash (which we use to fetch the next block), we set this to `None`
     /// whenever there are no more blocks, or the next block is no longer in the best chain. This
     /// gives us an opportunity to re-fetch this result.
-    last_block: Option<bitcoincore_rpc_json::GetBlockResult>,
+    last_block: Option<GetBlockVerboseOne>,
 
     /// The last snapshot of mempool transactions.
     ///
@@ -62,11 +64,7 @@ pub struct Emitter<C> {
 /// to start empty (i.e. with no unconfirmed transactions).
 pub const NO_EXPECTED_MEMPOOL_TXS: core::iter::Empty<Arc<Transaction>> = core::iter::empty();
 
-impl<C> Emitter<C>
-where
-    C: Deref,
-    C::Target: RpcApi,
-{
+impl<'a> Emitter<'a> {
     /// Construct a new [`Emitter`].
     ///
     /// `last_cp` informs the emitter of the chain we are starting off with. This way, the emitter
@@ -79,7 +77,7 @@ where
     /// wallet. This allows the [`Emitter`] to inform the wallet about relevant mempool evictions.
     /// If it is known that the wallet is empty, [`NO_EXPECTED_MEMPOOL_TXS`] can be used.
     pub fn new(
-        client: C,
+        client: &'a Client,
         last_cp: CheckPoint<BlockHash>,
         start_height: u32,
         expected_mempool_txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>,
@@ -138,7 +136,7 @@ where
     /// # Ok::<_, bdk_bitcoind_rpc::bitcoincore_rpc::Error>(())
     /// ```
     #[cfg(feature = "std")]
-    pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
+    pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoind_client::Error> {
         let sync_time = std::time::UNIX_EPOCH
             .elapsed()
             .expect("must get current time")
@@ -151,8 +149,8 @@ where
     /// `sync_time` is in unix seconds.
     ///
     /// This is the no-std version of [`mempool`](Self::mempool).
-    pub fn mempool_at(&mut self, sync_time: u64) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
-        let client = &*self.client;
+    pub fn mempool_at(&mut self, sync_time: u64) -> Result<MempoolEvent, bitcoind_client::Error> {
+        let client = self.client;
 
         let mut rpc_tip_height;
         let mut rpc_tip_hash;
@@ -175,10 +173,10 @@ where
         let mut mempool_event = MempoolEvent {
             update: rpc_mempool
                 .into_iter()
-                .filter_map(|txid| -> Option<Result<_, bitcoincore_rpc::Error>> {
+                .filter_map(|txid| -> Option<Result<_, bitcoind_client::Error>> {
                     let tx = match self.mempool_snapshot.get(&txid) {
                         Some(tx) => tx.clone(),
-                        None => match client.get_raw_transaction(&txid, None) {
+                        None => match client.get_raw_transaction(&txid) {
                             Ok(tx) => {
                                 let tx = Arc::new(tx);
                                 self.mempool_snapshot.insert(txid, tx.clone());
@@ -194,8 +192,7 @@ where
             ..Default::default()
         };
 
-        let at_tip =
-            rpc_tip_height == self.last_cp.height() as u64 && rpc_tip_hash == self.last_cp.hash();
+        let at_tip = rpc_tip_height == self.last_cp.height() && rpc_tip_hash == self.last_cp.hash();
 
         if at_tip {
             // We only emit evicted transactions when we have already emitted the RPC tip. This is
@@ -229,35 +226,7 @@ where
     }
 
     /// Emit the next block height and block (if any).
-    ///
-    /// Call this repeatedly until it returns `Ok(None)`, which means the chain tip has been
-    /// reached. Each [`BlockEvent`] carries the block alongside the [`CheckPoint`] it connects to,
-    /// so it can be applied to BDK structures that require block connectivity.
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use bdk_bitcoind_rpc::{
-    ///     bitcoincore_rpc::{Auth, Client},
-    ///     Emitter, NO_EXPECTED_MEMPOOL_TXS,
-    /// };
-    /// # use bdk_core::CheckPoint;
-    /// # use bitcoin::{constants::genesis_block, Network};
-    ///
-    /// let client = Client::new("127.0.0.1:8332", Auth::None)?;
-    /// let start_height = 0;
-    /// # let last_cp = CheckPoint::new(0, genesis_block(Network::Bitcoin).block_hash());
-    /// // Use the checkpoint from your receiving structure (e.g. `LocalChain::tip()`).
-    /// let mut emitter = Emitter::new(&client, last_cp, start_height, NO_EXPECTED_MEMPOOL_TXS);
-    ///
-    /// while let Some(event) = emitter.next_block()? {
-    ///     let height = event.block_height();
-    ///     let connected_to = event.connected_to();
-    ///     // apply `event.block` to your chain and tx graph here
-    /// }
-    /// # Ok::<_, bdk_bitcoind_rpc::bitcoincore_rpc::Error>(())
-    /// ```
-    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
+    pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoind_client::Error> {
         if let Some((checkpoint, block)) = poll(self, move |hash, client| client.get_block(hash))? {
             // Stop tracking unconfirmed transactions that have been confirmed in this block.
             for tx in &block.txdata {
@@ -323,39 +292,35 @@ impl<B> BlockEvent<B> {
 }
 
 enum PollResponse {
-    Block(bitcoincore_rpc_json::GetBlockResult),
+    Block(GetBlockVerboseOne),
     NoMoreBlocks,
     /// Fetched block is not in the best chain.
     BlockNotInBestChain,
-    AgreementFound(bitcoincore_rpc_json::GetBlockResult, CheckPoint<BlockHash>),
+    AgreementFound(GetBlockVerboseOne, CheckPoint<BlockHash>),
     /// Force the genesis checkpoint down the receiver's throat.
     AgreementPointNotFound(BlockHash),
 }
 
-fn poll_once<C>(emitter: &Emitter<C>) -> Result<PollResponse, bitcoincore_rpc::Error>
-where
-    C: Deref,
-    C::Target: RpcApi,
-{
-    let client = &*emitter.client;
+fn poll_once(emitter: &Emitter<'_>) -> Result<PollResponse, bitcoind_client::Error> {
+    let client = emitter.client;
 
     if let Some(last_res) = &emitter.last_block {
-        let next_hash = if last_res.height + 1 < emitter.start_height as _ {
+        let next_hash = if last_res.height + 1 < emitter.start_height {
             // enforce start height
-            let next_hash = client.get_block_hash(emitter.start_height as _)?;
+            let next_hash = client.get_block_hash(emitter.start_height)?;
             // make sure last emission is still in best chain
-            if client.get_block_hash(last_res.height as _)? != last_res.hash {
+            if client.get_block_hash(last_res.height)? != last_res.hash {
                 return Ok(PollResponse::BlockNotInBestChain);
             }
             next_hash
         } else {
-            match last_res.nextblockhash {
+            match last_res.next_block_hash {
                 None => return Ok(PollResponse::NoMoreBlocks),
                 Some(next_hash) => next_hash,
             }
         };
 
-        let res = client.get_block_info(&next_hash)?;
+        let res = client.get_block_verbose(&next_hash)?;
         if res.confirmations < 0 {
             return Ok(PollResponse::BlockNotInBestChain);
         }
@@ -364,7 +329,7 @@ where
     }
 
     for cp in emitter.last_cp.iter() {
-        let res = match client.get_block_info(&cp.hash()) {
+        let res = match client.get_block_verbose(&cp.hash()) {
             // block not in best chain
             Ok(res) if res.confirmations < 0 => continue,
             Ok(res) => res,
@@ -386,21 +351,19 @@ where
     Ok(PollResponse::AgreementPointNotFound(genesis_hash))
 }
 
-fn poll<C, V, F>(
-    emitter: &mut Emitter<C>,
+fn poll<V, F>(
+    emitter: &mut Emitter<'_>,
     get_item: F,
-) -> Result<Option<(CheckPoint<BlockHash>, V)>, bitcoincore_rpc::Error>
+) -> Result<Option<(CheckPoint<BlockHash>, V)>, bitcoind_client::Error>
 where
-    C: Deref,
-    C::Target: RpcApi,
-    F: Fn(&BlockHash, &C::Target) -> Result<V, bitcoincore_rpc::Error>,
+    F: Fn(&BlockHash, &Client) -> Result<V, bitcoind_client::Error>,
 {
     loop {
         match poll_once(emitter)? {
             PollResponse::Block(res) => {
-                let height = res.height as u32;
+                let height = res.height;
                 let hash = res.hash;
-                let item = get_item(&hash, &emitter.client)?;
+                let item = get_item(&hash, emitter.client)?;
 
                 let new_cp = emitter
                     .last_cp
@@ -422,10 +385,8 @@ where
             PollResponse::AgreementFound(res, cp) => {
                 // When a reorg happens, the agreement point drops below `last_cp`. We
                 // override `start_height` so the emitter revisits the invalidated heights.
-                if (res.height as u32) < emitter.start_height
-                    && (res.height as u32) < emitter.last_cp.height()
-                {
-                    emitter.start_height = res.height as _;
+                if res.height < emitter.start_height && res.height < emitter.last_cp.height() {
+                    emitter.start_height = res.height;
                 }
                 // get rid of evicted blocks
                 emitter.last_cp = cp;
@@ -437,26 +398,6 @@ where
                 emitter.last_block = None;
                 continue;
             }
-        }
-    }
-}
-
-/// Extends [`bitcoincore_rpc::Error`].
-pub trait BitcoindRpcErrorExt {
-    /// Returns whether the error is a "not found" error.
-    ///
-    /// This is useful since [`Emitter`] emits [`Result<_, bitcoincore_rpc::Error>`]s as
-    /// [`Iterator::Item`].
-    fn is_not_found_error(&self) -> bool;
-}
-
-impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
-    fn is_not_found_error(&self) -> bool {
-        if let bitcoincore_rpc::Error::JsonRpc(bitcoincore_rpc::jsonrpc::Error::Rpc(rpc_err)) = self
-        {
-            rpc_err.code == -5
-        } else {
-            false
         }
     }
 }
@@ -476,9 +417,9 @@ mod test {
         let (chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
         let chain_tip = chain.tip();
 
-        let rpc_client = bitcoincore_rpc::Client::new(
+        let rpc_client = bitcoind_client::bitreq::Client::with_auth(
             &env.bitcoind.rpc_url(),
-            bitcoincore_rpc::Auth::CookieFile(env.bitcoind.params.cookie_file.clone()),
+            bitcoind_client::bitreq::Auth::CookieFile(env.bitcoind.params.cookie_file.clone()),
         )?;
 
         let mut emitter = Emitter::new(&rpc_client, chain_tip.clone(), 1, NO_EXPECTED_MEMPOOL_TXS);
