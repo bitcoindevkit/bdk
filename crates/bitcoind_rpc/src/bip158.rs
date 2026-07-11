@@ -6,10 +6,12 @@
 //! [0]: https://github.com/bitcoin/bips/blob/master/bip-0157.mediawiki
 //! [1]: https://github.com/bitcoin/bips/blob/master/bip-0158.mediawiki
 
+use core::fmt::{self, Debug, Display};
+
 use bdk_core::bitcoin;
-use bdk_core::CheckPoint;
-use bitcoin::BlockHash;
+use bdk_core::{CheckPoint, ToBlockHash};
 use bitcoin::{bip158::BlockFilter, Block, ScriptBuf};
+use bitcoin::{block::Header, hashes::Hash, BlockHash};
 use bitcoind_client::bitreq::Client;
 
 use crate::corepc_types::model::GetBlockHeaderVerbose;
@@ -30,22 +32,22 @@ use crate::corepc_types::model::GetBlockHeaderVerbose;
 ///   Events contain the updated checkpoint `cp` which may be incorporated into the local chain
 ///   state to stay in sync with the tip.
 #[derive(Debug)]
-pub struct FilterIter<'a> {
+pub struct FilterIter<'a, B> {
     /// RPC client
     client: &'a Client,
     /// SPK inventory
     spks: Vec<ScriptBuf>,
     /// checkpoint
-    cp: CheckPoint<BlockHash>,
+    cp: CheckPoint<B>,
     /// Header info, contains the prev and next hashes for each header.
     header: Option<GetBlockHeaderVerbose>,
 }
 
-impl<'a> FilterIter<'a> {
+impl<'a, B> FilterIter<'a, B> {
     /// Construct [`FilterIter`] with checkpoint, RPC client and SPKs.
     pub fn new(
         client: &'a Client,
-        cp: CheckPoint,
+        cp: CheckPoint<B>,
         spks: impl IntoIterator<Item = ScriptBuf>,
     ) -> Self {
         Self {
@@ -74,14 +76,14 @@ impl<'a> FilterIter<'a> {
 
 /// Event returned by [`FilterIter`].
 #[derive(Debug, Clone)]
-pub struct Event {
+pub struct Event<B> {
     /// Checkpoint
-    pub cp: CheckPoint,
+    pub cp: CheckPoint<B>,
     /// Block, will be `Some(..)` for matching blocks
     pub block: Option<Block>,
 }
 
-impl Event {
+impl<B> Event<B> {
     /// Whether this event contains a matching block.
     pub fn is_match(&self) -> bool {
         self.block.is_some()
@@ -93,8 +95,11 @@ impl Event {
     }
 }
 
-impl Iterator for FilterIter<'_> {
-    type Item = Result<Event, Error>;
+impl<B> Iterator for FilterIter<'_, B>
+where
+    B: ToBlockHash + Debug + Clone + From<Header>,
+{
+    type Item = Result<Event<B>, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         (|| -> Result<Option<_>, Error> {
@@ -127,7 +132,7 @@ impl Iterator for FilterIter<'_> {
             next_hash = next_header.hash;
             let next_height = next_header.height;
 
-            cp = cp.insert(next_height, next_hash);
+            cp = cp.insert(next_height, next_header.as_header().into());
 
             let mut block = None;
             let filter =
@@ -152,6 +157,7 @@ impl Iterator for FilterIter<'_> {
 
 /// Error that may be thrown by [`FilterIter`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// RPC error
     Rpc(bitcoind_client::Error),
@@ -161,8 +167,8 @@ pub enum Error {
     ReorgDepthExceeded,
 }
 
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rpc(e) => write!(f, "{e}"),
             Self::Bip158(e) => write!(f, "{e}"),
@@ -176,5 +182,26 @@ impl core::error::Error for Error {}
 impl From<bitcoind_client::Error> for Error {
     fn from(e: bitcoind_client::Error) -> Self {
         Self::Rpc(e)
+    }
+}
+
+/// Trait used internally to derive a Bitcoin block [`Header`] from an instance of
+/// [`GetBlockHeaderVerbose`].
+trait AsHeader {
+    fn as_header(&self) -> Header;
+}
+
+impl AsHeader for GetBlockHeaderVerbose {
+    fn as_header(&self) -> Header {
+        Header {
+            version: self.version,
+            prev_blockhash: self
+                .previous_block_hash
+                .unwrap_or(BlockHash::from_byte_array([0x00; 32])),
+            merkle_root: self.merkle_root,
+            time: self.time,
+            bits: self.bits,
+            nonce: self.nonce,
+        }
     }
 }

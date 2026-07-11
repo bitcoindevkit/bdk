@@ -2,8 +2,8 @@ use alloc::sync::Arc;
 use core::fmt;
 
 use bdk_core::collections::{HashMap, HashSet};
-use bdk_core::{BlockId, CheckPoint};
-use bitcoin::{Block, BlockHash, Transaction, Txid};
+use bdk_core::{BlockId, CheckPoint, ToBlockHash};
+use bitcoin::{block::Header, Block, BlockHash, Transaction, Txid};
 use bitcoind_client::bitreq::Client;
 use bitcoind_client::corepc_types::model::GetBlockVerboseOne;
 
@@ -16,7 +16,7 @@ const MAX_AGREEMENT_FAILURES: u8 = 3;
 /// Refer to [module-level documentation] for more.
 ///
 /// [module-level documentation]: crate
-pub struct Emitter<'a> {
+pub struct Emitter<'a, B> {
     client: &'a Client,
 
     /// Height from which to start emitting blocks. Defaults to `last_cp.height()`.
@@ -25,7 +25,7 @@ pub struct Emitter<'a> {
     /// Checkpoint of the last-emitted block known to be in the best chain, and the tail of the
     /// linked checkpoint list threaded through each [`BlockEvent`]. Blocks reorged out are popped
     /// off during agreement scanning.
-    last_cp: CheckPoint<BlockHash>,
+    last_cp: CheckPoint<B>,
 
     /// RPC result of the last-emitted block, kept for its `nextblockhash` so the next block can be
     /// fetched without a height-to-hash lookup. `None` before the first emission, at tip, or after
@@ -42,7 +42,10 @@ pub struct Emitter<'a> {
     mempool_snapshot: HashMap<Txid, Arc<Transaction>>,
 }
 
-impl<'a> Emitter<'a> {
+impl<'a, B> Emitter<'a, B>
+where
+    B: ToBlockHash + Clone + fmt::Debug + From<Header>,
+{
     /// Construct a new [`Emitter`].
     ///
     /// `last_cp` is the chain the emitter starts from: it scans this checkpoint chain to find the
@@ -54,7 +57,7 @@ impl<'a> Emitter<'a> {
     /// lets the emitter report evictions for them. Pass `core::iter::empty()` when empty.
     pub fn new(
         client: &'a Client,
-        last_cp: CheckPoint<BlockHash>,
+        last_cp: CheckPoint<B>,
         expected_mempool_txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>,
     ) -> Self {
         let start_height = last_cp.height();
@@ -179,7 +182,7 @@ impl<'a> Emitter<'a> {
     /// the node's best chain). On a reorg the emitter rescans for a new agreement point and
     /// re-emits from there. Returns [`EmitterError::AgreementNotFound`] if no agreement point can
     /// be found after multiple consecutive attempts.
-    pub fn next_block(&mut self) -> Result<Option<BlockEvent>, EmitterError> {
+    pub fn next_block(&mut self) -> Result<Option<BlockEvent<B>>, EmitterError> {
         if let Some((checkpoint, block)) = self.poll()? {
             // Confirmed transactions leave the mempool snapshot so they aren't misreported as
             // evictions on the next mempool() call.
@@ -206,7 +209,7 @@ pub struct MempoolEvent {
 
 /// A newly emitted block from [`Emitter`].
 #[derive(Debug)]
-pub struct BlockEvent {
+pub struct BlockEvent<B> {
     /// The block.
     pub block: Block,
 
@@ -218,10 +221,10 @@ pub struct BlockEvent {
     ///
     /// This is important as BDK structures require block-to-apply to be connected with another
     /// block in the original chain.
-    pub checkpoint: CheckPoint<BlockHash>,
+    pub checkpoint: CheckPoint<B>,
 }
 
-impl BlockEvent {
+impl<B> BlockEvent<B> {
     /// The block height of this new block.
     pub fn block_height(&self) -> u32 {
         self.checkpoint.height()
@@ -254,7 +257,7 @@ impl BlockEvent {
 
 /// Outcome of a single node poll, driving the [`Emitter`] state machine (see
 /// [`Emitter::poll_once`]).
-enum PollResponse {
+enum PollResponse<B> {
     /// The next consecutive block is ready to emit.
     NextBlock(GetBlockVerboseOne),
     /// The emitter is current with the node's tip; there is no next block.
@@ -262,18 +265,21 @@ enum PollResponse {
     /// The last emitted block is no longer in the best chain; fall through to agreement scanning.
     Reorged,
     /// A checkpoint still in the best chain was found; resume scanning from here.
-    AgreementAt(GetBlockVerboseOne, CheckPoint<BlockHash>),
+    AgreementAt(GetBlockVerboseOne, CheckPoint<B>),
     /// No checkpoint matches the node's best chain.
     AgreementNotFound,
 }
 
-impl<'a> Emitter<'a> {
+impl<'a, B> Emitter<'a, B>
+where
+    B: ToBlockHash + Clone + fmt::Debug + From<Header>,
+{
     /// Probe the node once and return the appropriate `PollResponse`.
     ///
     /// `last_block` determines the next phase: when `Some`, follow its `next_block_hash` to the
     /// next block (reporting `PollResponse::Reorged` if it has been reorged out); when
     /// `None`, walk `last_cp` backwards to find the nearest checkpoint still in the best chain.
-    fn poll_once(&self) -> Result<PollResponse, bitcoind_client::Error> {
+    fn poll_once(&self) -> Result<PollResponse<B>, bitcoind_client::Error> {
         if let Some(last_block_info) = &self.last_block {
             let next_hash = if last_block_info.height + 1 < self.start_height {
                 // enforce start height
@@ -317,7 +323,7 @@ impl<'a> Emitter<'a> {
     /// Drive the state machine until a block is ready to emit (`Some`) or the tip is reached
     /// (`None`). Returns [`EmitterError::AgreementNotFound`] after [`MAX_AGREEMENT_FAILURES`]
     /// consecutive failures to find an agreement point.
-    fn poll(&mut self) -> Result<Option<(CheckPoint<BlockHash>, Block)>, EmitterError> {
+    fn poll(&mut self) -> Result<Option<(CheckPoint<B>, Block)>, EmitterError> {
         loop {
             match self.poll_once()? {
                 PollResponse::NextBlock(block_info) => {
@@ -328,7 +334,7 @@ impl<'a> Emitter<'a> {
                     let new_cp = self
                         .last_cp
                         .clone()
-                        .push(height, hash)
+                        .push(height, block.header.into())
                         .expect("NextBlock height must only increase");
                     self.last_cp = new_cp.clone();
                     self.last_block = Some(block_info);

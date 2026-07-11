@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use bdk_bitcoind_rpc::{Emitter, EmitterError};
+use bdk_bitcoind_rpc::EmitterError;
 use bdk_chain::{
-    bitcoin::{Address, Amount, Transaction, Txid},
+    bitcoin::{Address, Amount, BlockHash, Transaction, Txid},
     local_chain::{CheckPoint, LocalChain},
     spk_txout::SpkTxOutIndex,
     Balance, BlockId, IndexedTxGraph, Merge,
@@ -18,6 +18,8 @@ use bitcoin::{hashes::Hash, Block, Network, ScriptBuf, WScriptHash};
 use crate::common::ClientExt;
 
 mod common;
+
+type Emitter<'a> = bdk_bitcoind_rpc::Emitter<'a, BlockHash>;
 
 /// Ensures blocks are emitted consecutively with correct hashes, and that after a reorg the
 /// emitter re-emits the replacement blocks at the same heights with updated hashes.
@@ -1007,6 +1009,58 @@ fn wrong_genesis_returns_agreement_not_found() -> anyhow::Result<()> {
     assert!(
         matches!(err, EmitterError::AgreementNotFound),
         "expected EmitterError::AgreementNotFound, got {err:?}",
+    );
+
+    Ok(())
+}
+
+/// Exercises the emitter with a generic `CheckPoint<Header>` rather than the default
+/// `CheckPoint<BlockHash>`. The generic `B` parameter must thread full block [`Header`]s through
+/// every emitted checkpoint, and the checkpoint's derived block hash must match the emitted block.
+#[test]
+fn emitter_collects_header_checkpoints() -> anyhow::Result<()> {
+    use bitcoin::block::Header;
+    use bitcoin::constants::genesis_block;
+
+    const CHAIN_TIP: usize = 20;
+
+    let env = TestEnv::new()?;
+    let client = ClientExt::get_rpc_client(&env)?;
+
+    env.mine_blocks(CHAIN_TIP, None)?;
+    let network_tip = env.rpc_client().get_block_count()?.into_model().0;
+
+    // Start from a genesis checkpoint whose `data` is a full block `Header`.
+    let genesis_header = genesis_block(Network::Regtest).header;
+    let cp = CheckPoint::<Header>::new(0, genesis_header);
+
+    let mut emitter =
+        bdk_bitcoind_rpc::Emitter::new(&client, cp, core::iter::empty::<bitcoin::Transaction>());
+
+    let mut last_height = 0;
+    while let Some(block_event) = emitter.next_block()? {
+        let height = block_event.block_height();
+        assert_eq!(height, last_height + 1, "heights must be consecutive");
+
+        // The emitted checkpoint carries the block's `Header`; its hash must match the block.
+        let header: Header = block_event.checkpoint.data();
+        assert_eq!(
+            header, block_event.block.header,
+            "checkpoint header must match block header"
+        );
+        assert_eq!(
+            header.block_hash(),
+            block_event.block_hash(),
+            "checkpoint hash must derive from the header",
+        );
+
+        last_height = height;
+    }
+
+    assert_eq!(
+        u64::from(last_height),
+        network_tip,
+        "emitter must advance to the node's tip",
     );
 
     Ok(())
