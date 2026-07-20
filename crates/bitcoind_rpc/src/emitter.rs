@@ -281,8 +281,13 @@ where
     /// `None`, walk `last_cp` backwards to find the nearest checkpoint still in the best chain.
     fn poll_once(&self) -> Result<PollResponse<B>, bitcoind_client::Error> {
         if let Some(last_block_info) = &self.last_block {
+            // Enforce start height
             let next_hash = if last_block_info.height + 1 < self.start_height {
-                // enforce start height
+                // Verify the last-emitted (or agreement) block is still in the best chain before
+                // jumping ahead to `start_height`.
+                if self.client.get_block_hash(last_block_info.height)? != last_block_info.hash {
+                    return Ok(PollResponse::Reorged);
+                }
                 self.client.get_block_hash(self.start_height)?
             } else {
                 match last_block_info.next_block_hash {
