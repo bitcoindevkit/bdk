@@ -7,10 +7,6 @@ use bitcoin::{block::Header, Block, BlockHash, Transaction, Txid};
 use bitcoind_client::bitreq::Client;
 use bitcoind_client::corepc_types::model::GetBlockVerboseOne;
 
-/// Maximum number of consecutive failed attempts to find an agreement point before
-/// [`Emitter::next_block`] returns [`EmitterError::AgreementNotFound`].
-const MAX_AGREEMENT_FAILURES: u8 = 3;
-
 /// The [`Emitter`] is used to emit data sourced from [`bitcoind_client::bitreq::Client`].
 ///
 /// Refer to [module-level documentation] for more.
@@ -31,10 +27,6 @@ pub struct Emitter<'a, B> {
     /// fetched without a height-to-hash lookup. `None` before the first emission, at tip, or after
     /// the last block was reorged out.
     last_block: Option<GetBlockVerboseOne>,
-
-    /// Consecutive polls that failed to find an agreement point. Bounds the retry loop so the
-    /// emitter surfaces [`EmitterError::AgreementNotFound`] instead of spinning forever.
-    agreement_failure_count: u8,
 
     /// Unconfirmed transactions seen so far. Doubles as a fetch cache (avoids re-fetching txs) and
     /// as the reference set for eviction detection: at tip, any txid here but absent from the
@@ -66,7 +58,6 @@ where
             start_height,
             last_cp,
             last_block: None,
-            agreement_failure_count: 0,
             mempool_snapshot: expected_mempool_txs
                 .into_iter()
                 .map(|tx| {
@@ -326,8 +317,8 @@ where
     }
 
     /// Drive the state machine until a block is ready to emit (`Some`) or the tip is reached
-    /// (`None`). Returns [`EmitterError::AgreementNotFound`] after [`MAX_AGREEMENT_FAILURES`]
-    /// consecutive failures to find an agreement point.
+    /// (`None`). Returns [`EmitterError::AgreementNotFound`] if the client found no block in
+    /// common with this `Emitter`'s `last_cp`.
     fn poll(&mut self) -> Result<Option<(CheckPoint<B>, Block)>, EmitterError> {
         loop {
             match self.poll_once()? {
@@ -343,7 +334,6 @@ where
                         .expect("NextBlock height must only increase");
                     self.last_cp = new_cp.clone();
                     self.last_block = Some(block_info);
-                    self.agreement_failure_count = 0;
                     return Ok(Some((new_cp, block)));
                 }
                 PollResponse::Tip => {
@@ -361,15 +351,8 @@ where
                     }
                     self.last_cp = cp;
                     self.last_block = Some(block_info);
-                    self.agreement_failure_count = 0;
                 }
-                PollResponse::AgreementNotFound => {
-                    self.agreement_failure_count += 1;
-                    if self.agreement_failure_count >= MAX_AGREEMENT_FAILURES {
-                        return Err(EmitterError::AgreementNotFound);
-                    }
-                    self.last_block = None;
-                }
+                PollResponse::AgreementNotFound => return Err(EmitterError::AgreementNotFound),
             }
         }
     }
