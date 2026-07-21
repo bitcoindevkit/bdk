@@ -60,8 +60,10 @@ pub enum TxInTemplate {
 pub struct TxOutTemplate {
     /// Value in satoshis.
     pub value: u64,
-    /// If `Some(index)`, the output will use the script pubkey at that index
-    /// from the test descriptor set. If `None`, a random (empty) script is used.
+    /// If `Some(index)`, the output uses the script pubkey derived at that
+    /// index from the test descriptor. Valid indices are `0..2^31` (the
+    /// non-hardened range); a hardened index (`>= 2^31`) makes [`init_graph`]
+    /// panic. If `None`, an empty script is used.
     pub spk_index: Option<u32>,
 }
 

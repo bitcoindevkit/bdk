@@ -1,3 +1,63 @@
+//! # BDK Test Environment
+//!
+//! Testing utilities for building and testing Bitcoin applications against a local
+//! regtest network. The struct [`TestEnv`], manages a single `bitcoind` node
+//! with a connected `electrs` instance and drives them through common test scenarios.
+//!
+//! ## Features
+//!
+//! * **Node management** — spin up and configure `bitcoind` and `electrs` via [`TestEnv`] and
+//!   [`Config`]. The default configuration enables HTTP on `electrsd`, as required by `bdk_esplora`
+//!   tests.
+//! * **Block mining** — generate blocks with [`TestEnv::mine_blocks`], or shape individual blocks
+//!   with [`TestEnv::mine_block`] and [`MineParams`] to produce empty blocks, set custom
+//!   timestamps, or choose the coinbase output script.
+//! * **Chain reorganizations** — fork and reorg the chain with [`TestEnv::invalidate_blocks`],
+//!   [`TestEnv::reorg`], and [`TestEnv::reorg_empty_blocks`] to exercise how an application handles
+//!   conflicting chain states.
+//! * **Transactions & sync** — broadcast via Bitcoin Core RPC ([`TestEnv::send`]) and block on the
+//!   Electrum server with [`TestEnv::wait_until_electrum_sees_block`] and
+//!   [`TestEnv::wait_until_electrum_sees_txid`] to keep components in sync during tests.
+//! * **Transaction-graph templates** — build deterministic transaction histories and conflict
+//!   scenarios with the [`tx_template`] module, without a running node.
+//!
+//! ## Example
+//!
+//! ```rust,no_run
+//! use bdk_chain::bitcoin::Amount;
+//! use bdk_testenv::TestEnv;
+//! use core::time::Duration;
+//!
+//! # fn main() -> bdk_testenv::anyhow::Result<()> {
+//! // Spin up a regtest bitcoind + electrs environment with the default config.
+//! let env = TestEnv::new()?;
+//!
+//! // Get a fresh address from the bitcoind node.
+//! let addr = env
+//!     .rpc_client()
+//!     .get_new_address(None, None)?
+//!     .address()?
+//!     .assume_checked();
+//!
+//! // Mine 100 blocks to mature a coinbase reward to that address.
+//! env.mine_blocks(100, Some(addr.clone()))?;
+//!
+//! // Broadcast a transaction and wait for electrs to index it.
+//! let txid = env.send(&addr, Amount::from_sat(100_000))?;
+//! env.wait_until_electrum_sees_txid(txid, Duration::from_secs(5))?;
+//!
+//! // Mine an empty block, ignoring the mempool.
+//! env.mine_empty_block()?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Re-exports
+//!
+//! For convenience, this crate re-exports [`electrsd`], [`bitcoind`], [`anyhow`],
+//! [`corepc_client`], and [`electrum_client`], so tests can use matching versions
+//! without declaring those dependencies themselves.
+
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 pub mod tx_template;
