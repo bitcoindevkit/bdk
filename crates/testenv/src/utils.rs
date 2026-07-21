@@ -48,33 +48,6 @@ macro_rules! chain_update {
     }};
 }
 
-#[allow(unused_macros)]
-#[macro_export]
-macro_rules! changeset {
-    (checkpoints: $($tail:tt)*) => { changeset!(index: TxHeight, checkpoints: $($tail)*) };
-    (
-        index: $ind:ty,
-        checkpoints: [ $(( $height:expr, $cp_to:expr )),* ]
-        $(,txids: [ $(( $txid:expr, $tx_to:expr )),* ])?
-    ) => {{
-        use bdk_chain::collections::BTreeMap;
-
-        #[allow(unused_mut)]
-        bdk_chain::sparse_chain::ChangeSet::<$ind> {
-            checkpoints: {
-                let mut changes = BTreeMap::default();
-                $(changes.insert($height, $cp_to);)*
-                changes
-            },
-            txids: {
-                let mut changes = BTreeMap::default();
-                $($(changes.insert($txid, $tx_to.map(|h: TxHeight| h.into()));)*)?
-                changes
-            }
-        }
-    }};
-}
-
 /// Generate a dummy script pubkey.
 #[allow(unused_macros)]
 #[macro_export]
@@ -88,18 +61,9 @@ macro_rules! spk {
     }};
 }
 
+/// Initialize a standard transaction with a guaranteed output.
 #[allow(unused)]
 pub fn new_tx(lt: u32) -> Transaction {
-    Transaction {
-        version: bitcoin::transaction::Version::non_standard(0x00),
-        lock_time: bitcoin::absolute::LockTime::from_consensus(lt),
-        input: vec![],
-        output: vec![],
-    }
-}
-
-/// Initialize a standard transaction with a guaranteed output.
-pub fn new_standard_tx(lt: u32) -> Transaction {
     Transaction {
         version: Version::TWO,
         lock_time: LockTime::from_consensus(lt),

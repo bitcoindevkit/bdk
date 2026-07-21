@@ -4,8 +4,11 @@ use bdk_chain::{
     IndexedTxGraph,
 };
 use bdk_core::{CheckPoint, ConfirmationBlockTime, TxUpdate};
-use bdk_testenv::utils::{genesis_block_id, new_standard_tx, tip_block_id};
-use bitcoin::{key::Secp256k1, Amount, Transaction, TxIn, TxOut};
+use bdk_testenv::{
+    hash,
+    utils::{genesis_block_id, new_tx, tip_block_id},
+};
+use bitcoin::{key::Secp256k1, Amount, OutPoint, Transaction, TxIn, TxOut};
 use criterion::{criterion_group, criterion_main, Criterion};
 use miniscript::Descriptor;
 use std::sync::Arc;
@@ -70,12 +73,15 @@ pub fn reindex_tx_graph(c: &mut Criterion) {
         for i in 0..TX_CT {
             let script_pubkey = graph.index.reveal_next_spk(()).unwrap().0 .1;
             let tx = Transaction {
-                input: vec![TxIn::default()],
+                input: vec![TxIn {
+                    previous_output: OutPoint::new(hash!("prev"), i),
+                    ..Default::default()
+                }],
                 output: vec![TxOut {
                     script_pubkey,
                     value: AMOUNT,
                 }],
-                ..new_standard_tx(i)
+                ..new_tx(i)
             };
             let txid = tx.compute_txid();
             let mut update = TxUpdate::default();

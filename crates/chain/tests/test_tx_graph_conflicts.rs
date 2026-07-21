@@ -697,7 +697,7 @@ fn test_tx_conflict_handling() {
         let exp_txs = scenario
             .exp_chain_txs
             .iter()
-            .map(|&txid| *env.txid_to_name.get(txid).expect("txid must exist"))
+            .map(|&txid| *env.txids.get(txid).expect("txid must exist"))
             .collect::<BTreeSet<_>>();
         assert_eq!(
             txs, exp_txs,
@@ -713,7 +713,7 @@ fn test_tx_conflict_handling() {
             .exp_chain_txouts
             .iter()
             .map(|&(txid, vout)| OutPoint {
-                txid: *env.txid_to_name.get(txid).expect("txid must exist"),
+                txid: *env.txids.get(txid).expect("txid must exist"),
                 vout,
             })
             .collect::<BTreeSet<_>>();
@@ -731,7 +731,7 @@ fn test_tx_conflict_handling() {
             .exp_unspents
             .iter()
             .map(|&(txid, vout)| OutPoint {
-                txid: *env.txid_to_name.get(txid).expect("txid must exist"),
+                txid: *env.txids.get(txid).expect("txid must exist"),
                 vout,
             })
             .collect::<BTreeSet<_>>();

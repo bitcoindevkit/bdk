@@ -1,5 +1,7 @@
 #![cfg(feature = "miniscript")]
 
+use std::vec;
+
 use bdk_chain::{
     collections::BTreeMap,
     indexer::keychain_txout::{ChangeSet, KeychainTxOutIndex},
@@ -708,7 +710,10 @@ fn reassigning_keychain_to_a_new_descriptor_should_error() {
 #[test]
 fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
     let mut indexer = KeychainTxOutIndex::<usize>::new(0, true);
-    let mut tx = new_tx(0);
+    let mut tx = Transaction {
+        output: vec![],
+        ..new_tx(0)
+    };
 
     for (i, descriptor) in DESCRIPTORS.iter().enumerate() {
         let descriptor = parse_descriptor(descriptor);

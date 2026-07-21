@@ -2,7 +2,7 @@ use bdk_chain::{keychain_txout::KeychainTxOutIndex, local_chain::LocalChain, Ind
 use bdk_core::{BlockId, CheckPoint};
 use bdk_core::{ConfirmationBlockTime, TxUpdate};
 use bdk_testenv::hash;
-use bdk_testenv::utils::{genesis_block_id, new_standard_tx, spk_at_index, tip_block_id};
+use bdk_testenv::utils::{genesis_block_id, new_tx, spk_at_index, tip_block_id};
 use bitcoin::{key::Secp256k1, Amount, OutPoint, Transaction, TxIn, TxOut};
 use criterion::{criterion_group, criterion_main, Criterion};
 use miniscript::{Descriptor, DescriptorPublicKey};
@@ -25,7 +25,7 @@ fn add_ancestor_tx(graph: &mut KeychainTxGraph, block_id: BlockId, locktime: u32
             value: Amount::ONE_BTC,
             script_pubkey: spk_0,
         }],
-        ..new_standard_tx(locktime)
+        ..new_tx(locktime)
     };
     let txid = tx.compute_txid();
     let _ = graph.insert_tx(tx);
@@ -94,7 +94,7 @@ pub fn many_conflicting_unconfirmed(c: &mut Criterion) {
                     value: Amount::ONE_BTC - Amount::from_sat(i as u64 * 10),
                     script_pubkey: spk_1.clone(),
                 }],
-                ..new_standard_tx(i)
+                ..new_tx(i)
             };
             let mut update = TxUpdate::default();
             update.seen_ats = [(tx.compute_txid(), i as u64)].into();
@@ -129,7 +129,7 @@ pub fn many_chained_unconfirmed(c: &mut Criterion) {
                     previous_output,
                     ..Default::default()
                 }],
-                ..new_standard_tx(i)
+                ..new_tx(i)
             };
             let txid = tx.compute_txid();
             let mut update = TxUpdate::default();
@@ -179,7 +179,7 @@ pub fn nested_conflicts(c: &mut Criterion) {
                             value,
                             script_pubkey,
                         }],
-                        ..new_standard_tx(conflict_i as _)
+                        ..new_tx(conflict_i as _)
                     };
                     let txid = tx.compute_txid();
                     prev_ops.push(OutPoint::new(txid, 0));

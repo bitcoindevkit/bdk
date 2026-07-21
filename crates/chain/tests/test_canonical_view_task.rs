@@ -46,7 +46,7 @@ fn test_assumed_canonical_scenarios() {
     let env = init_graph(tx_templates);
 
     // get the actual txid from given tx_name.
-    let txid_c = *env.txid_to_name.get("txC").unwrap();
+    let txid_c = *env.txids.get("txC").unwrap();
 
     // build the expected `CanonicalReason` with specific descendant txid's
     //
@@ -79,7 +79,7 @@ fn test_assumed_canonical_scenarios() {
     let exp_canonical_txids: HashSet<Txid> = exp_canonical_txs
         .iter()
         .map(|tx_name| {
-            *env.txid_to_name
+            *env.txids
                 .get(tx_name)
                 .expect("txid should exist for tx_name")
         })
@@ -99,7 +99,7 @@ fn test_assumed_canonical_scenarios() {
     // assert canonical reasons
     for (tx_name, exp_reason) in exp_reasons {
         let txid = env
-            .txid_to_name
+            .txids
             .get(tx_name)
             .expect("txid should exist for tx_name");
 
@@ -116,7 +116,7 @@ fn test_assumed_canonical_scenarios() {
         )
     }
 
-    let txid_b = *env.txid_to_name.get("txB").unwrap();
+    let txid_b = *env.txids.get("txB").unwrap();
 
     // build the expected `ChainPosition` with specific txid's for transitively confirmed txs.
     //
@@ -156,7 +156,7 @@ fn test_assumed_canonical_scenarios() {
     // assert final positions
     for (tx_name, exp_position) in exp_positions {
         let txid = *env
-            .txid_to_name
+            .txids
             .get(tx_name)
             .expect("txid should exist for tx_name");
 

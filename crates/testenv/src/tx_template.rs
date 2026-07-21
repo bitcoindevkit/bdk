@@ -40,7 +40,6 @@ pub struct TxTemplate<A> {
 
 /// Describes how an input is created in a [`TxTemplate`].
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub enum TxInTemplate {
     /// A random (bogus) previous output. Useful when the actual prevout doesn't matter.
     Bogus,
@@ -50,8 +49,9 @@ pub enum TxInTemplate {
 
     /// Spends from a previous transaction defined in the template list.
     ///
-    /// The rule is that the referenced transaction (`prev_name`) must appear
-    /// earlier in the list passed to [`init_graph`].
+    /// - `0` (`&'static str`): the `tx_name` of the transaction to spend from. It must appear
+    ///   earlier in the list passed to [`init_graph`] (otherwise `init_graph` panics).
+    /// - `1` (`usize`): the output index (vout) of that transaction to spend.
     PrevTx(&'static str, usize),
 }
 
@@ -119,6 +119,8 @@ impl<A> TxTemplate<A> {
 }
 
 impl TxOutTemplate {
+    /// Create an output of `value` sats. `spk_index` selects a script pubkey
+    /// from the test descriptor set, or `None` for an empty script.
     pub fn new(value: u64, spk_index: Option<u32>) -> Self {
         TxOutTemplate { value, spk_index }
     }
@@ -128,11 +130,16 @@ impl TxOutTemplate {
 ///
 /// Contains the built [`TxGraph`], the associated indexer, and a mapping from
 /// template names to their final txids.
-#[allow(dead_code)]
 pub struct TxTemplateEnv<A> {
+    /// The graph built from the templates.
     pub tx_graph: TxGraph<A>,
+    /// Indexer holding the test descriptor's script pubkeys, scanned
+    /// against every built transaction.
     pub indexer: SpkTxOutIndex<u32>,
-    pub txid_to_name: HashMap<&'static str, Txid>,
+    /// Maps each template's `tx_name` to the txid it was assigned.
+    pub txids: HashMap<&'static str, Txid>,
+    /// Canonicalization params, pre-populated with the txids of every template
+    /// marked [`assume_canonical`](TxTemplate::assume_canonical).
     pub canonicalization_params: CanonicalParams,
 }
 
@@ -141,7 +148,6 @@ pub struct TxTemplateEnv<A> {
 /// This is the main entry point for using transaction templates in tests.
 /// It handles txid generation, outpoint wiring, anchor insertion, and last-seen
 /// timestamps automatically.
-#[allow(dead_code)]
 pub fn init_graph<A: Anchor + Clone>(
     tx_templates: impl IntoIterator<Item = TxTemplate<A>>,
 ) -> TxTemplateEnv<A> {
@@ -149,19 +155,23 @@ pub fn init_graph<A: Anchor + Clone>(
         Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[2]).unwrap();
     let mut tx_graph = TxGraph::<A>::default();
     let mut indexer = SpkTxOutIndex::default();
-    (0..10).for_each(|index| {
-        indexer.insert_spk(
-            index,
-            descriptor
-                .at_derivation_index(index)
-                .unwrap()
-                .script_pubkey(),
-        );
-    });
-    let mut txid_to_name = HashMap::<&'static str, Txid>::new();
+    let mut txids = HashMap::<&'static str, Txid>::new();
     let mut canonicalization_params = CanonicalParams::default();
 
     for (bogus_txin_vout, tx_tmp) in tx_templates.into_iter().enumerate() {
+        for output in &tx_tmp.outputs {
+            if let Some(index) = output.spk_index {
+                if indexer.spk_at_index(&index).is_none() {
+                    indexer.insert_spk(
+                        index,
+                        descriptor
+                            .at_derivation_index(index)
+                            .unwrap()
+                            .script_pubkey(),
+                    );
+                }
+            }
+        }
         let tx = Transaction {
             version: transaction::Version::non_standard(0),
             lock_time: LockTime::ZERO,
@@ -189,7 +199,7 @@ pub fn init_graph<A: Anchor + Clone>(
                         witness: Witness::new(),
                     },
                     TxInTemplate::PrevTx(prev_name, prev_vout) => {
-                        let prev_txid = txid_to_name.get(prev_name).expect(
+                        let prev_txid = txids.get(prev_name).expect(
                             "txin template must spend from tx of template that comes before",
                         );
                         TxIn {
@@ -221,7 +231,7 @@ pub fn init_graph<A: Anchor + Clone>(
         if tx_tmp.assume_canonical {
             canonicalization_params.assume_canonical.push(txid);
         }
-        txid_to_name.insert(tx_tmp.tx_name, txid);
+        txids.insert(tx_tmp.tx_name, txid);
         indexer.scan(&tx);
         let _ = tx_graph.insert_tx(tx.clone());
         for anchor in tx_tmp.anchors.iter() {
@@ -234,7 +244,7 @@ pub fn init_graph<A: Anchor + Clone>(
     TxTemplateEnv {
         tx_graph,
         indexer,
-        txid_to_name,
+        txids,
         canonicalization_params,
     }
 }
