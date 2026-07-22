@@ -2,12 +2,24 @@
 
 use std::collections::BTreeMap;
 
-use bdk_chain::{local_chain::LocalChain, BlockId, ConfirmationBlockTime, TxGraph};
+use bdk_chain::{local_chain::LocalChain, BlockId, ChainPosition, ConfirmationBlockTime, TxGraph};
 use bdk_testenv::{hash, utils::new_tx};
 use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
 
+/// Builds an `is_settled` predicate requiring at least `min_confirmations` confirmations.
+fn settled(
+    tip_height: u32,
+    min_confirmations: u32,
+) -> impl Fn(&ChainPosition<ConfirmationBlockTime>) -> bool {
+    let min_confirmations = min_confirmations.max(1); // 0 and 1 behave identically
+    move |pos| {
+        pos.confirmation_height_upper_bound()
+            .is_some_and(|h| tip_height.saturating_sub(h).saturating_add(1) >= min_confirmations)
+    }
+}
+
 #[test]
-fn test_min_confirmations_parameter() {
+fn test_is_settled_boundary() {
     // Create a local chain with several blocks
     let blocks: BTreeMap<u32, BlockHash> = [
         (0, hash!("block0")),
@@ -55,12 +67,13 @@ fn test_min_confirmations_parameter() {
 
     let canonical_view =
         chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let tip_height = canonical_view.tip().height;
 
     // Test min_confirmations = 1: Should be confirmed (has 6 confirmations)
     let balance_1_conf = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| true, // trust all
-        1,
+        [outpoint],
+        |_tx| false, // leave trust to ancestry
+        settled(tip_height, 1),
     );
 
     assert_eq!(balance_1_conf.confirmed, Amount::from_sat(50_000));
@@ -68,31 +81,21 @@ fn test_min_confirmations_parameter() {
 
     // Test min_confirmations = 6: Should be confirmed (has exactly 6 confirmations)
     let balance_6_conf = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| true, // trust all
-        6,
+        [outpoint],
+        |_tx| false, // leave trust to ancestry
+        settled(tip_height, 6),
     );
     assert_eq!(balance_6_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_6_conf.trusted_pending, Amount::ZERO);
 
     // Test min_confirmations = 7: Should be trusted pending (only has 6 confirmations)
     let balance_7_conf = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| true, // trust all
-        7,
+        [outpoint],
+        |_tx| false, // leave trust to ancestry
+        settled(tip_height, 7),
     );
     assert_eq!(balance_7_conf.confirmed, Amount::ZERO);
     assert_eq!(balance_7_conf.trusted_pending, Amount::from_sat(50_000));
-
-    // Test min_confirmations = 0: Should behave same as 1 (confirmed)
-    let balance_0_conf = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| true, // trust all
-        0,
-    );
-    assert_eq!(balance_0_conf.confirmed, Amount::from_sat(50_000));
-    assert_eq!(balance_0_conf.trusted_pending, Amount::ZERO);
-    assert_eq!(balance_0_conf, balance_1_conf);
 }
 
 #[test]
@@ -117,10 +120,33 @@ fn test_min_confirmations_with_untrusted_tx() {
 
     let mut tx_graph = TxGraph::default();
 
+    // A settled parent, so ancestry alone would make the child trusted and `does_taint` is what
+    // decides the outcome.
+    let parent = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("root"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(25_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(0)
+    };
+    let parent_txid = parent.compute_txid();
+    let _ = tx_graph.insert_tx(parent.clone());
+    let _ = tx_graph.insert_anchor(
+        parent_txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+
     // Create a transaction
     let tx = Transaction {
         input: vec![TxIn {
-            previous_output: OutPoint::new(hash!("parent"), 0),
+            previous_output: OutPoint::new(parent_txid, 0),
             ..Default::default()
         }],
         output: vec![TxOut {
@@ -143,18 +169,28 @@ fn test_min_confirmations_with_untrusted_tx() {
 
     let canonical_view =
         chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let tip_height = canonical_view.tip().height;
 
-    // Test with min_confirmations = 5 and untrusted predicate
+    // Test with min_confirmations = 5 and everything tainted
     let balance = canonical_view.balance(
-        [((), outpoint)],
-        |_, _| false, // don't trust
-        5,
+        [outpoint],
+        |_tx| true, // taint everything
+        settled(tip_height, 5),
     );
 
     // Should be untrusted pending (not enough confirmations and not trusted)
     assert_eq!(balance.confirmed, Amount::ZERO);
     assert_eq!(balance.trusted_pending, Amount::ZERO);
     assert_eq!(balance.untrusted_pending, Amount::from_sat(25_000));
+
+    // Without the taint, the settled ancestry makes it trusted instead.
+    let balance = canonical_view.balance(
+        [outpoint],
+        |_tx| false, // leave trust to ancestry
+        settled(tip_height, 5),
+    );
+    assert_eq!(balance.trusted_pending, Amount::from_sat(25_000));
+    assert_eq!(balance.untrusted_pending, Amount::ZERO);
 }
 
 #[test]
@@ -209,7 +245,7 @@ fn test_min_confirmations_multiple_transactions() {
             confirmation_time: 123456,
         },
     );
-    outpoints.push(((), outpoint0));
+    outpoints.push(outpoint0);
 
     // Transaction 1: anchored at height 10, has 6 confirmations (15-10+1 = 6)
     let tx1 = Transaction {
@@ -233,7 +269,7 @@ fn test_min_confirmations_multiple_transactions() {
             confirmation_time: 123457,
         },
     );
-    outpoints.push(((), outpoint1));
+    outpoints.push(outpoint1);
 
     // Transaction 2: anchored at height 13, has 3 confirmations (15-13+1 = 3)
     let tx2 = Transaction {
@@ -257,16 +293,17 @@ fn test_min_confirmations_multiple_transactions() {
             confirmation_time: 123458,
         },
     );
-    outpoints.push(((), outpoint2));
+    outpoints.push(outpoint2);
 
     let canonical_view =
         chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let tip_height = canonical_view.tip().height;
 
     // Test with min_confirmations = 5
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> confirmed
     // tx2: 3 confirmations -> trusted pending
-    let balance = canonical_view.balance(outpoints.clone(), |_, _| true, 5);
+    let balance = canonical_view.balance(outpoints.clone(), |_tx| false, settled(tip_height, 5));
 
     assert_eq!(
         balance.confirmed,
@@ -282,7 +319,7 @@ fn test_min_confirmations_multiple_transactions() {
     // tx0: 11 confirmations -> confirmed
     // tx1: 6 confirmations -> trusted pending
     // tx2: 3 confirmations -> trusted pending
-    let balance_high = canonical_view.balance(outpoints, |_, _| true, 10);
+    let balance_high = canonical_view.balance(outpoints, |_tx| false, settled(tip_height, 10));
 
     assert_eq!(
         balance_high.confirmed,
