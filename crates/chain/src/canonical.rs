@@ -22,7 +22,7 @@
 //! }
 //! ```
 
-use crate::collections::HashMap;
+use crate::collections::{HashMap, HashSet};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::{fmt, ops::RangeBounds};
@@ -33,6 +33,32 @@ use bitcoin::{
 };
 
 use crate::{spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalViewTask, ChainPosition, TxGraph};
+
+/// The spend-eligibility classification of a canonical output, produced by
+/// [`CanonicalView::classify_outpoints`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Eligibility {
+    /// An output the caller considers settled, per the `is_settled` predicate given to
+    /// [`classify_outpoints`](CanonicalView::classify_outpoints). Typically confirmed deeply
+    /// enough to be unlikely to be replaced, but the caller decides.
+    Settled,
+    /// A coinbase output that has not yet matured and is not spendable.
+    Immature,
+    /// An output not yet settled.
+    Unsettled(Trust),
+}
+
+/// Describes whether an [`Unsettled`](Eligibility::Unsettled) output is trusted, untrusted, or of
+/// unknown trust because the `CanonicalView` doesn't have its full ancestry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Trust {
+    /// Ancestors spend owned outputs.
+    Trusted,
+    /// Ancestors spend foreign outputs.
+    Untrusted,
+    /// Some ancestor is not in Canonical set.
+    Unknown,
+}
 
 /// A single canonical transaction with its position.
 ///
@@ -394,6 +420,150 @@ impl<A, P: Clone> Canonical<A, P> {
 }
 
 impl<A: Anchor> CanonicalView<A> {
+    /// Classify each of the given `outpoints` by its [spend eligibility](Eligibility).
+    /// This is the primitive behind [`balance`](Self::balance).
+    ///  
+    /// Callers that need richer handling (coin selection, coin control, or
+    /// wallet-specific categories like "locked") can fold over this instead of `balance`.
+    ///
+    /// Outpoints that are already spent, or that aren't part of this canonical view, are skipped.
+    ///
+    /// # Arguments
+    ///
+    /// * `outpoints` - The outpoints to classify.
+    /// * `does_taint` - Returns `true` for a transaction that pulls in untrusted funds (e.g. it
+    ///   spends an output the wallet doesn't own). It drives the [`Trust`] of an unsettled output:
+    ///   a tainting transaction in its ancestry makes it [`Untrusted`](Trust::Untrusted). Outputs
+    ///   with missing ancestry stay [`Unknown`](Trust::Unknown) regardless of this predicate.
+    /// * `is_settled` - Returns `true` for the [position](ChainPosition) of a transaction we
+    ///   consider settled (unlikely to be replaced), for example one with enough confirmations.
+    pub fn classify_outpoints<'a>(
+        &'a self,
+        outpoints: impl IntoIterator<Item = OutPoint> + 'a,
+        mut does_taint: impl FnMut(&CanonicalTx<ChainPosition<A>>) -> bool + 'a,
+        is_settled: impl Fn(&ChainPosition<A>) -> bool + 'a,
+    ) -> impl Iterator<Item = (CanonicalTxOut<ChainPosition<A>>, Eligibility)> + 'a {
+        let tip = self.tip.height;
+        // Shared across outpoints so an ancestor reached by several of them is only walked once.
+        let mut cache = HashMap::<Txid, Trust>::new();
+        outpoints
+            .into_iter()
+            .filter_map(move |op| self.txout(op))
+            .filter(|txo| txo.spent_by.is_none())
+            .map(move |txout| {
+                let eligibility = if !txout.is_mature(tip) {
+                    Eligibility::Immature
+                } else if is_settled(&txout.pos) {
+                    Eligibility::Settled
+                } else {
+                    Eligibility::Unsettled(self.ancestry_trust(
+                        txout.outpoint.txid,
+                        &mut does_taint,
+                        &is_settled,
+                        &mut cache,
+                    ))
+                };
+                (txout, eligibility)
+            })
+    }
+
+    /// Returns the [`Trust`] of `seed_txid` based on its unsettled ancestry.
+    ///
+    /// Walks backwards from `seed_txid`, stopping at settled ancestors.
+    /// An ancestor missing from the [`CanonicalView`] set is [`Unknown`](Trust::Unknown).
+    /// Each visited transaction is cached, so an ancestor shared by several outpoints only gets
+    /// walked once across the calls to this method that share the same `cache`.
+    /// The walk stops at [`Settled`](Eligibility::Settled) transactions and at
+    /// [`Unknown`](Trust::Unknown) ones, and performs a short-circuit as soon as a tainting
+    /// transaction is found.
+    fn ancestry_trust<F, S>(
+        &self,
+        seed_txid: Txid,
+        does_taint: &mut F,
+        is_settled: &S,
+        cache: &mut HashMap<Txid, Trust>,
+    ) -> Trust
+    where
+        F: FnMut(&CanonicalTx<ChainPosition<A>>) -> bool,
+        S: Fn(&ChainPosition<A>) -> bool,
+    {
+        if let Some(&trust) = cache.get(&seed_txid) {
+            return trust;
+        }
+
+        // `Enter`: if tx is unsettled and not directly tainted, queue its parents.
+        // `Exit`: by now every parent is resolved, so the tx is tainted if any parent is.
+        enum Frame<A: Anchor> {
+            Enter(Txid),
+            Exit(CanonicalTx<ChainPosition<A>>),
+        }
+
+        let mut stack = alloc::vec![Frame::Enter(seed_txid)];
+        // Txids currently on the stack between their `Enter` and `Exit`, so we don't queue the
+        // same parent twice while it's still being processed.
+        let mut pending = HashSet::<Txid>::new();
+
+        while let Some(frame) = stack.pop() {
+            match frame {
+                Frame::Enter(txid) => {
+                    if cache.contains_key(&txid) || pending.contains(&txid) {
+                        continue;
+                    }
+                    let Some(c_tx) = self.tx(txid) else {
+                        // Missing from the `CanonicalView`.
+                        cache.insert(txid, Trust::Unknown);
+                        continue;
+                    };
+                    if is_settled(&c_tx.pos) {
+                        cache.insert(txid, Trust::Trusted);
+                        continue;
+                    }
+                    if does_taint(&c_tx) {
+                        // Directly tainted
+                        cache.insert(txid, Trust::Untrusted);
+                        continue;
+                    }
+                    pending.insert(txid);
+                    stack.push(Frame::Exit(c_tx.clone()));
+                    for txin in &c_tx.tx.input {
+                        // Previous output is coinbase
+                        if txin.previous_output.is_null() {
+                            continue;
+                        }
+                        let parent_txid = txin.previous_output.txid;
+                        if !cache.contains_key(&parent_txid) && !pending.contains(&parent_txid) {
+                            stack.push(Frame::Enter(parent_txid));
+                        }
+                    }
+                }
+                Frame::Exit(c_tx) => {
+                    let mut trust = Trust::Trusted;
+                    for txin in &c_tx.tx.input {
+                        if txin.previous_output.is_null() {
+                            continue;
+                        }
+                        let parent_trust = cache
+                            .get(&txin.previous_output.txid)
+                            .copied()
+                            .unwrap_or(Trust::Trusted);
+                        trust = match (trust, parent_trust) {
+                            (Trust::Untrusted, _) | (_, Trust::Untrusted) => Trust::Untrusted,
+                            (Trust::Unknown, _) | (_, Trust::Unknown) => Trust::Unknown,
+                            _ => Trust::Trusted,
+                        };
+                        if trust == Trust::Untrusted {
+                            break;
+                        }
+                    }
+                    cache.insert(c_tx.txid, trust);
+                    pending.remove(&c_tx.txid);
+                }
+            }
+        }
+
+        cache[&seed_txid]
+    }
+
     /// Calculate the total balance of the given outpoints.
     ///
     /// This method computes a detailed balance breakdown for a set of outpoints, categorizing
