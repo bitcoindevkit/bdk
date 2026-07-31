@@ -297,10 +297,7 @@ mod test {
     const TEST_MAGIC_BYTES: [u8; TEST_MAGIC_BYTES_LEN] =
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
 
-    use bdk_testenv::persist_test_utils::{
-        assert_persist_changesets, keychain_txout_changesets, local_chain_changesets,
-        tx_graph_changesets,
-    };
+    use bdk_testenv::persist_test_utils::*;
 
     type TestChangeSet = BTreeSet<String>;
 

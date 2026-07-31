@@ -1,10 +1,7 @@
 #![cfg(feature = "rusqlite")]
 use anyhow::anyhow;
 use bdk_chain::{keychain_txout, local_chain, tx_graph, ConfirmationBlockTime};
-use bdk_testenv::persist_test_utils::{
-    assert_persist_changesets, keychain_txout_changesets, local_chain_changesets,
-    tx_graph_changesets,
-};
+use bdk_testenv::persist_test_utils::*;
 
 #[test]
 fn txgraph_is_persisted() -> anyhow::Result<()> {
@@ -35,6 +32,7 @@ fn txgraph_is_persisted() -> anyhow::Result<()> {
 }
 
 #[test]
+#[cfg(feature = "miniscript")]
 fn indexer_is_persisted() -> anyhow::Result<()> {
     let temp_dir = tempfile::tempdir().unwrap();
     let changesets = keychain_txout_changesets();
