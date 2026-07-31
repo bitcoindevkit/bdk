@@ -22,15 +22,18 @@ const ADDRS: [&str; 2] = [
     "bcrt1q8an5jfmpq8w2hr648nn34ecf9zdtxk0qyqtrfl",
 ];
 
-/// A helper to check if a custom persistence backend persists `ChangeSet`s correctly.
+/// Asserts a persistence backend correctly stores and reloads a sequence of `ChangeSet`s.
 ///
-/// This first tries to create a `Store` using `init`, `load`s from it and checks if
-/// the result is an empty `ChangeSet`.
-/// It then tries to `persist` each `ChangeSet` in `changesets` one by one, doing a `load`
-/// each time and checks that the aggregated `ChangeSet` matches the one loaded.
+/// Checks that `load` always returns the merge of everything `persist`ed so far - including after
+/// the store is dropped and reopened. The backend is supplied as three closures:
 ///
-/// Finally it closes the `Store`, reopens it using `init`, `load`s from it and checks if the loaded
-/// `ChangeSet` matches the final aggregated `ChangeSet`.
+/// - `init`: open-or-create a handle. This must never wipe existing data.
+/// - `load`: return the full persisted changeset (`C::default()` on a fresh store).
+/// - `persist`: durably write one changeset on top of what's stored; must survive the handle being
+///   dropped.
+///
+/// Returns `Err` naming the failing step if a closure errors or a load doesn't match the expected
+/// merge.
 pub fn assert_persist_changesets<C, Store, Init, Load, Persist>(
     init: Init,
     load: Load,
