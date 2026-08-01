@@ -103,7 +103,7 @@ pub fn create_test_tx(
     vouts: impl IntoIterator<Item = u32>,
     amounts: impl IntoIterator<Item = u64>,
     addrs: impl IntoIterator<Item = &'static str>,
-    version: u32,
+    version: transaction::Version,
     locktime: u32,
 ) -> Transaction {
     let input_vec = core::iter::zip(txids, vouts)
@@ -115,8 +115,6 @@ pub fn create_test_tx(
     let output_vec = core::iter::zip(amounts, addrs)
         .map(|(amount, addr)| create_txout(amount, addr))
         .collect();
-    let version = transaction::Version::non_standard(version as i32);
-    assert!(version.is_standard());
     let lock_time = absolute::LockTime::from_consensus(locktime);
     assert_eq!(lock_time.to_consensus_u32(), locktime);
     Transaction {
