@@ -2,7 +2,7 @@
 use crate::{block_id, hash};
 use alloc::sync::Arc;
 use bdk_chain::{
-    bitcoin::{self, OutPoint},
+    bitcoin::{self, transaction::Version, OutPoint},
     local_chain, tx_graph, ConfirmationBlockTime, Merge,
 };
 
@@ -47,35 +47,44 @@ where
     Persist: Fn(&mut Store, &C) -> Result<(), Box<dyn Err>>,
 {
     let mut merged_changeset = C::default();
-    {
-        let mut store = init().map_err(|err| {
+    let mut store = init().map_err(|err| {
+        format!(
+            "Encountered an error from the persister while initializing the store.\nGot:\n{}",
+            err
+        )
+    })?;
+
+    let init_changeset = load(&mut store).map_err(|err| {
+        format!(
+            "Encountered an error from the persister while loading from the new store.\nGot:\n{}",
+            err
+        )
+    })?;
+
+    if init_changeset != C::default() {
+        Err("Loading from a new store should return an empty changeset.")?;
+    }
+
+    for (i, changeset) in changesets.iter().enumerate() {
+        persist(&mut store, changeset).map_err(|err| {
             format!(
-                "Encountered an error from the persister while initializing the store.\nGot:\n{}",
+                "Persisting changeset no. {} failed. Got an error from the persister instead:\n{} ",
+                i + 1,
                 err
             )
         })?;
 
-        let init_changeset = load(&mut store).map_err(|err| format!("Encountered an error from the persister while loading from the new store.\nGot:\n{}",err))?;
+        merged_changeset.merge(changeset.clone());
 
-        if init_changeset != C::default() {
-            Err("Loading from a new store should return an empty changeset.")?;
-        }
+        let persisted_changeset = load(&mut store).map_err(|err| format!("Encountered an error from the persister while loading (after persisting changeset no. {}).\nGot:\n {}", i+1, err))?;
 
-        for (i, changeset) in changesets.iter().enumerate() {
-            persist(&mut store, changeset).map_err(|err| format!("Persisting changeset no. {} failed. Got an error from the persister instead:\n{} ", i+1, err) )?;
-
-            merged_changeset.merge(changeset.clone());
-
-            let persisted_changeset = load(&mut store).map_err(|err| format!("Encountered an error from the persister while loading (after persisting changeset no. {}).\nGot:\n {}", i+1, err))?;
-
-            if persisted_changeset != merged_changeset {
-                Err(format!(
-                    "Persisting changeset no. {} failed.\nExpected:\n\n{:?}\n\n\nLoaded:\n\n{:?};",
-                    i + 1,
-                    merged_changeset,
-                    persisted_changeset
-                ))?;
-            }
+        if persisted_changeset != merged_changeset {
+            Err(format!(
+                "Persisting changeset no. {} failed.\nExpected:\n\n{:?}\n\n\nLoaded:\n\n{:?};",
+                i + 1,
+                merged_changeset,
+                persisted_changeset
+            ))?;
         }
     }
 
@@ -112,7 +121,7 @@ pub fn tx_graph_changesets() -> [tx_graph::ChangeSet<ConfirmationBlockTime>; 2] 
         [0],
         [30_000],
         [ADDRS[0]],
-        1,
+        Version::ONE,
         0,
     ));
 
@@ -142,7 +151,7 @@ pub fn tx_graph_changesets() -> [tx_graph::ChangeSet<ConfirmationBlockTime>; 2] 
         [0],
         [20_000],
         [ADDRS[0]],
-        1,
+        Version::ONE,
         0,
     ));
 
