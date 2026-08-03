@@ -314,7 +314,7 @@ where
     I: Iterator<Item = Indexed<SpkWithExpectedTxids>> + Send,
     S: Sleeper + Clone + Send + Sync,
 {
-    type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
+    type TxsOfSpkIndex = (u32, Vec<esplora_client::EsploraTx>, HashSet<Txid>);
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     let mut last_active_index = Option::<u32>::None;
@@ -335,7 +335,7 @@ where
                     let mut last_seen = None;
                     let mut spk_txs = Vec::new();
                     loop {
-                        let txs = client.scripthash_txs(&spk, last_seen).await?;
+                        let txs = client.get_scripthash_txs(&spk, last_seen).await?;
                         let tx_count = txs.len();
                         last_seen = txs.last().map(|tx| tx.txid);
                         spk_txs.extend(txs);

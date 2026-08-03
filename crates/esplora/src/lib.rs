@@ -21,7 +21,7 @@
 //! [`esplora_client::AsyncClient`].
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use bdk_core::bitcoin::{Amount, OutPoint, TxOut, Txid};
+use bdk_core::bitcoin::{OutPoint, TxOut, Txid};
 use bdk_core::{BlockId, ConfirmationBlockTime, TxUpdate};
 use esplora_client::TxStatus;
 
@@ -76,7 +76,7 @@ fn insert_prevouts(
             OutPoint::new(prev_txid, prev_vout),
             TxOut {
                 script_pubkey: prev_txout.scriptpubkey,
-                value: Amount::from_sat(prev_txout.value),
+                value: prev_txout.value,
             },
         );
     }
