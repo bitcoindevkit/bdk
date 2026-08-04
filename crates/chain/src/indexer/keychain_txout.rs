@@ -540,16 +540,23 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn lookahead_to_target(&mut self, keychain: K, target_index: u32) -> ChangeSet {
         let mut changeset = ChangeSet::default();
         if let Some((next_index, _)) = self.next_index(keychain.clone()) {
-            let temp_lookahead = (target_index + 1)
-                .checked_sub(next_index)
-                .filter(|&index| index > 0);
-
-            if let Some(temp_lookahead) = temp_lookahead {
+            if let Some(temp_lookahead) = Self::lookahead_delta(target_index, next_index) {
                 self.replenish_inner_index_keychain(keychain, temp_lookahead);
             }
         }
         self._empty_stage_into_changeset(&mut changeset);
         changeset
+    }
+
+    /// Computes how many additional lookahead scripts are needed to cover `target_index`
+    /// (inclusive), given the next index that would be derived (`next_index`).
+    ///
+    /// Returns `None` if `target_index` is already covered (i.e. `target_index < next_index`).
+    fn lookahead_delta(target_index: u32, next_index: u32) -> Option<u32> {
+        target_index
+            .saturating_add(1)
+            .checked_sub(next_index)
+            .filter(|&index| index > 0)
     }
 
     fn replenish_inner_index_did(&mut self, did: DescriptorId, lookahead: u32) {
@@ -1145,6 +1152,24 @@ mod test {
     use bdk_testenv::utils::DESCRIPTORS;
     use bitcoin::secp256k1::Secp256k1;
     use miniscript::Descriptor;
+
+    /// `lookahead_delta` must not panic (via overflow) when `target_index` is `u32::MAX`, and
+    /// must saturate rather than silently returning a wrong/empty result.
+    #[test]
+    fn lookahead_delta_does_not_overflow_at_u32_max() {
+        // Fresh keychain (next_index = 0): delta should saturate to u32::MAX, not overflow.
+        assert_eq!(
+            KeychainTxOutIndex::<i32>::lookahead_delta(u32::MAX, 0),
+            Some(u32::MAX)
+        );
+        // Target already covered by next_index: no lookahead needed.
+        assert_eq!(
+            KeychainTxOutIndex::<i32>::lookahead_delta(u32::MAX, u32::MAX),
+            None
+        );
+        // Normal, non-boundary case still behaves as before.
+        assert_eq!(KeychainTxOutIndex::<i32>::lookahead_delta(10, 5), Some(6));
+    }
 
     // Test that `KeychainTxOutIndex` uses the spk cache.
     // And the indexed spks are as expected.
