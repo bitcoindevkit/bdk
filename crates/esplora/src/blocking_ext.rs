@@ -1,15 +1,16 @@
-use bdk_core::collections::{BTreeMap, BTreeSet, HashSet};
+use bdk_core::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use bdk_core::spk_client::{
     FullScanRequest, FullScanResponse, SpkWithExpectedTxids, SyncRequest, SyncResponse,
 };
 use bdk_core::{
-    bitcoin::{BlockHash, OutPoint, Txid},
+    bitcoin::{BlockHash, OutPoint, Transaction, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
 };
 use esplora_client::{OutputStatus, Tx};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
+use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts, BdkEsploraClient};
 
 /// [`esplora_client::Error`]
 pub type Error = Box<esplora_client::Error>;
@@ -75,6 +76,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                 .map(|(spk_i, spk)| (spk_i, spk.into()));
             let (update, last_active_index) = fetch_txs_with_keychain_spks(
                 self,
+                None,
                 start_time,
                 &mut inserted_txs,
                 keychain_spks,
@@ -124,6 +126,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         let mut inserted_txs = HashSet::<Txid>::new();
         tx_update.extend(fetch_txs_with_spks(
             self,
+            None,
             start_time,
             &mut inserted_txs,
             request.iter_spks_with_expected_txids(),
@@ -131,6 +134,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         )?);
         tx_update.extend(fetch_txs_with_txids(
             self,
+            None,
             start_time,
             &mut inserted_txs,
             request.iter_txids(),
@@ -138,6 +142,7 @@ impl EsploraExt for esplora_client::BlockingClient {
         )?);
         tx_update.extend(fetch_txs_with_outpoints(
             self,
+            None,
             start_time,
             &mut inserted_txs,
             request.iter_outpoints(),
@@ -147,6 +152,134 @@ impl EsploraExt for esplora_client::BlockingClient {
         let chain_update = match (chain_tip, latest_blocks) {
             (Some(chain_tip), Some(latest_blocks)) => Some(chain_update(
                 self,
+                &latest_blocks,
+                &chain_tip,
+                &tx_update.anchors,
+            )?),
+            _ => None,
+        };
+
+        Ok(SyncResponse {
+            chain_update,
+            tx_update,
+        })
+    }
+}
+
+impl BdkEsploraClient<esplora_client::BlockingClient> {
+    /// Scan keychain scripts for transactions against Esplora, returning an update that can be
+    /// applied to the receiving structures.
+    ///
+    /// This behaves like [`EsploraExt::full_scan`], except that already-cached transactions
+    /// (populated via [`BdkEsploraClient::populate_tx_cache`] or a previous call to
+    /// [`full_scan`](Self::full_scan) / [`sync`](Self::sync)) are not re-fetched.
+    pub fn full_scan<K: Ord + Clone, R: Into<FullScanRequest<K>>>(
+        &self,
+        request: R,
+        stop_gap: usize,
+        parallel_requests: usize,
+    ) -> Result<FullScanResponse<K>, Error> {
+        let mut request: FullScanRequest<K> = request.into();
+        let start_time = request.start_time();
+
+        let chain_tip = request.chain_tip();
+        let latest_blocks = if chain_tip.is_some() {
+            Some(fetch_latest_blocks(&self.inner)?)
+        } else {
+            None
+        };
+
+        let mut tx_update = TxUpdate::default();
+        let mut inserted_txs = HashSet::<Txid>::new();
+        let mut last_active_indices = BTreeMap::<K, u32>::new();
+        for keychain in request.keychains() {
+            let last_revealed = request.last_revealed(&keychain);
+            let keychain_spks = request
+                .iter_spks(keychain.clone())
+                .map(|(spk_i, spk)| (spk_i, spk.into()));
+            let (update, last_active_index) = fetch_txs_with_keychain_spks(
+                &self.inner,
+                Some(&self.tx_cache),
+                start_time,
+                &mut inserted_txs,
+                keychain_spks,
+                stop_gap,
+                last_revealed,
+                parallel_requests,
+            )?;
+            tx_update.extend(update);
+            if let Some(last_active_index) = last_active_index {
+                last_active_indices.insert(keychain, last_active_index);
+            }
+        }
+
+        let chain_update = match (chain_tip, latest_blocks) {
+            (Some(chain_tip), Some(latest_blocks)) => Some(chain_update(
+                &self.inner,
+                &latest_blocks,
+                &chain_tip,
+                &tx_update.anchors,
+            )?),
+            _ => None,
+        };
+
+        Ok(FullScanResponse {
+            chain_update,
+            tx_update,
+            last_active_indices,
+        })
+    }
+
+    /// Sync a set of scripts, txids, and/or outpoints against Esplora.
+    ///
+    /// This behaves like [`EsploraExt::sync`], except that for `txid`s already present in the
+    /// transaction cache, only their confirmation status is re-checked (via a lightweight
+    /// `get_tx_status` call) rather than re-downloading the full transaction body.
+    pub fn sync<I: 'static, R: Into<SyncRequest<I>>>(
+        &self,
+        request: R,
+        parallel_requests: usize,
+    ) -> Result<SyncResponse, Error> {
+        let mut request: SyncRequest<I> = request.into();
+        let start_time = request.start_time();
+
+        let chain_tip = request.chain_tip();
+        let latest_blocks = if chain_tip.is_some() {
+            Some(fetch_latest_blocks(&self.inner)?)
+        } else {
+            None
+        };
+
+        let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
+        let mut inserted_txs = HashSet::<Txid>::new();
+        tx_update.extend(fetch_txs_with_spks(
+            &self.inner,
+            Some(&self.tx_cache),
+            start_time,
+            &mut inserted_txs,
+            request.iter_spks_with_expected_txids(),
+            parallel_requests,
+        )?);
+        tx_update.extend(fetch_txs_with_txids(
+            &self.inner,
+            Some(&self.tx_cache),
+            start_time,
+            &mut inserted_txs,
+            request.iter_txids(),
+            parallel_requests,
+        )?);
+        tx_update.extend(fetch_txs_with_outpoints(
+            &self.inner,
+            Some(&self.tx_cache),
+            start_time,
+            &mut inserted_txs,
+            request.iter_outpoints(),
+            parallel_requests,
+        )?);
+
+        let chain_update = match (chain_tip, latest_blocks) {
+            (Some(chain_tip), Some(latest_blocks)) => Some(chain_update(
+                &self.inner,
                 &latest_blocks,
                 &chain_tip,
                 &tx_update.anchors,
@@ -273,8 +406,10 @@ fn chain_update(
     Ok(tip)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>>>(
     client: &esplora_client::BlockingClient,
+    tx_cache: Option<&Mutex<HashMap<Txid, Arc<Transaction>>>>,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     mut keychain_spks: I,
@@ -335,10 +470,15 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
             }
 
             for tx in txs {
-                if inserted_txs.insert(tx.txid) {
-                    update.txs.push(tx.to_tx().into());
+                let txid = tx.txid;
+                if inserted_txs.insert(txid) {
+                    let tx_arc: Arc<Transaction> = tx.to_tx().into();
+                    if let Some(tx_cache) = tx_cache {
+                        tx_cache.lock().unwrap().insert(txid, Arc::clone(&tx_arc));
+                    }
+                    update.txs.push(tx_arc);
                 }
-                insert_anchor_or_seen_at_from_status(&mut update, start_time, tx.txid, tx.status);
+                insert_anchor_or_seen_at_from_status(&mut update, start_time, txid, tx.status);
                 insert_prevouts(&mut update, tx.vin);
             }
             update
@@ -364,6 +504,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
 /// Refer to [crate-level docs](crate) for more.
 fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
     client: &esplora_client::BlockingClient,
+    tx_cache: Option<&Mutex<HashMap<Txid, Arc<Transaction>>>>,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     spks: I,
@@ -371,6 +512,7 @@ fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
     fetch_txs_with_keychain_spks(
         client,
+        tx_cache,
         start_time,
         inserted_txs,
         spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
@@ -389,20 +531,34 @@ fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
 /// Refer to [crate-level docs](crate) for more.
 fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
     client: &esplora_client::BlockingClient,
+    tx_cache: Option<&Mutex<HashMap<Txid, Arc<Transaction>>>>,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     txids: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
-    // Only fetch for non-inserted txs.
-    let mut txids = txids
-        .into_iter()
-        .filter(|txid| !inserted_txs.contains(txid))
-        .collect::<Vec<Txid>>()
-        .into_iter();
+
+    // Only fetch for non-inserted txs. Split into txs already in the cache (for which we only
+    // need to check the confirmation status) and txs we have never seen before (for which we
+    // need the full transaction body).
+    let mut to_fetch = Vec::<Txid>::new();
+    let mut to_check_status = Vec::<(Txid, Arc<Transaction>)>::new();
+    for txid in txids {
+        if inserted_txs.contains(&txid) {
+            continue;
+        }
+        let cached_tx = tx_cache.and_then(|cache| cache.lock().unwrap().get(&txid).cloned());
+        match cached_tx {
+            Some(tx) => to_check_status.push((txid, tx)),
+            None => to_fetch.push(txid),
+        }
+    }
+
+    // Fully fetch transactions we have not seen before, and populate the cache with them.
+    let mut to_fetch = to_fetch.into_iter();
     loop {
-        let handles = txids
+        let handles = to_fetch
             .by_ref()
             .take(parallel_requests)
             .map(|txid| {
@@ -423,14 +579,49 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
         for handle in handles {
             let (txid, tx_info) = handle.join().expect("thread must not panic")?;
             if let Some(tx_info) = tx_info {
+                let tx: Arc<Transaction> = tx_info.to_tx().into();
+                if let Some(tx_cache) = tx_cache {
+                    tx_cache.lock().unwrap().insert(txid, Arc::clone(&tx));
+                }
                 if inserted_txs.insert(txid) {
-                    update.txs.push(tx_info.to_tx().into());
+                    update.txs.push(tx);
                 }
                 insert_anchor_or_seen_at_from_status(&mut update, start_time, txid, tx_info.status);
                 insert_prevouts(&mut update, tx_info.vin);
             }
         }
     }
+
+    // For cached transactions, only re-check their confirmation status.
+    let mut to_check_status = to_check_status.into_iter();
+    loop {
+        let handles = to_check_status
+            .by_ref()
+            .take(parallel_requests)
+            .map(|(txid, tx)| {
+                let client = client.clone();
+                std::thread::spawn(move || {
+                    client
+                        .get_tx_status(&txid)
+                        .map_err(Box::new)
+                        .map(|status| (txid, tx, status))
+                })
+            })
+            .collect::<Vec<JoinHandle<Result<(Txid, Arc<Transaction>, esplora_client::TxStatus), Error>>>>();
+
+        if handles.is_empty() {
+            break;
+        }
+
+        for handle in handles {
+            let (txid, tx, status) = handle.join().expect("thread must not panic")?;
+            if inserted_txs.insert(txid) {
+                update.txs.push(tx);
+            }
+            insert_anchor_or_seen_at_from_status(&mut update, start_time, txid, status);
+        }
+    }
+
     Ok(update)
 }
 
@@ -442,6 +633,7 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
 /// Refer to [crate-level docs](crate) for more.
 fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     client: &esplora_client::BlockingClient,
+    tx_cache: Option<&Mutex<HashMap<Txid, Arc<Transaction>>>>,
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     outpoints: I,
@@ -451,9 +643,9 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
 
     // make sure txs exists in graph and tx statuses are updated
-    // TODO: We should maintain a tx cache (like we do with Electrum).
     update.extend(fetch_txs_with_txids(
         client,
+        tx_cache,
         start_time,
         inserted_txs,
         outpoints.iter().map(|op| op.txid),
@@ -504,6 +696,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
 
     update.extend(fetch_txs_with_txids(
         client,
+        tx_cache,
         start_time,
         inserted_txs,
         missing_txs,
@@ -944,6 +1137,73 @@ mod test {
                 );
             }
         }
+
+        Ok(())
+    }
+
+    /// `BdkEsploraClient::sync` should not need to re-fetch the full transaction body for a
+    /// `txid` that is already present in the client's transaction cache: only its confirmation
+    /// status should be checked. This test verifies the cache does not prevent the update from
+    /// being functionally correct across multiple syncs (unconfirmed -> confirmed).
+    #[test]
+    fn test_bdk_esplora_client_sync_uses_tx_cache() -> anyhow::Result<()> {
+        use crate::BdkEsploraClient;
+        use bdk_chain::bitcoin::Amount;
+        use bdk_core::spk_client::SyncRequest;
+
+        let env = TestEnv::new()?;
+        let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+        let blocking_client = Builder::new(base_url.as_str()).build_blocking();
+        let client = BdkEsploraClient::new(blocking_client);
+
+        env.mine_blocks(101, None)?;
+
+        let addr = env
+            .rpc_client()
+            .get_new_address(None, None)?
+            .address()?
+            .assume_checked();
+        let txid = env.send(&addr, Amount::from_sat(50_000))?;
+        env.wait_until_electrum_sees_txid(txid, Duration::from_secs(6))?;
+
+        // First sync: the tx is unconfirmed and unseen, so it must be fully fetched (and cached).
+        let request = SyncRequest::builder().txids([txid]).build();
+        let resp1 = client.sync(request, 1)?;
+        assert!(resp1
+            .tx_update
+            .txs
+            .iter()
+            .any(|tx| tx.compute_txid() == txid));
+        assert!(resp1
+            .tx_update
+            .seen_ats
+            .iter()
+            .any(|(seen_txid, _)| *seen_txid == txid));
+        assert!(resp1.tx_update.anchors.is_empty());
+
+        // Confirm the tx.
+        env.mine_blocks(1, None)?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+        // Second sync: the tx is already cached, so only its status should be re-checked. The
+        // resulting update should still correctly reflect the new anchor.
+        let request2 = SyncRequest::builder().txids([txid]).build();
+        let resp2 = client.sync(request2, 1)?;
+        assert!(resp2
+            .tx_update
+            .txs
+            .iter()
+            .any(|tx| tx.compute_txid() == txid));
+        assert_eq!(
+            resp2
+                .tx_update
+                .anchors
+                .iter()
+                .filter(|(_, anchor_txid)| *anchor_txid == txid)
+                .count(),
+            1,
+            "tx should now be anchored after confirmation"
+        );
 
         Ok(())
     }

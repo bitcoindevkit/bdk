@@ -21,9 +21,11 @@
 //! [`esplora_client::AsyncClient`].
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use bdk_core::bitcoin::{Amount, OutPoint, TxOut, Txid};
+use bdk_core::bitcoin::{Amount, OutPoint, Transaction, TxOut, Txid};
+use bdk_core::collections::HashMap;
 use bdk_core::{BlockId, ConfirmationBlockTime, TxUpdate};
 use esplora_client::TxStatus;
+use std::sync::{Arc, Mutex};
 
 pub use esplora_client;
 
@@ -36,6 +38,45 @@ pub use blocking_ext::*;
 mod async_ext;
 #[cfg(feature = "async")]
 pub use async_ext::*;
+
+/// Wrapper around an Esplora client (either [`esplora_client::BlockingClient`] or
+/// [`esplora_client::AsyncClient`]) which maintains an internal in-memory transaction cache to
+/// avoid re-fetching the full body of transactions that have already been downloaded in a
+/// previous sync.
+///
+/// This mirrors the caching behavior of `bdk_electrum`'s `BdkElectrumClient`. For a `txid` that
+/// is already present in the cache, only its confirmation status is re-checked (via
+/// [`esplora_client::BlockingClient::get_tx_status`] / [`esplora_client::AsyncClient::get_tx_status`])
+/// instead of re-downloading the full transaction body.
+#[derive(Debug)]
+pub struct BdkEsploraClient<C> {
+    /// The internal esplora client.
+    pub inner: C,
+    /// The transaction cache.
+    tx_cache: Mutex<HashMap<Txid, Arc<Transaction>>>,
+}
+
+impl<C> BdkEsploraClient<C> {
+    /// Creates a new bdk client from an esplora client.
+    pub fn new(client: C) -> Self {
+        Self {
+            inner: client,
+            tx_cache: Default::default(),
+        }
+    }
+
+    /// Insert transactions into the transaction cache so that the client will not re-fetch them.
+    ///
+    /// Typically used to pre-populate the cache from an existing `TxGraph`.
+    pub fn populate_tx_cache(&self, txs: impl IntoIterator<Item = impl Into<Arc<Transaction>>>) {
+        let mut tx_cache = self.tx_cache.lock().unwrap();
+        for tx in txs {
+            let tx = tx.into();
+            let txid = tx.compute_txid();
+            tx_cache.insert(txid, tx);
+        }
+    }
+}
 
 #[allow(dead_code)]
 fn insert_anchor_or_seen_at_from_status(
