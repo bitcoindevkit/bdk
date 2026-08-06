@@ -62,10 +62,23 @@ impl<'g, A: Anchor> CanonicalViewTask<'g, A> {
         let all_anchors = tx_graph.all_anchors();
 
         let mut unprocessed_anchor_checks = VecDeque::new();
+        let mut direct_anchors = HashMap::new();
         for txid in &order {
             if let Some((_, reason)) = txs.get(txid) {
                 if matches!(reason, CanonicalReason::ObservedIn { .. }) {
                     continue;
+                }
+                // A non-transitive `Anchor` reason already carries a chain-verified anchor for
+                // this txid (validated when it was first canonicalized), so it can seed
+                // `direct_anchors` right away. This makes it discoverable by ancestors that
+                // search their descendants for a directly anchored one (see `finish`), which
+                // otherwise only happens for transactions that go through the query loop below.
+                if let CanonicalReason::Anchor {
+                    anchor,
+                    descendant: None,
+                } = reason
+                {
+                    direct_anchors.insert(*txid, anchor.clone());
                 }
                 if reason.is_transitive() || reason.is_assumed() {
                     if let Some(anchors) = all_anchors.get(txid) {
@@ -82,7 +95,7 @@ impl<'g, A: Anchor> CanonicalViewTask<'g, A> {
             canonical_txs: txs,
             spends,
             unprocessed_anchor_checks,
-            direct_anchors: HashMap::new(),
+            direct_anchors,
             current_stage: ViewStage::default(),
         }
     }

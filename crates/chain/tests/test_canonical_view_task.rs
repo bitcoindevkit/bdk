@@ -188,3 +188,131 @@ fn test_assumed_canonical_scenarios() {
         );
     }
 }
+
+#[test]
+fn test_assumed_root_confirmed_via_directly_anchored_descendant() {
+    // scenario: "txX is assumed canonical (root, no anchor of its own); txY spends txX and has
+    // its own direct anchor".
+    //
+    // txY is *not* an ancestor of txX, so it is not swept up by the "assumed" propagation to
+    // ancestors: it keeps its own ordinary `Anchor` reason. txX has no anchor of its own, so its
+    // position must be derived by finding a directly anchored descendant, which here is txY.
+
+    let local_chain = local_chain![
+        (0, hash!("genesis")),
+        (1, hash!("block1")),
+        (2, hash!("block2")),
+        (3, hash!("block3")),
+        (4, hash!("block4")),
+        (5, hash!("block5"))
+    ];
+    let chain_tip = local_chain.tip().block_id();
+
+    let tx_templates = [
+        TxTemplate {
+            tx_name: "txX",
+            inputs: &[TxInTemplate::Bogus],
+            outputs: &[TxOutTemplate::new(100000, Some(0))],
+            anchors: &[],
+            last_seen: None,
+            assume_canonical: true,
+        },
+        TxTemplate {
+            tx_name: "txY",
+            inputs: &[TxInTemplate::PrevTx("txX", 0)],
+            outputs: &[TxOutTemplate::new(50000, Some(0))],
+            anchors: &[block_id!(3, "block3")],
+            last_seen: None,
+            assume_canonical: false,
+        },
+    ];
+
+    let env = init_graph(&tx_templates);
+    let txid_y = *env.txid_to_name.get("txY").unwrap();
+
+    let exp_canonical_txs = HashSet::from(["txX", "txY"]);
+
+    // build task & canonicalize
+    let canonical_params = env.canonicalization_params;
+    let canonical_task = env.tx_graph.canonical_task(chain_tip, canonical_params);
+    let canonical_txs = local_chain.canonicalize(canonical_task);
+
+    let exp_canonical_txids: HashSet<Txid> = exp_canonical_txs
+        .iter()
+        .map(|tx_name| {
+            *env.txid_to_name
+                .get(tx_name)
+                .expect("txid should exist for tx_name")
+        })
+        .collect::<HashSet<Txid>>();
+
+    let canonical_txids = canonical_txs
+        .txs()
+        .map(|canonical_tx| canonical_tx.txid)
+        .collect::<HashSet<Txid>>();
+
+    assert_eq!(
+        canonical_txids, exp_canonical_txids,
+        "canonical transactions mismatch"
+    );
+
+    // sanity-check the underlying reasons: txX is the directly-assumed root, txY keeps its own
+    // ordinary anchor reason (it is a descendant of txX, not an ancestor, so it is not swept up
+    // by "assumed" propagation).
+    let exp_reasons = vec![
+        ("txX", CanonicalReason::Assumed { descendant: None }),
+        (
+            "txY",
+            CanonicalReason::Anchor {
+                anchor: block_id!(3, "block3"),
+                descendant: None,
+            },
+        ),
+    ];
+    for (tx_name, exp_reason) in exp_reasons {
+        let txid = env.txid_to_name.get(tx_name).unwrap();
+        let canonical_reason = canonical_txs
+            .txs()
+            .find(|ctx| &ctx.txid == txid)
+            .expect("expected txid should exist in canonical txs")
+            .pos;
+        assert_eq!(
+            canonical_reason, exp_reason,
+            "canonical reason mismatch for {tx_name}"
+        );
+    }
+
+    // build task & resolve positions
+    let view_task = canonical_txs.view_task(&env.tx_graph);
+    let canonical_view = local_chain.canonicalize(view_task);
+
+    let exp_positions = vec![
+        (
+            "txX",
+            ChainPosition::Confirmed {
+                anchor: block_id!(3, "block3"),
+                transitively: Some(txid_y),
+            },
+        ),
+        (
+            "txY",
+            ChainPosition::Confirmed {
+                anchor: block_id!(3, "block3"),
+                transitively: None,
+            },
+        ),
+    ];
+
+    for (tx_name, exp_position) in exp_positions {
+        let txid = *env.txid_to_name.get(tx_name).unwrap();
+        let canonical_position = canonical_view
+            .txs()
+            .find(|ctx| ctx.txid == txid)
+            .expect("expected txid should exist in canonical view")
+            .pos;
+        assert_eq!(
+            canonical_position, exp_position,
+            "canonical position mismatch for {tx_name}"
+        );
+    }
+}
