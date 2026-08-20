@@ -83,6 +83,21 @@ impl<A: Anchor> ChainPosition<A> {
             ChainPosition::Unconfirmed { .. } => None,
         }
     }
+
+    /// Number of confirmations of this position, given `tip`.
+    ///
+    /// Returns `0` if unconfirmed, or if the confirmation height is above `tip`.
+    pub fn confirmations_lower_bound(&self, tip: u32) -> u32 {
+        let Some(height) = self.confirmation_height_upper_bound() else {
+            return 0;
+        };
+
+        if height > tip {
+            return 0;
+        }
+
+        tip - height + 1
+    }
 }
 
 /// Ordering for `ChainPosition`:
@@ -334,5 +349,30 @@ mod test {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn test_confirmations_lower_bound() {
+        let confirmed_at = |height: u32| ChainPosition::Confirmed {
+            anchor: ConfirmationBlockTime {
+                confirmation_time: 0,
+                block_id: BlockId {
+                    height,
+                    ..Default::default()
+                },
+            },
+            transitively: None,
+        };
+
+        assert_eq!(confirmed_at(100).confirmations_lower_bound(100), 1);
+        assert_eq!(confirmed_at(99).confirmations_lower_bound(100), 2);
+        assert_eq!(confirmed_at(90).confirmations_lower_bound(100), 11);
+        assert_eq!(confirmed_at(101).confirmations_lower_bound(100), 0);
+
+        let unconfirmed = ChainPosition::<ConfirmationBlockTime>::Unconfirmed {
+            first_seen: Some(1),
+            last_seen: Some(2),
+        };
+        assert_eq!(unconfirmed.confirmations_lower_bound(100), 0);
     }
 }
