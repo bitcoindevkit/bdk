@@ -329,6 +329,7 @@ fn get_balance(
             outpoints.into_iter().map(|(_, op)| op),
             bdk_chain::taints_unowned(&recv_graph.index),
             |pos| pos.is_confirmed(),
+            |_txout| false,
         );
     Ok(balance)
 }

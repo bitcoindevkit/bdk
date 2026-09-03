@@ -12,6 +12,8 @@ pub struct Balance {
     pub untrusted_pending: Amount,
     /// Confirmed and immediately spendable balance
     pub confirmed: Amount,
+    /// Coins locked by some timelock
+    pub locked: Amount,
 }
 
 impl Balance {
@@ -25,7 +27,7 @@ impl Balance {
 
     /// Get the whole balance visible to the wallet.
     pub fn total(&self) -> Amount {
-        self.confirmed + self.trusted_pending + self.untrusted_pending + self.immature
+        self.confirmed + self.trusted_pending + self.untrusted_pending + self.immature + self.locked
     }
 }
 
@@ -33,8 +35,8 @@ impl core::fmt::Display for Balance {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
-            "{{ immature: {}, trusted_pending: {}, untrusted_pending: {}, confirmed: {} }}",
-            self.immature, self.trusted_pending, self.untrusted_pending, self.confirmed
+            "{{ immature: {}, trusted_pending: {}, untrusted_pending: {}, confirmed: {}, locked: {} }}",
+            self.immature, self.trusted_pending, self.untrusted_pending, self.confirmed, self.locked
         )
     }
 }
@@ -48,6 +50,7 @@ impl core::ops::Add for Balance {
             trusted_pending: self.trusted_pending + other.trusted_pending,
             untrusted_pending: self.untrusted_pending + other.untrusted_pending,
             confirmed: self.confirmed + other.confirmed,
+            locked: self.locked + other.locked,
         }
     }
 }
