@@ -992,6 +992,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             }
         }
         for (did, index) in changeset.last_revealed {
+            let index = index.min(BIP32_MAX_INDEX);
             let v = self.last_revealed.entry(did).or_default();
             *v = index.max(*v);
             self.replenish_inner_index_did(did, self.lookahead);
@@ -1225,5 +1226,36 @@ mod test {
         // The cache is optional at load time
         let index = KeychainTxOutIndex::<i32>::from_changeset(lookahead, false, init_cs);
         assert!(index.spk_cache.is_empty());
+    }
+
+    #[test]
+    fn apply_changeset_clamps_out_of_range_index_and_derives_correct_spk() {
+        let s = DESCRIPTORS[0];
+        let desc = Descriptor::parse_descriptor(&Secp256k1::new(), s)
+            .unwrap()
+            .0;
+        let mut index = KeychainTxOutIndex::new(0, false);
+        let did = desc.descriptor_id();
+        let _ = index.insert_descriptor(0i32, desc.clone());
+        let seed_index = BIP32_MAX_INDEX - 1;
+        let spk = desc
+            .at_derivation_index(seed_index)
+            .unwrap()
+            .script_pubkey();
+        index.inner.insert_spk((0i32, seed_index), spk);
+        let changeset = ChangeSet {
+            last_revealed: [(did, BIP32_MAX_INDEX + 1)].into(),
+            ..Default::default()
+        };
+        index.apply_changeset(changeset);
+        assert_eq!(index.last_revealed_index(0i32), Some(BIP32_MAX_INDEX));
+        assert_eq!(
+            index.spk_at_index(0i32, BIP32_MAX_INDEX),
+            Some(
+                desc.at_derivation_index(BIP32_MAX_INDEX)
+                    .unwrap()
+                    .script_pubkey()
+            )
+        );
     }
 }
