@@ -288,6 +288,7 @@ fn insert_tx_displaces_txouts() {
     assert_eq!(tx_graph.get_txout(outpoint), Some(txout));
 }
 
+#[cfg(not(debug_assertions))]
 #[test]
 fn insert_txout_keeps_first_floating_txout() {
     let outpoint = OutPoint::new(hash!("floating txout"), 0);
@@ -306,6 +307,25 @@ fn insert_txout_keeps_first_floating_txout() {
 
     assert!(changeset.is_empty());
     assert_eq!(graph.get_txout(outpoint), Some(&original));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "txout of the same outpoint should never change")]
+fn insert_txout_rejects_conflicting_floating_txout() {
+    let outpoint = OutPoint::new(hash!("floating txout"), 0);
+    let original = TxOut {
+        value: Amount::from_sat(1_000),
+        script_pubkey: ScriptBuf::new(),
+    };
+    let replacement = TxOut {
+        value: Amount::from_sat(2_000),
+        script_pubkey: ScriptBuf::new(),
+    };
+    let mut graph = TxGraph::<BlockId>::default();
+
+    let _ = graph.insert_txout(outpoint, original);
+    let _ = graph.insert_txout(outpoint, replacement);
 }
 
 #[test]

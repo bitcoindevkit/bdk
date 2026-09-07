@@ -629,12 +629,19 @@ impl<A: Anchor> TxGraph<A> {
                 // replaced was actually correct is a good idea but the tests have already been
                 // written assuming this never panics.
             }
-            TxNodeInternal::Partial(partial_tx) => {
-                if !partial_tx.contains_key(&outpoint.vout) {
-                    partial_tx.insert(outpoint.vout, txout.clone());
+            TxNodeInternal::Partial(partial_tx) => match partial_tx.entry(outpoint.vout) {
+                crate::collections::btree_map::Entry::Occupied(entry) => {
+                    debug_assert_eq!(
+                        entry.get(),
+                        &txout,
+                        "txout of the same outpoint should never change"
+                    );
+                }
+                crate::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(txout.clone());
                     changeset.txouts.insert(outpoint, txout);
                 }
-            }
+            },
         }
         changeset
     }
