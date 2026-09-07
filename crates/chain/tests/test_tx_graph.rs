@@ -289,6 +289,26 @@ fn insert_tx_displaces_txouts() {
 }
 
 #[test]
+fn insert_txout_keeps_first_floating_txout() {
+    let outpoint = OutPoint::new(hash!("floating txout"), 0);
+    let original = TxOut {
+        value: Amount::from_sat(1_000),
+        script_pubkey: ScriptBuf::new(),
+    };
+    let replacement = TxOut {
+        value: Amount::from_sat(2_000),
+        script_pubkey: ScriptBuf::new(),
+    };
+    let mut graph = TxGraph::<BlockId>::default();
+
+    let _ = graph.insert_txout(outpoint, original.clone());
+    let changeset = graph.insert_txout(outpoint, replacement);
+
+    assert!(changeset.is_empty());
+    assert_eq!(graph.get_txout(outpoint), Some(&original));
+}
+
+#[test]
 fn insert_tx_witness_precedence() {
     let previous_output = OutPoint::new(hash!("prev"), 2);
     let unsigned_tx = Transaction {

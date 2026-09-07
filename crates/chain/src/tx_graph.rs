@@ -630,16 +630,9 @@ impl<A: Anchor> TxGraph<A> {
                 // written assuming this never panics.
             }
             TxNodeInternal::Partial(partial_tx) => {
-                match partial_tx.insert(outpoint.vout, txout.clone()) {
-                    Some(old_txout) => {
-                        debug_assert_eq!(
-                            txout, old_txout,
-                            "txout of the same outpoint should never change"
-                        );
-                    }
-                    None => {
-                        changeset.txouts.insert(outpoint, txout);
-                    }
+                if !partial_tx.contains_key(&outpoint.vout) {
+                    partial_tx.insert(outpoint.vout, txout.clone());
+                    changeset.txouts.insert(outpoint, txout);
                 }
             }
         }
