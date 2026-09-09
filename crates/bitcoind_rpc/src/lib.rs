@@ -54,6 +54,10 @@ pub struct Emitter<C> {
     /// sure the tip block is already emitted. When a block is emitted, the transactions in the
     /// block are removed from this field.
     mempool_snapshot: HashMap<Txid, Arc<Transaction>>,
+    /// Maximum number of transactions to track in `mempool_snapshot`. Once reached, unknown
+    /// mempool transactions are skipped rather than fetched and stored, bounding memory so a
+    /// malicious node cannot grow the snapshot unboundedly. See [`Emitter::with_max_mempool_txs`].
+    max_mempool_txs: usize,
 }
 
 /// Indicates that there are no initially-expected mempool transactions.
@@ -61,6 +65,18 @@ pub struct Emitter<C> {
 /// Use this as the `expected_mempool_txs` field of [`Emitter::new`] when the wallet is known
 /// to start empty (i.e. with no unconfirmed transactions).
 pub const NO_EXPECTED_MEMPOOL_TXS: core::iter::Empty<Arc<Transaction>> = core::iter::empty();
+
+/// Maximum attempts to obtain a mempool snapshot consistent with the node's tip before
+/// [`Emitter::mempool_at`] returns an error. Bounds the retry loop so a malicious
+/// node cannot spin it forever.
+const MEMPOOL_TIP_CONSISTENCY_MAX_ATTEMPTS: usize = 10;
+/// Default maximum number of transactions an [`Emitter`] tracks in its mempool snapshot.
+///
+/// Bounds the memory used by `mempool_snapshot` so a malicious or compromised node cannot grow it
+/// unboundedly by streaming distinct txids. Override with [`Emitter::with_max_mempool_txs`]. Chosen
+/// to comfortably exceed a default-configured node's mempool while still bounding worst-case
+/// memory; the wallet's own transactions are never dropped, as they bypass the fetch path.
+pub const DEFAULT_MAX_MEMPOOL_TXS: usize = 100_000;
 
 impl<C> Emitter<C>
 where
@@ -96,7 +112,23 @@ where
                     (tx.compute_txid(), tx)
                 })
                 .collect(),
+            max_mempool_txs: DEFAULT_MAX_MEMPOOL_TXS,
         }
+    }
+
+    /// Set the maximum number of transactions the [`Emitter`] tracks in its mempool snapshot.
+    ///
+    /// Once the snapshot holds this many transactions, further *unknown* mempool transactions are
+    /// skipped for the current and subsequent polls (they are not fetched or stored) until existing
+    /// entries are freed by confirmations or by catching up to the node's tip. This bounds the
+    /// memory a malicious node can force the emitter to allocate.
+    ///
+    /// Transactions already known to the emitter — those provided via `expected_mempool_txs` in
+    /// [`Emitter::new`] or seen in a previous poll — are never dropped, as they bypass the fetch
+    /// path. Defaults to [`DEFAULT_MAX_MEMPOOL_TXS`].
+    pub fn with_max_mempool_txs(mut self, max_mempool_txs: usize) -> Self {
+        self.max_mempool_txs = max_mempool_txs;
+        self
     }
 
     /// Emit mempool transactions and any evicted [`Txid`]s.
@@ -151,6 +183,20 @@ where
     /// `sync_time` is in unix seconds.
     ///
     /// This is the no-std version of [`mempool`](Self::mempool).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`bitcoincore_rpc::Error::UnexpectedStructure`] if the node's tip keeps changing
+    /// across a bounded number of consistency retries, or if the node returns a transaction body
+    /// whose computed txid does not match the requested txid. In the latter case the entire poll
+    /// fails; retry on the next poll.
+    ///
+    /// # Truncation
+    ///
+    /// At most [`with_max_mempool_txs`](Self::with_max_mempool_txs) transactions are tracked. If
+    /// the node's mempool exceeds that, unknown transactions beyond the limit are silently
+    /// omitted from the returned snapshot (the emitter's own known transactions are always
+    /// included).
     pub fn mempool_at(&mut self, sync_time: u64) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let client = &*self.client;
 
@@ -158,6 +204,7 @@ where
         let mut rpc_tip_hash;
         let mut rpc_mempool;
         let mut rpc_mempool_txids;
+        let mut attempts: usize = 0;
 
         // Ensure we get a mempool snapshot consistent with `rpc_tip_hash` as the tip.
         loop {
@@ -170,7 +217,13 @@ where
             if is_still_at_tip {
                 break;
             }
+            attempts += 1;
+            if attempts >= MEMPOOL_TIP_CONSISTENCY_MAX_ATTEMPTS {
+                return Err(bitcoincore_rpc::Error::UnexpectedStructure);
+            }
         }
+
+        let max_mempool_txs = self.max_mempool_txs;
 
         let mut mempool_event = MempoolEvent {
             update: rpc_mempool
@@ -178,7 +231,15 @@ where
                 .filter_map(|txid| -> Option<Result<_, bitcoincore_rpc::Error>> {
                     let tx = match self.mempool_snapshot.get(&txid) {
                         Some(tx) => tx.clone(),
+                        // Cap reached: skip unknown txs so the snapshot cannot grow unboundedly.
+                        // Known txs above are still returned.
+                        None if self.mempool_snapshot.len() >= max_mempool_txs => return None,
+
                         None => match client.get_raw_transaction(&txid, None) {
+                            // Reject a tx whose computed txid does not match the requested one
+                            Ok(tx) if tx.compute_txid() != txid => {
+                                return Some(Err(bitcoincore_rpc::Error::UnexpectedStructure));
+                            }
                             Ok(tx) => {
                                 let tx = Arc::new(tx);
                                 self.mempool_snapshot.insert(txid, tx.clone());
@@ -535,5 +596,249 @@ mod test {
         assert!(emitter.mempool_snapshot.is_empty());
 
         Ok(())
+    }
+}
+
+/// Regression tests for mempool spin loop + unverified txid.
+///
+/// These use in-process mock [`RpcApi`] implementations rather than a real node, so they can
+/// simulate a hostile server without any network.
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod mempool_security_test {
+    use crate::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
+    use bdk_core::CheckPoint;
+    use bitcoin::{
+        absolute::LockTime, hashes::Hash, transaction::Version, BlockHash, Transaction, Txid,
+    };
+    use bitcoincore_rpc::{Error, RpcApi};
+    use core::cell::Cell;
+
+    /// A minimal, well-formed transaction with a deterministic txid.
+    fn dummy_tx() -> Transaction {
+        Transaction {
+            version: Version::ONE,
+            lock_time: LockTime::ZERO,
+            input: vec![],
+            output: vec![],
+        }
+    }
+
+    /// Node whose `get_block_hash` answer changes on every call, so the two tip reads within a
+    /// single `mempool_at` consistency check never agree.
+    #[derive(Default)]
+    struct FlappingNode {
+        calls: Cell<u64>,
+    }
+
+    impl RpcApi for FlappingNode {
+        fn call<T: for<'a> serde::de::Deserialize<'a>>(
+            &self,
+            _cmd: &str,
+            _args: &[serde_json::Value],
+        ) -> Result<T, Error> {
+            unreachable!("mempool_at should only use the overridden methods")
+        }
+
+        fn get_block_count(&self) -> Result<u64, Error> {
+            Ok(100)
+        }
+
+        fn get_block_hash(&self, _height: u64) -> Result<BlockHash, Error> {
+            let n = self.calls.get();
+            self.calls.set(n + 1);
+            let mut bytes = [0u8; 32];
+            bytes[..8].copy_from_slice(&n.to_le_bytes());
+            Ok(BlockHash::from_byte_array(bytes))
+        }
+
+        fn get_raw_mempool(&self) -> Result<Vec<Txid>, Error> {
+            Ok(vec![])
+        }
+    }
+
+    /// Finding (a): a flapping tip must not spin the loop forever; it is surfaced as an error
+    /// after a bounded number of attempts.
+    #[test]
+    fn mempool_tip_consistency_loop_is_bounded() {
+        let node = FlappingNode::default();
+        let last_cp = CheckPoint::new(0, BlockHash::all_zeros());
+        let mut emitter = Emitter::new(&node, last_cp, 0, NO_EXPECTED_MEMPOOL_TXS);
+
+        let result = emitter.mempool_at(0);
+        assert!(
+            matches!(result, Err(Error::UnexpectedStructure)),
+            "flapping tip must be surfaced as an error, got {result:?}",
+        );
+    }
+
+    /// Node that announces one txid in `getrawmempool` but serves a body with a different txid.
+    struct LyingNode {
+        announced: Txid,
+        tip_hash: BlockHash,
+        served: Transaction,
+    }
+
+    impl RpcApi for LyingNode {
+        fn call<T: for<'a> serde::de::Deserialize<'a>>(
+            &self,
+            _cmd: &str,
+            _args: &[serde_json::Value],
+        ) -> Result<T, Error> {
+            unreachable!("mempool_at should only use the overridden methods")
+        }
+
+        fn get_block_count(&self) -> Result<u64, Error> {
+            Ok(100)
+        }
+
+        fn get_block_hash(&self, _height: u64) -> Result<BlockHash, Error> {
+            Ok(self.tip_hash)
+        }
+
+        fn get_raw_mempool(&self) -> Result<Vec<Txid>, Error> {
+            Ok(vec![self.announced])
+        }
+
+        fn get_raw_transaction(
+            &self,
+            _txid: &Txid,
+            _block_hash: Option<&BlockHash>,
+        ) -> Result<Transaction, Error> {
+            Ok(self.served.clone())
+        }
+    }
+
+    /// A body whose computed txid does not match the requested txid must be rejected
+    /// and must not be cached under the announced txid.
+    #[test]
+    fn mismatched_tx_body_is_rejected_and_not_cached() {
+        let served = dummy_tx();
+        let announced = Txid::from_byte_array([1u8; 32]);
+        assert_ne!(
+            announced,
+            served.compute_txid(),
+            "test setup: announced txid must differ from the served body",
+        );
+
+        let node = LyingNode {
+            announced,
+            tip_hash: BlockHash::from_byte_array([2u8; 32]),
+            served,
+        };
+        let last_cp = CheckPoint::new(0, BlockHash::all_zeros());
+        let mut emitter = Emitter::new(&node, last_cp, 0, NO_EXPECTED_MEMPOOL_TXS);
+
+        let result = emitter.mempool_at(0);
+        assert!(
+            matches!(result, Err(Error::UnexpectedStructure)),
+            "mismatched tx body must be rejected, got {result:?}",
+        );
+        assert!(
+            !emitter.mempool_snapshot.contains_key(&announced),
+            "rejected tx must not be cached under the announced txid",
+        );
+    }
+}
+
+/// Regression test for finding unbounded `mempool_snapshot` growth.
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod mempool_cap_test {
+    use crate::Emitter;
+    use bdk_core::CheckPoint;
+    use bitcoin::{
+        absolute::LockTime, hashes::Hash, transaction::Version, BlockHash, Transaction, Txid,
+    };
+    use bitcoincore_rpc::{Error, RpcApi};
+    use std::collections::HashMap;
+
+    /// Node that floods `getrawmempool` with many distinct txids, serving a matching (self-hashing)
+    /// body for each so they pass txid verification.
+    struct FloodingNode {
+        txs: HashMap<Txid, Transaction>,
+        txids: Vec<Txid>,
+        tip_hash: BlockHash,
+    }
+
+    impl FloodingNode {
+        fn with_txs(n: u32) -> Self {
+            let mut txs = HashMap::new();
+            let mut txids = Vec::new();
+            for i in 0..n {
+                let tx = Transaction {
+                    version: Version::ONE,
+                    lock_time: LockTime::from_consensus(i),
+                    input: vec![],
+                    output: vec![],
+                };
+                let txid = tx.compute_txid();
+                txids.push(txid);
+                txs.insert(txid, tx);
+            }
+            Self {
+                txs,
+                txids,
+                tip_hash: BlockHash::from_byte_array([7u8; 32]),
+            }
+        }
+    }
+
+    impl RpcApi for FloodingNode {
+        fn call<T: for<'a> serde::de::Deserialize<'a>>(
+            &self,
+            _cmd: &str,
+            _args: &[serde_json::Value],
+        ) -> Result<T, Error> {
+            unreachable!("mempool_at should only use the overridden methods")
+        }
+
+        fn get_block_count(&self) -> Result<u64, Error> {
+            Ok(100)
+        }
+
+        fn get_block_hash(&self, _height: u64) -> Result<BlockHash, Error> {
+            Ok(self.tip_hash)
+        }
+
+        fn get_raw_mempool(&self) -> Result<Vec<Txid>, Error> {
+            Ok(self.txids.clone())
+        }
+
+        fn get_raw_transaction(
+            &self,
+            txid: &Txid,
+            _block_hash: Option<&BlockHash>,
+        ) -> Result<Transaction, Error> {
+            Ok(self
+                .txs
+                .get(txid)
+                .expect("only announced txids are requested")
+                .clone())
+        }
+    }
+
+    /// A node announcing far more mempool txs than the cap must not grow the
+    /// snapshot past the cap; the poll succeeds with a truncated result.
+    #[test]
+    fn mempool_snapshot_is_capped() {
+        const CAP: usize = 5;
+        let node = FloodingNode::with_txs(100);
+        let last_cp = CheckPoint::new(0, BlockHash::all_zeros());
+        let mut emitter = Emitter::new(&node, last_cp, 0, core::iter::empty::<Transaction>())
+            .with_max_mempool_txs(CAP);
+
+        let event = emitter.mempool_at(0).expect("truncation must not error");
+
+        assert_eq!(
+            emitter.mempool_snapshot.len(),
+            CAP,
+            "snapshot must be bounded by the cap, not the node-announced count",
+        );
+        assert_eq!(
+            event.update.len(),
+            CAP,
+            "returned update must be truncated to the cap"
+        );
     }
 }
