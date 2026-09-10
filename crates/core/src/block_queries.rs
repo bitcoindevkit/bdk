@@ -41,18 +41,31 @@ impl<B> BlockQueries<B> {
     }
 
     /// Marks a height as resolved. Removes from pending and inserts into blocks.
+    ///
+    /// `block` is `None` when the chain source **has no block** at `height`. This is terminal:
+    /// the height leaves [`unresolved`](Self::unresolved) and [`request`](Self::request) will
+    /// never return it again. So do not pass `None` for a *failed* fetch; leave the height
+    /// pending and retry it, or the failure is silently recorded as "no such block".
+    ///
+    /// `height` need not be pending: after [`clear_pending`](Self::clear_pending), an answer to a
+    /// dropped request, or a second answer to one requested again, is recorded like any other.
     pub fn resolve(&mut self, height: u32, block: Option<B>) {
-        let was_pending = self.pending.remove(&height);
+        self.pending.remove(&height);
         self.blocks.insert(height, block);
-        debug_assert!(
-            was_pending,
-            "request must be previously unresolved to be resolved now"
-        );
     }
 
     /// Iterates over heights that are still pending (unresolved).
     pub fn unresolved(&self) -> impl Iterator<Item = u32> + '_ {
         self.pending.iter().copied()
+    }
+
+    /// Drops every pending request, keeping only resolved blocks.
+    ///
+    /// Call this when handing a `BlockQueries` to a new task, so that every height the new task
+    /// waits on is one it requested itself. A dropped height is returned by
+    /// [`request`](Self::request) again.
+    pub fn clear_pending(&mut self) {
+        self.pending.clear();
     }
 
     /// Looks up a resolved block by height.
@@ -203,6 +216,16 @@ mod test {
                 },
                 candidates: vec![id(7, 7)],
                 expected: BlockCandidateResolution::Awaiting,
+                expected_unresolved: vec![7],
+            },
+            Case {
+                name: "query again for a height dropped by clear_pending",
+                setup: |q| {
+                    q.request([7].into_iter());
+                    q.clear_pending();
+                },
+                candidates: vec![id(7, 7)],
+                expected: BlockCandidateResolution::Query(vec![7]),
                 expected_unresolved: vec![7],
             },
             Case {

@@ -65,8 +65,11 @@ impl<'g, A: Anchor, B> CanonicalViewTask<'g, A, B> {
         order: Vec<Txid>,
         txs: HashMap<Txid, CanonicalEntry<CanonicalReason<A>>>,
         spends: HashMap<OutPoint, Txid>,
-        queries: BlockQueries<B>,
+        mut queries: BlockQueries<B>,
     ) -> Self {
+        // Reuse only resolved blocks. A height phase 1 left in flight is requested again if
+        // needed, so this task only ever waits on heights it announced itself.
+        queries.clear_pending();
         let all_anchors = tx_graph.all_anchors();
 
         let mut unprocessed_anchor_checks = VecDeque::new();
