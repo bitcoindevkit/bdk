@@ -42,6 +42,39 @@ fn chain_with_time_equal_to_height(tip_height: u32) -> LocalChain<Header> {
     LocalChain::from_blocks(blocks).expect("chain connects from genesis")
 }
 
+/// Insert a transaction into `tx_graph` spending a distinct parent (identified by `seed`) and
+/// anchor it at `height`.
+///
+/// Returns the txid of the inserted transaction.
+fn confirm_tx_at(
+    tx_graph: &mut TxGraph<ConfirmationBlockTime>,
+    chain: &LocalChain<Header>,
+    seed: u8,
+    height: u32,
+) -> bitcoin::Txid {
+    let tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(bitcoin::Txid::from_byte_array([seed; 32]), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let txid = tx.compute_txid();
+    let _ = tx_graph.insert_tx(tx);
+    let _ = tx_graph.insert_anchor(
+        txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(height).unwrap().block_id(),
+            confirmation_time: 0,
+        },
+    );
+    txid
+}
+
 #[test]
 fn canonicalize_with_mtp_computes_median_time_past() {
     // A 13-block chain (heights 0..=12) where each block's time equals its height.
@@ -76,11 +109,62 @@ fn canonicalize_with_mtp_computes_median_time_past() {
     // Tip is at height 12, so its MTP is the median of heights 2..=12, which is 7.
     assert_eq!(view.tip_mtp(), Some(7));
 
-    // The transaction is confirmed at height 11, so its MTP is the median of heights 1..=11 == 6.
+    // The transaction is confirmed at height 11. Its `prev_mtp` is the MTP of the block
+    // *preceding* the confirmation height (BIP-68), i.e. MTP at height 10 = median of heights
+    // 0..=10 == 5. (Was 6 when the buggy code medianed heights 1..=11 at height 11 itself.)
     let canonical_tx = view
         .txs()
         .find(|c| c.txid == txid)
         .expect("tx is canonical");
     assert!(matches!(canonical_tx.pos, ChainPosition::Confirmed { .. }));
-    assert_eq!(canonical_tx.mtp, Some(6));
+    assert_eq!(canonical_tx.prev_mtp, Some(5));
+}
+
+#[test]
+fn prev_mtp_saturates_for_low_confirmation_heights() {
+    // A 13-block chain (heights 0..=12) where each block's time equals its height.
+    let chain = chain_with_time_equal_to_height(12);
+    let mut tx_graph = TxGraph::default();
+
+    // Confirmed at genesis (height 0): `confirmation_height - 1` saturates to 0, matching
+    // Core's `std::max(nCoinHeight - 1, 0)`. prev_mtp = MTP(0) = median of heights 0..=0 == 0.
+    let genesis_txid = confirm_tx_at(&mut tx_graph, &chain, 1, 0);
+
+    // Confirmed at height 3: prev_mtp = MTP(2) = median of heights 0..=2 == 1. The MTP window
+    // start (`2 - 10`) also saturates to 0. (The buggy code would have medianed heights 0..=3
+    // at height 3 == 2.)
+    let low_txid = confirm_tx_at(&mut tx_graph, &chain, 2, 3);
+
+    let view = chain.canonicalize_with_mtp(&tx_graph, chain.tip().block_id(), Default::default());
+
+    let genesis_tx = view
+        .txs()
+        .find(|c| c.txid == genesis_txid)
+        .expect("tx is canonical");
+    assert_eq!(genesis_tx.prev_mtp, Some(0));
+
+    let low_tx = view
+        .txs()
+        .find(|c| c.txid == low_txid)
+        .expect("tx is canonical");
+    assert_eq!(low_tx.prev_mtp, Some(1));
+}
+
+#[test]
+fn prev_mtp_differs_from_tip_mtp() {
+    // A 13-block chain (heights 0..=12) where each block's time equals its height.
+    let chain = chain_with_time_equal_to_height(12);
+    let mut tx_graph = TxGraph::default();
+
+    // Confirmed at height 11, with the tip at height 12: prev_mtp = MTP(10) = 5, while
+    // tip_mtp = MTP(12) = 7. These are distinguishable, so `prev_mtp` (BIP-68, the block before
+    // the coin) is clearly not the same reference as `tip_mtp` (BIP-113, the tip).
+    let txid = confirm_tx_at(&mut tx_graph, &chain, 1, 11);
+
+    let view = chain.canonicalize_with_mtp(&tx_graph, chain.tip().block_id(), Default::default());
+
+    let canonical_tx = view.txs().find(|c| c.txid == txid).expect("tx is canonical");
+    assert_eq!(canonical_tx.prev_mtp, Some(5));
+    assert_eq!(view.tip_mtp(), Some(7));
+    assert_ne!(canonical_tx.prev_mtp, view.tip_mtp());
 }

@@ -110,10 +110,12 @@ impl<'g, A: Anchor, B> CanonicalViewTask<'g, A, B> {
 impl<'g, A: Anchor, B: ToBlockHash + ToBlockTime> CanonicalViewTask<'g, A, B> {
     /// Enable MTP (median-time-past) computation.
     ///
-    /// When enabled, the task will fetch additional blocks needed to compute MTP values
-    /// for each confirmed height and the tip height. The resulting [`CanonicalView`] will
-    /// have per-tx MTP on [`CanonicalTx::mtp`](crate::CanonicalTx::mtp) and the tip MTP
-    /// accessible via [`tip_mtp()`](crate::Canonical::tip_mtp).
+    /// When enabled, the task will fetch additional blocks needed to compute MTP values.
+    /// For each confirmed tx it computes the MTP of the block *preceding* the confirmation
+    /// height (per BIP-68, matching Bitcoin Core's `CalculateSequenceLocks`), exposed on
+    /// [`CanonicalTx::prev_mtp`](crate::CanonicalTx::prev_mtp). For the tip it computes
+    /// MTP(tip.height) (per BIP-113), accessible via
+    /// [`tip_mtp()`](crate::Canonical::tip_mtp).
     pub fn with_mtp(mut self) -> Self {
         self.extract_time = Some(B::to_blocktime);
         self
@@ -166,10 +168,15 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
                 }
 
                 // Collect all MTP heights needed (an 11-block window per target height).
+                //
+                // For the tip we need MTP(tip.height) (BIP-113). For each confirmed tx we need
+                // the MTP of the block *preceding* the confirmation height (BIP-68), so we push
+                // `confirmation_height - 1` (saturating at genesis) — the same value read in
+                // `finish`.
                 let mut mtp_heights = Vec::<u32>::new();
                 mtp_heights.push(self.tip.height);
                 for anchor in self.direct_anchors.values() {
-                    mtp_heights.push(anchor.confirmation_height_upper_bound());
+                    mtp_heights.push(anchor.confirmation_height_upper_bound().saturating_sub(1));
                 }
                 let required: Vec<u32> = mtp_heights
                     .into_iter()
@@ -242,9 +249,16 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
                     anchor: anchor.clone(),
                     transitively: None,
                 };
-                let mtp = extract_time
-                    .and_then(|f| compute_mtp_at(anchor.confirmation_height_upper_bound(), f));
-                view_txs.insert(*txid, CanonicalEntry { tx, pos, mtp });
+                // BIP-68 evaluates relative timelocks against the MTP of the block *before* the
+                // coin's height (Core's `std::max(nCoinHeight - 1, 0)`), so compute MTP at
+                // `confirmation_height - 1`, saturating to genesis for coins at height 0.
+                let prev_mtp = extract_time.and_then(|f| {
+                    compute_mtp_at(
+                        anchor.confirmation_height_upper_bound().saturating_sub(1),
+                        f,
+                    )
+                });
+                view_txs.insert(*txid, CanonicalEntry { tx, pos, prev_mtp });
                 continue;
             }
 
@@ -295,8 +309,11 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
                 CanonicalEntry {
                     tx: tx.clone(),
                     pos,
-                    // No MTP since we do not know confirmation height.
-                    mtp: None,
+                    // No MTP: this stage handles txs without a direct anchor, so even when the
+                    // position is `Confirmed` (transitively, via a descendant's anchor) this
+                    // tx's own confirmation height is unknown and there is no block to median
+                    // around.
+                    prev_mtp: None,
                 },
             );
         }

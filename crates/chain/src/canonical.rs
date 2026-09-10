@@ -38,7 +38,7 @@ use crate::{spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalViewTask, ChainP
 pub(crate) struct CanonicalEntry<P> {
     pub(crate) tx: Arc<Transaction>,
     pub(crate) pos: P,
-    pub(crate) mtp: Option<u32>,
+    pub(crate) prev_mtp: Option<u32>,
 }
 
 /// A single canonical transaction with its position.
@@ -59,11 +59,26 @@ pub struct CanonicalTx<P> {
     pub txid: Txid,
     /// The full transaction.
     pub tx: Arc<Transaction>,
-    /// The median-time-past at the confirmation height, if computed.
+    /// The median-time-past of the block *preceding* the confirmation height, if computed.
     ///
-    /// This is `Some` only when the transaction is confirmed and MTP computation was
-    /// enabled via [`CanonicalViewTask::with_mtp`](crate::CanonicalViewTask::with_mtp).
-    pub mtp: Option<u32>,
+    /// This is the MTP at `confirmation_height - 1` (saturating at genesis), which is the
+    /// reference value used to evaluate BIP-68 relative timelocks on spends of this
+    /// transaction's outputs — matching Bitcoin Core's `CalculateSequenceLocks`. It is *not*
+    /// the MTP at the confirmation height itself.
+    ///
+    /// `None` means the value is unknown, which happens whenever any of these hold:
+    ///
+    /// - MTP computation was not enabled — see
+    ///   [`CanonicalViewTask::with_mtp`](crate::CanonicalViewTask::with_mtp).
+    /// - The transaction is not confirmed.
+    /// - The transaction is confirmed only *transitively* — through a descendant's anchor, so
+    ///   [`pos`](Self::pos) is [`Confirmed`](crate::ChainPosition::Confirmed) with
+    ///   `transitively: Some(_)`. Its own confirmation height genuinely isn't known.
+    /// - The chain could not resolve the full 11-block window the MTP medians over.
+    ///
+    /// So a confirmed transaction can have `None` here even with MTP enabled; do not read
+    /// `None` as "MTP was off", and do not treat it as an absent or satisfied timelock.
+    pub prev_mtp: Option<u32>,
 }
 
 impl<P: Ord> Ord for CanonicalTx<P> {
@@ -98,11 +113,17 @@ pub struct CanonicalTxOut<P> {
     pub spent_by: Option<(P, Txid)>,
     /// Whether this output is on a coinbase transaction.
     pub is_on_coinbase: bool,
-    /// The median-time-past at the confirmation height, if computed.
+    /// The median-time-past of the block *preceding* the confirmation height, if computed.
     ///
-    /// This is `Some` only when the output's transaction is confirmed and MTP computation
-    /// was enabled via [`CanonicalViewTask::with_mtp`](crate::CanonicalViewTask::with_mtp).
-    pub mtp: Option<u32>,
+    /// This is the MTP at `confirmation_height - 1` (saturating at genesis), which is the
+    /// reference value used to evaluate BIP-68 relative timelocks on spends of this output —
+    /// matching Bitcoin Core's `CalculateSequenceLocks`. It is *not* the MTP at the
+    /// confirmation height itself.
+    ///
+    /// `None` means unknown, not "no timelock" — see
+    /// [`CanonicalTx::prev_mtp`](crate::CanonicalTx::prev_mtp) for the cases that produce it,
+    /// which include an output whose transaction is confirmed only transitively.
+    pub prev_mtp: Option<u32>,
 }
 
 impl<P: Ord> Ord for CanonicalTxOut<P> {
@@ -270,7 +291,7 @@ impl<A, P: Clone> Canonical<A, P> {
             pos: entry.pos.clone(),
             txid,
             tx: entry.tx.clone(),
-            mtp: entry.mtp,
+            prev_mtp: entry.prev_mtp,
         })
     }
 
@@ -297,7 +318,7 @@ impl<A, P: Clone> Canonical<A, P> {
             txout: txout.clone(),
             spent_by,
             is_on_coinbase: entry.tx.is_coinbase(),
-            mtp: entry.mtp,
+            prev_mtp: entry.prev_mtp,
         })
     }
 
@@ -331,7 +352,7 @@ impl<A, P: Clone> Canonical<A, P> {
                 pos: entry.pos.clone(),
                 txid,
                 tx: entry.tx.clone(),
-                mtp: entry.mtp,
+                prev_mtp: entry.prev_mtp,
             }
         })
     }

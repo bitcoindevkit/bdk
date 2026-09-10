@@ -341,7 +341,7 @@ impl<'g, A: Anchor, B: ToBlockHash> CanonicalTask<'g, A, B> {
                 canonical_entry.insert(CanonicalEntry {
                     tx: tx.clone(),
                     pos: this_reason,
-                    mtp: None,
+                    prev_mtp: None,
                 });
                 Some(this_txid)
             },
@@ -596,10 +596,13 @@ mod tests {
             ChainPosition::Confirmed { .. }
         ));
 
-        // Per-tx MTP at height 5: median of timestamps at heights 0..=5
-        // Timestamps: 100, 200, 300, 400, 500, 600 → sorted, median = ts[len/2] = ts[3] = 400
+        // Per-tx `prev_mtp` for a tx confirmed at height 5: the MTP of the block *preceding*
+        // the confirmation height (BIP-68), i.e. MTP at height 4 = median of timestamps at
+        // heights 0..=4.
+        // Timestamps: 100, 200, 300, 400, 500 → sorted, median = ts[len/2] = ts[2] = 300.
+        // (Was 400 when the buggy code medianed heights 0..=5 at the confirmation height itself.)
         let canon_tx = view.txs().next().unwrap();
-        assert_eq!(canon_tx.mtp, Some(400));
+        assert_eq!(canon_tx.prev_mtp, Some(300));
 
         // MTP at tip height (11): median of timestamps at heights 1..=11
         // Timestamps: 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200

@@ -474,9 +474,14 @@ where
     ///
     /// Requires `D: ToBlockTime` (e.g. `LocalChain<Header>`).
     ///
-    /// The resulting [`CanonicalView`] will have per-tx MTP on
-    /// [`CanonicalTx::mtp`](crate::CanonicalTx::mtp) and the tip MTP accessible via
+    /// For each confirmed transaction this computes the MTP of the block *preceding* the
+    /// confirmation height (the BIP-68 reference for relative timelocks), exposed on
+    /// [`CanonicalTx::prev_mtp`](crate::CanonicalTx::prev_mtp). For the tip it computes
+    /// MTP(tip.height) (the BIP-113 reference for absolute timelocks), accessible via
     /// [`tip_mtp()`](crate::Canonical::tip_mtp).
+    ///
+    /// See [`CanonicalViewTask::with_mtp`](crate::CanonicalViewTask::with_mtp) for the block
+    /// data this requires.
     pub fn canonicalize_with_mtp<A: Anchor>(
         &self,
         tx_graph: &TxGraph<A>,
