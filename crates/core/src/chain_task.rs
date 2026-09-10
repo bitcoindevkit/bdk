@@ -117,14 +117,25 @@ pub trait ChainTask<B = BlockHash> {
 
     /// Provides the block data (or `None`) for a previously requested `height`.
     ///
-    /// A response of `None` signals that the chain source has no block at that
-    /// height. The task records this so it can distinguish "not yet queried"
-    /// from "queried but absent."
+    /// A response of `None` signals that the chain source **has no block** at that height —
+    /// it is an answer, not an error. The task records it so it can distinguish "not yet
+    /// queried" from "queried but absent", and treats every anchor at that height as not
+    /// in-chain.
+    ///
+    /// Resolving is terminal: a height is answered once, and the task will not ask for it
+    /// again. A driver that *failed* to fetch a height (I/O error, timeout) must therefore
+    /// **not** call this with `None` — that would silently record "no such block" and, for an
+    /// anchor that is really in-chain, downgrade a confirmed transaction to unconfirmed with
+    /// no error surfaced anywhere. Leave the height unresolved instead and retry it; see
+    /// [`unresolved_queries`](Self::unresolved_queries).
     fn resolve_query(&mut self, height: u32, response: Option<B>);
 
     /// Returns heights that have been requested but not yet resolved.
     ///
-    /// This is useful for retrying failed queries or reporting progress.
+    /// This is the retry set: a height a fetch failed for stays here until the driver
+    /// resolves it, so a driver can re-issue those fetches (and report progress) after an
+    /// error. Once [`resolve_query`](Self::resolve_query) is called for a height it leaves
+    /// this set permanently.
     fn unresolved_queries<'a>(&'a self) -> impl Iterator<Item = u32> + 'a;
 
     /// Consumes the task and returns the final output.

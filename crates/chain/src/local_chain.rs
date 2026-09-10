@@ -419,6 +419,13 @@ where
     /// against this chain and returning the task's output. The chain responds with its data
     /// type `D`, so `LocalChain<Header>` responds with headers and `LocalChain<BlockHash>`
     /// responds with hashes.
+    ///
+    /// # Panics
+    ///
+    /// If the task returns [`TaskProgress::Blocked`]. This driver resolves every height a task
+    /// announces via [`TaskProgress::Query`] before polling it again, so a task that follows the
+    /// [`ChainTask`] contract never has anything outstanding here and never blocks. Reaching
+    /// this means the task is waiting on heights it never announced.
     pub fn run_task<T>(&self, mut task: T) -> T::Output
     where
         T: ChainTask<D>,
@@ -441,11 +448,18 @@ where
                         task.resolve_query(height, data);
                     }
                 }
-                // This is a synchronous driver: every `Query` height is resolved before the next
-                // poll, so the task never has an in-flight query and cannot return this variant.
+                // Every `Query` height is resolved before the next poll, so a task that announces
+                // what it needs never has anything outstanding here — `Blocked` means it is
+                // waiting on heights it never put in a `Query`.
+                //
+                // Serving that anyway (by draining `unresolved_queries()`) would be the wrong
+                // kindness: it hides the bug behind the one driver everyone tests against, while a
+                // streaming driver — which launches fetches only for announced heights — waits
+                // forever on I/O that was never started. Fail here, where it is cheap to find.
                 TaskProgress::Blocked => {
-                    unreachable!(
-                        "run_task resolves queries synchronously; nothing is ever in-flight"
+                    panic!(
+                        "ChainTask returned Blocked to a synchronous driver: it is waiting on \
+                         heights it never announced via TaskProgress::Query"
                     )
                 }
             }
