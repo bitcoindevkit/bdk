@@ -17,6 +17,7 @@ use alloc::vec::Vec;
 /// 2. Feed responses back via [`resolve`](Self::resolve).
 /// 3. Look up resolved blocks with [`get`](Self::get).
 /// 4. Check for outstanding requests with [`unresolved`](Self::unresolved).
+#[derive(Debug)]
 pub struct BlockQueries<B> {
     pending: BTreeSet<u32>,
     blocks: BTreeMap<u32, Option<B>>,
