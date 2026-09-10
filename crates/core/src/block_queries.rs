@@ -41,6 +41,11 @@ impl<B> BlockQueries<B> {
     }
 
     /// Marks a height as resolved. Removes from pending and inserts into blocks.
+    ///
+    /// `block` is `None` when the chain source **has no block** at `height`. This is terminal:
+    /// the height leaves [`unresolved`](Self::unresolved) and [`request`](Self::request) will
+    /// never return it again. So do not pass `None` for a *failed* fetch — leave the height
+    /// pending and retry it, or the failure is silently recorded as "no such block".
     pub fn resolve(&mut self, height: u32, block: Option<B>) {
         let was_pending = self.pending.remove(&height);
         self.blocks.insert(height, block);
