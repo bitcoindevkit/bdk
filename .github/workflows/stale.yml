@@ -1,0 +1,57 @@
+name: "Stale Issue Triage"
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      debug_only:
+        description: 'Dry-run mode (no writes)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+  pull_request:
+    paths:
+      - .github/workflows/stale.yml
+    types:
+      - opened
+      - synchronize
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11
+        with:
+          days-before-issue-stale: 180
+          days-before-issue-close: 30
+          stale-issue-label: 'stale'
+          stale-issue-message: >
+            This issue has been inactive for 180 days and labeled **stale**, comment to keep it open. It will be closed in 30 days if there is no activity.
+          close-issue-message: >
+            Closed after 210 days of inactivity. Feel free to reopen if this is still relevant.
+          exempt-issue-labels: 'release,security,audit,do-not-close,good first issue'
+          exempt-all-issue-milestones: true
+
+          days-before-pr-stale: 180
+          days-before-pr-close: 30
+          stale-pr-label: 'stale'
+          stale-pr-message: >
+            This pull request has had no activity for 180 days and has been labeled **stale**. If this work is still in progress or waiting on review, a comment or push will remove the label. PRs with no further activity for 30 days will be closed.
+          close-pr-message: >
+            Closed after 210 days of inactivity. Feel free to reopen if this is still relevant.
+          exempt-pr-labels: 'blocked,security,do-not-close'
+          exempt-all-pr-milestones: true
+
+          remove-stale-when-updated: true
+          ascending: true
+          operations-per-run: 600
+          debug-only: ${{ github.event_name == 'pull_request' || github.event.inputs.debug_only == 'true' }}
+          enable-statistics: true
