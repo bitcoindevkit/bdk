@@ -665,7 +665,7 @@ mod test {
     use super::*;
 
     use bdk_testenv::{anyhow, hash};
-    use bitcoin::{absolute, transaction, TxIn, TxOut};
+    use bitcoin::{absolute, transaction, Amount, OutPoint, ScriptBuf, TxIn, TxOut};
 
     #[test]
     fn can_persist_anchors_and_txs_independently() -> anyhow::Result<()> {
@@ -725,6 +725,45 @@ mod test {
             assert!(changeset.txs.contains(&tx));
             assert!(changeset.anchors.contains(&(anchor, txid)));
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn can_persist_replaced_floating_txout() -> anyhow::Result<()> {
+        type ChangeSet = tx_graph::ChangeSet<ConfirmationBlockTime>;
+        let mut conn = rusqlite::Connection::open_in_memory()?;
+
+        {
+            let db_tx = conn.transaction()?;
+            ChangeSet::init_sqlite_tables(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        let outpoint = OutPoint::new(hash!("floating txout"), 0);
+        let original = TxOut {
+            value: Amount::from_sat(1_000),
+            script_pubkey: ScriptBuf::new(),
+        };
+        let replacement = TxOut {
+            value: Amount::from_sat(2_000),
+            script_pubkey: ScriptBuf::new(),
+        };
+
+        for txout in [original, replacement.clone()] {
+            let changeset = ChangeSet {
+                txouts: [(outpoint, txout)].into(),
+                ..Default::default()
+            };
+            let db_tx = conn.transaction()?;
+            changeset.persist_to_sqlite(&db_tx)?;
+            db_tx.commit()?;
+        }
+
+        let db_tx = conn.transaction()?;
+        let changeset = ChangeSet::from_sqlite(&db_tx)?;
+        db_tx.commit()?;
+        assert_eq!(changeset.txouts.get(&outpoint), Some(&replacement));
 
         Ok(())
     }

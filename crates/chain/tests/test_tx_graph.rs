@@ -1180,6 +1180,31 @@ fn test_changeset_last_seen_merge() {
     }
 }
 
+/// Ensure that merging changesets keeps the latest floating txout value.
+#[test]
+fn test_changeset_txouts_merge_replaces_conflicts() {
+    let outpoint = OutPoint::new(hash!("floating txout"), 0);
+    let original = TxOut {
+        value: Amount::from_sat(1_000),
+        script_pubkey: ScriptBuf::new(),
+    };
+    let replacement = TxOut {
+        value: Amount::from_sat(2_000),
+        script_pubkey: ScriptBuf::new(),
+    };
+
+    let mut changeset = ChangeSet::<BlockId> {
+        txouts: [(outpoint, original)].into(),
+        ..Default::default()
+    };
+    changeset.merge(ChangeSet {
+        txouts: [(outpoint, replacement.clone())].into(),
+        ..Default::default()
+    });
+
+    assert_eq!(changeset.txouts.get(&outpoint), Some(&replacement));
+}
+
 #[test]
 fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anchor_in_best_chain() {
     let txs = vec![new_tx(0), new_tx(1)];

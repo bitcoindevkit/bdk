@@ -616,7 +616,7 @@ impl<A: Anchor> TxGraph<A> {
     /// about.
     ///
     /// The [`ChangeSet`] result will be empty if the `outpoint` (or a full transaction containing
-    /// the `outpoint`) already existed in `self`.
+    /// the `outpoint`) already existed in `self` with the same output.
     ///
     /// [`apply_changeset`]: Self::apply_changeset
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<A> {
@@ -1127,10 +1127,12 @@ impl<A> ChangeSet<A> {
 
 impl<A: Ord> Merge for ChangeSet<A> {
     fn merge(&mut self, other: Self) {
-        // We use `extend` instead of `BTreeMap::append` due to performance issues with `append`.
-        // Refer to https://github.com/rust-lang/rust/issues/34666#issuecomment-675658420
         self.txs.extend(other.txs);
-        self.txouts.extend(other.txouts);
+        // Floating txouts may be corrected by a later chain source. Keep the newest value when
+        // aggregating changesets so persisted state follows the in-memory graph.
+        for (outpoint, txout) in other.txouts {
+            self.txouts.insert(outpoint, txout);
+        }
         self.anchors.extend(other.anchors);
 
         // first_seen timestamps should only decrease
