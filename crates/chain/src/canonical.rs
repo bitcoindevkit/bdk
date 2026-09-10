@@ -708,8 +708,9 @@ impl<A: Anchor> CanonicalTxs<A> {
     /// Creates a [`CanonicalViewTask`] that resolves
     /// [`CanonicalReason`](crate::canonical_task::CanonicalReason)s into [`ChainPosition`]s.
     ///
-    /// This is the second phase of the canonicalization pipeline. Blocks fetched during
-    /// phase 1 are passed through so they can be reused without redundant queries.
+    /// This is the second phase of the canonicalization pipeline. Blocks resolved during
+    /// phase 1 are reused without redundant queries; requests still outstanding in `queries` are
+    /// dropped and made again if needed.
     ///
     /// To also compute median-time-past (MTP) values for the resulting view, call
     /// [`CanonicalViewTask::with_mtp`] on the returned task.

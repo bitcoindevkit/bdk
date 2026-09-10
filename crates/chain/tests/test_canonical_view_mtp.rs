@@ -5,7 +5,10 @@
 
 use std::collections::BTreeMap;
 
-use bdk_chain::{local_chain::LocalChain, ChainPosition, ConfirmationBlockTime, TxGraph};
+use bdk_chain::{
+    local_chain::LocalChain, BlockQueries, CanonicalTask, ChainPosition, ConfirmationBlockTime,
+    TxGraph,
+};
 use bdk_testenv::{hash, utils::new_tx};
 use bitcoin::{
     block::Header, hashes::Hash, Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut,
@@ -212,4 +215,21 @@ fn sparse_chain_yields_no_mtp_but_still_canonicalizes() {
     let txo = view.txout(OutPoint::new(txid, 0)).expect("output exists");
     assert_eq!(txo.prev_mtp, None);
     assert_eq!(view.tip_mtp(), None);
+}
+
+/// Phase 2 drops requests still outstanding in the `BlockQueries` it is handed (e.g. left by a
+/// phase 1 run on another driver), and requests them again itself. Otherwise it would wait on a
+/// height `run_task` never saw in a `Query`, and `run_task` would panic on `Blocked`.
+#[test]
+fn view_task_requests_again_heights_left_pending() {
+    let chain = chain_with_time_equal_to_height(12);
+    let tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+    let tip = chain.tip().block_id();
+
+    let (txs, _) = chain.run_task(CanonicalTask::new(&tx_graph, tip, Default::default()));
+    let mut queries = BlockQueries::new();
+    let _ = queries.request([tip.height].into_iter());
+
+    let view = chain.run_task(txs.view_task(&tx_graph, queries).with_mtp());
+    assert_eq!(view.tip_mtp(), Some(7));
 }
