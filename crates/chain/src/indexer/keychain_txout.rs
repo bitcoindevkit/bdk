@@ -563,11 +563,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn lookahead_to_target(&mut self, keychain: K, target_index: u32) -> ChangeSet {
         let mut changeset = ChangeSet::default();
         if let Some((next_index, _)) = self.next_index(keychain.clone()) {
-            let temp_lookahead = (target_index + 1)
-                .checked_sub(next_index)
-                .filter(|&index| index > 0);
+            let temp_lookahead = target_index.saturating_add(1).saturating_sub(next_index);
 
-            if let Some(temp_lookahead) = temp_lookahead {
+            if temp_lookahead > 0 {
                 self.replenish_inner_index_keychain(keychain, temp_lookahead);
             }
         }
@@ -1306,5 +1304,29 @@ mod test {
         let (spks, _changeset) = index.reveal_to_target(0i32, BIP32_MAX_INDEX + 5).unwrap();
         assert_eq!(spks.len(), 1);
         assert_eq!(spks[0].0, BIP32_MAX_INDEX);
+    }
+
+    #[test]
+    fn lookahead_to_target_past_bip32_max_clamps() {
+        let mut index = indexer_with_last_revealed_at(BIP32_MAX_INDEX - 1);
+        // `u32::MAX` is past `BIP32_MAX_INDEX`, so it must clamp down to it and store the final
+        // spk.
+        let changeset = index.lookahead_to_target(0i32, u32::MAX);
+        assert!(
+            changeset.last_revealed.is_empty(),
+            "lookahead must not reveal"
+        );
+        // `spk_at_index` is aware of lookahead spks.
+        assert!(index.spk_at_index(0i32, BIP32_MAX_INDEX).is_some());
+    }
+
+    #[test]
+    fn lookahead_to_target_at_bip32_max_does_not_overflow() {
+        let mut index = indexer_with_last_revealed_at(BIP32_MAX_INDEX);
+        let changeset = index.lookahead_to_target(0i32, u32::MAX - 1);
+        assert!(
+            changeset.last_revealed.is_empty(),
+            "lookahead must not reveal"
+        );
     }
 }
