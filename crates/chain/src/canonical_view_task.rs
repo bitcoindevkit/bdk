@@ -126,6 +126,24 @@ impl<'g, A: Anchor, B: ToBlockHash + ToBlockTime> CanonicalViewTask<'g, A, B> {
     /// [`CanonicalTxOut::prev_mtp`](crate::CanonicalTxOut::prev_mtp). For the tip it computes
     /// MTP(tip.height) (per BIP-113), accessible via
     /// [`tip_mtp()`](crate::Canonical::tip_mtp).
+    ///
+    /// # `None` means unknown, not zero
+    ///
+    /// An MTP at height `h` is the median of the timestamps at `h-10..=h`, so it is `Some`
+    /// only when the driver resolves all eleven of those heights. A window with any gap in it
+    /// yields `None`, since a partial window has no defined median — and a gap cannot be told
+    /// apart from a block that is genuinely absent.
+    ///
+    /// This is not an error, and a driver is under no obligation to hold every height. A
+    /// [`LocalChain`](crate::local_chain::LocalChain) built by syncing (electrum, esplora)
+    /// keeps a handful of checkpoints rather than every block, so it yields `None` for both
+    /// `prev_mtp` and `tip_mtp` until the sync client fetches the preceding window for each
+    /// confirmed height.
+    ///
+    /// Treat `None` as "MTP unknown here". It is safe for display and for reporting, but a
+    /// caller evaluating a BIP-68 or BIP-113 timelock cannot decide the lock from it — and
+    /// must not read it as "no timelock" or as a timestamp of zero, either of which would
+    /// report an immature coin as spendable.
     pub fn with_mtp(mut self) -> Self {
         self.extract_time = Some(B::to_blocktime);
         self

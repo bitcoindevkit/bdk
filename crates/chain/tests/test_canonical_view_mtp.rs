@@ -167,3 +167,37 @@ fn prev_mtp_differs_from_tip_mtp() {
     assert_eq!(view.tip_mtp(), Some(7));
     assert_ne!(txo.prev_mtp, view.tip_mtp());
 }
+
+#[test]
+fn sparse_chain_yields_no_mtp_but_still_canonicalizes() {
+    // A chain holding only heights {0, 50, 100} — the shape a synced `LocalChain` has, since
+    // electrum/esplora insert a handful of checkpoints rather than every height.
+    let blocks: BTreeMap<u32, Header> = {
+        let genesis = header(BlockHash::all_zeros(), 0);
+        // The heights are not adjacent, so `prev_blockhash` linkage between them is arbitrary;
+        // `LocalChain` only requires that it connects from genesis.
+        let at_50 = header(genesis.block_hash(), 50);
+        let at_100 = header(at_50.block_hash(), 100);
+        [(0, genesis), (50, at_50), (100, at_100)].into()
+    };
+    let chain = LocalChain::from_blocks(blocks).expect("chain connects from genesis");
+    let mut tx_graph = TxGraph::default();
+
+    let txid = confirm_tx_at(&mut tx_graph, &chain, 1, 50);
+
+    let view = chain.canonicalize_with_mtp(&tx_graph, chain.tip().block_id(), Default::default());
+
+    // Canonicalization itself is unaffected by the gaps.
+    let canonical_tx = view
+        .txs()
+        .find(|c| c.txid == txid)
+        .expect("tx is canonical");
+    assert!(matches!(canonical_tx.pos, ChainPosition::Confirmed { .. }));
+
+    // But MTP needs *every* height in an 11-block window: `prev_mtp` would need 39..=49 and
+    // `tip_mtp` would need 90..=100, none of which this chain holds. Both are silently `None`
+    // rather than an error — a gap is indistinguishable from a reorged-out block.
+    let txo = view.txout(OutPoint::new(txid, 0)).expect("output exists");
+    assert_eq!(txo.prev_mtp, None);
+    assert_eq!(view.tip_mtp(), None);
+}
