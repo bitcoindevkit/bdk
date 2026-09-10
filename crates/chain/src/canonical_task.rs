@@ -517,7 +517,11 @@ mod tests {
         // Create canonicalization task and canonicalize using the two-step pipeline
         let params = CanonicalParams::default();
         let task = CanonicalTask::new(&tx_graph, chain_tip, params);
-        let (txs, queries) = chain.run_task(task);
+        let output = chain.run_task(task);
+        // `CanonicalTask::Output` is `(CanonicalTxs, BlockQueries)`. Both halves must be
+        // `Debug` or callers cannot `dbg!()` it, or `.unwrap()` it out of a `Result`.
+        let _ = alloc::format!("{output:?}");
+        let (txs, queries) = output;
         let view_task = txs.view_task(&tx_graph, queries);
         let canonical_view = chain.run_task(view_task);
 
