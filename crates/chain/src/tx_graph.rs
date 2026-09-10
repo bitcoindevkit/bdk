@@ -630,12 +630,16 @@ impl<A: Anchor> TxGraph<A> {
                 // written assuming this never panics.
             }
             TxNodeInternal::Partial(partial_tx) => match partial_tx.entry(outpoint.vout) {
-                crate::collections::btree_map::Entry::Occupied(entry) => {
-                    debug_assert_eq!(
-                        entry.get(),
-                        &txout,
-                        "txout of the same outpoint should never change"
-                    );
+                crate::collections::btree_map::Entry::Occupied(mut entry) => {
+                    if entry.get() != &txout {
+                        debug_assert_eq!(
+                            entry.get(),
+                            &txout,
+                            "txout of the same outpoint should never change"
+                        );
+                        entry.insert(txout.clone());
+                        changeset.txouts.insert(outpoint, txout);
+                    }
                 }
                 crate::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert(txout.clone());
