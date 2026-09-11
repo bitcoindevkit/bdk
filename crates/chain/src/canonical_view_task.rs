@@ -330,13 +330,24 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
                 },
                 CanonicalReason::ObservedIn { observed_in, .. } => ChainPosition::Unconfirmed {
                     first_seen: tx_node.first_seen,
-                    // `last_seen` is a mempool sighting. `ObservedIn::Block` means the tx was
-                    // only ever seen in a block that is not in the best chain, so there is no
-                    // mempool sighting to report — a tx that re-entered the mempool would be
-                    // `ObservedIn::Mempool` instead.
+                    // `ObservedIn::Block` usually means no mempool sighting, but not always:
+                    // `txids_by_descending_last_seen` filters out evicted txs, so an evicted tx
+                    // never reaches the mempool stage and can arrive here transitively, as the
+                    // ancestor of a stale-anchored tx, while genuinely having a `last_seen`.
+                    // Report it — `last_seen` is documented as `None` only when the tx was never
+                    // seen in the mempool, and `first_seen` above is passed through on the same
+                    // terms.
                     last_seen: match observed_in {
-                        ObservedIn::Block(_) => None,
-                        ObservedIn::Mempool(seen_at) => Some(*seen_at),
+                        ObservedIn::Block(_) => tx_node.last_seen,
+                        // For a transitively-marked ancestor this is the *descendant's*
+                        // sighting, which is only a lower bound: a child cannot sit in the
+                        // mempool without its parent. Take whichever is later, so a direct
+                        // observation of this tx is never discarded in favour of an inferred
+                        // one. `None` sorts below `Some`, so this is `seen_at` when the tx has
+                        // no sighting of its own. Ordinarily they agree — the mempool stage runs
+                        // newest-first, so a sweep only reaches an ancestor whose own sighting is
+                        // older — but evicted txs are filtered out of that stage.
+                        ObservedIn::Mempool(seen_at) => Some(*seen_at).max(tx_node.last_seen),
                     },
                 },
             };
