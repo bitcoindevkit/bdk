@@ -3,7 +3,7 @@
 #[macro_use]
 mod common;
 
-use bdk_chain::{local_chain::LocalChain, Balance, BlockId};
+use bdk_chain::{local_chain::LocalChain, Balance, BlockId, ChainPosition, TxGraph};
 use bdk_testenv::{block_id, hash, local_chain};
 use bitcoin::{Amount, BlockHash, OutPoint};
 use common::*;
@@ -1005,4 +1005,73 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
     }
+}
+
+/// A tx without its own anchor borrows the anchor of a confirmed descendant, so its confirmation
+/// height is only an upper bound until its own anchor is known.
+#[test]
+fn transitively_confirmed_tx_reports_descendant_anchor_height() {
+    let chain = local_chain![
+        (0, hash!("genesis")),
+        (1, hash!("parent_block")),
+        (5, hash!("child_block"))
+    ];
+    let tip = chain.tip().block_id();
+    let parent_anchor = block_id!(1, "parent_block");
+    let child_anchor = block_id!(5, "child_block");
+
+    let templates = [
+        TxTemplate {
+            tx_name: "parent",
+            inputs: &[TxInTemplate::Bogus],
+            outputs: &[TxOutTemplate::new(100_000, Some(0))],
+            // Seen in the mempool, but its confirmation has not been fetched yet.
+            last_seen: Some(1),
+            ..Default::default()
+        },
+        TxTemplate {
+            tx_name: "child",
+            inputs: &[TxInTemplate::PrevTx("parent", 0)],
+            outputs: &[TxOutTemplate::new(90_000, Some(0))],
+            anchors: &[child_anchor],
+            ..Default::default()
+        },
+    ];
+    let mut env = init_graph(&templates);
+    let parent_txid = env.txid_to_name["parent"];
+    let child_txid = env.txid_to_name["child"];
+
+    let parent_position = |tx_graph: &TxGraph<BlockId>| {
+        chain
+            .canonical_view(tx_graph, tip, Default::default())
+            .txs()
+            .find(|tx| tx.txid == parent_txid)
+            .expect("parent must be canonical")
+            .pos
+    };
+
+    // Really confirmed in block 1, but the position can only report the child's block 5.
+    let pos = parent_position(&env.tx_graph);
+    assert_eq!(
+        pos,
+        ChainPosition::Confirmed {
+            anchor: child_anchor,
+            transitively: Some(child_txid),
+        }
+    );
+    assert_eq!(pos.confirmation_height_upper_bound(), Some(5));
+    assert_eq!(pos.confirmations_lower_bound(tip.height), 1);
+
+    // Once the parent's own anchor is known, the position becomes exact.
+    let _ = env.tx_graph.insert_anchor(parent_txid, parent_anchor);
+    let pos = parent_position(&env.tx_graph);
+    assert_eq!(
+        pos,
+        ChainPosition::Confirmed {
+            anchor: parent_anchor,
+            transitively: None,
+        }
+    );
+    assert_eq!(pos.confirmation_height_upper_bound(), Some(1));
+    assert_eq!(pos.confirmations_lower_bound(tip.height), 5);
 }

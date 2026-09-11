@@ -66,11 +66,10 @@ pub trait Anchor: core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash:
     /// Returns the [`BlockId`] that the associated blockchain data is "anchored" in.
     fn anchor_block(&self) -> BlockId;
 
-    /// Get the upper bound of the chain data's confirmation height.
+    /// Get the height of the block that confirmed the associated chain data.
     ///
-    /// The default definition gives a pessimistic answer. This can be overridden by the `Anchor`
-    /// implementation for a more accurate value.
-    fn confirmation_height_upper_bound(&self) -> u32 {
+    /// This is the height of [`anchor_block`](Anchor::anchor_block).
+    fn confirmation_height(&self) -> u32 {
         self.anchor_block().height
     }
 }
@@ -80,8 +79,8 @@ impl<A: Anchor> Anchor for &A {
         <A as Anchor>::anchor_block(self)
     }
 
-    fn confirmation_height_upper_bound(&self) -> u32 {
-        <A as Anchor>::confirmation_height_upper_bound(self)
+    fn confirmation_height(&self) -> u32 {
+        <A as Anchor>::confirmation_height(self)
     }
 }
 
@@ -94,10 +93,6 @@ impl Anchor for BlockId {
 impl Anchor for ConfirmationBlockTime {
     fn anchor_block(&self) -> BlockId {
         self.block_id
-    }
-
-    fn confirmation_height_upper_bound(&self) -> u32 {
-        self.block_id.height
     }
 }
 

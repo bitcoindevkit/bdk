@@ -178,7 +178,7 @@ impl<'g, A: Anchor> ChainQuery for CanonicalTask<'g, A> {
                                     .expect(
                                         "tx taken from `unprocessed_anchored_txs` so it must have at least one anchor",
                                     )
-                                    .confirmation_height_upper_bound(),
+                                    .confirmation_height(),
                             ))
                         }
                     }

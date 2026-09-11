@@ -75,18 +75,25 @@ impl<A: Clone> ChainPosition<&A> {
 
 impl<A: Anchor> ChainPosition<A> {
     /// Determines the upper bound of the confirmation height.
+    ///
+    /// This is the height of the anchor block. It is exact for a direct anchor. If the position is
+    /// confirmed [`transitively`](ChainPosition::Confirmed::transitively), the anchor belongs to a
+    /// descendant, so the chain data may be confirmed in an earlier block.
     pub fn confirmation_height_upper_bound(&self) -> Option<u32> {
         match self {
-            ChainPosition::Confirmed { anchor, .. } => {
-                Some(anchor.confirmation_height_upper_bound())
-            }
+            ChainPosition::Confirmed { anchor, .. } => Some(anchor.confirmation_height()),
             ChainPosition::Unconfirmed { .. } => None,
         }
     }
 
-    /// Number of confirmations of this position, given `tip`.
+    /// Lower bound of the number of confirmations of this position, given `tip`.
+    ///
+    /// This is derived from [`confirmation_height_upper_bound`], so it is exact unless the position
+    /// is confirmed [`transitively`](ChainPosition::Confirmed::transitively).
     ///
     /// Returns `0` if unconfirmed, or if the confirmation height is above `tip`.
+    ///
+    /// [`confirmation_height_upper_bound`]: Self::confirmation_height_upper_bound
     pub fn confirmations_lower_bound(&self, tip: u32) -> u32 {
         let Some(height) = self.confirmation_height_upper_bound() else {
             return 0;
