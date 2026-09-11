@@ -107,14 +107,12 @@ impl<P: Ord> PartialOrd for CanonicalTxOut<P> {
 impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
     /// Whether the `txout` is considered mature.
     ///
-    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpreted confirmation count may be
-    /// less than the actual value.
-    ///
-    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
+    /// A coinbase output is mature once [`COINBASE_MATURITY`] blocks (including the block that
+    /// confirmed it) have been mined up to and including `tip`. Non-coinbase outputs are always
+    /// mature.
     pub fn is_mature(&self, tip: u32) -> bool {
         if self.is_on_coinbase {
-            let conf_height = match self.pos.confirmation_height_upper_bound() {
+            let conf_height = match self.pos.confirmation_height() {
                 Some(height) => height,
                 None => {
                     debug_assert!(false, "coinbase tx can never be unconfirmed");
@@ -133,18 +131,12 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
     /// Whether the utxo is/was/will be spendable with chain `tip`.
     ///
     /// This method does not take into account the lock time.
-    ///
-    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpreted confirmation count may be
-    /// less than the actual value.
-    ///
-    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
     pub fn is_confirmed_and_spendable(&self, tip: u32) -> bool {
         if !self.is_mature(tip) {
             return false;
         }
 
-        let conf_height = match self.pos.confirmation_height_upper_bound() {
+        let conf_height = match self.pos.confirmation_height() {
             Some(height) => height,
             None => return false,
         };
@@ -156,7 +148,7 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
         if let Some(spend_height) = self
             .spent_by
             .as_ref()
-            .and_then(|(pos, _)| pos.confirmation_height_upper_bound())
+            .and_then(|(pos, _)| pos.confirmation_height())
         {
             if spend_height <= tip {
                 return false;
@@ -449,7 +441,7 @@ impl<A: Anchor> CanonicalView<A> {
         for (spk_i, txout) in self.filter_unspent_outpoints(outpoints) {
             match &txout.pos {
                 ChainPosition::Confirmed { anchor, .. } => {
-                    let confirmation_height = anchor.confirmation_height_upper_bound();
+                    let confirmation_height = anchor.confirmation_height();
                     let confirmations = self
                         .tip
                         .height
