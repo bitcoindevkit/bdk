@@ -6,15 +6,14 @@
 //! ## Example
 //!
 //! ```
-//! # use bdk_chain::{TxGraph, CanonicalParams, CanonicalTask, local_chain::LocalChain};
+//! # use bdk_chain::{TxGraph, CanonicalParams, local_chain::LocalChain};
 //! # use bdk_core::BlockId;
 //! # use bitcoin::hashes::Hash;
 //! # let tx_graph = TxGraph::<BlockId>::default();
 //! # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
 //! let chain_tip = chain.tip().block_id();
 //! let params = CanonicalParams::default();
-//! let task = CanonicalTask::new(&tx_graph, chain_tip, params);
-//! let view = chain.canonicalize(task);
+//! let view = chain.canonicalize(&tx_graph, chain_tip, params);
 //!
 //! // Iterate over canonical transactions
 //! for tx in view.txs() {
@@ -27,12 +26,20 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::{fmt, ops::RangeBounds};
 
-use bdk_core::BlockId;
+use bdk_core::{BlockId, BlockQueries};
 use bitcoin::{
     constants::COINBASE_MATURITY, Amount, OutPoint, ScriptBuf, Transaction, TxOut, Txid,
 };
 
 use crate::{spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalViewTask, ChainPosition, TxGraph};
+
+/// Internal per-transaction entry in [`Canonical`].
+#[derive(Clone, Debug)]
+pub(crate) struct CanonicalEntry<P> {
+    pub(crate) tx: Arc<Transaction>,
+    pub(crate) pos: P,
+    pub(crate) prev_mtp: Option<u32>,
+}
 
 /// A single canonical transaction with its position.
 ///
@@ -86,6 +93,25 @@ pub struct CanonicalTxOut<P> {
     pub spent_by: Option<(P, Txid)>,
     /// Whether this output is on a coinbase transaction.
     pub is_on_coinbase: bool,
+    /// The median-time-past of the block *preceding* the confirmation height, if computed.
+    ///
+    /// This is the MTP at `confirmation_height - 1` (saturating at genesis), which is the
+    /// reference value used to evaluate BIP-68 relative timelocks on spends of this output —
+    /// matching Bitcoin Core's `CalculateSequenceLocks`. It is *not* the MTP at the
+    /// confirmation height itself.
+    ///
+    /// `None` means the value is unknown, which happens whenever any of these hold:
+    ///
+    /// - MTP computation was not enabled — see
+    ///   [`CanonicalViewTask::with_mtp`](crate::CanonicalViewTask::with_mtp).
+    /// - The output's transaction is not confirmed.
+    /// - The output's transaction is confirmed only *transitively* — through a descendant's
+    ///   anchor, so its own confirmation height genuinely isn't known.
+    /// - The chain could not resolve the full 11-block window the MTP medians over.
+    ///
+    /// So a confirmed output can have `None` here even with MTP enabled. Do not read `None` as
+    /// "MTP was off", and never treat it as an absent or satisfied timelock.
+    pub prev_mtp: Option<u32>,
 }
 
 impl<P: Ord> Ord for CanonicalTxOut<P> {
@@ -188,12 +214,14 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
 pub struct Canonical<A, P> {
     /// List of canonical transaction IDs.
     pub(crate) order: Vec<Txid>,
-    /// Map of transaction IDs to their transaction data and position.
-    pub(crate) txs: HashMap<Txid, (Arc<Transaction>, P)>,
+    /// Map of transaction IDs to their transaction data, position, and MTP.
+    pub(crate) txs: HashMap<Txid, CanonicalEntry<P>>,
     /// Map of outpoints to the transaction ID that spends them.
     pub(crate) spends: HashMap<OutPoint, Txid>,
     /// The chain tip at the time this view was created.
     pub(crate) tip: BlockId,
+    /// Median-time-past at the chain tip height.
+    pub(crate) tip_mtp: Option<u32>,
     /// Marker for the anchor type.
     pub(crate) _anchor: core::marker::PhantomData<A>,
 }
@@ -215,14 +243,16 @@ impl<A, P: Clone> Canonical<A, P> {
     pub(crate) fn new(
         tip: BlockId,
         order: Vec<Txid>,
-        txs: HashMap<Txid, (Arc<Transaction>, P)>,
+        txs: HashMap<Txid, CanonicalEntry<P>>,
         spends: HashMap<OutPoint, Txid>,
+        tip_mtp: Option<u32>,
     ) -> Self {
         Self {
             tip,
             order,
             txs,
             spends,
+            tip_mtp,
             _anchor: core::marker::PhantomData,
         }
     }
@@ -232,15 +262,24 @@ impl<A, P: Clone> Canonical<A, P> {
         self.tip
     }
 
+    /// Get the MTP at the chain tip height.
+    ///
+    /// Returns `None` if MTP was not computed.
+    pub fn tip_mtp(&self) -> Option<u32> {
+        self.tip_mtp
+    }
+
     /// Get a single canonical transaction by its transaction ID.
     ///
     /// Returns `Some(CanonicalTx)` if the transaction exists in the canonical set,
     /// or `None` if the transaction doesn't exist or was excluded due to conflicts.
     pub fn tx(&self, txid: Txid) -> Option<CanonicalTx<P>> {
-        self.txs
-            .get(&txid)
-            .cloned()
-            .map(|(tx, pos)| CanonicalTx { pos, txid, tx })
+        let entry = self.txs.get(&txid)?;
+        Some(CanonicalTx {
+            pos: entry.pos.clone(),
+            txid,
+            tx: entry.tx.clone(),
+        })
     }
 
     /// Get a single canonical transaction output.
@@ -253,19 +292,20 @@ impl<A, P: Clone> Canonical<A, P> {
     /// - The output index is out of bounds
     /// - The transaction was excluded due to conflicts
     pub fn txout(&self, op: OutPoint) -> Option<CanonicalTxOut<P>> {
-        let (tx, pos) = self.txs.get(&op.txid)?;
+        let entry = self.txs.get(&op.txid)?;
         let vout: usize = op.vout.try_into().ok()?;
-        let txout = tx.output.get(vout)?;
+        let txout = entry.tx.output.get(vout)?;
         let spent_by = self.spends.get(&op).map(|spent_by_txid| {
-            let (_, spent_by_pos) = &self.txs[spent_by_txid];
-            (spent_by_pos.clone(), *spent_by_txid)
+            let spent_by_entry = &self.txs[spent_by_txid];
+            (spent_by_entry.pos.clone(), *spent_by_txid)
         });
         Some(CanonicalTxOut {
-            pos: pos.clone(),
+            pos: entry.pos.clone(),
             outpoint: op,
             txout: txout.clone(),
             spent_by,
-            is_on_coinbase: tx.is_coinbase(),
+            is_on_coinbase: entry.tx.is_coinbase(),
+            prev_mtp: entry.prev_mtp,
         })
     }
 
@@ -277,14 +317,13 @@ impl<A, P: Clone> Canonical<A, P> {
     /// # Example
     ///
     /// ```
-    /// # use bdk_chain::{TxGraph, CanonicalTask, local_chain::LocalChain};
+    /// # use bdk_chain::{TxGraph, local_chain::LocalChain};
     /// # use bdk_core::BlockId;
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph = TxGraph::<BlockId>::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
     /// # let chain_tip = chain.tip().block_id();
-    /// # let task = CanonicalTask::new(&tx_graph, chain_tip, Default::default());
-    /// # let view = chain.canonicalize(task);
+    /// # let view = chain.canonicalize(&tx_graph, chain_tip, Default::default());
     /// // Iterate over all canonical transactions
     /// for tx in view.txs() {
     ///     println!("TX {}: {:?}", tx.txid, tx.pos);
@@ -295,8 +334,12 @@ impl<A, P: Clone> Canonical<A, P> {
     /// ```
     pub fn txs(&self) -> impl ExactSizeIterator<Item = CanonicalTx<P>> + DoubleEndedIterator + '_ {
         self.order.iter().map(|&txid| {
-            let (tx, pos) = self.txs[&txid].clone();
-            CanonicalTx { pos, txid, tx }
+            let entry = &self.txs[&txid];
+            CanonicalTx {
+                pos: entry.pos.clone(),
+                txid,
+                tx: entry.tx.clone(),
+            }
         })
     }
 
@@ -312,14 +355,13 @@ impl<A, P: Clone> Canonical<A, P> {
     /// # Example
     ///
     /// ```
-    /// # use bdk_chain::{TxGraph, CanonicalTask, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_chain::{TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
     /// # use bdk_core::BlockId;
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph = TxGraph::<BlockId>::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
     /// # let chain_tip = chain.tip().block_id();
-    /// # let task = CanonicalTask::new(&tx_graph, chain_tip, Default::default());
-    /// # let view = chain.canonicalize(task);
+    /// # let view = chain.canonicalize(&tx_graph, chain_tip, Default::default());
     /// # let indexer = KeychainTxOutIndex::<&str>::default();
     /// // Get all outputs from an indexer
     /// for (keychain, txout) in view.filter_outpoints(indexer.outpoints().clone()) {
@@ -343,14 +385,13 @@ impl<A, P: Clone> Canonical<A, P> {
     /// # Example
     ///
     /// ```
-    /// # use bdk_chain::{TxGraph, CanonicalTask, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
+    /// # use bdk_chain::{TxGraph, local_chain::LocalChain, keychain_txout::KeychainTxOutIndex};
     /// # use bdk_core::BlockId;
     /// # use bitcoin::hashes::Hash;
     /// # let tx_graph = TxGraph::<BlockId>::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
     /// # let chain_tip = chain.tip().block_id();
-    /// # let task = CanonicalTask::new(&tx_graph, chain_tip, Default::default());
-    /// # let view = chain.canonicalize(task);
+    /// # let view = chain.canonicalize(&tx_graph, chain_tip, Default::default());
     /// # let indexer = KeychainTxOutIndex::<&str>::default();
     /// // Get unspent outputs (UTXOs) from an indexer
     /// for (keychain, utxo) in view.filter_unspent_outpoints(indexer.outpoints().clone()) {
@@ -426,7 +467,7 @@ impl<A: Anchor> CanonicalView<A> {
     /// # let tx_graph = TxGraph::<BlockId>::default();
     /// # let chain = LocalChain::from_blocks([(0, bitcoin::BlockHash::all_zeros())].into_iter().collect()).unwrap();
     /// # let chain_tip = chain.tip().block_id();
-    /// # let view = chain.canonical_view(&tx_graph, chain_tip, CanonicalParams::default());
+    /// # let view = chain.canonicalize(&tx_graph, chain_tip, CanonicalParams::default());
     /// # let indexer = KeychainTxOutIndex::<&str>::default();
     /// // Calculate balance with 6 confirmations, trusting all outputs
     /// let balance = view.balance(
@@ -490,13 +531,26 @@ impl<A: Anchor> CanonicalView<A> {
 }
 
 impl<A: Anchor> CanonicalTxs<A> {
-    /// Creates a [`CanonicalViewTask`] that resolves [`CanonicalReason`](crate::CanonicalReason)s
-    /// into [`ChainPosition`]s.
+    /// Creates a [`CanonicalViewTask`] that resolves
+    /// [`CanonicalReason`](crate::canonical_task::CanonicalReason)s into [`ChainPosition`]s.
     ///
-    /// This is the second phase of the canonicalization pipeline. The resulting task
-    /// queries the chain to verify anchors for transitively anchored transactions and
-    /// produces a [`CanonicalView`] with resolved chain positions.
-    pub fn view_task<'g>(self, tx_graph: &'g TxGraph<A>) -> CanonicalViewTask<'g, A> {
-        CanonicalViewTask::new(tx_graph, self.tip, self.order, self.txs, self.spends)
+    /// This is the second phase of the canonicalization pipeline. Blocks fetched during
+    /// phase 1 are passed through so they can be reused without redundant queries.
+    ///
+    /// To also compute median-time-past (MTP) values for the resulting view, call
+    /// [`CanonicalViewTask::with_mtp`] on the returned task.
+    pub fn view_task<'g, B>(
+        self,
+        tx_graph: &'g TxGraph<A>,
+        queries: BlockQueries<B>,
+    ) -> CanonicalViewTask<'g, A, B> {
+        CanonicalViewTask::new(
+            tx_graph,
+            self.tip,
+            self.order,
+            self.txs,
+            self.spends,
+            queries,
+        )
     }
 }

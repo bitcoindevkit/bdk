@@ -1311,3 +1311,44 @@ fn merge_chains_with_prev_blockhash() {
     .into_iter()
     .for_each(TestLocalChain::run);
 }
+
+/// A [`ChainTask`] that reports [`TaskProgress::Blocked`] without ever having announced the
+/// height it is waiting on in a [`TaskProgress::Query`].
+///
+/// This is the only way a task reaches `run_task`'s `Blocked` arm: the driver resolves every
+/// announced height before polling again, so a task that announces what it needs never has
+/// anything outstanding. Such a task would also hang a streaming driver, which starts fetches
+/// only for announced heights — so the synchronous driver panics rather than covering for it.
+struct BlockedTask {
+    tip: BlockId,
+}
+
+impl bdk_chain::ChainTask<BlockHash> for BlockedTask {
+    type Output = ();
+
+    fn tip(&self) -> BlockId {
+        self.tip
+    }
+
+    fn poll(&mut self) -> bdk_chain::TaskProgress {
+        bdk_chain::TaskProgress::Blocked
+    }
+
+    fn resolve_query(&mut self, _height: u32, _response: Option<BlockHash>) {}
+
+    fn unresolved_queries<'a>(&'a self) -> impl Iterator<Item = u32> + 'a {
+        core::iter::empty()
+    }
+
+    fn finish(self) -> Self::Output {}
+}
+
+#[test]
+#[should_panic(expected = "heights it never announced")]
+fn run_task_panics_when_a_task_blocks_without_querying() {
+    let chain = local_chain![(0, hash!("_")), (1, hash!("A"))];
+
+    chain.run_task(BlockedTask {
+        tip: chain.tip().block_id(),
+    });
+}
