@@ -2,10 +2,8 @@ use crate::{BlockId, ConfirmationBlockTime};
 
 /// Trait that "anchors" blockchain data to a specific block of height and hash.
 ///
-/// If transaction A is anchored in block B, and block B is in the best chain, we can
-/// assume that transaction A is also confirmed in the best chain. This does not necessarily mean
-/// that transaction A is confirmed in block B. It could also mean transaction A is confirmed in a
-/// parent block of B.
+/// If transaction A is anchored in block B, then block B is the block that confirmed transaction
+/// A. If block B is in the best chain, transaction A is confirmed in the best chain.
 ///
 /// Every [`Anchor`] implementation must contain a [`BlockId`] parameter, and must implement
 /// [`Ord`]. When implementing [`Ord`], the anchors' [`BlockId`]s should take precedence
