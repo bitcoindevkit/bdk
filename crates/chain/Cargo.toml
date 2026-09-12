@@ -44,3 +44,7 @@ harness = false
 [[bench]]
 name = "indexer"
 harness = false
+
+[[bench]]
+name = "trust_classification"
+harness = false

@@ -116,10 +116,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("tx1", 0), ("tx_conflict_2", 0)]),
             exp_unspents: HashSet::from([("tx_conflict_2", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
                 trusted_pending: Amount::from_sat(30000),
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                ..Default::default()
             },
         },
         Scenario {
@@ -152,10 +150,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("tx1", 0), ("tx1", 1), ("tx_conflict_2", 0)]),
             exp_unspents: HashSet::from([("tx_conflict_2", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
                 trusted_pending: Amount::from_sat(30000),
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                ..Default::default()
             },
         },
         Scenario {
@@ -195,10 +191,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("tx1", 0), ("tx_conflict_3", 0)]),
             exp_unspents: HashSet::from([("tx_conflict_3", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
                 trusted_pending: Amount::from_sat(40000),
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                ..Default::default()
             },
         },
         Scenario {
@@ -232,10 +226,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("tx1", 0), ("tx_orphaned_conflict", 0)]),
             exp_unspents: HashSet::from([("tx_orphaned_conflict", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
                 trusted_pending: Amount::from_sat(30000),
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                ..Default::default()
             },
         },
         Scenario {
@@ -269,10 +261,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("tx1", 0), ("tx_conflict_1", 0)]),
             exp_unspents: HashSet::from([("tx_conflict_1", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
-                trusted_pending: Amount::from_sat(20000),
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                untrusted_pending: Amount::from_sat(20000),
+                ..Default::default()
             },
         },
         Scenario {
@@ -319,10 +309,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("tx1", 0), ("tx_confirmed_conflict", 0)]),
             exp_unspents: HashSet::from([("tx_confirmed_conflict", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
-                trusted_pending: Amount::ZERO,
-                untrusted_pending: Amount::ZERO,
                 confirmed: Amount::from_sat(50000),
+                ..Default::default()
             },
         },
         Scenario {
@@ -364,10 +352,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("A", 0), ("B", 0), ("C", 0)]),
             exp_unspents: HashSet::from([("C", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
-                trusted_pending: Amount::from_sat(30000),
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                untrusted_pending: Amount::from_sat(30000),
+                ..Default::default()
             },
         },
         Scenario {
@@ -406,10 +392,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("A", 0), ("B'", 0)]),
             exp_unspents: HashSet::from([("B'", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
-                trusted_pending: Amount::ZERO,
-                untrusted_pending: Amount::ZERO,
                 confirmed: Amount::from_sat(20000),
+                ..Default::default()
             },
         },
         Scenario {
@@ -453,10 +437,8 @@ fn test_tx_conflict_handling() {
             ]),
             exp_unspents: HashSet::from([("C", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
                 trusted_pending: Amount::from_sat(30000),
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                ..Default::default()
             },
         },
         Scenario {
@@ -499,10 +481,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("A", 0), ("B'", 0)]),
             exp_unspents: HashSet::from([("B'", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
                 trusted_pending: Amount::from_sat(30000),
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                ..Default::default()
             },
         },
         Scenario {
@@ -545,10 +525,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("A", 0), ("B'", 0)]),
             exp_unspents: HashSet::from([("B'", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
-                trusted_pending: Amount::ZERO,
-                untrusted_pending: Amount::ZERO,
                 confirmed: Amount::from_sat(50000),
+                ..Default::default()
             },
         },
         Scenario {
@@ -597,10 +575,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("A", 0), ("B'", 0)]),
             exp_unspents: HashSet::from([("B'", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
-                trusted_pending: Amount::ZERO,
-                untrusted_pending: Amount::ZERO,
                 confirmed: Amount::from_sat(50000),
+                ..Default::default()
             },
         },
         Scenario {
@@ -630,10 +606,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("first", 0), ("second", 0), ("anchored", 0)]),
             exp_unspents: HashSet::from([("anchored", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
-                trusted_pending: Amount::ZERO,
-                untrusted_pending: Amount::ZERO,
                 confirmed: Amount::from_sat(800),
+                ..Default::default()
             }
         },
         Scenario {
@@ -697,7 +671,7 @@ fn test_tx_conflict_handling() {
             exp_chain_txs: HashSet::from(["root", "tx"]),
             exp_chain_txouts: HashSet::from([("tx", 0)]),
             exp_unspents: HashSet::from([("tx", 0)]),
-            exp_balance: Balance { trusted_pending: Amount::from_sat(9000), ..Default::default() }
+            exp_balance: Balance { untrusted_pending: Amount::from_sat(9000), ..Default::default() }
         },
         Scenario {
             name: "tx spends from 2 conflicting transactions where a conflict spends another",
@@ -764,7 +738,7 @@ fn test_tx_conflict_handling() {
             exp_chain_txs: HashSet::from(["A", "S1", "B"]),
             exp_chain_txouts: HashSet::from([("A", 0), ("B", 0), ("S1", 0)]),
             exp_unspents: HashSet::from([("B", 0)]),
-            exp_balance: Balance { trusted_pending: Amount::from_sat(8_000), ..Default::default() },
+            exp_balance: Balance { untrusted_pending: Amount::from_sat(8_000), ..Default::default() },
         },
         Scenario {
             name: "tx spends from 2 conflicting transactions where the conflict is nested (different last_seens)",
@@ -801,7 +775,7 @@ fn test_tx_conflict_handling() {
             exp_chain_txs: HashSet::from(["A", "S1", "B"]),
             exp_chain_txouts: HashSet::from([("A", 0), ("B", 0), ("S1", 0)]),
             exp_unspents: HashSet::from([("B", 0)]),
-            exp_balance: Balance { trusted_pending: Amount::from_sat(8_000), ..Default::default() },
+            exp_balance: Balance { untrusted_pending: Amount::from_sat(8_000), ..Default::default() },
         },
         Scenario {
             name: "assume-canonical-tx displaces unconfirmed chain",
@@ -845,10 +819,9 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("root", 0), ("root", 1), ("assume_canonical", 0)]),
             exp_unspents: HashSet::from([("root", 1), ("assume_canonical", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
                 trusted_pending: Amount::from_sat(19_000),
-                untrusted_pending: Amount::ZERO,
                 confirmed: Amount::from_sat(21_000),
+                ..Default::default()
             },
         },
         Scenario {
@@ -893,10 +866,9 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("root", 0), ("root", 1), ("assume_canonical", 0)]),
             exp_unspents: HashSet::from([("root", 1), ("assume_canonical", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
                 trusted_pending: Amount::from_sat(19_000),
-                untrusted_pending: Amount::ZERO,
                 confirmed: Amount::from_sat(21_000),
+                ..Default::default()
             },
         },
         Scenario {
@@ -937,10 +909,8 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([("root", 0), ("assume_c", 0)]),
             exp_unspents: HashSet::from([("assume_c", 0)]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
                 trusted_pending: Amount::from_sat(18_000),
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                ..Default::default()
             },
         },
         Scenario {
@@ -959,10 +929,7 @@ fn test_tx_conflict_handling() {
             exp_chain_txouts: HashSet::from([]),
             exp_unspents: HashSet::from([]),
             exp_balance: Balance {
-                immature: Amount::ZERO,
-                trusted_pending: Amount::ZERO,
-                untrusted_pending: Amount::ZERO,
-                confirmed: Amount::ZERO,
+                ..Default::default()
             }
         }
     ];
@@ -1028,13 +995,9 @@ fn test_tx_conflict_handling() {
         );
 
         let balance = canonical_view.balance(
-            env.indexer.outpoints().iter().cloned(),
-            |_, txout| {
-                env.indexer
-                    .index_of_spk(txout.txout.script_pubkey.as_script())
-                    .is_some()
-            },
-            0,
+            env.indexer.outpoints().iter().map(|(_, op)| *op),
+            bdk_chain::taints_unowned(&env.indexer),
+            |pos| pos.is_confirmed(),
         );
         assert_eq!(
             balance, scenario.exp_balance,

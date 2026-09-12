@@ -62,7 +62,11 @@ fn get_balance(
             recv_chain.tip().block_id(),
             Default::default(),
         )
-        .balance(outpoints, |_, _| true, 0);
+        .balance(
+            outpoints.into_iter().map(|(_, op)| op),
+            bdk_chain::taints_unowned(&recv_graph.index),
+            |pos| pos.is_confirmed(),
+        );
     Ok(balance)
 }
 
@@ -592,7 +596,7 @@ fn test_sync() -> anyhow::Result<()> {
     assert_eq!(
         get_balance(&recv_chain, &recv_graph)?,
         Balance {
-            trusted_pending: SEND_AMOUNT,
+            untrusted_pending: SEND_AMOUNT,
             ..Balance::default()
         },
         "balance must be correct",
@@ -634,7 +638,7 @@ fn test_sync() -> anyhow::Result<()> {
     assert_eq!(
         get_balance(&recv_chain, &recv_graph)?,
         Balance {
-            trusted_pending: SEND_AMOUNT,
+            untrusted_pending: SEND_AMOUNT,
             ..Balance::default()
         },
     );
@@ -770,7 +774,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
         assert_eq!(
             get_balance(&recv_chain, &recv_graph)?,
             Balance {
-                trusted_pending: SEND_AMOUNT * depth as u64,
+                untrusted_pending: SEND_AMOUNT * depth as u64,
                 confirmed: SEND_AMOUNT * (REORG_COUNT - depth) as u64,
                 ..Balance::default()
             },
