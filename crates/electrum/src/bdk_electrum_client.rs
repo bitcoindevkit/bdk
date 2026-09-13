@@ -836,7 +836,7 @@ mod test {
 
         // Mine block that confirms transaction.
         env.mine_blocks(1, None)?;
-        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
         let height: u32 = env.rpc_client().get_block_count()?.into_model().0 as u32;
 
         // Add the pre-reorg block that the tx is confirmed in to the header cache.
@@ -851,7 +851,7 @@ mod test {
 
         // Reorg to create a new header and hash.
         env.reorg(1)?;
-        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
 
         // Calling `batch_fetch_anchors` should fetch new header, replacing the pre-reorg header.
         let anchors = electrum_client.batch_fetch_anchors(&[(txid, height as usize)])?;
