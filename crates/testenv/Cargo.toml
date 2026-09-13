@@ -16,9 +16,10 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.23.1", default-features = false }
+bdk_chain = { path = "../chain", version = "0.23.1", default-features = false, features = ["miniscript"]}
 electrsd = { version = "0.38.0", features = [ "legacy" ], default-features = false }
 bitcoin = { version = "0.32.0", default-features = false }
+rand = { version = "0.8.0", default-features = false, features = ["std", "small_rng", "std_rng"] }
 
 [dev-dependencies]
 bdk_testenv = { path = "." }
