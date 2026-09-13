@@ -59,8 +59,9 @@ impl EsploraExt for esplora_client::BlockingClient {
         let start_time = request.start_time();
 
         let chain_tip = request.chain_tip();
+        let target = request.target();
         let latest_blocks = if chain_tip.is_some() {
-            Some(fetch_latest_blocks(self)?)
+            Some(fetch_latest_blocks(self, target)?)
         } else {
             None
         };
@@ -80,6 +81,7 @@ impl EsploraExt for esplora_client::BlockingClient {
                 keychain_spks,
                 stop_gap,
                 last_revealed,
+                target,
                 parallel_requests,
             )?;
             tx_update.extend(update);
@@ -114,8 +116,9 @@ impl EsploraExt for esplora_client::BlockingClient {
         let start_time = request.start_time();
 
         let chain_tip = request.chain_tip();
+        let target = request.target();
         let latest_blocks = if chain_tip.is_some() {
-            Some(fetch_latest_blocks(self)?)
+            Some(fetch_latest_blocks(self, target)?)
         } else {
             None
         };
@@ -127,6 +130,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             start_time,
             &mut inserted_txs,
             request.iter_spks_with_expected_txids(),
+            target,
             parallel_requests,
         )?);
         tx_update.extend(fetch_txs_with_txids(
@@ -134,6 +138,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             start_time,
             &mut inserted_txs,
             request.iter_txids(),
+            target,
             parallel_requests,
         )?);
         tx_update.extend(fetch_txs_with_outpoints(
@@ -141,6 +146,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             start_time,
             &mut inserted_txs,
             request.iter_outpoints(),
+            target,
             parallel_requests,
         )?);
 
@@ -170,12 +176,20 @@ impl EsploraExt for esplora_client::BlockingClient {
 /// alternating between chain-sources.
 fn fetch_latest_blocks(
     client: &esplora_client::BlockingClient,
+    target: Option<BlockId>,
 ) -> Result<BTreeMap<u32, BlockHash>, Error> {
-    Ok(client
+    let mut latest_blocks = client
         .get_block_infos(None)?
         .into_iter()
+        .filter(|b| target.map_or(true, |t| b.height <= t.height))
         .map(|b| (b.height, b.id))
-        .collect())
+        .collect::<BTreeMap<u32, BlockHash>>();
+
+    if let Some(t) = target {
+        latest_blocks.entry(t.height).or_insert(t.hash);
+    }
+
+    Ok(latest_blocks)
 }
 
 /// Used instead of [`esplora_client::BlockingClient::get_block_hash`].
@@ -280,6 +294,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
     mut keychain_spks: I,
     stop_gap: usize,
     last_revealed: Option<u32>,
+    target: Option<BlockId>,
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error> {
     type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
@@ -338,7 +353,13 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
                 if inserted_txs.insert(tx.txid) {
                     update.txs.push(tx.to_tx().into());
                 }
-                insert_anchor_or_seen_at_from_status(&mut update, start_time, tx.txid, tx.status);
+                insert_anchor_or_seen_at_from_status(
+                    &mut update,
+                    start_time,
+                    tx.txid,
+                    tx.status,
+                    target,
+                );
                 insert_prevouts(&mut update, tx.vin);
             }
             update
@@ -367,6 +388,7 @@ fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     spks: I,
+    target: Option<BlockId>,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
     fetch_txs_with_keychain_spks(
@@ -376,6 +398,7 @@ fn fetch_txs_with_spks<I: IntoIterator<Item = SpkWithExpectedTxids>>(
         spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
         usize::MAX,
         None,
+        target,
         parallel_requests,
     )
     .map(|(update, _)| update)
@@ -392,6 +415,7 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     txids: I,
+    target: Option<BlockId>,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
@@ -426,7 +450,13 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
                 if inserted_txs.insert(txid) {
                     update.txs.push(tx_info.to_tx().into());
                 }
-                insert_anchor_or_seen_at_from_status(&mut update, start_time, txid, tx_info.status);
+                insert_anchor_or_seen_at_from_status(
+                    &mut update,
+                    start_time,
+                    txid,
+                    tx_info.status,
+                    target,
+                );
                 insert_prevouts(&mut update, tx_info.vin);
             }
         }
@@ -445,6 +475,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     outpoints: I,
+    target: Option<BlockId>,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
     let outpoints = outpoints.into_iter().collect::<Vec<_>>();
@@ -457,6 +488,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
         start_time,
         inserted_txs,
         outpoints.iter().map(|op| op.txid),
+        target,
         parallel_requests,
     )?);
 
@@ -496,6 +528,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
                         start_time,
                         spend_txid,
                         spend_status,
+                        target,
                     );
                 }
             }
@@ -507,6 +540,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
         start_time,
         inserted_txs,
         missing_txs,
+        target,
         parallel_requests,
     )?);
     Ok(update)

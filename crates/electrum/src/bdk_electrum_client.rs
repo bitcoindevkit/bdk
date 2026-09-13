@@ -132,7 +132,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let start_time = request.start_time();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(
+                &self.inner,
+                chain_tip,
+                request.target(),
+            )?),
             None => None,
         };
 
@@ -150,6 +154,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 spks,
                 stop_gap,
                 last_revealed,
+                request.target(),
                 batch_size,
                 &mut pending_anchors,
             )? {
@@ -215,9 +220,10 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ) -> Result<SyncResponse, Error> {
         let mut request: SyncRequest<I> = request.into();
         let start_time = request.start_time();
+        let target = request.target();
 
         let tip_and_latest_blocks = match request.chain_tip() {
-            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip)?),
+            Some(chain_tip) => Some(fetch_tip_and_latest_blocks(&self.inner, chain_tip, target)?),
             None => None,
         };
 
@@ -232,6 +238,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 .map(|(i, spk)| (i as u32, spk)),
             usize::MAX,
             None,
+            target,
             batch_size,
             &mut pending_anchors,
         )?;
@@ -239,12 +246,14 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             start_time,
             &mut tx_update,
             request.iter_txids(),
+            target,
             &mut pending_anchors,
         )?;
         self.populate_with_outpoints(
             start_time,
             &mut tx_update,
             request.iter_outpoints(),
+            target,
             &mut pending_anchors,
         )?;
 
@@ -288,6 +297,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         mut spks_with_expected_txids: impl Iterator<Item = (u32, SpkWithExpectedTxids)>,
         stop_gap: usize,
         last_revealed: Option<u32>,
+        target: Option<BlockId>,
         batch_size: usize,
         pending_anchors: &mut Vec<(Txid, usize)>,
     ) -> Result<Option<u32>, Error> {
@@ -335,7 +345,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                     match tx_res.height.try_into() {
                         // Returned heights 0 & -1 are reserved for unconfirmed txs.
                         Ok(height) if height > 0 => {
-                            pending_anchors.push((tx_res.tx_hash, height));
+                            if target.map_or(true, |t| height as u32 <= t.height) {
+                                pending_anchors.push((tx_res.tx_hash, height));
+                            } else {
+                                tx_update.seen_ats.insert((tx_res.tx_hash, start_time));
+                            }
                         }
                         _ => {
                             tx_update.seen_ats.insert((tx_res.tx_hash, start_time));
@@ -355,6 +369,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         outpoints: impl IntoIterator<Item = OutPoint>,
+        target: Option<BlockId>,
         pending_anchors: &mut Vec<(Txid, usize)>,
     ) -> Result<(), Error> {
         // Collect valid outpoints with their corresponding `spk` and `tx`.
@@ -398,7 +413,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         match res.height.try_into() {
                             // Returned heights 0 & -1 are reserved for unconfirmed txs.
                             Ok(height) if height > 0 => {
-                                pending_anchors.push((res.tx_hash, height));
+                                if target.map_or(true, |t| height as u32 <= t.height) {
+                                    pending_anchors.push((res.tx_hash, height));
+                                } else {
+                                    tx_update.seen_ats.insert((res.tx_hash, start_time));
+                                }
                             }
                             _ => {
                                 tx_update.seen_ats.insert((res.tx_hash, start_time));
@@ -420,7 +439,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                         match res.height.try_into() {
                             // Returned heights 0 & -1 are reserved for unconfirmed txs.
                             Ok(height) if height > 0 => {
-                                pending_anchors.push((res.tx_hash, height));
+                                if target.map_or(true, |t| height as u32 <= t.height) {
+                                    pending_anchors.push((res.tx_hash, height));
+                                } else {
+                                    tx_update.seen_ats.insert((res.tx_hash, start_time));
+                                }
                             }
                             _ => {
                                 tx_update.seen_ats.insert((res.tx_hash, start_time));
@@ -440,6 +463,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         start_time: u64,
         tx_update: &mut TxUpdate<ConfirmationBlockTime>,
         txids: impl IntoIterator<Item = Txid>,
+        target: Option<BlockId>,
         pending_anchors: &mut Vec<(Txid, usize)>,
     ) -> Result<(), Error> {
         let mut txs = Vec::<(Txid, Arc<Transaction>)>::new();
@@ -501,7 +525,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 match res.height.try_into() {
                     // Returned heights 0 & -1 are reserved for unconfirmed txs.
                     Ok(height) if height > 0 => {
-                        pending_anchors.push((tx.0, height));
+                        if target.map_or(true, |t| height as u32 <= t.height) {
+                            pending_anchors.push((tx.0, height));
+                        } else {
+                            tx_update.seen_ats.insert((res.tx_hash, start_time));
+                        }
                     }
                     _ => {
                         tx_update.seen_ats.insert((res.tx_hash, start_time));
@@ -652,9 +680,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 fn fetch_tip_and_latest_blocks(
     client: &impl ElectrumApi,
     prev_tip: CheckPoint<BlockHash>,
+    target: Option<BlockId>,
 ) -> Result<(CheckPoint<BlockHash>, BTreeMap<u32, BlockHash>), Error> {
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
-    let new_tip_height = height as u32;
+    let mut new_tip_height = height as u32;
+
+    if let Some(t) = target {
+        if new_tip_height > t.height {
+            new_tip_height = t.height;
+        }
+    }
 
     // If electrum returns a tip height that is lower than our previous tip, then checkpoints do
     // not need updating. We just return the previous tip and use that as the point of agreement.
@@ -868,6 +903,50 @@ mod test {
         // Anchor cache should also contain new hash.
         let cache = electrum_client.anchor_cache.lock().unwrap();
         assert!(cache.get(&(txid, new_hash)).is_some());
+
+        Ok(())
+    }
+
+    #[cfg(feature = "default")]
+    #[test]
+    fn test_target_limit() -> anyhow::Result<()> {
+        use bdk_chain::BlockId;
+
+        let env = TestEnv::new()?;
+        let client = electrum_client::Client::new(env.electrsd.electrum_url.as_str()).unwrap();
+        let electrum_client = BdkElectrumClient::new(client);
+
+        let addr = env.rpc_client().get_new_address(None, None)?.address()?.assume_checked();
+        let spk = addr.script_pubkey();
+
+        // Send funds to address.
+        let txid = env.send(&addr, Amount::from_sat(50_000))?;
+
+        let target_height: u32 = env.rpc_client().get_block_count()?.into_model().0 as u32;
+        let target_hash = electrum_client.inner.block_header(target_height as _)?.block_hash();
+
+        // Mine a block to confirm the transaction.
+        env.mine_blocks(1, None)?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+        let bogus_genesis = constants::genesis_block(Network::Testnet).block_hash();
+        let cp = CheckPoint::new(0, bogus_genesis);
+
+        let target = BlockId {
+            height: target_height,
+            hash: target_hash,
+        };
+
+        let req = SyncRequest::builder()
+            .chain_tip(cp)
+            .spks([spk])
+            .target(target)
+            .build();
+
+        let res = electrum_client.sync(req, 10, false)?;
+
+        assert!(res.tx_update.anchors.is_empty(), "anchors should be empty");
+        assert!(res.tx_update.seen_ats.iter().any(|(t, _)| *t == txid), "tx should be in seen_ats");
 
         Ok(())
     }
