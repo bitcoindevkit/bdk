@@ -26,6 +26,14 @@ use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 /// The built-in chain-source crates (`bdk_electrum`, `bdk_esplora`, `bdk_bitcoind_rpc`) handle this
 /// automatically. Transactions lacking temporal context are stored but ignored by canonicalization.
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(bound(
+        serialize = "A: serde::Serialize",
+        deserialize = "A: Ord + serde::Deserialize<'de>"
+    ))
+)]
 #[non_exhaustive]
 pub struct TxUpdate<A = ()> {
     /// Full transactions. These are transactions that were determined to be relevant to the wallet
@@ -108,5 +116,55 @@ impl<A: Ord> TxUpdate<A> {
         self.anchors.extend(other.anchors);
         self.seen_ats.extend(other.seen_ats);
         self.evicted_ats.extend(other.evicted_ats);
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod test {
+    use super::*;
+    use crate::{BlockId, ConfirmationBlockTime};
+    use bitcoin::{hashes::Hash, Amount, ScriptBuf};
+
+    #[test]
+    fn tx_update_serde_round_trip() {
+        let tx = Transaction {
+            version: bitcoin::transaction::Version::non_standard(0),
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: Vec::new(),
+            output: Vec::new(),
+        };
+        let txid = tx.compute_txid();
+
+        let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
+        tx_update.txs.push(Arc::new(tx));
+        tx_update.txouts.insert(
+            OutPoint::new(txid, 0),
+            TxOut {
+                value: Amount::from_sat(42_000),
+                script_pubkey: ScriptBuf::new(),
+            },
+        );
+        tx_update.anchors.insert((
+            ConfirmationBlockTime {
+                block_id: BlockId {
+                    height: 7,
+                    hash: Hash::hash(b"anchor"),
+                },
+                confirmation_time: 1_700_000_000,
+            },
+            txid,
+        ));
+        tx_update.seen_ats.insert((txid, 1_700_000_001));
+        tx_update.evicted_ats.insert((txid, 1_700_000_002));
+
+        let json = serde_json::to_string(&tx_update).expect("serialization must succeed");
+        let restored: TxUpdate<ConfirmationBlockTime> =
+            serde_json::from_str(&json).expect("deserialization must succeed");
+
+        assert_eq!(tx_update.txs, restored.txs);
+        assert_eq!(tx_update.txouts, restored.txouts);
+        assert_eq!(tx_update.anchors, restored.anchors);
+        assert_eq!(tx_update.seen_ats, restored.seen_ats);
+        assert_eq!(tx_update.evicted_ats, restored.evicted_ats);
     }
 }
