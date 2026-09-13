@@ -18,6 +18,18 @@ fn apply_changeset_to_checkpoint<D>(
 where
     D: ToBlockHash + fmt::Debug + Clone,
 {
+    if let Some(Some(new_genesis_data)) = changeset.blocks.get(&0) {
+        if let Some(genesis_entry) = init_cp.entry_iter().find(|e| e.height() == 0) {
+            if !genesis_entry.is_placeholder()
+                && genesis_entry.hash() != new_genesis_data.to_blockhash()
+            {
+                return Err(ApplyBlockError::CannotReplaceGenesis {
+                    expected: genesis_entry.block_id(),
+                });
+            }
+        }
+    }
+
     if let Some(start_height) = changeset.blocks.keys().next().cloned() {
         // changes after point of agreement
         let mut extension = BTreeMap::default();
@@ -560,6 +572,11 @@ pub enum ApplyBlockError {
         /// The block that `prev_blockhash` should reference.
         expected: BlockId,
     },
+    /// The changeset attempts to replace the chain's genesis block with a different one.
+    CannotReplaceGenesis {
+        /// The genesis block the chain already has.
+        expected: BlockId,
+    },
 }
 
 impl core::fmt::Display for ApplyBlockError {
@@ -571,6 +588,11 @@ impl core::fmt::Display for ApplyBlockError {
             ApplyBlockError::PrevBlockhashMismatch { expected } => write!(
                 f,
                 "`prev_blockhash` doesn't match block at height {} ({})",
+                expected.height, expected.hash
+            ),
+            ApplyBlockError::CannotReplaceGenesis { expected } => write!(
+                f,
+                "changeset cannot replace the genesis block at height {} ({})",
                 expected.height, expected.hash
             ),
         }
@@ -713,6 +735,9 @@ where
                         try_include_height: expected.height,
                     }
                 }
+                ApplyBlockError::CannotReplaceGenesis { .. } => CannotConnectError {
+                    try_include_height: 0,
+                },
             }
         })?;
         Ok((new_tip, changeset))
