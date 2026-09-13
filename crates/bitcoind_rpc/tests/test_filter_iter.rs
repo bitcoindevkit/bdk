@@ -42,7 +42,11 @@ fn filter_iter_matches_blocks() -> anyhow::Result<()> {
     let cp = CheckPoint::new(0, genesis_hash);
 
     let client = ClientExt::get_rpc_client(&env)?;
-    let iter = FilterIter::new(&client, cp, [addr.script_pubkey()]);
+    const FINAL_DEPTH: u32 = 100;
+    let tip_height = ClientExt::get_rpc_client(&env)?.get_block_count()? as u32;
+    let start_height = tip_height.saturating_sub(FINAL_DEPTH);
+
+    let iter = FilterIter::new(&client, cp, start_height, [addr.script_pubkey()]);
 
     for res in iter {
         let event = res?;
@@ -58,15 +62,27 @@ fn filter_iter_matches_blocks() -> anyhow::Result<()> {
 }
 
 #[test]
-fn filter_iter_error_wrong_network() -> anyhow::Result<()> {
+fn filter_iter_recovers_from_start_height() -> anyhow::Result<()> {
     let env = testenv()?;
     let _ = env.mine_blocks(10, None)?;
 
-    // Try to initialize FilterIter with a CP on the wrong network
+    // Wrong checkpoint hash
     let cp = CheckPoint::new(0, bitcoin::hashes::Hash::hash(b"wrong-hash"));
+
     let client = ClientExt::get_rpc_client(&env)?;
-    let mut iter = FilterIter::new(&client, cp, [ScriptBuf::new()]);
-    assert!(matches!(iter.next(), Some(Err(Error::ReorgDepthExceeded))));
+
+    // Recovery should happen from genesis/start_height
+    let mut iter = FilterIter::new(
+        &client,
+        cp,
+        0,
+        [ScriptBuf::new()],
+    );
+
+    // Iterator should successfully continue
+    let event = iter.next().unwrap()?;
+
+    assert_eq!(event.height(), 1);
 
     Ok(())
 }
@@ -87,7 +103,7 @@ fn filter_iter_detects_reorgs() -> anyhow::Result<()> {
 
     let spk = ScriptBuf::from_hex("0014446906a6560d8ad760db3156706e72e171f3a2aa")?;
     let client = ClientExt::get_rpc_client(&env)?;
-    let mut iter = FilterIter::new(&client, cp, [spk]);
+    let mut iter = FilterIter::new(&client, cp, 0, [spk]);
 
     // Process events to height (MINE_TO - 1)
     loop {
@@ -138,7 +154,7 @@ fn event_checkpoint_connects_to_local_chain() -> anyhow::Result<()> {
 
     // Construct iter
     let client = ClientExt::get_rpc_client(&env)?;
-    let mut iter = FilterIter::new(&client, cp, vec![ScriptBuf::new()]);
+    let mut iter = FilterIter::new(&client, cp, 0, [ScriptBuf::new()]);
 
     // Now reorg 3 blocks (14, 15, 16)
     let new_hashes: BTreeMap<u32, BlockHash> = (14..=16).zip(env.reorg(3)?).collect();

@@ -52,7 +52,11 @@ fn main() -> anyhow::Result<()> {
     for (_, desc) in graph.index.keychains() {
         spks.extend(SpkIterator::new_with_range(desc, 0..SPK_COUNT).map(|(_, s)| s));
     }
-    let iter = FilterIter::new(&rpc_client, chain.tip(), spks);
+    const FINAL_DEPTH: u32 = 100;
+
+    let start_height = chain.tip().height().saturating_sub(FINAL_DEPTH);
+
+    let iter = FilterIter::new(&rpc_client, chain.tip(), start_height, spks);
 
     let start = Instant::now();
 
