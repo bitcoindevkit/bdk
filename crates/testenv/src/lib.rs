@@ -1,5 +1,6 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+pub mod persist_test_utils;
 pub mod utils;
 
 use anyhow::Context;
@@ -13,6 +14,8 @@ use bitcoin::hex::HexToBytesError;
 use core::time::Duration;
 use electrsd::bitcoind::mtype::GetBlockTemplate;
 use electrsd::bitcoind::{TemplateRequest, TemplateRules};
+
+extern crate alloc;
 
 pub use electrsd;
 pub use electrsd::bitcoind;
