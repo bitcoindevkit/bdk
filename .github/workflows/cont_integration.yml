@@ -74,6 +74,30 @@ jobs:
     defaults:
       run:
         working-directory: ./crates/chain
+        # TODO "--target thumbv6m-none-eabi" should work but currently does not
+        run: cargo check --no-default-features --features hashbrown
+      - name: Check serde does not enable serde/std in no_std builds
+        run: |
+          set -euo pipefail
+          check_no_serde_std() {
+            local pkg="$1" features="$2"
+            if cargo tree -p "$pkg" -e features \
+                --no-default-features --features "$features" --no-dev-dependencies \
+                | grep -q 'serde feature "std"'; then
+              echo "error: serde/std enabled for $pkg with features=$features"
+              exit 1
+            fi
+          }
+          check_no_serde_std bdk_core serde
+          check_no_serde_std bdk_chain serde
+      - name: Install ARM cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi
+      - name: Add bare-metal target
+        run: rustup target add thumbv7em-none-eabihf
+      - name: Check bdk_chain serde on bare-metal target
+        working-directory: ./crates/chain
+        run: cargo check --no-default-features --features serde --target thumbv7em-none-eabihf
+      - name: Check esplora
     steps:
       - name: Checkout
         uses: actions/checkout@v6
