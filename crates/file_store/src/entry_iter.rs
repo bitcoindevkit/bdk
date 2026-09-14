@@ -50,7 +50,34 @@ where
             }
 
             let pos_before_read = self.db_file.stream_position()?;
-            match bincode_options().deserialize_from(&mut self.db_file) {
+            // An entry can never be larger than the bytes remaining in the file. Bounding the
+            // deserializer by that amount makes a corrupt/oversized length prefix fail with
+            // `bincode::ErrorKind::SizeLimit` (mapped to `StoreError::Bincode` below) instead of
+            // attempting an unbounded allocation and panicking with `capacity overflow`.
+            //
+            // The factor of 9 accounts for how bincode charges reads: every length literal it
+            // decodes is charged a full `size_of::<u64>()` (8 bytes) even when the varint
+            // encoding occupies one byte on disk, and the payload length is charged again. A
+            // valid entry therefore charges at most `8 * bytes + bytes` and this bound can
+            // never reject a store that fits in the file.
+            let remaining = self
+                .db_file
+                .get_ref()
+                .metadata()?
+                .len()
+                .saturating_sub(pos_before_read);
+            // At end of file there is nothing left to decode; terminate cleanly without
+            // invoking the deserializer (with a zero limit it would report `SizeLimit`
+            // instead of `UnexpectedEof`, breaking the clean-EOF path below).
+            if remaining == 0 {
+                self.finished = true;
+                return Ok(None);
+            }
+            let limit = remaining.saturating_mul(9);
+            match bincode_options()
+                .with_limit(limit)
+                .deserialize_from(&mut self.db_file)
+            {
                 Ok(changeset) => Ok(Some(changeset)),
                 Err(e) => {
                     self.finished = true;
