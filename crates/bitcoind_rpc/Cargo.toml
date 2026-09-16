@@ -24,6 +24,8 @@ bdk_core = { path = "../core", version = "0.6.1", default-features = false }
 bdk_bitcoind_rpc = { path = "." }
 bdk_testenv = { path = "../testenv" }
 bdk_chain = { path = "../chain" }
+serde = "1"
+serde_json = "1"
 
 [features]
 default = ["std"]
