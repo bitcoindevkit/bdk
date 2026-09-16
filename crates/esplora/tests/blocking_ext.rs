@@ -302,7 +302,10 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
             .compute_txid(),
         txid_4th_addr
     );
-    assert_eq!(full_scan_update.last_active_indices[&0], 3);
+    assert_eq!(
+        common::last_active_index(&full_scan_update.last_active_indices, 0),
+        Some(3)
+    );
 
     // Now receive a coin on the last address.
     let txid_last_addr = env
@@ -331,7 +334,10 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         .collect();
     assert_eq!(txs.len(), 1);
     assert!(txs.contains(&txid_4th_addr));
-    assert_eq!(full_scan_update.last_active_indices[&0], 3);
+    assert_eq!(
+        common::last_active_index(&full_scan_update.last_active_indices, 0),
+        Some(3)
+    );
     let full_scan_update = {
         let request = FullScanRequest::builder()
             .chain_tip(cp_tip.clone())
@@ -346,7 +352,10 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         .collect();
     assert_eq!(txs.len(), 2);
     assert!(txs.contains(&txid_4th_addr) && txs.contains(&txid_last_addr));
-    assert_eq!(full_scan_update.last_active_indices[&0], 9);
+    assert_eq!(
+        common::last_active_index(&full_scan_update.last_active_indices, 0),
+        Some(9)
+    );
 
     Ok(())
 }
@@ -395,7 +404,10 @@ pub fn test_stop_gap_past_last_revealed() -> anyhow::Result<()> {
         response.tx_update.txs.first().unwrap().compute_txid(),
         txid_last_addr
     );
-    assert_eq!(response.last_active_indices[&0], 9);
+    assert_eq!(
+        common::last_active_index(&response.last_active_indices, 0),
+        Some(9)
+    );
 
     // Tx sits beyond `last_revealed + stop_gap`. So `stop_gap` must cut the scan off.
     let request = FullScanRequest::builder()
