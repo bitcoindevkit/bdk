@@ -139,7 +139,7 @@ fn test_set_all_derivation_indices() {
     ]
     .into();
     assert_eq!(
-        txout_index.reveal_to_target_multi(&derive_to),
+        txout_index.reveal_to_target_multi(derive_to.clone()),
         ChangeSet {
             last_revealed: last_revealed.clone(),
             spk_cache: spk_cache.clone(),
@@ -147,11 +147,48 @@ fn test_set_all_derivation_indices() {
     );
     assert_eq!(txout_index.last_revealed_indices(), derive_to);
     assert_eq!(
-        txout_index.reveal_to_target_multi(&derive_to),
+        txout_index.reveal_to_target_multi(derive_to.clone()),
         ChangeSet::default(),
         "no changes if we set to the same thing"
     );
     assert_eq!(txout_index.initial_changeset().last_revealed, last_revealed);
+}
+
+/// `reveal_to_target_multi` only depends on the highest target per keychain, so repeated and
+/// unordered entries reveal the same as their per-keychain max.
+#[test]
+fn reveal_to_target_multi_ignores_order_and_repeats() {
+    use TestKeychain::*;
+    let new_index = || {
+        init_txout_index(
+            parse_descriptor(DESCRIPTORS[0]),
+            parse_descriptor(DESCRIPTORS[1]),
+            0,
+            true,
+        )
+    };
+
+    let mut deduped = new_index();
+    let expected = deduped.reveal_to_target_multi([(External, 12), (Internal, 24)]);
+    assert_eq!(
+        deduped.last_revealed_indices(),
+        BTreeMap::from([(External, 12), (Internal, 24)])
+    );
+
+    let mut messy = new_index();
+    let changeset = messy.reveal_to_target_multi([
+        (External, 5),
+        (Internal, 24),
+        (External, 12),
+        (External, 3),
+        (Internal, 24),
+    ]);
+
+    assert_eq!(changeset, expected);
+    assert_eq!(
+        messy.last_revealed_indices(),
+        deduped.last_revealed_indices()
+    );
 }
 
 #[test]
