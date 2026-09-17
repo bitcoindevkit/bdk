@@ -5,6 +5,7 @@ alias t := test
 alias p := pre-push
 alias d := doc
 alias vs := verify-standalone
+alias vsa := verify-standalone-all
 
 _default:
   @just --list
@@ -118,3 +119,44 @@ verify-standalone crate *args:
     cargo build --locked "$@"
 
     echo "✅ $CRATE builds successfully in isolation!"
+
+# Verify all publishable crates can be built standalone (with --all-features)
+[positional-arguments]
+verify-standalone-all *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    command -v jq >/dev/null 2>&1 || { echo "Error: jq is required but not installed" >&2; exit 1; }
+
+    # Get all workspace crates (excluding examples)
+    CRATES=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.source == null and (.name | startswith("example_") | not)) | .name' | sort)
+
+    if [ -z "$CRATES" ]; then
+        echo "Error: no publishable crates found via cargo metadata" >&2
+        exit 1
+    fi
+
+    echo "Verifying all publishable crates can build standalone..."
+    echo "Crates to verify:"
+    echo "$CRATES" | sed 's/^/  - /'
+    echo
+
+    for crate in $CRATES; do
+        echo "========================================="
+        echo "Verifying $crate..."
+        echo "========================================="
+
+        if ! just verify-standalone "$crate" --all-features "$@"; then
+            echo "❌ $crate: FAILED"
+            echo "========================================="
+            echo "❌ VERIFICATION FAILED for: $crate"
+            echo "========================================="
+            exit 1
+        fi
+        echo "✅ $crate: SUCCESS"
+        echo
+    done
+
+    echo "========================================="
+    echo "✅ All crates build successfully in isolation!"
+    echo "========================================="
