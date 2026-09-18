@@ -694,6 +694,79 @@ fn test_sync() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Ensure that a tx re-mined at the same height after a reorg is anchored to the replacement block.
+///
+/// The header cache must not keep serving the pre-reorg header for that height, otherwise the
+/// anchor cache is hit with the stale block hash and the tx is never re-anchored. This is checked
+/// both when the reorged height is still within the synced chain suffix, and when enough blocks
+/// have been mined before the next sync that it is not.
+#[test]
+fn test_sync_reorg_remined_at_same_height() -> anyhow::Result<()> {
+    const SEND_AMOUNT: Amount = Amount::from_sat(10_000);
+
+    for blocks_after_reorg in [0, 20] {
+        let env = TestEnv::new()?;
+        let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+        let client = BdkElectrumClient::new(electrum_client);
+
+        let spk_to_track = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
+        let addr_to_track =
+            Address::from_script(&spk_to_track, bdk_chain::bitcoin::Network::Regtest)?;
+
+        let (mut recv_chain, _) =
+            LocalChain::from_genesis_hash(env.bitcoind.client.get_block_hash(0)?);
+        let mut recv_graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new({
+            let mut recv_index = SpkTxOutIndex::default();
+            recv_index.insert_spk((), spk_to_track.clone());
+            recv_index
+        });
+
+        env.mine_blocks(101, None)?;
+        let txid = env.send(&addr_to_track, SEND_AMOUNT)?;
+        env.mine_blocks(1, None)?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        let _ = sync_with_electrum(
+            &client,
+            [spk_to_track.clone()],
+            &mut recv_chain,
+            &mut recv_graph,
+        )?;
+
+        // Replace the confirming block. The tx returns to the mempool and is re-mined at the same
+        // height in the replacement block.
+        let height = env.bitcoind.client.get_block_count()?;
+        env.reorg(1)?;
+        env.mine_blocks(blocks_after_reorg, None)?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        let new_hash = env.bitcoind.client.get_block_hash(height)?;
+        let _ = sync_with_electrum(
+            &client,
+            [spk_to_track.clone()],
+            &mut recv_chain,
+            &mut recv_graph,
+        )?;
+
+        assert!(
+            recv_graph
+                .graph()
+                .all_anchors()
+                .get(&txid)
+                .is_some_and(|anchors| anchors.iter().any(|a| a.block_id.hash == new_hash)),
+            "blocks_after_reorg={blocks_after_reorg}: tx must be anchored to the replacement block",
+        );
+        assert_eq!(
+            get_balance(&recv_chain, &recv_graph)?,
+            Balance {
+                confirmed: SEND_AMOUNT,
+                ..Balance::default()
+            },
+            "blocks_after_reorg={blocks_after_reorg}: balance must be correct",
+        );
+    }
+
+    Ok(())
+}
+
 /// Ensure that confirmed txs that are reorged become unconfirmed.
 ///
 /// 1. Mine 101 blocks.
