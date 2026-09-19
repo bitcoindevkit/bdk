@@ -2,7 +2,7 @@
 use crate::{
     alloc::{boxed::Box, collections::VecDeque, vec::Vec},
     collections::{BTreeMap, HashMap, HashSet},
-    CheckPoint, ConfirmationBlockTime, Indexed,
+    BlockId, CheckPoint, ConfirmationBlockTime, Indexed,
 };
 use bitcoin::{BlockHash, OutPoint, Script, ScriptBuf, Txid};
 
@@ -129,6 +129,14 @@ impl<I, D> SyncRequestBuilder<I, D> {
     /// This is used to update [`LocalChain`](../../bdk_chain/local_chain/struct.LocalChain.html).
     pub fn chain_tip(mut self, cp: CheckPoint<D>) -> Self {
         self.inner.chain_tip = Some(cp);
+        self
+    }
+
+    /// Set the target chain tip for the sync request.
+    ///
+    /// The sync will not fetch chain data beyond this target.
+    pub fn target(mut self, target: BlockId) -> Self {
+        self.inner.target = Some(target);
         self
     }
 
@@ -259,6 +267,7 @@ impl<I, D> SyncRequestBuilder<I, D> {
 pub struct SyncRequest<I = (), D = BlockHash> {
     start_time: u64,
     chain_tip: Option<CheckPoint<D>>,
+    target: Option<BlockId>,
     spks: VecDeque<(I, ScriptBuf)>,
     spks_consumed: usize,
     spk_expected_txids: HashMap<ScriptBuf, HashSet<Txid>>,
@@ -289,6 +298,7 @@ impl<I, D> SyncRequest<I, D> {
             inner: Self {
                 start_time,
                 chain_tip: None,
+                target: None,
                 spks: VecDeque::new(),
                 spks_consumed: 0,
                 spk_expected_txids: HashMap::new(),
@@ -335,6 +345,11 @@ impl<I, D> SyncRequest<I, D> {
     /// Get the chain tip [`CheckPoint`] of this request (if any).
     pub fn chain_tip(&self) -> Option<CheckPoint<D>> {
         self.chain_tip.clone()
+    }
+
+    /// Get the target chain tip [`BlockId`] of this request (if any).
+    pub fn target(&self) -> Option<BlockId> {
+        self.target
     }
 
     /// Advances the sync request and returns the next [`ScriptBuf`] with corresponding [`Txid`]
@@ -444,6 +459,14 @@ impl<K: Ord, D> FullScanRequestBuilder<K, D> {
         self
     }
 
+    /// Set the target chain tip for the full scan request.
+    ///
+    /// The sync will not fetch chain data beyond this target.
+    pub fn target(mut self, target: BlockId) -> Self {
+        self.inner.target = Some(target);
+        self
+    }
+
     /// Set the spk iterator for a given `keychain`.
     pub fn spks_for_keychain(
         mut self,
@@ -495,6 +518,7 @@ impl<K: Ord, D> FullScanRequestBuilder<K, D> {
 pub struct FullScanRequest<K, D = BlockHash> {
     start_time: u64,
     chain_tip: Option<CheckPoint<D>>,
+    target: Option<BlockId>,
     spks_by_keychain: BTreeMap<K, Box<dyn Iterator<Item = Indexed<ScriptBuf>> + Send>>,
     last_revealed: BTreeMap<K, u32>,
     inspect: Box<InspectFullScan<K>>,
@@ -520,6 +544,7 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
             inner: Self {
                 start_time,
                 chain_tip: None,
+                target: None,
                 spks_by_keychain: BTreeMap::new(),
                 last_revealed: BTreeMap::new(),
                 inspect: Box::new(|_, _, _| ()),
@@ -549,6 +574,11 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
     /// Get the chain tip [`CheckPoint`] of this request (if any).
     pub fn chain_tip(&self) -> Option<CheckPoint<D>> {
         self.chain_tip.clone()
+    }
+
+    /// Get the target chain tip [`BlockId`] of this request (if any).
+    pub fn target(&self) -> Option<BlockId> {
+        self.target
     }
 
     /// List all keychains contained in this request.
