@@ -291,9 +291,21 @@ impl TestEnv {
         Err(anyhow::anyhow!("Cannot find nonce that meets the target"))
     }
 
-    /// This method waits for the Electrum notification indicating that a new block has been mined.
+    /// Wait until Electrum is aware of a block at the given `block_height` (and optionally that the
+    /// block at that height matches the given `block_hash`).
+    ///
     /// `timeout` is the maximum [`Duration`] we want to wait for a response from Electrsd.
-    pub fn wait_until_electrum_sees_block(&self, timeout: Duration) -> anyhow::Result<()> {
+    pub fn wait_until_electrum_sees_block(
+        &self,
+        block_height: usize,
+        block_hash: Option<BlockHash>,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
+        // NOTE: We use the subscribe endpoint because polling Electrs for a block header at
+        // `block_height` and verifying the `block_hash` does not ensure that the spk histories are
+        // current. In contrast, getting a notification for a new block tip ensures that the
+        // confirmed spk histories are current, including those of the newly notified tip. This is a
+        // result of the internal workings of Electrs.
         self.electrsd.client.block_headers_subscribe()?;
         let delay = Duration::from_millis(200);
         let start = std::time::Instant::now();
@@ -301,17 +313,42 @@ impl TestEnv {
         while start.elapsed() < timeout {
             self.electrsd.trigger()?;
             self.electrsd.client.ping()?;
-            if self.electrsd.client.block_headers_pop()?.is_some() {
-                return Ok(());
+            if let Some(header_notif) = self.electrsd.client.block_headers_pop()? {
+                if header_notif.height >= block_height {
+                    // If the notified tip already advanced past `block_height`, fetch the header at
+                    // `block_height` explicitly so we can verify the expected `block_hash`.
+                    let header = if header_notif.height == block_height {
+                        header_notif.header
+                    } else {
+                        self.electrsd.client.block_header(block_height)?
+                    };
+                    match block_hash {
+                        None => return Ok(()),
+                        Some(exp_hash) if exp_hash == header.block_hash() => return Ok(()),
+                        Some(_) => {}
+                    }
+                }
             }
 
             std::thread::sleep(delay);
         }
 
         Err(anyhow::Error::msg(format!(
-            "Timed out waiting for Electrsd to get transaction, took: {:?}",
+            "Timed out waiting for Electrsd to sync to block {block_height}, took: {:?}",
             start.elapsed()
         )))
+    }
+
+    /// Wait until Electrum's tip syncs with bitcoind's chain tip.
+    ///
+    /// `timeout` is the maximum [`Duration`] we want to wait for a response from Electrsd.
+    pub fn wait_until_electrum_tip_syncs_with_bitcoind(
+        &self,
+        timeout: Duration,
+    ) -> anyhow::Result<()> {
+        let chain_height = self.rpc_client().get_block_count()?.into_model().0;
+        let chain_hash = self.get_block_hash(chain_height)?;
+        self.wait_until_electrum_sees_block(chain_height as usize, Some(chain_hash), timeout)
     }
 
     /// This method waits for Electrsd to see a transaction with given `txid`. `timeout` is the
@@ -438,7 +475,7 @@ mod test {
 
         // Mine some blocks.
         env.mine_blocks(101, None)?;
-        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
         let height = env.bitcoind.client.get_block_count()?.into_model().0;
         let blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
@@ -446,7 +483,7 @@ mod test {
 
         // Perform reorg on six blocks.
         env.reorg(6)?;
-        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
         let reorged_height = env.bitcoind.client.get_block_count()?.into_model().0;
         let reorged_blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
