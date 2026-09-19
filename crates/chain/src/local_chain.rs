@@ -375,7 +375,23 @@ where
     }
 
     /// Apply the given `changeset`.
+    ///
+    /// # Errors
+    ///
+    /// [`ApplyBlockError::MissingGenesis`] occurs if the `changeset` would remove or replace the
+    /// genesis block. [`ApplyBlockError::PrevBlockhashMismatch`] occurs if it would break a
+    /// `prev_blockhash` link.
+    ///
+    /// The chain is left untouched when this fails.
     pub fn apply_changeset(&mut self, changeset: &ChangeSet<D>) -> Result<(), ApplyBlockError> {
+        // Genesis is immutable: a changeset that swaps it belongs to a different chain. Removing
+        // it is caught further down by `LocalChain::from_blocks`.
+        if let Some(Some(data)) = changeset.blocks.get(&0) {
+            if data.to_blockhash() != self.genesis_hash() {
+                return Err(ApplyBlockError::MissingGenesis);
+            }
+        }
+
         let old_tip = self.tip.clone();
         let new_tip = apply_changeset_to_checkpoint(old_tip, changeset)?;
         self.tip = new_tip;
@@ -553,7 +569,7 @@ impl<D> FromIterator<(u32, D)> for ChangeSet<D> {
 /// Error when applying blocks to a local chain.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ApplyBlockError {
-    /// Genesis block is missing.
+    /// Genesis block is missing, or would be replaced by a different block.
     MissingGenesis,
     /// Block's `prev_blockhash` doesn't match the expected block.
     PrevBlockhashMismatch {
@@ -566,7 +582,7 @@ impl core::fmt::Display for ApplyBlockError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ApplyBlockError::MissingGenesis => {
-                write!(f, "genesis block is missing")
+                write!(f, "genesis block is missing or would be replaced")
             }
             ApplyBlockError::PrevBlockhashMismatch { expected } => write!(
                 f,
