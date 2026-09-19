@@ -18,7 +18,7 @@ workspace = true
 [dependencies]
 bitcoin = { version = "0.32.0", default-features = false }
 bdk_core = { path = "../core", version = "0.6.2", default-features = false }
-serde = { version = "1", optional = true, features = ["derive", "rc"] }
+serde = { version = "1", optional = true, default-features = false, features = ["derive", "rc", "alloc"] }
 miniscript = { version = "13.0.0", optional = true, default-features = false }
 
 # Feature dependencies
