@@ -3,11 +3,12 @@ use bdk_chain::{
     local_chain::LocalChain,
     IndexedTxGraph,
 };
-use bdk_core::{BlockId, CheckPoint, ConfirmationBlockTime, TxUpdate};
-use bitcoin::{
-    absolute, constants, hashes::Hash, key::Secp256k1, transaction, Amount, BlockHash, Network,
-    Transaction, TxIn, TxOut,
+use bdk_core::{CheckPoint, ConfirmationBlockTime, TxUpdate};
+use bdk_testenv::{
+    hash,
+    utils::{genesis_block_id, new_tx, tip_block_id},
 };
+use bitcoin::{key::Secp256k1, Amount, OutPoint, Transaction, TxIn, TxOut};
 use criterion::{criterion_group, criterion_main, Criterion};
 use miniscript::Descriptor;
 use std::sync::Arc;
@@ -22,36 +23,13 @@ const TX_CT: u32 = 21;
 const USE_SPK_CACHE: bool = true;
 const AMOUNT: Amount = Amount::from_sat(1_000);
 
-fn new_tx(lt: u32) -> Transaction {
-    Transaction {
-        version: transaction::Version::TWO,
-        lock_time: absolute::LockTime::from_consensus(lt),
-        input: vec![],
-        output: vec![TxOut::NULL],
-    }
-}
-
-fn genesis_block_id() -> BlockId {
-    BlockId {
-        height: 0,
-        hash: constants::genesis_block(Network::Regtest).block_hash(),
-    }
-}
-
-fn tip_block_id() -> BlockId {
-    BlockId {
-        height: 100,
-        hash: BlockHash::all_zeros(),
-    }
-}
-
 fn setup<F: Fn(&mut KeychainTxGraph, &LocalChain)>(f: F) -> (KeychainTxGraph, LocalChain) {
     let desc = Descriptor::parse_descriptor(&Secp256k1::new(), DESC)
         .unwrap()
         .0;
 
     let cp = CheckPoint::from_blocks(
-        [genesis_block_id(), tip_block_id()]
+        [genesis_block_id(), tip_block_id(100)]
             .into_iter()
             .map(|block_id| (block_id.height, block_id.hash)),
     )
@@ -99,7 +77,10 @@ pub fn reindex_tx_graph(c: &mut Criterion) {
         for i in 0..TX_CT {
             let script_pubkey = graph.index.reveal_next_spk(()).unwrap().0 .1;
             let tx = Transaction {
-                input: vec![TxIn::default()],
+                input: vec![TxIn {
+                    previous_output: OutPoint::new(hash!("prev"), i),
+                    ..Default::default()
+                }],
                 output: vec![TxOut {
                     script_pubkey,
                     value: AMOUNT,
