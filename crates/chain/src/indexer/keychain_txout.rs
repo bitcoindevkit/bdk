@@ -816,11 +816,17 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     }
 
     /// Convenience method to call [`Self::reveal_to_target`] on multiple keychains.
-    pub fn reveal_to_target_multi(&mut self, keychains: &BTreeMap<K, u32>) -> ChangeSet {
+    ///
+    /// `keychains` may repeat a keychain and need not be ordered, as revealing to a target at or
+    /// below the keychain's last revealed index is a no-op.
+    pub fn reveal_to_target_multi(
+        &mut self,
+        keychains: impl IntoIterator<Item = (K, u32)>,
+    ) -> ChangeSet {
         let mut changeset = ChangeSet::default();
 
-        for (keychain, &index) in keychains {
-            self._reveal_to_target(&mut changeset, keychain.clone(), index);
+        for (keychain, index) in keychains {
+            self._reveal_to_target(&mut changeset, keychain, index);
         }
 
         self._empty_stage_into_changeset(&mut changeset);

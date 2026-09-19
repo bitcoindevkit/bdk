@@ -137,7 +137,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         };
 
         let mut tx_update = TxUpdate::<ConfirmationBlockTime>::default();
-        let mut last_active_indices = BTreeMap::<K, u32>::default();
+        let mut last_active_indices = Vec::<(K, u32)>::new();
         let mut pending_anchors = Vec::new();
         for keychain in request.keychains() {
             let last_revealed = request.last_revealed(&keychain);
@@ -153,7 +153,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 batch_size,
                 &mut pending_anchors,
             )? {
-                last_active_indices.insert(keychain, last_active_index);
+                last_active_indices.push((keychain, last_active_index));
             }
         }
 

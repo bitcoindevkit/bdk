@@ -592,7 +592,12 @@ pub struct FullScanResponse<K, A = ConfirmationBlockTime, D = BlockHash> {
     pub tx_update: crate::TxUpdate<A>,
     /// Last active indices for the corresponding keychains (`K`). An index is active if it had a
     /// transaction associated with the script pubkey at that index.
-    pub last_active_indices: BTreeMap<K, u32>,
+    ///
+    /// Entries are observations, so a keychain may appear multiple times and entries need not be
+    /// ordered. The consumer only ever reveals upwards (see
+    /// [`reveal_to_target_multi`](https://docs.rs/bdk_chain/latest/bdk_chain/indexer/keychain_txout/struct.KeychainTxOutIndex.html#method.reveal_to_target_multi)),
+    /// so an entry that targets an index at or below what is already revealed is a no-op.
+    pub last_active_indices: Vec<(K, u32)>,
     /// Changes to the chain discovered during the scan.
     pub chain_update: Option<CheckPoint<D>>,
 }
