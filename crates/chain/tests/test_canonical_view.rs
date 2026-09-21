@@ -1,13 +1,19 @@
 #![cfg(feature = "miniscript")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use bdk_chain::{
-    local_chain::LocalChain, BlockId, ChainPosition, ConfirmationBlockTime, Eligibility, Trust,
-    TxGraph,
+    local_chain::LocalChain, BlockId, CanonicalTxOut, ChainPosition, ConfirmationBlockTime,
+    Eligibility, Trust, TxGraph,
 };
 use bdk_testenv::{hash, utils::new_tx};
-use bitcoin::{Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{
+    key::Secp256k1,
+    opcodes::all::{OP_CLTV, OP_CSV},
+    script::Instruction,
+    Amount, BlockHash, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut,
+};
+use miniscript::Descriptor;
 
 /// Builds an `is_settled` predicate requiring at least `min_confirmations` confirmations.
 fn settled(
@@ -1061,4 +1067,208 @@ fn test_evicted_stale_anchored_tx_not_canonical() {
         !view.txs().any(|tx| tx.txid == txid),
         "evicted leftover tx must not be canonical"
     );
+}
+
+/// A settled output for which `is_locked` returns true is classified `Locked` and counted in
+/// `Balance::locked` instead of `confirmed`.
+#[test]
+fn test_classify_locked() {
+    let blocks: BTreeMap<u32, BlockHash> =
+        [(0, hash!("g")), (1, hash!("tip"))].into_iter().collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+    let spk = ScriptBuf::new();
+
+    let tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("ext"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(40_000),
+            script_pubkey: spk.clone(),
+        }],
+        ..new_tx(0)
+    };
+    let txid = tx.compute_txid();
+    let _ = tx_graph.insert_tx(tx.clone());
+    let _ = tx_graph.insert_anchor(
+        txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(1).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+
+    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let ops = [OutPoint::new(txid, 0)];
+
+    // Timelock unmet
+    let (_, eligibility) = view
+        .classify_outpoints(ops, |_| false, |pos| pos.is_confirmed(), |_| true)
+        .next()
+        .unwrap();
+    assert_eq!(eligibility, Eligibility::Locked);
+
+    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), |_| true);
+    assert_eq!(balance.locked, Amount::from_sat(40_000));
+    assert_eq!(balance.confirmed, Amount::ZERO);
+
+    // Timelock met
+    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), |_| false);
+    assert_eq!(balance.confirmed, Amount::from_sat(40_000));
+    assert_eq!(balance.locked, Amount::ZERO);
+
+    let locked = view.balance(ops, |_| false, |pos| pos.is_confirmed(), |_| true);
+    assert_eq!((balance + locked).total(), Amount::from_sat(80_000));
+}
+
+/// A settled output behind OP_CSV is `Locked` until it has enough confirmations, and one behind
+/// OP_CLTV until the tip reaches its lock height.
+#[test]
+fn test_classify_locked_script_timelocks() {
+    enum Timelock {
+        Relative(u32),
+        Absolute(u32),
+    }
+
+    /// Reads the first `<n> OP_CSV` or `<n> OP_CLTV` pair in `script`.
+    fn read_timelock(script: &Script) -> Option<Timelock> {
+        let instructions = script.instructions().collect::<Result<Vec<_>, _>>().ok()?;
+        instructions.windows(2).find_map(|pair| {
+            let n = u32::try_from(pair[0].script_num()?).ok()?;
+            match &pair[1] {
+                Instruction::Op(op) if *op == OP_CSV => Some(Timelock::Relative(n)),
+                Instruction::Op(op) if *op == OP_CLTV => Some(Timelock::Absolute(n)),
+                _ => None,
+            }
+        })
+    }
+
+    /// Returns true if the UTXO is still locked by its timelock.
+    fn is_locked(
+        wallet: &HashMap<ScriptBuf, ScriptBuf>,
+        tip: u32,
+        utxo: &CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>,
+    ) -> bool {
+        let spk = &utxo.txout.script_pubkey;
+        let Some(script) = wallet.get(spk) else {
+            return false;
+        };
+        let Some(timelock) = read_timelock(script) else {
+            return false;
+        };
+        match timelock {
+            Timelock::Relative(n) => utxo.pos.confirmations_lower_bound(tip) < n,
+            Timelock::Absolute(h) => tip < h,
+        }
+    }
+
+    let key = "tprv8ZgxMBicQKsPd3krDUsBAmtnRsK3rb8u5yi1zhQgMhF1tR8MW7xfE4rnrbbsrbPR52e7rKapu6ztw1jXveJSCGHEriUGZV7mCe88duLp5pj/0/*";
+    let desc_csv = format!("wsh(and_v(v:pk({key}),older(100)))");
+    let desc_cltv = format!("wsh(and_v(v:pk({key}),after(200)))");
+
+    let secp = Secp256k1::signing_only();
+
+    let (desc_csv, _) = Descriptor::parse_descriptor(&secp, &desc_csv).unwrap();
+    let (desc_cltv, _) = Descriptor::parse_descriptor(&secp, &desc_cltv).unwrap();
+
+    let desc_csv = desc_csv.at_derivation_index(0).unwrap();
+    let desc_cltv = desc_cltv.at_derivation_index(0).unwrap();
+
+    let wallet = HashMap::from([
+        (
+            desc_csv.script_pubkey(),
+            desc_csv.explicit_script().unwrap(),
+        ),
+        (
+            desc_cltv.script_pubkey(),
+            desc_cltv.explicit_script().unwrap(),
+        ),
+    ]);
+
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("genesis")), (100, hash!("100"))]
+        .into_iter()
+        .collect();
+    let mut chain = LocalChain::from_blocks(blocks).unwrap();
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+
+    let tx = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("ext"), 0),
+            ..Default::default()
+        }],
+        output: vec![
+            TxOut {
+                value: Amount::from_sat(10_000),
+                script_pubkey: desc_csv.script_pubkey(),
+            },
+            TxOut {
+                value: Amount::from_sat(20_000),
+                script_pubkey: desc_cltv.script_pubkey(),
+            },
+        ],
+        ..new_tx(0)
+    };
+
+    let txid: bitcoin::Txid = tx.compute_txid();
+    let _ = tx_graph.insert_tx(tx);
+    let _ = tx_graph.insert_anchor(
+        txid,
+        ConfirmationBlockTime {
+            block_id: chain.get(100).unwrap().block_id(),
+            confirmation_time: 100,
+        },
+    );
+
+    let csv_op = OutPoint::new(txid, 0);
+    let cltv_op = OutPoint::new(txid, 1);
+
+    chain.insert_block(101, hash!("101")).unwrap();
+
+    let test_cases = [
+        (198, true, true),   // tip 198 -> CSV Locked,  CLTV Locked
+        (199, false, true),  // tip 199 -> CSV Settled, CLTV Locked
+        (200, false, false), // tip 200 -> CSV Settled, CLTV Settled
+    ];
+
+    for (tip_height, expect_csv_locked, expect_cltv_locked) in test_cases {
+        chain.insert_block(tip_height, hash!("tip")).unwrap();
+        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let tip = view.tip().height;
+
+        let (_, csv) = view
+            .classify_outpoints(
+                [csv_op],
+                |_| true,
+                |pos| pos.is_confirmed(),
+                |txout: &CanonicalTxOut<_>| is_locked(&wallet, tip, txout),
+            )
+            .next()
+            .unwrap();
+
+        let (_, cltv) = view
+            .classify_outpoints(
+                [cltv_op],
+                |_| true,
+                |pos| pos.is_confirmed(),
+                |txout: &CanonicalTxOut<_>| is_locked(&wallet, tip, txout),
+            )
+            .next()
+            .unwrap();
+
+        let csv_is_locked = csv == Eligibility::Locked;
+        let cltv_is_locked = cltv == Eligibility::Locked;
+
+        assert_eq!(
+            csv_is_locked, expect_csv_locked,
+            "csv at tip {tip} expected: {}",
+            expect_csv_locked
+        );
+        assert_eq!(
+            cltv_is_locked, expect_cltv_locked,
+            "cltv at tip {tip} expected: {}",
+            expect_cltv_locked
+        );
+    }
 }
