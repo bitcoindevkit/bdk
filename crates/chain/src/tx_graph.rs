@@ -1015,10 +1015,15 @@ impl<A: Anchor> TxGraph<A> {
             .iter()
             .copied()
             .rev()
-            .filter(|(last_seen, txid)| match self.last_evicted.get(txid) {
-                Some(last_evicted) => last_evicted < last_seen,
-                None => true,
-            })
+            .filter(|&(_, txid)| !self.is_evicted(txid))
+    }
+
+    pub(crate) fn is_evicted(&self, txid: Txid) -> bool {
+        match (self.last_evicted.get(&txid), self.last_seen.get(&txid)) {
+            (Some(last_evicted), Some(last_seen)) => last_evicted >= last_seen,
+            (Some(_), None) => true,
+            (None, _) => false,
+        }
     }
 
     /// Construct a `TxGraph` from a `changeset`.

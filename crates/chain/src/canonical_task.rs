@@ -119,7 +119,10 @@ impl<'g, A: Anchor> ChainQuery for CanonicalTask<'g, A> {
                 }
                 CanonicalStage::LeftOverTxs => {
                     if let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
-                        if !self.is_canonicalized(txid) && !tx.is_coinbase() {
+                        if !self.is_canonicalized(txid)
+                            && !tx.is_coinbase()
+                            && !self.tx_graph.is_evicted(txid)
+                        {
                             let observed_in = ObservedIn::Block(height);
                             self.mark_canonical(
                                 txid,
