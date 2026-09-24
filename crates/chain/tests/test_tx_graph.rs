@@ -1222,6 +1222,37 @@ fn transactions_inserted_into_tx_graph_are_not_canonical_until_they_have_an_anch
 }
 
 #[test]
+fn evicted_tx_anchored_only_in_stale_block_is_not_canonical() {
+    let chain = LocalChain::from_blocks(
+        [(0, hash!("g")), (1, hash!("A")), (2, hash!("B"))]
+            .into_iter()
+            .collect(),
+    )
+    .unwrap();
+    let stale_block = block_id!(2, "B_stale");
+
+    let evicted_tx = new_tx(0);
+    let kept_tx = new_tx(1);
+    let evicted_txid = evicted_tx.compute_txid();
+    let kept_txid = kept_tx.compute_txid();
+
+    let mut graph = TxGraph::<BlockId>::new([evicted_tx, kept_tx]);
+    let _ = graph.insert_anchor(evicted_txid, stale_block);
+    let _ = graph.insert_anchor(kept_txid, stale_block);
+    let _ = graph.insert_evicted_at(evicted_txid, 100);
+
+    let view = chain.canonical_view(&graph, chain.tip().block_id(), Default::default());
+    assert!(view.tx(evicted_txid).is_none());
+    assert_eq!(
+        view.tx(kept_txid).map(|tx| tx.pos),
+        Some(ChainPosition::Unconfirmed {
+            first_seen: None,
+            last_seen: None,
+        })
+    );
+}
+
+#[test]
 fn insert_anchor_without_tx() {
     let mut graph = TxGraph::<BlockId>::default();
 
