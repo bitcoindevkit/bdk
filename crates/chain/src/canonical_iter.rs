@@ -243,7 +243,17 @@ impl<A: Anchor, C: ChainOracle> Iterator for CanonicalIter<'_, A, C> {
             }
 
             if let Some((txid, tx, height)) = self.unprocessed_leftover_txs.pop_front() {
-                if !self.is_canonicalized(txid) && !tx.is_coinbase() {
+                let last_seen = self
+                    .tx_graph
+                    .get_tx_node(txid)
+                    .expect("leftover transaction must exist")
+                    .last_seen;
+                let is_evicted = match (last_seen, self.tx_graph.get_last_evicted(txid)) {
+                    (_, None) => false,
+                    (Some(last_seen), Some(last_evicted)) => last_evicted >= last_seen,
+                    (None, Some(_)) => true,
+                };
+                if !self.is_canonicalized(txid) && !tx.is_coinbase() && !is_evicted {
                     let observed_in = ObservedIn::Block(height);
                     self.mark_canonical(txid, tx, CanonicalReason::from_observed_in(observed_in));
                 }
