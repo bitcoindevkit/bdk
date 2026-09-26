@@ -360,10 +360,13 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         // Collect valid outpoints with their corresponding `spk` and `tx`.
         let mut ops_spks_txs = Vec::new();
         for op in outpoints {
-            if let Ok(tx) = self.fetch_tx(op.txid) {
-                if let Some(txout) = tx.output.get(op.vout as usize) {
-                    ops_spks_txs.push((op, txout.script_pubkey.clone(), tx));
-                }
+            let tx = match self.fetch_tx(op.txid) {
+                Ok(tx) => tx,
+                Err(electrum_client::Error::Protocol(_)) => continue,
+                Err(e) => return Err(e),
+            };
+            if let Some(txout) = tx.output.get(op.vout as usize) {
+                ops_spks_txs.push((op, txout.script_pubkey.clone(), tx));
             }
         }
 
