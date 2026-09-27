@@ -496,11 +496,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// will return a [`InsertDescriptorError<K>`].
     ///
     /// [`KeychainTxOutIndex`] will prevent you from inserting two descriptors which derive the same
-    /// script pubkey at index 0, but it's up to you to ensure that descriptors don't collide at
-    /// other indices. If they do nothing catastrophic happens at the `KeychainTxOutIndex` level
-    /// (one keychain just becomes the defacto owner of that spk arbitrarily) but this may have
-    /// subtle implications up the application stack like one UTXO being missing from one keychain
+    /// script pubkey at index 0. Descriptors may still collide at other indices, in which case one
+    /// keychain becomes the defacto owner of that spk arbitrarily. This may have subtle
+    /// implications up the application stack like one UTXO being missing from one keychain
     /// because it has been assigned to another which produces the same script pubkey.
+    ///
+    /// A non-wildcard descriptor whose script pubkey is already claimed by another keychain is
+    /// rejected with [`InsertDescriptorError::SpkAlreadyOwned`]. Only previously derived script
+    /// pubkeys are considered when checking for collisions.
     pub fn insert_descriptor(
         &mut self,
         keychain: K,
@@ -510,10 +513,36 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         if !self.keychain_to_descriptor_id.contains_key(&keychain)
             && !self.descriptor_id_to_keychain.contains_key(&did)
         {
+            // Attempt replenishment before committing the keychain mapping, so a total
+            // collision can be detected before the keychain is registered.
             self.descriptors.insert(did, descriptor.clone());
+            self.replenish_inner_index(did, &keychain, self.lookahead);
+
+            if !descriptor.has_wildcard()
+                && self.inner.spk_at_index(&(keychain.clone(), 0)).is_none()
+            {
+                self.descriptors.remove(&did);
+                if self.persist_spks {
+                    self.spk_cache.remove(&did);
+                    self.spk_cache_stage.remove(&did);
+                }
+
+                let spk = descriptor
+                    .at_derivation_index(0)
+                    .expect("The descriptor cannot have hardened derivation")
+                    .script_pubkey();
+
+                let owner = self
+                    .inner
+                    .index_of_spk(&spk)
+                    .cloned()
+                    .expect("spk collision implies an existing owner");
+
+                return Err(InsertDescriptorError::SpkAlreadyOwned { keychain, owner });
+            }
+
             self.keychain_to_descriptor_id.insert(keychain.clone(), did);
             self.descriptor_id_to_keychain.insert(did, keychain.clone());
-            self.replenish_inner_index(did, &keychain, self.lookahead);
             return Ok(true);
         }
 
@@ -587,8 +616,21 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         }
     }
 
-    /// Syncs the state of the inner spk index after changes to a keychain
+    /// Syncs the state of the inner spk index after changes to a keychain.
     fn replenish_inner_index(&mut self, did: DescriptorId, keychain: &K, lookahead: u32) {
+        let next_reveal_index = self.last_revealed.get(&did).map_or(0, |v| *v + 1);
+        self.replenish_inner_index_from(did, keychain, lookahead, next_reveal_index);
+    }
+
+    /// Like [`replenish_inner_index`](Self::replenish_inner_index), but takes `next_reveal_index`
+    /// explicitly so a collision can be resolved without updating `last_revealed`.
+    fn replenish_inner_index_from(
+        &mut self,
+        did: DescriptorId,
+        keychain: &K,
+        lookahead: u32,
+        next_reveal_index: u32,
+    ) {
         let descriptor = self.descriptors.get(&did).expect("invariant");
 
         let mut next_index = self
@@ -600,7 +642,6 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
 
         // Exclusive: index to stop at.
         let stop_index = if descriptor.has_wildcard() {
-            let next_reveal_index = self.last_revealed.get(&did).map_or(0, |v| *v + 1);
             (next_reveal_index + lookahead).min(BIP32_MAX_INDEX)
         } else {
             1
@@ -638,19 +679,19 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
                     Some((spk_i, spk))
                 }
             });
+            // An SPK may already be owned by another keychain. Such collisions are
+            // tolerated and skipped when revealing.
             for (new_index, new_spk) in cached_spk_iter {
-                let _inserted = self
+                let _ = self
                     .inner
                     .insert_spk((keychain.clone(), new_index), new_spk);
-                debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={keychain:?}, lookahead={lookahead}, next_index={next_index}");
             }
         } else {
             let spk_iter = SpkIterator::new_with_range(descriptor, next_index..stop_index);
             for (new_index, new_spk) in spk_iter {
-                let _inserted = self
+                let _ = self
                     .inner
                     .insert_spk((keychain.clone(), new_index), new_spk);
-                debug_assert!(_inserted, "replenish lookahead: must not have existing spk: keychain={keychain:?}, lookahead={lookahead}, next_index={next_index}");
             }
         }
     }
@@ -862,7 +903,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             if !new || i > target_index {
                 break;
             }
-            match self._reveal_next_spk(changeset, keychain.clone()) {
+            match self._reveal_next_spk_bounded(changeset, keychain.clone(), Some(target_index)) {
                 Some(indexed_spk) => spks.push(indexed_spk),
                 None => break,
             }
@@ -881,7 +922,11 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     ///  1. The descriptor has no wildcard and already has one script revealed.
     ///  2. The descriptor has already revealed scripts up to the numeric bound.
-    ///  3. There is no descriptor associated with the given keychain.
+    ///
+    /// Returns `None` if there is no descriptor associated with the given keychain.
+    ///
+    /// A wildcard descriptor may skip an index if its script pubkey is already owned by another
+    /// keychain, so revealed indices may not be contiguous.
     pub fn reveal_next_spk(&mut self, keychain: K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
         let mut changeset = ChangeSet::default();
         let indexed_spk = self._reveal_next_spk(&mut changeset, keychain)?;
@@ -893,18 +938,56 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         changeset: &mut ChangeSet,
         keychain: K,
     ) -> Option<Indexed<ScriptBuf>> {
-        let (next_index, new) = self.next_index(keychain.clone())?;
-        if new {
-            let did = self.keychain_to_descriptor_id.get(&keychain)?;
-            self.last_revealed.insert(*did, next_index);
-            changeset.last_revealed.insert(*did, next_index);
-            self.replenish_inner_index(*did, &keychain, self.lookahead);
+        self._reveal_next_spk_bounded(changeset, keychain, None)
+    }
+
+    /// Like [`_reveal_next_spk`](Self::_reveal_next_spk), but does not resolve collisions past
+    /// `upper_bound` when it is set.
+    fn _reveal_next_spk_bounded(
+        &mut self,
+        changeset: &mut ChangeSet,
+        keychain: K,
+        upper_bound: Option<u32>,
+    ) -> Option<Indexed<ScriptBuf>> {
+        let (candidate, new) = self.next_index(keychain.clone())?;
+        if !new {
+            let script = self
+                .inner
+                .spk_at_index(&(keychain.clone(), candidate))
+                .expect("already-revealed index must have a backing spk");
+            return Some((candidate, script));
         }
+
+        let did = *self.keychain_to_descriptor_id.get(&keychain)?;
+
+        // Skip collided indices without updating `last_revealed` until an available index is found.
+        let mut probe = candidate;
+        let resolved = loop {
+            if upper_bound.is_some_and(|bound| probe > bound) {
+                return None;
+            }
+
+            self.replenish_inner_index_from(did, &keychain, self.lookahead, probe + 1);
+            if self
+                .inner
+                .spk_at_index(&(keychain.clone(), probe))
+                .is_some()
+            {
+                break probe;
+            }
+            if probe >= BIP32_MAX_INDEX {
+                return None;
+            }
+            probe += 1;
+        };
+
+        self.last_revealed.insert(did, resolved);
+        changeset.last_revealed.insert(did, resolved);
         let script = self
             .inner
-            .spk_at_index(&(keychain.clone(), next_index))
-            .expect("we just inserted it");
-        Some((next_index, script))
+            .spk_at_index(&(keychain.clone(), resolved))
+            .expect("just resolved to a present index");
+        Some((resolved, script))
     }
 
     /// Gets the next unused script pubkey in the keychain. I.e., the script pubkey with the lowest
@@ -1016,6 +1099,14 @@ pub enum InsertDescriptorError<K> {
         /// The descriptor that the keychain is already assigned to
         existing_assignment: Box<Descriptor<DescriptorPublicKey>>,
     },
+    /// The descriptor's script pubkey is already owned by another keychain, so it cannot be
+    /// inserted.
+    SpkAlreadyOwned {
+        /// The keychain the descriptor was being assigned to.
+        keychain: K,
+        /// The keychain and derivation index that already owns the colliding script pubkey.
+        owner: (K, u32),
+    },
 }
 
 impl<K: core::fmt::Display> core::fmt::Display for InsertDescriptorError<K> {
@@ -1039,6 +1130,13 @@ impl<K: core::fmt::Display> core::fmt::Display for InsertDescriptorError<K> {
                     f,
                     "keychain '{}' is already associated with another descriptor '{}'",
                     keychain, existing_assignment
+                )
+            }
+            InsertDescriptorError::SpkAlreadyOwned { keychain, owner } => {
+                write!(
+                    f,
+                    "descriptor for keychain '{}' would derive a script pubkey already owned by keychain '{}' at index {}",
+                    keychain, owner.0, owner.1
                 )
             }
         }
