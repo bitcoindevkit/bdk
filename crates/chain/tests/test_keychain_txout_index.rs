@@ -2,7 +2,7 @@
 
 use bdk_chain::{
     collections::BTreeMap,
-    indexer::keychain_txout::{ChangeSet, KeychainTxOutIndex},
+    indexer::keychain_txout::{ChangeSet, InsertDescriptorError, KeychainTxOutIndex},
     DescriptorExt, DescriptorId, Indexer, Merge, SpkIterator,
 };
 use bdk_testenv::{
@@ -57,6 +57,19 @@ fn spk_at_index(descriptor: &Descriptor<DescriptorPublicKey>, index: u32) -> Scr
         .derived_descriptor(&Secp256k1::verification_only(), index)
         .expect("must derive")
         .script_pubkey()
+}
+
+/// A wildcard descriptor and a non-wildcard descriptor whose sole script pubkey
+/// collides with the wildcard descriptor at index 3.
+fn colliding_descriptors() -> (
+    Descriptor<DescriptorPublicKey>,
+    Descriptor<DescriptorPublicKey>,
+) {
+    const XPRV: &str = "[73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk";
+    (
+        parse_descriptor(&format!("wpkh({XPRV}/2/*)")),
+        parse_descriptor(&format!("wpkh({XPRV}/2/3)")),
+    )
 }
 
 // We create two empty changesets lhs and rhs, we then insert various descriptors with various
@@ -744,5 +757,105 @@ fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
     assert_eq!(
         indexer.net_value(&tx, 3..6).to_sat(),
         (10_000 * (6 - 3 - /*the skipped one*/ 1)) as i64
+    );
+}
+
+#[test]
+fn insert_descriptor_rejects_total_collision_for_non_wildcard() {
+    let (k0, k1) = colliding_descriptors();
+
+    let mut txout_index = KeychainTxOutIndex::<u8>::new(25, true);
+    assert_eq!(txout_index.insert_descriptor(0u8, k0), Ok(true));
+
+    let err = txout_index.insert_descriptor(1u8, k1);
+    assert!(
+        matches!(
+            err,
+            Err(InsertDescriptorError::SpkAlreadyOwned {
+                keychain: 1u8,
+                owner: (0u8, 3),
+            })
+        ),
+        "expected SpkAlreadyOwned, got {err:?}"
+    );
+
+    assert!(txout_index.get_descriptor(1u8).is_none());
+    assert_eq!(txout_index.next_index(1u8), None);
+    assert_eq!(txout_index.reveal_next_spk(1u8), None);
+
+    assert_eq!(txout_index.next_index(0u8), Some((0, true)));
+    let (spk0, _) = txout_index.reveal_next_spk(0u8).unwrap();
+    assert_eq!(spk0.0, 0);
+}
+
+#[test]
+fn reveal_next_spk_skips_wildcard_collision_order_k1_then_k0() {
+    let (k0, k1) = colliding_descriptors();
+
+    let mut txout_index = KeychainTxOutIndex::<u8>::new(25, true);
+    assert_eq!(txout_index.insert_descriptor(1u8, k1), Ok(true));
+    assert_eq!(txout_index.insert_descriptor(0u8, k0), Ok(true));
+
+    for expected in 0..=2u32 {
+        let ((i, _), _) = txout_index.reveal_next_spk(0u8).unwrap();
+        assert_eq!(i, expected);
+    }
+
+    let ((resolved, _), _) = txout_index.reveal_next_spk(0u8).unwrap();
+    assert_eq!(resolved, 4, "must skip the collided index 3");
+    assert_eq!(txout_index.last_revealed_index(0u8), Some(4));
+
+    let ((next, _), _) = txout_index.reveal_next_spk(0u8).unwrap();
+    assert_eq!(next, 5, "the collided index must not be retried");
+}
+
+#[test]
+fn reveal_next_spk_skips_consecutive_wildcard_collisions() {
+    let (k0, k1a) = colliding_descriptors();
+    const XPRV: &str = "[73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk";
+    let k1b = parse_descriptor(&format!("wpkh({XPRV}/2/4)"));
+
+    let mut txout_index = KeychainTxOutIndex::<u8>::new(25, true);
+    assert_eq!(txout_index.insert_descriptor(1u8, k1a), Ok(true));
+    assert_eq!(txout_index.insert_descriptor(2u8, k1b), Ok(true));
+    assert_eq!(txout_index.insert_descriptor(0u8, k0.clone()), Ok(true));
+
+    for expected in 0..=2u32 {
+        let ((i, _), _) = txout_index.reveal_next_spk(0u8).unwrap();
+        assert_eq!(i, expected);
+    }
+
+    let ((resolved, _), _) = txout_index.reveal_next_spk(0u8).unwrap();
+    assert_eq!(resolved, 5, "must skip both collided indices 3 and 4");
+    assert_eq!(txout_index.last_revealed_index(0u8), Some(5));
+
+    let ((next, _), _) = txout_index.reveal_next_spk(0u8).unwrap();
+    assert_eq!(next, 6);
+
+    assert_eq!(txout_index.spk_at_index(1u8, 0), Some(spk_at_index(&k0, 3)));
+    assert_eq!(txout_index.spk_at_index(2u8, 0), Some(spk_at_index(&k0, 4)));
+    assert!(txout_index.spk_at_index(0u8, 3).is_none());
+    assert!(txout_index.spk_at_index(0u8, 4).is_none());
+}
+
+#[test]
+fn reveal_to_target_does_not_overshoot_a_collided_target() {
+    let (k0, k1) = colliding_descriptors();
+    let mut idx = KeychainTxOutIndex::<u8>::new(25, true);
+    idx.insert_descriptor(1u8, k1).unwrap();
+    idx.insert_descriptor(0u8, k0).unwrap();
+
+    let (revealed, _) = idx.reveal_to_target(0u8, 3).unwrap();
+    assert_eq!(
+        revealed.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+        vec![0, 1, 2],
+        "must reveal up to the collision but not the collided target itself"
+    );
+    assert_eq!(idx.last_revealed_index(0u8), Some(2));
+
+    let (next, _) = idx.reveal_next_spk(0u8).unwrap();
+    assert_eq!(
+        next.0, 4,
+        "index 4 must still be reachable via unbounded reveal"
     );
 }
