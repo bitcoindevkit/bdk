@@ -81,7 +81,24 @@ well as test out the patch set and opine on the technical merits of the patch.
 PR should be reviewed first on the conceptual level before focusing on code
 style or grammar fixes.
 
-To merge a PR we require all CI tests to pass, the PR has at least one approving review by a maintainer with write access, and reasonable criticisms have been addressed.
+Repository maintainers
+----------------------
+
+Like all open source projects our maintainers are busy. Please take it easy on
+them and only ping them if you get no response for a week or two. Maintainers must ensure
+that there is "rough consensus" that a PR is needed and correctly implemented.
+Maintainers are not required to review and test your PR. A maintainer may ACK and
+merge (or NACK and close) a PR based on the reviews of any competent project contributors.
+Non-trivial changes should have more than one ACK and no un-addressed NACKs from project
+contributors who have demonstrated they understand the code being changed.
+
+Minimum pull request merge requirements:
+
+- all CI tests pass.
+- at least one "accepts"/ACK from a repository maintainer (other than the author). 
+- no reasonable "rejects"/NACK from anybody who reviewed the code.
+
+See the [CODEOWNERS](.github/CODEOWNERS) file for a current list of the project maintainers.
 
 Coding Conventions
 ------------------
