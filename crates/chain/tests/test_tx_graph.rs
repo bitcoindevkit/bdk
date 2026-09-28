@@ -1551,3 +1551,42 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+#[test]
+fn backward_clock_keeps_dropped_transaction_pending() {
+    use bdk_chain::bitcoin::{
+        absolute, hashes::Hash, transaction, Amount, BlockHash, OutPoint, ScriptBuf,
+        Transaction, TxIn, TxOut, Txid,
+    };
+    use bdk_chain::{local_chain::LocalChain, BlockId, TxGraph};
+
+    let chain = LocalChain::from_blocks([(0, BlockHash::all_zeros())].into()).unwrap();
+    let tx = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::new(Txid::all_zeros(), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(75_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+    };
+    let txid = tx.compute_txid();
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.insert_tx(tx);
+    let _ = graph.insert_seen_at(txid, 1_750_000_000);
+    let pending = |graph: &TxGraph<BlockId>| {
+        chain.canonical_view(graph, chain.tip().block_id(), Default::default())
+            .balance([OutPoint::new(txid, 0)], |_| false, |_| false)
+            .untrusted_pending
+    };
+    assert_eq!(pending(&graph), Amount::from_sat(75_000));
+
+    // Later syncs report the transaction missing after the clock moved backwards.
+    for evicted_at in 1_749_999_900..1_749_999_905 {
+        let _ = graph.insert_evicted_at(txid, evicted_at);
+    }
+    assert_eq!(pending(&graph), Amount::ZERO); // Fails: still 75,000 sat.
+}
