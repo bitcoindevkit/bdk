@@ -125,6 +125,25 @@ jobs:
       - name: Test (all features)
         run: cargo test --all-features
 
+  regtest-bitcoind-rpc-example:
+    needs: prepare
+    name: Regtest bitcoind_rpc example
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./crates/bitcoind_rpc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+      - name: Test filter_iter example on regtest
+        run: cargo test --all-features --test test_example_regtest -- --nocapture
+
   build-electrum:
     needs: prepare
     name: bdk_electrum
