@@ -5,8 +5,8 @@ use std::ops::{Bound, RangeBounds};
 
 use bdk_chain::{
     local_chain::{
-        AlterCheckPointError, ApplyHeaderError, CannotConnectError, ChangeSet, CheckPoint,
-        LocalChain, MissingGenesisError,
+        AlterCheckPointError, ApplyBlockError, ApplyHeaderError, CannotConnectError, ChangeSet,
+        CheckPoint, LocalChain, MissingGenesisError,
     },
     BlockId,
 };
@@ -564,6 +564,73 @@ fn local_chain_disconnect_from() {
             i, t.name
         );
     }
+}
+
+#[test]
+fn local_chain_apply_changeset_cannot_replace_genesis() {
+    let mut chain: LocalChain = local_chain![(0, hash!("G")), (1, hash!("A"))];
+    let original = chain.clone();
+    let changeset: ChangeSet = [(0, Some(hash!("not_G")))].into_iter().collect();
+
+    assert_eq!(
+        chain.apply_changeset(&changeset),
+        Err(ApplyBlockError::CannotReplaceGenesis {
+            expected: BlockId {
+                height: 0,
+                hash: hash!("G"),
+            },
+        }),
+        "replacing genesis must fail",
+    );
+    // The chain must be unchanged after the failure.
+    assert_eq!(chain, original);
+}
+
+#[test]
+fn local_chain_apply_changeset_with_matching_genesis() {
+    let mut chain: LocalChain = local_chain![(0, hash!("G")), (1, hash!("A"))];
+    let changeset: ChangeSet = [(0, Some(hash!("G"))), (2, Some(hash!("B")))]
+        .into_iter()
+        .collect();
+
+    assert_eq!(chain.apply_changeset(&changeset), Ok(()));
+    assert_eq!(
+        chain,
+        local_chain![(0, hash!("G")), (1, hash!("A")), (2, hash!("B"))]
+    );
+}
+
+#[test]
+fn local_chain_from_changeset_sets_genesis() {
+    let changeset: ChangeSet = [
+        (0, Some(hash!("G"))),
+        (1, Some(hash!("A"))),
+        (2, Some(hash!("B"))),
+    ]
+    .into_iter()
+    .collect();
+    let chain = LocalChain::from_changeset(changeset.clone()).expect("must construct");
+
+    assert_eq!(chain.genesis_hash(), hash!("G"));
+    assert_eq!(chain.initial_changeset(), changeset);
+}
+
+// Removing genesis via a changeset is rejected with `MissingGenesis`, leaving the chain unchanged.
+#[test]
+fn local_chain_apply_changeset_removing_genesis() {
+    let mut chain: LocalChain = local_chain![(0, hash!("G")), (1, hash!("A"))];
+    let original = chain.clone();
+    let changeset: ChangeSet = [(0, None)].into_iter().collect();
+
+    assert_eq!(
+        chain.apply_changeset(&changeset),
+        Err(ApplyBlockError::MissingGenesis),
+    );
+    assert_eq!(chain, original);
+    assert_eq!(
+        LocalChain::from_changeset(changeset),
+        Err(ApplyBlockError::MissingGenesis),
+    );
 }
 
 // Test that `apply_update` can connect 1 `Header` at a time
