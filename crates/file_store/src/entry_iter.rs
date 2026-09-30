@@ -51,7 +51,17 @@ where
 
             let pos_before_read = self.db_file.stream_position()?;
             match bincode_options().deserialize_from(&mut self.db_file) {
-                Ok(changeset) => Ok(Some(changeset)),
+                Ok(changeset) => {
+                    // A zero-byte encoding (e.g. `()`) decodes successfully without consuming
+                    // input, so we would yield the same entry forever. Treat it as an error.
+                    if self.db_file.stream_position()? == pos_before_read {
+                        self.finished = true;
+                        return Err(StoreError::Bincode(bincode::ErrorKind::Custom(
+                            "decoded entry consumed no bytes".into(),
+                        )));
+                    }
+                    Ok(Some(changeset))
+                }
                 Err(e) => {
                     self.finished = true;
                     let pos_after_read = self.db_file.stream_position()?;
