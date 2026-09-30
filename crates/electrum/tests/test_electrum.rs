@@ -1,5 +1,5 @@
 use bdk_chain::{
-    bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, WScriptHash},
+    bitcoin::{hashes::Hash, Address, Amount, OutPoint, ScriptBuf, Txid, WScriptHash},
     local_chain::LocalChain,
     spk_client::{FullScanRequest, SyncRequest, SyncResponse},
     spk_txout::SpkTxOutIndex,
@@ -932,5 +932,28 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
         // Check that the calculated fee matches the fee from the transaction data.
         assert_eq!(fee, Amount::from_sat(tx_fee)); // 1650sat
     }
+    Ok(())
+}
+
+/// Syncing outpoints must report network errors instead of silently skipping the outpoint.
+#[test]
+fn test_sync_outpoints_propagates_connection_error() -> anyhow::Result<()> {
+    // A "server" that accepts connections and closes them immediately.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let url = format!("tcp://{}", listener.local_addr()?);
+    std::thread::spawn(move || listener.incoming().for_each(drop));
+
+    let config = electrum_client::ConfigBuilder::new().retry(0).build();
+    let client = BdkElectrumClient::new(electrum_client::Client::from_config(&url, config)?);
+
+    let outpoint = OutPoint::new(Txid::from_byte_array([1; 32]), 0);
+    let request = SyncRequest::<()>::builder().outpoints([outpoint]).build();
+    let result = client.sync(request, BATCH_SIZE, false);
+
+    assert!(
+        result.is_err(),
+        "sync dropped the outpoint and returned {result:?}"
+    );
+
     Ok(())
 }
