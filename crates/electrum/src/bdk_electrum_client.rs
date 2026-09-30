@@ -305,6 +305,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             let spk_histories = self
                 .inner
                 .batch_script_get_history(spks.iter().map(|(_, s)| s.spk.as_script()))?;
+            check_batch_len("batch_script_get_history", spks.len(), spk_histories.len())?;
 
             for ((spk_index, spk), spk_history) in spks.into_iter().zip(spk_histories) {
                 let beyond_revealed = last_revealed.is_none_or(|lr| spk_index > lr);
@@ -377,6 +378,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let histories = self
             .inner
             .batch_script_get_history(unique_spks.iter().map(|spk| spk.as_script()))?;
+        check_batch_len(
+            "batch_script_get_history",
+            unique_spks.len(),
+            histories.len(),
+        )?;
         let mut spk_map = HashMap::new();
         for (spk, history) in unique_spks.into_iter().zip(histories) {
             spk_map.insert(spk, history);
@@ -495,6 +501,11 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         let spk_histories = self
             .inner
             .batch_script_get_history(scripts.iter().map(|spk| spk.as_script()))?;
+        check_batch_len(
+            "batch_script_get_history",
+            scripts.len(),
+            spk_histories.len(),
+        )?;
 
         for (tx, spk_history) in txs.into_iter().zip(spk_histories) {
             if let Some(res) = spk_history.into_iter().find(|res| res.tx_hash == tx.0) {
@@ -546,6 +557,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
             if !missing_heights.is_empty() {
                 let headers = self.inner.batch_block_header(missing_heights.clone())?;
+                check_batch_len("batch_block_header", missing_heights.len(), headers.len())?;
                 for (height, header) in missing_heights.into_iter().zip(headers) {
                     height_to_hash.insert(height, header.block_hash());
                     cache.insert(height, header);
@@ -569,6 +581,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         // Fetch merkle proofs.
         let proofs = self.inner.batch_transaction_get_merkle(to_fetch.iter())?;
+        check_batch_len("batch_transaction_get_merkle", to_fetch.len(), proofs.len())?;
 
         // Validate each proof, retrying once for each stale header.
         for ((txid, height), proof) in to_fetch.into_iter().zip(proofs) {
@@ -645,6 +658,17 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
         Ok(())
     }
+}
+
+/// Ensure that a batch response has exactly one entry per request, so that pairing them with
+/// `zip` or indexing can never silently drop entries or panic.
+fn check_batch_len(method: &str, expected: usize, actual: usize) -> Result<(), Error> {
+    if expected != actual {
+        return Err(Error::Message(format!(
+            "electrum server returned {actual} responses for {expected} {method} requests"
+        )));
+    }
+    Ok(())
 }
 
 /// Return a [`CheckPoint`] of the latest tip, that connects with `prev_tip`. The latest blocks are
