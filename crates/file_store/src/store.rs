@@ -4,7 +4,7 @@ use bincode::Options;
 use std::{
     fmt::{self, Debug},
     fs::{File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, Write},
     marker::PhantomData,
     path::Path,
 };
@@ -230,6 +230,10 @@ where
     /// not needed because file pointer is always moved to the end of the last decodable data from
     /// beginning to end.
     ///
+    /// Before writing, valid changesets appended through other handles to the same file since this
+    /// handle last read or wrote are skipped over, so they are not overwritten. Concurrent writes
+    /// are still not synchronized.
+    ///
     /// If multiple garbage writes are produced on the file, the next load will only retrieve the
     /// first chunk of valid changesets.
     ///
@@ -240,6 +244,26 @@ where
         // no need to write anything if changeset is empty
         if changeset.is_empty() {
             return Ok(());
+        }
+
+        // Skip over valid entries that other handles appended since this handle's cursor was last
+        // synced, so we never overwrite them. `EntryIter` leaves the cursor right after the last
+        // decodable entry, or at the start of an undecodable one, so trailing garbage is handled
+        // as before.
+        let pos = self.db_file.stream_position()?;
+        for entry in EntryIter::<C>::new(pos, &mut self.db_file) {
+            match entry {
+                Ok(_) => {}
+                // A real I/O failure means we cannot tell where the valid data ends.
+                Err(StoreError::Io(error)) => return Err(error),
+                Err(StoreError::Bincode(bincode::ErrorKind::Io(error)))
+                    if error.kind() != io::ErrorKind::UnexpectedEof =>
+                {
+                    return Err(error)
+                }
+                // Undecodable or partial entry: write from here, as before.
+                Err(_) => break,
+            }
         }
 
         bincode_options()
@@ -542,6 +566,106 @@ mod test {
                 );
             }
         }
+    }
+
+    /// Appending after a failed `dump` must still write at the start of the undecodable data, not
+    /// after it, so the new changeset stays reachable.
+    #[test]
+    fn append_after_failed_dump_writes_at_start_of_garbage() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let changeset1 = TestChangeSet::from(["a".to_string()]);
+        let changeset2 = TestChangeSet::from(["b".to_string()]);
+
+        let mut store =
+            Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
+        store.append(&changeset1).expect("must append");
+        store
+            .db_file
+            .write_all(&[255_u8; 20])
+            .expect("should write");
+        store.dump().expect_err("must fail on garbage");
+
+        store.append(&changeset2).expect("must append");
+        drop(store);
+
+        let err = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path)
+            .expect_err("leftover garbage must still fail to load");
+        let mut expected = changeset1;
+        expected.extend(changeset2);
+        assert_eq!(err.changeset, Some(Box::new(expected)));
+    }
+
+    /// A partial trailing entry written by another handle ends the catch-up scan; the append then
+    /// starts at that point, as it did before the scan existed.
+    #[test]
+    fn append_over_partial_trailing_entry_from_other_handle() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let changeset1 = TestChangeSet::from(["a".to_string()]);
+        let changeset2 = TestChangeSet::from(["b".to_string()]);
+        let torn = bincode_options()
+            .serialize(&TestChangeSet::from(["zzzzzz".to_string()]))
+            .unwrap();
+
+        let mut first =
+            Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
+        first.append(&changeset1).expect("must append");
+        let (mut second, _) =
+            Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).expect("must load");
+        first.db_file.write_all(&torn[..2]).expect("should write");
+
+        second.append(&changeset2).expect("must append");
+        drop((first, second));
+
+        let (_, recovered) =
+            Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).expect("must load");
+        let mut expected = changeset1;
+        expected.extend(changeset2);
+        assert_eq!(recovered, Some(expected));
+    }
+
+    /// After `append` the cursor must sit right after the new entry, both for a single handle and
+    /// for a handle that had to skip entries written by another one.
+    #[test]
+    fn append_leaves_cursor_after_new_entry() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let file_len = || fs::metadata(&file_path).unwrap().len();
+
+        let mut first =
+            Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
+        first.append(&TestChangeSet::from(["a".into()])).unwrap();
+        assert_eq!(first.db_file.stream_position().unwrap(), file_len());
+
+        let (mut second, _) =
+            Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).expect("must load");
+        first.append(&TestChangeSet::from(["b".into()])).unwrap();
+        assert_eq!(first.db_file.stream_position().unwrap(), file_len());
+
+        second.append(&TestChangeSet::from(["c".into()])).unwrap();
+        assert_eq!(second.db_file.stream_position().unwrap(), file_len());
+    }
+
+    /// An I/O error while scanning must be returned, not ignored, and nothing may be written.
+    #[test]
+    fn append_returns_io_error_from_scan() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let changeset = TestChangeSet::from(["a".to_string()]);
+
+        let mut store =
+            Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
+        store.append(&changeset).expect("must append");
+        let bytes_before = fs::read(&file_path).unwrap();
+
+        // A write-only handle cannot be read, so the scan fails with an I/O error.
+        store.db_file = OpenOptions::new().write(true).open(&file_path).unwrap();
+        store
+            .append(&TestChangeSet::from(["b".to_string()]))
+            .expect_err("scan error must be returned");
+
+        assert_eq!(fs::read(&file_path).unwrap(), bytes_before);
     }
 
     #[test]
