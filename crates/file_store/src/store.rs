@@ -1,6 +1,5 @@
-use crate::{bincode_options, EntryIter, StoreError};
+use crate::{EntryIter, StoreError};
 use bdk_core::Merge;
-use bincode::Options;
 use std::{
     fmt::{self, Debug},
     fs::{File, OpenOptions},
@@ -10,6 +9,10 @@ use std::{
 };
 
 /// Persists an append-only list of changesets (`C`) to a single file.
+///
+/// After the magic bytes, each changeset is stored as a `postcard`-encoded `u64` varint length
+/// prefix followed by the `postcard`-encoded changeset. Files written by versions that used
+/// `bincode` cannot be read, so use new magic bytes when upgrading.
 ///
 /// > ⚠ This is a development/testing database. It does not natively support backwards compatible
 /// > BDK version upgrades so should not be used in production.
@@ -60,7 +63,7 @@ where
     ///
     /// If there exist changesets in the file, [`load`] will try to aggregate them in
     /// a single changeset to verify their integrity. If aggregation fails
-    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::Bincode`] error variant in
+    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::Decode`] error variant in
     /// its error field and the aggregated changeset so far in the changeset field.
     ///
     /// To get a new working file store from this error use [`Store::create`] and [`Store::append`]
@@ -178,7 +181,7 @@ where
     ///
     /// If there exist changesets in the file, [`dump`] will try to aggregate them in a single
     /// changeset. If aggregation fails [`StoreErrorWithDump`] will be returned with the
-    /// [`StoreError::Bincode`] error variant in its error field and the aggregated changeset so
+    /// [`StoreError::Decode`] error variant in its error field and the aggregated changeset so
     /// far in the changeset field.
     ///
     /// [`dump`]: Store::dump
@@ -256,24 +259,17 @@ where
                 Ok(_) => {}
                 // A real I/O failure means we cannot tell where the valid data ends.
                 Err(StoreError::Io(error)) => return Err(error),
-                Err(StoreError::Bincode(bincode::ErrorKind::Io(error)))
-                    if error.kind() != io::ErrorKind::UnexpectedEof =>
-                {
-                    return Err(error)
-                }
                 // Undecodable or partial entry: write from here, as before.
                 Err(_) => break,
             }
         }
 
-        bincode_options()
-            .serialize_into(&mut self.db_file, changeset)
-            .map_err(|e| match *e {
-                bincode::ErrorKind::Io(error) => error,
-                unexpected_err => panic!("unexpected bincode error: {unexpected_err}"),
-            })?;
-
-        Ok(())
+        // Each entry is a `postcard` varint length prefix followed by the `postcard` payload,
+        // written in one call.
+        let payload = postcard::to_allocvec(changeset).map_err(io::Error::other)?;
+        let mut frame = postcard::to_allocvec(&(payload.len() as u64)).map_err(io::Error::other)?;
+        frame.extend_from_slice(&payload);
+        self.db_file.write_all(&frame)
     }
 }
 
@@ -320,6 +316,14 @@ mod test {
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
 
     type TestChangeSet = BTreeSet<String>;
+
+    /// The bytes [`Store::append`] writes for `changeset`: varint length prefix + payload.
+    fn frame(changeset: &TestChangeSet) -> Vec<u8> {
+        let payload = postcard::to_allocvec(changeset).unwrap();
+        let mut frame = postcard::to_allocvec(&(payload.len() as u64)).unwrap();
+        frame.extend_from_slice(&payload);
+        frame
+    }
 
     /// Check behavior of [`Store::create`] and [`Store::load`].
     #[test]
@@ -393,7 +397,7 @@ mod test {
         match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, file_path) {
             Err(StoreErrorWithDump {
                 changeset,
-                error: StoreError::Bincode(_),
+                error: StoreError::Decode(_),
             }) => {
                 assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
@@ -421,7 +425,7 @@ mod test {
         match store.dump() {
             Err(StoreErrorWithDump {
                 changeset,
-                error: StoreError::Bincode(_),
+                error: StoreError::Decode(_),
             }) => {
                 assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
@@ -498,7 +502,7 @@ mod test {
             TestChangeSet::from(["4".into(), "5".into(), "6".into()]),
         ];
         let last_changeset = TestChangeSet::from(["7".into(), "8".into(), "9".into()]);
-        let last_changeset_bytes = bincode_options().serialize(&last_changeset).unwrap();
+        let last_changeset_bytes = frame(&last_changeset);
 
         for short_write_len in 1..last_changeset_bytes.len() - 1 {
             let file_path = temp_dir.path().join(format!("{short_write_len}.dat"));
@@ -604,9 +608,7 @@ mod test {
         let file_path = temp_dir.path().join("db_file");
         let changeset1 = TestChangeSet::from(["a".to_string()]);
         let changeset2 = TestChangeSet::from(["b".to_string()]);
-        let torn = bincode_options()
-            .serialize(&TestChangeSet::from(["zzzzzz".to_string()]))
-            .unwrap();
+        let torn = frame(&TestChangeSet::from(["zzzzzz".to_string()]));
 
         let mut first =
             Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
@@ -666,6 +668,80 @@ mod test {
             .expect_err("scan error must be returned");
 
         assert_eq!(fs::read(&file_path).unwrap(), bytes_before);
+    }
+
+    /// Write `bytes` after the magic bytes of a fresh file and try to load it.
+    fn load_raw(bytes: &[u8]) -> Result<(Store<TestChangeSet>, Option<TestChangeSet>), StoreError> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        fs::write(&file_path, [&TEST_MAGIC_BYTES[..], bytes].concat()).unwrap();
+        Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).map_err(|e| e.error)
+    }
+
+    /// The length prefix is 1 byte below 128 and 2 bytes from 128 on; both must round-trip.
+    #[test]
+    fn roundtrip_at_varint_length_boundaries() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        // a one-entry set encodes as: count (1 byte) + string length (1 byte) + the string
+        let overhead = postcard::to_allocvec(&TestChangeSet::from([String::new()]))
+            .unwrap()
+            .len();
+
+        let mut store = Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).unwrap();
+        let mut expected = TestChangeSet::new();
+        for payload_len in [127_usize, 128] {
+            let changeset = TestChangeSet::from(["x".repeat(payload_len - overhead)]);
+            assert_eq!(
+                postcard::to_allocvec(&changeset).unwrap().len(),
+                payload_len
+            );
+            store.append(&changeset).unwrap();
+            expected.extend(changeset);
+        }
+        drop(store);
+
+        let (_, recovered) = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).unwrap();
+        assert_eq!(recovered, Some(expected));
+    }
+
+    /// A corrupt, huge length prefix must be reported as a decode error, not panic or abort.
+    #[test]
+    fn load_fails_on_oversized_length_prefix() {
+        let bytes = postcard::to_allocvec(&u64::MAX).unwrap();
+        assert!(matches!(
+            load_raw(&bytes),
+            Err(StoreError::Decode(
+                postcard::Error::DeserializeUnexpectedEnd
+            ))
+        ));
+    }
+
+    /// Bytes left in a frame after the payload decoded are corruption.
+    #[test]
+    fn load_fails_on_trailing_bytes_in_frame() {
+        let mut payload =
+            postcard::to_allocvec(&TestChangeSet::from(["hello".to_string()])).unwrap();
+        payload.extend_from_slice(&[0xaa, 0xbb]);
+        let mut bytes = postcard::to_allocvec(&(payload.len() as u64)).unwrap();
+        bytes.extend_from_slice(&payload);
+        assert!(matches!(load_raw(&bytes), Err(StoreError::Decode(_))));
+    }
+
+    /// A length prefix cut short by the end of the file is a torn entry, and so is one that never
+    /// terminates.
+    #[test]
+    fn load_fails_on_torn_or_overlong_length_prefix() {
+        assert!(matches!(
+            load_raw(&[0x80]),
+            Err(StoreError::Decode(
+                postcard::Error::DeserializeUnexpectedEnd
+            ))
+        ));
+        assert!(matches!(
+            load_raw(&[0xff; 10]),
+            Err(StoreError::Decode(postcard::Error::DeserializeBadVarint))
+        ));
     }
 
     #[test]
