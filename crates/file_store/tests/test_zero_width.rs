@@ -26,9 +26,7 @@ fn load_terminates_on_zero_width_changeset() {
     assert!(load_terminates(&contents), "load did not terminate");
 }
 
-// `Store::<()>` cannot tell a magic-only file from a corrupt one, since every decode of `()`
-// succeeds without consuming bytes. An error is therefore the expected outcome; what matters is
-// that `load` no longer hangs.
+// A file with no entries must still load, even for a zero-width changeset type.
 #[test]
 fn load_terminates_on_magic_only_zero_width_store() {
     assert!(load_terminates(MAGIC), "load did not terminate");
