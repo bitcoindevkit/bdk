@@ -1,6 +1,5 @@
-use crate::{bincode_options, EntryIter, StoreError};
+use crate::{EntryIter, StoreError};
 use bdk_core::Merge;
-use bincode::Options;
 use std::{
     fmt::{self, Debug},
     fs::{File, OpenOptions},
@@ -60,7 +59,7 @@ where
     ///
     /// If there exist changesets in the file, [`load`] will try to aggregate them in
     /// a single changeset to verify their integrity. If aggregation fails
-    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::Bincode`] error variant in
+    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::Decode`] error variant in
     /// its error field and the aggregated changeset so far in the changeset field.
     ///
     /// To get a new working file store from this error use [`Store::create`] and [`Store::append`]
@@ -178,7 +177,7 @@ where
     ///
     /// If there exist changesets in the file, [`dump`] will try to aggregate them in a single
     /// changeset. If aggregation fails [`StoreErrorWithDump`] will be returned with the
-    /// [`StoreError::Bincode`] error variant in its error field and the aggregated changeset so
+    /// [`StoreError::Decode`] error variant in its error field and the aggregated changeset so
     /// far in the changeset field.
     ///
     /// [`dump`]: Store::dump
@@ -242,12 +241,11 @@ where
             return Ok(());
         }
 
-        bincode_options()
-            .serialize_into(&mut self.db_file, changeset)
-            .map_err(|e| match *e {
-                bincode::ErrorKind::Io(error) => error,
-                unexpected_err => panic!("unexpected bincode error: {unexpected_err}"),
-            })?;
+        // Each entry is a `u64` varint length prefix followed by the `postcard`-encoded changeset.
+        let payload = postcard::to_allocvec(changeset).map_err(io::Error::other)?;
+        let mut frame = postcard::to_allocvec(&(payload.len() as u64)).map_err(io::Error::other)?;
+        frame.extend_from_slice(&payload);
+        self.db_file.write_all(&frame)?;
 
         Ok(())
     }
@@ -369,7 +367,7 @@ mod test {
         match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, file_path) {
             Err(StoreErrorWithDump {
                 changeset,
-                error: StoreError::Bincode(_),
+                error: StoreError::Decode(_),
             }) => {
                 assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
@@ -397,7 +395,7 @@ mod test {
         match store.dump() {
             Err(StoreErrorWithDump {
                 changeset,
-                error: StoreError::Bincode(_),
+                error: StoreError::Decode(_),
             }) => {
                 assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
@@ -474,7 +472,10 @@ mod test {
             TestChangeSet::from(["4".into(), "5".into(), "6".into()]),
         ];
         let last_changeset = TestChangeSet::from(["7".into(), "8".into(), "9".into()]);
-        let last_changeset_bytes = bincode_options().serialize(&last_changeset).unwrap();
+        let last_changeset_payload = postcard::to_allocvec(&last_changeset).unwrap();
+        let mut last_changeset_bytes =
+            postcard::to_allocvec(&(last_changeset_payload.len() as u64)).unwrap();
+        last_changeset_bytes.extend_from_slice(&last_changeset_payload);
 
         for short_write_len in 1..last_changeset_bytes.len() - 1 {
             let file_path = temp_dir.path().join(format!("{short_write_len}.dat"));
