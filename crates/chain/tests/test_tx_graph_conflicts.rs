@@ -998,6 +998,7 @@ fn test_tx_conflict_handling() {
             env.indexer.outpoints().iter().map(|(_, op)| *op),
             bdk_chain::taints_unowned(&env.indexer),
             |pos| pos.is_confirmed(),
+            |_txout| false,
         );
         assert_eq!(
             balance, scenario.exp_balance,
