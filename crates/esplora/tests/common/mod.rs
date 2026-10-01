@@ -32,3 +32,15 @@ pub fn test_addresses() -> Vec<Address> {
     .map(|s| Address::from_str(s).unwrap().assume_checked())
     .collect()
 }
+
+/// The last active index reported for `keychain`.
+///
+/// Entries of `last_active_indices` are observations, so they may repeat a keychain and need not
+/// be ordered. The highest index reported for the keychain is the meaningful one.
+pub fn last_active_index(last_active_indices: &[(u32, u32)], keychain: u32) -> Option<u32> {
+    last_active_indices
+        .iter()
+        .filter(|(k, _)| *k == keychain)
+        .map(|(_, i)| *i)
+        .max()
+}
