@@ -164,8 +164,23 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         if !pending_anchors.is_empty() {
             let anchors = self.batch_fetch_anchors(&pending_anchors)?;
+            let anchored = anchors.iter().map(|a| a.0).collect::<HashSet<_>>();
             for (txid, anchor) in anchors {
                 tx_update.anchors.insert((anchor, txid));
+            }
+
+            // A failed merkle proof must not hide a tx the server reports (and it is not an error,
+            // as a stale header can cause one). Treat the tx as unconfirmed until the proof
+            // validates. Coinbase txs cannot be unconfirmed, so they are left without a `seen_at`.
+            for &(txid, _) in &pending_anchors {
+                if !anchored.contains(&txid)
+                    && !tx_update
+                        .txs
+                        .iter()
+                        .any(|tx| tx.is_coinbase() && tx.compute_txid() == txid)
+                {
+                    tx_update.seen_ats.insert((txid, start_time));
+                }
             }
         }
 
@@ -255,8 +270,23 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         if !pending_anchors.is_empty() {
             let anchors = self.batch_fetch_anchors(&pending_anchors)?;
+            let anchored = anchors.iter().map(|a| a.0).collect::<HashSet<_>>();
             for (txid, anchor) in anchors {
                 tx_update.anchors.insert((anchor, txid));
+            }
+
+            // A failed merkle proof must not hide a tx the server reports (and it is not an error,
+            // as a stale header can cause one). Treat the tx as unconfirmed until the proof
+            // validates. Coinbase txs cannot be unconfirmed, so they are left without a `seen_at`.
+            for &(txid, _) in &pending_anchors {
+                if !anchored.contains(&txid)
+                    && !tx_update
+                        .txs
+                        .iter()
+                        .any(|tx| tx.is_coinbase() && tx.compute_txid() == txid)
+                {
+                    tx_update.seen_ats.insert((txid, start_time));
+                }
             }
         }
 
