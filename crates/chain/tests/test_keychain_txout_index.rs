@@ -1,5 +1,7 @@
 #![cfg(feature = "miniscript")]
 
+use std::vec;
+
 use bdk_chain::{
     collections::BTreeMap,
     indexer::keychain_txout::{ChangeSet, KeychainTxOutIndex},
@@ -7,9 +9,9 @@ use bdk_chain::{
 };
 use bdk_testenv::{
     hash,
-    utils::{new_tx, DESCRIPTORS},
+    utils::{new_tx, spk_at_index, DESCRIPTORS},
 };
-use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxOut};
+use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut};
 use miniscript::{Descriptor, DescriptorPublicKey};
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
@@ -50,13 +52,6 @@ fn init_txout_index(
         .unwrap();
 
     txout_index
-}
-
-fn spk_at_index(descriptor: &Descriptor<DescriptorPublicKey>, index: u32) -> ScriptBuf {
-    descriptor
-        .derived_descriptor(&Secp256k1::verification_only(), index)
-        .expect("must derive")
-        .script_pubkey()
 }
 
 // We create two empty changesets lhs and rhs, we then insert various descriptors with various
@@ -715,7 +710,10 @@ fn reassigning_keychain_to_a_new_descriptor_should_error() {
 #[test]
 fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
     let mut indexer = KeychainTxOutIndex::<usize>::new(0, true);
-    let mut tx = new_tx(0);
+    let mut tx = Transaction {
+        output: vec![],
+        ..new_tx(0)
+    };
 
     for (i, descriptor) in DESCRIPTORS.iter().enumerate() {
         let descriptor = parse_descriptor(descriptor);
