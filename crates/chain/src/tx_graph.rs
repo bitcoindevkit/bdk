@@ -47,15 +47,14 @@
 //! * [`Anchor`] - This bit of data represents that a transaction is anchored in a given block. If
 //!   the transaction is anchored in chain of `chain_tip`, or is an ancestor of a transaction
 //!   anchored in chain of `chain_tip`, then the transaction must be canonical.
-//! * `last_seen` - This is the timestamp of when a transaction is last-seen in the mempool. This
-//!   value is updated by [`insert_seen_at`](TxGraph::insert_seen_at) and
-//!   [`apply_update`](TxGraph::apply_update). Transactions that are seen later have higher priority
-//!   than those that are seen earlier. `last_seen` values are transitive. This means that the
-//!   actual `last_seen` value of a transaction is the max of all the `last_seen` values from it's
-//!   descendants.
-//! * `last_evicted` - This is the timestamp of when a transaction last went missing from the
-//!   mempool. If this value is equal to or higher than the transaction's `last_seen` value, then it
-//!   will not be considered canonical.
+//! * `last_seen` - This is the timestamp of when a transaction was last observed in the mempool.
+//!   Transactions seen later have higher conflict priority. If a supplied timestamp does not sort
+//!   after a later eviction observation, it is advanced by one second to preserve observation
+//!   order despite wall-clock changes. Values are transitive: a transaction's effective `last_seen`
+//!   is the maximum of its own and its descendants' `last_seen` values.
+//! * `last_evicted` - This is the timestamp of when a transaction was last observed missing from
+//!   the mempool. If a supplied timestamp does not sort after a later sighting, it is advanced by
+//!   one second. A transaction is excluded from canonicalization when `last_evicted >= last_seen`.
 //!
 //! # Graph traversal
 //!
@@ -809,17 +808,23 @@ impl<A: Anchor> TxGraph<A> {
 
     /// Updates the first-seen and last-seen timestamps for a given `txid` in the [`TxGraph`].
     ///
-    /// This method records the time a transaction was observed by updating both:
+    /// This method records when a transaction was observed by updating both:
     /// - the **first-seen** timestamp, which only changes if `seen_at` is earlier than the current
     ///   value, and
     /// - the **last-seen** timestamp, which only changes if `seen_at` is later than the current
     ///   value.
     ///
-    /// `seen_at` is a UNIX timestamp in seconds.
+    /// `seen_at` is a UNIX timestamp in seconds. If it is not later than a recorded eviction, the
+    /// stored `last_seen` is advanced to one second after that eviction. Thus `last_seen` may differ
+    /// from the supplied wall-clock timestamp when clocks move backwards.
     ///
     /// Returns a [`ChangeSet`] representing any changes applied.
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
         let mut changeset_first_seen = self.update_first_seen(txid, seen_at);
+        let seen_at = match self.last_evicted.get(&txid) {
+            Some(last_evicted) if seen_at <= *last_evicted => last_evicted.saturating_add(1),
+            _ => seen_at,
+        };
         let changeset_last_seen = self.update_last_seen(txid, seen_at);
         changeset_first_seen.merge(changeset_last_seen);
         changeset_first_seen
@@ -882,9 +887,14 @@ impl<A: Anchor> TxGraph<A> {
     /// Inserts the given `evicted_at` for `txid` into [`TxGraph`].
     ///
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
-    /// to be missing from the mempool. If `txid` was previously recorded with an earlier
-    /// `evicted_at` value, it is updated only if the new value is greater.
+    /// to be missing from the mempool. If it is not later than a recorded sighting, the stored
+    /// `last_evicted` is advanced to one second after that sighting. Thus `last_evicted` may differ
+    /// from the supplied wall-clock timestamp when clocks move backwards.
     pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A> {
+        let evicted_at = match self.last_seen.get(&txid) {
+            Some(last_seen) if evicted_at <= *last_seen => last_seen.saturating_add(1),
+            _ => evicted_at,
+        };
         let is_changed = match self.last_evicted.entry(txid) {
             hash_map::Entry::Occupied(mut e) => {
                 let last_evicted = e.get_mut();
@@ -945,11 +955,25 @@ impl<A: Anchor> TxGraph<A> {
         for (anchor, txid) in update.anchors {
             changeset.merge(self.insert_anchor(txid, anchor));
         }
-        for (txid, seen_at) in update.seen_ats {
-            changeset.merge(self.insert_seen_at(txid, seen_at));
-        }
-        for (txid, evicted_at) in update.evicted_ats {
-            changeset.merge(self.insert_evicted_at(txid, evicted_at));
+        let mut mempool_updates = update
+            .seen_ats
+            .into_iter()
+            .map(|(txid, timestamp)| (timestamp, false, txid))
+            .chain(
+                update
+                    .evicted_ats
+                    .into_iter()
+                    .map(|(txid, timestamp)| (timestamp, true, txid)),
+            )
+            .collect::<Vec<_>>();
+        mempool_updates.sort_unstable();
+        for (timestamp, is_evicted, txid) in mempool_updates {
+            let update_changeset = if is_evicted {
+                self.insert_evicted_at(txid, timestamp)
+            } else {
+                self.insert_seen_at(txid, timestamp)
+            };
+            changeset.merge(update_changeset);
         }
         changeset
     }
@@ -984,11 +1008,17 @@ impl<A: Anchor> TxGraph<A> {
         for (anchor, txid) in changeset.anchors {
             let _ = self.insert_anchor(txid, anchor);
         }
+        for (txid, first_seen) in changeset.first_seen {
+            let _ = self.update_first_seen(txid, first_seen);
+        }
         for (txid, seen_at) in changeset.last_seen {
-            let _ = self.insert_seen_at(txid, seen_at);
+            let _ = self.update_last_seen(txid, seen_at);
         }
         for (txid, evicted_at) in changeset.last_evicted {
-            let _ = self.insert_evicted_at(txid, evicted_at);
+            self.last_evicted
+                .entry(txid)
+                .and_modify(|stored| *stored = core::cmp::max(*stored, evicted_at))
+                .or_insert(evicted_at);
         }
     }
 
