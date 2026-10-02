@@ -430,3 +430,52 @@ fn outputs_in_range_excluded_bounds() {
         .collect();
     assert_eq!(outputs_empty.len(), 0);
 }
+
+#[test]
+fn insert_spk_rejects_reused_index_and_script() {
+    let old_script = ScriptBuf::from_bytes(vec![0x51]);
+    let new_script = ScriptBuf::from_bytes(vec![0x52]);
+    let mut index = SpkTxOutIndex::<u32>::default();
+    assert!(index.insert_spk(0, old_script.clone()));
+    assert!(!index.insert_spk(0, new_script.clone()));
+    assert!(!index.insert_spk(1, old_script.clone()));
+    assert!(!index.insert_spk(0, old_script.clone()));
+    assert_eq!(index.spk_at_index(&0), Some(old_script.clone()));
+    assert_eq!(index.index_of_spk(&old_script), Some(&0));
+    assert_eq!(index.index_of_spk(&new_script), None);
+    assert_eq!(index.spk_at_index(&1), None);
+    assert_eq!(
+        index.unused_spks(..).collect::<Vec<_>>(),
+        vec![(&0, old_script)]
+    );
+    assert!(index.insert_spk(1, new_script.clone()));
+    assert_eq!(index.index_of_spk(&new_script), Some(&1));
+}
+
+#[test]
+fn insert_spk_preserves_scanned_output_and_used_status() {
+    let old_script = ScriptBuf::from_bytes(vec![0x51]);
+    let new_script = ScriptBuf::from_bytes(vec![0x52]);
+    let mut index = SpkTxOutIndex::<u32>::default();
+    assert!(index.insert_spk(0, old_script.clone()));
+    let old_output = TxOut {
+        value: Amount::from_sat(1000),
+        script_pubkey: old_script.clone(),
+    };
+    let old_outpoint = OutPoint::null();
+    assert_eq!(index.scan_txout(old_outpoint, &old_output), Some(&0));
+    assert!(!index.insert_spk(0, new_script.clone()));
+    assert_eq!(index.unused_spks(..).count(), 0);
+    assert_eq!(index.txout(old_outpoint), Some((&0, &old_output)));
+    assert_eq!(index.spk_at_index(&0), Some(old_script));
+    let new_output = TxOut {
+        value: Amount::from_sat(2000),
+        script_pubkey: new_script,
+    };
+    let new_outpoint = OutPoint {
+        vout: 1,
+        ..old_outpoint
+    };
+    assert_eq!(index.scan_txout(new_outpoint, &new_output), None);
+    assert_eq!(index.txout(new_outpoint), None);
+}
