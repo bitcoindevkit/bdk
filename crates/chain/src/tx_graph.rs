@@ -984,8 +984,13 @@ impl<A: Anchor> TxGraph<A> {
         for (anchor, txid) in changeset.anchors {
             let _ = self.insert_anchor(txid, anchor);
         }
+        // Restore first_seen and last_seen independently. Replaying last_seen via
+        // `insert_seen_at` on an empty graph would set first_seen to last_seen.
+        for (txid, seen_at) in changeset.first_seen {
+            let _ = self.update_first_seen(txid, seen_at);
+        }
         for (txid, seen_at) in changeset.last_seen {
-            let _ = self.insert_seen_at(txid, seen_at);
+            let _ = self.update_last_seen(txid, seen_at);
         }
         for (txid, evicted_at) in changeset.last_evicted {
             let _ = self.insert_evicted_at(txid, evicted_at);
