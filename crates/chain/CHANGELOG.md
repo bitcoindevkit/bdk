@@ -7,6 +7,16 @@ Contributors do not need to change this file but do need to add changelog detail
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [chain-0.23.4]
+
+### Fixed
+
+- Fixed `CanonicalIter` assumed-tx processing by adding missing `continue` #2170
+- Fixed `merge_chains`  to prevent it replacing the genesis block #2174
+- Fixed `full_scan` to now always scans the full revealed range before applying `stop_gap` past `last_revealed` #2222
+- Fixed integer overflow in `SpkIterator::new_with_range` #2229
+- Fixed `CanonicalIter` leftover canonicalization to skip evicted transactions, so a transaction anchored only in stale blocks is no longer canonical once it has been evicted #2324
+
 ## [chain-0.23.3]
 
 ### Added
@@ -105,3 +115,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [chain-0.23.1]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.1
 [chain-0.23.2]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.2
 [chain-0.23.3]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.3
+[chain-0.23.4]: https://github.com/bitcoindevkit/bdk/releases/tag/chain-0.23.4
