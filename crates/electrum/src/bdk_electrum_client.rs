@@ -170,11 +170,19 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
 
         let chain_update = match tip_and_latest_blocks {
-            Some((chain_tip, latest_blocks)) => Some(chain_update(
-                chain_tip,
-                &latest_blocks,
-                tx_update.anchors.iter().cloned(),
-            )?),
+            Some((chain_tip, mut latest_blocks)) => {
+                fill_missing_anchor_heights(
+                    &self.inner,
+                    &chain_tip,
+                    &mut latest_blocks,
+                    tx_update.anchors.iter().cloned(),
+                )?;
+                Some(chain_update(
+                    chain_tip,
+                    &latest_blocks,
+                    tx_update.anchors.iter().cloned(),
+                )?)
+            }
             _ => None,
         };
 
@@ -261,11 +269,19 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         }
 
         let chain_update = match tip_and_latest_blocks {
-            Some((chain_tip, latest_blocks)) => Some(chain_update(
-                chain_tip,
-                &latest_blocks,
-                tx_update.anchors.iter().cloned(),
-            )?),
+            Some((chain_tip, mut latest_blocks)) => {
+                fill_missing_anchor_heights(
+                    &self.inner,
+                    &chain_tip,
+                    &mut latest_blocks,
+                    tx_update.anchors.iter().cloned(),
+                )?;
+                Some(chain_update(
+                    chain_tip,
+                    &latest_blocks,
+                    tx_update.anchors.iter().cloned(),
+                )?)
+            }
             None => None,
         };
 
@@ -716,6 +732,12 @@ fn fetch_tip_and_latest_blocks(
 
 // Add a corresponding checkpoint per anchor height if it does not yet exist. Checkpoints should not
 // surpass `latest_blocks`.
+//
+// Every hash inserted here must come from `latest_blocks`. An anchor's own `block_id.hash` is not
+// used as a fallback: it was fetched (and merkle-proof-verified) at a different point in the sync
+// than `latest_blocks`, so it isn't necessarily consistent with the chain `tip` represents. Callers
+// are expected to have already extended `latest_blocks` to cover every anchor height below the tip
+// via `fill_missing_anchor_heights`, so this should skip only heights callers chose not to fill.
 fn chain_update(
     mut tip: CheckPoint<BlockHash>,
     latest_blocks: &BTreeMap<u32, BlockHash>,
@@ -724,17 +746,53 @@ fn chain_update(
     for (anchor, _txid) in anchors {
         let height = anchor.block_id.height;
 
-        // Checkpoint uses the `BlockHash` from `latest_blocks` so that the hash will be consistent
-        // in case of a re-org.
         if tip.get(height).is_none() && height <= tip.height() {
-            let hash = match latest_blocks.get(&height) {
-                Some(&hash) => hash,
-                None => anchor.block_id.hash,
-            };
-            tip = tip.insert(height, hash);
+            if let Some(&hash) = latest_blocks.get(&height) {
+                tip = tip.insert(height, hash);
+            }
         }
     }
     Ok(tip)
+}
+
+// Extend `latest_blocks` with freshly fetched (i.e. not read from any cache) headers for anchor
+// heights that fall outside the reorg-risk window it already covers, and that `tip` does not
+// already have a checkpoint for. `latest_blocks` is otherwise only populated with the tip and the
+// last `CHAIN_SUFFIX_LENGTH` blocks, so most historical anchor heights need to be filled in here.
+//
+// This closes the gap where an anchor's own hash (fetched via `batch_fetch_anchors`, at a different
+// point in the sync than `latest_blocks`) could be stale relative to the server's current view --
+// e.g. around a reorg. By re-fetching the header for that exact height right before `chain_update`
+// runs, the checkpoint we insert always reflects the server's current chain, whether or not it
+// still agrees with the anchor: if the block was reorged out, the fresh hash will differ from the
+// anchor's hash, and canonicalization will correctly treat that anchor as invalid rather than
+// silently trusting it.
+fn fill_missing_anchor_heights(
+    client: &impl ElectrumApi,
+    tip: &CheckPoint<BlockHash>,
+    latest_blocks: &mut BTreeMap<u32, BlockHash>,
+    anchors: impl Iterator<Item = (ConfirmationBlockTime, Txid)>,
+) -> Result<(), Error> {
+    let mut missing_heights = anchors
+        .map(|(anchor, _txid)| anchor.block_id.height)
+        .filter(|height| {
+            *height <= tip.height()
+                && tip.get(*height).is_none()
+                && !latest_blocks.contains_key(height)
+        })
+        .collect::<Vec<_>>();
+    missing_heights.sort_unstable();
+    missing_heights.dedup();
+
+    if missing_heights.is_empty() {
+        return Ok(());
+    }
+
+    let headers = client.batch_block_header(missing_heights.clone())?;
+    for (height, header) in missing_heights.into_iter().zip(headers) {
+        latest_blocks.insert(height, header.block_hash());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -750,6 +808,117 @@ mod test {
     use core::time::Duration;
     use electrum_client::Error as ElectrumError;
     use std::sync::Arc;
+
+    #[cfg(feature = "default")]
+    #[test]
+    fn chain_update_only_inserts_checkpoints_backed_by_latest_blocks() {
+        let genesis_hash = constants::genesis_block(Network::Bitcoin).block_hash();
+        let tip_hash = constants::genesis_block(Network::Testnet).block_hash();
+        let verified_hash = constants::genesis_block(Network::Regtest).block_hash();
+        let stale_anchor_hash = constants::genesis_block(Network::Signet).block_hash();
+
+        let tip = CheckPoint::new(0, genesis_hash).insert(100, tip_hash);
+        // Height 50 is present in `latest_blocks` (as if `fill_missing_anchor_heights` had already
+        // fetched it); height 30 is not.
+        let latest_blocks = [(100, tip_hash), (50, verified_hash)].into_iter().collect();
+
+        let anchor_50 = bdk_core::ConfirmationBlockTime {
+            block_id: bdk_core::BlockId {
+                height: 50,
+                hash: stale_anchor_hash,
+            },
+            confirmation_time: 0,
+        };
+        let anchor_30 = bdk_core::ConfirmationBlockTime {
+            block_id: bdk_core::BlockId {
+                height: 30,
+                hash: stale_anchor_hash,
+            },
+            confirmation_time: 0,
+        };
+
+        let updated = super::chain_update(
+            tip,
+            &latest_blocks,
+            [
+                (anchor_50, new_tx(0).compute_txid()),
+                (anchor_30, new_tx(1).compute_txid()),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+
+        // Height 50 is backed by `latest_blocks`, so its verified hash wins over the anchor's own
+        // (possibly stale) hash -- the anchor's hash is never trusted directly.
+        assert_eq!(updated.get(50).map(|cp| cp.hash()), Some(verified_hash));
+        // Height 30 has no entry in `latest_blocks`, so no checkpoint is inserted for it.
+        assert_eq!(updated.get(30).map(|cp| cp.hash()), None);
+    }
+
+    #[cfg(feature = "default")]
+    #[test]
+    fn fill_missing_anchor_heights_corrects_reorged_anchor() -> anyhow::Result<()> {
+        let env = TestEnv::new()?;
+        let client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+
+        env.mine_blocks(101, None)?;
+
+        let addr = env
+            .rpc_client()
+            .get_new_address(None, None)?
+            .address()?
+            .assume_checked();
+        let txid = env.send(&addr, Amount::from_sat(50_000))?;
+
+        // Mine the block that confirms the transaction; this is the anchor height that will later
+        // fall outside the reorg-risk window `latest_blocks` covers.
+        env.mine_blocks(1, None)?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+        let height: u32 = env.rpc_client().get_block_count()?.into_model().0 as u32;
+        let stale_hash = client.block_header(height as usize)?.block_hash();
+
+        // Simulate an anchor that was fetched (and merkle-proof-verified) before a reorg replaced
+        // this height's block -- as would happen if `batch_fetch_anchors` ran just before the
+        // reorg, earlier in the same sync that later calls `chain_update`.
+        let stale_anchor = bdk_core::ConfirmationBlockTime {
+            block_id: bdk_core::BlockId {
+                height,
+                hash: stale_hash,
+            },
+            confirmation_time: 0,
+        };
+
+        // Reorg the block at `height`, then mine well past it so it falls below the
+        // `CHAIN_SUFFIX_LENGTH`-block reorg-risk window.
+        env.reorg(1)?;
+        env.mine_blocks(20, None)?;
+        env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+        let tip_height: u32 = env.rpc_client().get_block_count()?.into_model().0 as u32;
+        let tip_hash = client.block_header(tip_height as usize)?.block_hash();
+        let tip = CheckPoint::new(tip_height, tip_hash);
+        let mut latest_blocks = [(tip_height, tip_hash)].into_iter().collect();
+
+        super::fill_missing_anchor_heights(
+            &client,
+            &tip,
+            &mut latest_blocks,
+            [(stale_anchor, txid)].into_iter(),
+        )?;
+        let updated = super::chain_update(tip, &latest_blocks, [(stale_anchor, txid)].into_iter())?;
+
+        let current_hash = client.block_header(height as usize)?.block_hash();
+        assert_ne!(
+            current_hash, stale_hash,
+            "test setup should have reorged this height"
+        );
+        // The checkpoint reflects the server's *current* chain, not the stale anchor's hash -- so
+        // a tx whose anchor still carries the pre-reorg hash will correctly no longer match it,
+        // instead of being silently trusted.
+        assert_eq!(updated.get(height).map(|cp| cp.hash()), Some(current_hash));
+
+        Ok(())
+    }
 
     #[cfg(feature = "default")]
     #[test]
