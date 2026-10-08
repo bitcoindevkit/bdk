@@ -726,9 +726,11 @@ where
     {
         let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset).map_err(|err| {
             match err {
-                ApplyBlockError::MissingGenesis => CannotConnectError {
-                    try_include_height: 0,
-                },
+                ApplyBlockError::MissingGenesis | ApplyBlockError::CannotReplaceGenesis { .. } => {
+                    CannotConnectError {
+                        try_include_height: 0,
+                    }
+                }
                 // The merge iteration is supposed to detect `prev_blockhash` conflicts and resolve
                 // them by invalidating conflicting blocks in the changeset. Reaching this arm means
                 // either the original chain was internally inconsistent or the iteration missed a
@@ -743,9 +745,6 @@ where
                         try_include_height: expected.height,
                     }
                 }
-                ApplyBlockError::CannotReplaceGenesis { .. } => CannotConnectError {
-                    try_include_height: 0,
-                },
             }
         })?;
         Ok((new_tip, changeset))

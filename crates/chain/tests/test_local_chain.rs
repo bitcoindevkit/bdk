@@ -633,6 +633,22 @@ fn local_chain_apply_changeset_removing_genesis() {
     );
 }
 
+#[test]
+fn apply_block_error_cannot_replace_genesis_display() {
+    let genesis = BlockId {
+        height: 0,
+        hash: hash!("G"),
+    };
+    let err = ApplyBlockError::CannotReplaceGenesis { expected: genesis };
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "changeset cannot replace the genesis block at height 0 ({})",
+            genesis.hash
+        ),
+    );
+}
+
 // Test that `apply_update` can connect 1 `Header` at a time
 // and fails if a `prev_blockhash` conflict is detected.
 #[test]
