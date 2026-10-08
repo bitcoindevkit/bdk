@@ -8,8 +8,18 @@ use bincode::{DefaultOptions, Options};
 pub use entry_iter::*;
 pub use store::*;
 
+/// Maximum number of bytes bincode will read or write in a single
+/// serialize / deserialize call.  The limit prevents a corrupted or
+/// malicious length prefix from causing a panic (`capacity overflow`)
+/// or an unbounded allocation.  256 MiB is far larger than any
+/// legitimate changeset while still guarding against `u64::MAX`-sized
+/// requests.
+const MAX_BINCODE_BYTES: u64 = 256 * 1024 * 1024;
+
 pub(crate) fn bincode_options() -> impl bincode::Options {
-    DefaultOptions::new().with_varint_encoding()
+    DefaultOptions::new()
+        .with_varint_encoding()
+        .with_limit(MAX_BINCODE_BYTES)
 }
 
 /// Error that occurs due to problems encountered with the file.
