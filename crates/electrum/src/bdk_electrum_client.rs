@@ -654,7 +654,8 @@ fn fetch_tip_and_latest_blocks(
     prev_tip: CheckPoint<BlockHash>,
 ) -> Result<(CheckPoint<BlockHash>, BTreeMap<u32, BlockHash>), Error> {
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
-    let new_tip_height = height as u32;
+    let new_tip_height = u32::try_from(height)
+        .map_err(|_| Error::Message(format!("server tip height {height} overflows u32")))?;
 
     // If electrum returns a tip height that is lower than our previous tip, then checkpoints do
     // not need updating. We just return the previous tip and use that as the point of agreement.
