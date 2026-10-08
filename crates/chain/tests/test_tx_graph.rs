@@ -1253,6 +1253,46 @@ fn insert_anchor_without_tx() {
 }
 
 #[test]
+fn insert_anchor_indexes_max_confirmation_height_not_last_anchor() {
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct TestAnchor {
+        block_id: BlockId,
+        confirmation_height: u32,
+    }
+
+    impl Anchor for TestAnchor {
+        fn anchor_block(&self) -> BlockId {
+            self.block_id
+        }
+
+        fn confirmation_height_upper_bound(&self) -> u32 {
+            self.confirmation_height
+        }
+    }
+
+    let mut graph = TxGraph::<TestAnchor>::default();
+    let txid = new_tx(42).compute_txid();
+
+    for (block_height, confirmation_height) in [(100, 10), (90, 80), (110, 20)] {
+        let _ = graph.insert_anchor(
+            txid,
+            TestAnchor {
+                block_id: BlockId {
+                    height: block_height,
+                    hash: BlockHash::from_byte_array([block_height as u8; 32]),
+                },
+                confirmation_height,
+            },
+        );
+    }
+
+    assert_eq!(
+        graph.txids_by_descending_anchor_height().collect::<Vec<_>>(),
+        vec![(80, txid)]
+    );
+}
+
+#[test]
 /// The `map_anchors` allow a caller to pass a function to reconstruct the [`TxGraph`] with any
 /// [`Anchor`], even though the function is non-deterministic.
 fn call_map_anchors_with_non_deterministic_anchor() {
