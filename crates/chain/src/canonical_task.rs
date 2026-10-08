@@ -102,10 +102,6 @@ impl<'g, A: Anchor> ChainQuery for CanonicalTask<'g, A> {
                 }
                 CanonicalStage::SeenTxs => {
                     if let Some((txid, tx, last_seen)) = self.unprocessed_seen_txs.next() {
-                        debug_assert!(
-                            !tx.is_coinbase(),
-                            "Coinbase txs must not have `last_seen` (in mempool) value"
-                        );
                         if !self.is_canonicalized(txid) {
                             let observed_in = ObservedIn::Mempool(last_seen);
                             self.mark_canonical(
@@ -274,11 +270,22 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
         let mut undo_not_canonical = Vec::<Txid>::new();
         let mut staged_canonical = Vec::<(Txid, Arc<Transaction>, CanonicalReason<A>)>::new();
 
+        // A coinbase is only ever created by a block, so an anchor is the only reason that can
+        // make one canonical. `to_transitive` preserves the variant, so this holds for every tx
+        // in the ancestor walk below.
+        let reason_is_anchor = matches!(reason, CanonicalReason::Anchor { .. });
+
         // Process ancestors
         TxAncestors::new_include_root(
             self.tx_graph,
             tx,
             |_: usize, tx: Arc<Transaction>| -> Option<Txid> {
+                // Any other reason resolves to `ChainPosition::Unconfirmed`, which is not a
+                // state a coinbase can be in on any real chain.
+                if !reason_is_anchor && tx.is_coinbase() {
+                    return None;
+                }
+
                 let this_txid = tx.compute_txid();
                 let this_reason = if is_starting_tx {
                     is_starting_tx = false;

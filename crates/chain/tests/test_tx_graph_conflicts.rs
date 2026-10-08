@@ -931,6 +931,73 @@ fn test_tx_conflict_handling() {
             exp_balance: Balance {
                 ..Default::default()
             }
+        },
+        Scenario {
+            name: "coinbase tx in mempool must not become unconfirmed",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "coinbase",
+                    inputs: &[TxInTemplate::Coinbase],
+                    outputs: &[TxOutTemplate::new(21_000, Some(0))],
+                    // Seen in the mempool, but never anchored. A coinbase only exists because a
+                    // block created it, so a mempool sighting must not make it canonical.
+                    last_seen: Some(100),
+                    ..Default::default()
+                }
+            ],
+            exp_chain_txs: HashSet::from([]),
+            exp_chain_txouts: HashSet::from([]),
+            exp_unspents: HashSet::from([]),
+            exp_balance: Balance {
+                ..Default::default()
+            }
+        },
+        Scenario {
+            name: "coinbase tx must not become unconfirmed via an unconfirmed spend",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "coinbase",
+                    inputs: &[TxInTemplate::Coinbase],
+                    outputs: &[TxOutTemplate::new(21_000, Some(0))],
+                    // No anchor and no `last_seen` of its own. The spend below is the only
+                    // thing that could pull it in, transitively.
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "spend",
+                    inputs: &[TxInTemplate::PrevTx("coinbase", 0)],
+                    outputs: &[TxOutTemplate::new(20_000, Some(1))],
+                    last_seen: Some(100),
+                    ..Default::default()
+                }
+            ],
+            exp_chain_txs: HashSet::from(["spend"]),
+            exp_chain_txouts: HashSet::from([("spend", 0)]),
+            exp_unspents: HashSet::from([("spend", 0)]),
+            exp_balance: Balance {
+                untrusted_pending: Amount::from_sat(20_000),
+                ..Default::default()
+            }
+        },
+        Scenario {
+            name: "assumed canonical coinbase tx must not become unconfirmed",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "coinbase",
+                    inputs: &[TxInTemplate::Coinbase],
+                    outputs: &[TxOutTemplate::new(21_000, Some(0))],
+                    // Assumed canonical by the caller, but never anchored. `assume_canonical`
+                    // supersedes conflicting txs; it must not conjure a confirmation.
+                    assume_canonical: true,
+                    ..Default::default()
+                }
+            ],
+            exp_chain_txs: HashSet::from([]),
+            exp_chain_txouts: HashSet::from([]),
+            exp_unspents: HashSet::from([]),
+            exp_balance: Balance {
+                ..Default::default()
+            }
         }
     ];
 
