@@ -56,7 +56,10 @@ where
                     if pos_after_read == pos_before_read {
                         // The deserialized type consumed zero bytes (e.g. `()`).
                         // The file offset will never advance, so stop iterating
-                        // to avoid an infinite loop.
+                        // to avoid an infinite loop. This is independent of the
+                        // bincode -> postcard migration tracked in #2258; if that
+                        // lands first this check becomes moot, but the regression
+                        // test in test_zero_width.rs is still worth keeping.
                         self.finished = true;
                         return Ok(None);
                     }
