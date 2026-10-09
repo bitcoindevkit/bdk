@@ -4,6 +4,8 @@ alias f := fmt
 alias t := test
 alias p := pre-push
 alias d := doc
+alias vs := verify-standalone
+alias vsa := verify-standalone-all
 
 _default:
   @just --list
@@ -62,3 +64,99 @@ pre-push: fmt check test
 # Check documentation for all workspace packages
 doc:
    RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps
+
+# A failure usually means the crate uses something from a sibling workspace
+# crate that isn't released on crates.io yet
+[doc("Verify a crate builds as published, against released workspace crates")]
+[positional-arguments]
+verify-standalone crate *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    command -v jq >/dev/null 2>&1 || { echo "Error: jq is required but not installed" >&2; exit 1; }
+
+    # Positional args avoid word-splitting/quoting issues with `{{{{args}}`
+    CRATE="$1"
+    shift
+
+    echo "Verifying $CRATE can build standalone..."
+
+    # Package the crate; extra args are passed to `cargo build` only
+    cargo package -p "$CRATE" --no-verify
+
+    # Find the packaged tarball (respects CARGO_TARGET_DIR / build.target-dir)
+    METADATA=$(cargo metadata --format-version 1 --no-deps)
+    TARGET_DIR=$(jq -r '.target_directory' <<< "$METADATA")
+    CRATE_VERSION=$(jq -r --arg c "$CRATE" '.packages[] | select(.name == $c) | .version' <<< "$METADATA")
+    TARBALL="$TARGET_DIR/package/${CRATE}-${CRATE_VERSION}.crate"
+
+    if [ ! -f "$TARBALL" ]; then
+        echo "Error: Could not find packaged tarball at $TARBALL"
+        exit 1
+    fi
+
+    # Reuse a persistent cache across runs/crates instead of re-downloading
+    # the registry index and every dependency from scratch each invocation
+    CACHE_DIR="$TARGET_DIR/verify-standalone-cache"
+    mkdir -p "$CACHE_DIR/cargo-home" "$CACHE_DIR/target"
+
+    # Create a temporary directory for unpacking
+    TEMP_DIR=$(mktemp -d)
+    trap "rm -rf $TEMP_DIR" EXIT
+
+    # Unpack the tarball
+    tar -xzf "$TARBALL" -C "$TEMP_DIR"
+
+    # Build outside the workspace so sibling crates resolve from crates.io
+    cd "$TEMP_DIR/${CRATE}-${CRATE_VERSION}"
+
+    # Reuse the registry cache and build artifacts across invocations for speed
+    export CARGO_HOME="$CACHE_DIR/cargo-home"
+    export CARGO_TARGET_DIR="$CACHE_DIR/target"
+
+    echo "Building $CRATE in isolation..."
+    # --locked: use the packaged Cargo.lock as-is
+    cargo build --locked "$@"
+
+    echo "✅ $CRATE builds successfully in isolation!"
+
+# Verify all publishable crates can be built standalone (with --all-features)
+[positional-arguments]
+verify-standalone-all *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    command -v jq >/dev/null 2>&1 || { echo "Error: jq is required but not installed" >&2; exit 1; }
+
+    # Get all workspace crates (excluding examples)
+    CRATES=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.source == null and (.name | startswith("example_") | not)) | .name' | sort)
+
+    if [ -z "$CRATES" ]; then
+        echo "Error: no publishable crates found via cargo metadata" >&2
+        exit 1
+    fi
+
+    echo "Verifying all publishable crates can build standalone..."
+    echo "Crates to verify:"
+    echo "$CRATES" | sed 's/^/  - /'
+    echo
+
+    for crate in $CRATES; do
+        echo "========================================="
+        echo "Verifying $crate..."
+        echo "========================================="
+
+        if ! just verify-standalone "$crate" --all-features "$@"; then
+            echo "❌ $crate: FAILED"
+            echo "========================================="
+            echo "❌ VERIFICATION FAILED for: $crate"
+            echo "========================================="
+            exit 1
+        fi
+        echo "✅ $crate: SUCCESS"
+        echo
+    done
+
+    echo "========================================="
+    echo "✅ All crates build successfully in isolation!"
+    echo "========================================="
