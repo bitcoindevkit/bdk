@@ -109,7 +109,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// - `stop_gap`: the full scan for each keychain stops after a gap of script pubkeys with no
     ///   associated transactions.
     /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
-    ///   request.
+    ///   request. A `batch_size` of 0 is treated as 1.
     /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation. Note
     ///   that this requires additional calls to the Electrum server, but is necessary for
     ///   calculating the fee on a transaction if your wallet does not own the inputs. Methods like
@@ -191,7 +191,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     /// - `request`: struct with data required to perform a spk-based blockchain client sync, see
     ///   [`SyncRequest`]
     /// - `batch_size`: specifies the max number of script pubkeys to request for in a single batch
-    ///   request
+    ///   request. A `batch_size` of 0 is treated as 1.
     /// - `fetch_prev_txouts`: specifies whether we want previous `TxOut`s for fee calculation. Note
     ///   that this requires additional calls to the Electrum server, but is necessary for
     ///   calculating the fee on a transaction if your wallet does not own the inputs. Methods like
@@ -293,6 +293,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
     ) -> Result<Option<u32>, Error> {
         let mut unused_spk_count = 0_usize;
         let mut last_active_index = Option::<u32>::None;
+        let batch_size = batch_size.max(1);
 
         loop {
             let spks = (0..batch_size)
