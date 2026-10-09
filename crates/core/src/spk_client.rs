@@ -404,6 +404,15 @@ impl<I, D> SyncRequest<I, D> {
 /// See also [`SyncRequest`].
 #[must_use]
 #[derive(Debug)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(bound(
+        serialize = "A: serde::Serialize, D: serde::Serialize",
+        deserialize = "A: Ord + serde::Deserialize<'de>, \
+                       D: crate::ToBlockHash + Clone + core::fmt::Debug + serde::Deserialize<'de>"
+    ))
+)]
 pub struct SyncResponse<A = ConfirmationBlockTime, D = BlockHash> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,
@@ -687,5 +696,71 @@ impl<I, D> Iterator for SyncIter<'_, I, D, OutPoint> {
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.request.outpoints.len();
         (remaining, Some(remaining))
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod test {
+    use super::*;
+    use crate::{alloc::sync::Arc, BlockId};
+    use bitcoin::{hashes::Hash, Amount, Transaction, TxOut};
+
+    #[test]
+    fn sync_response_serde_round_trip() {
+        // A checkpoint chain to exercise the non-recursive `CheckPoint` (de)serialization.
+        let mut cp = CheckPoint::new(0, Hash::hash(b"genesis"));
+        for height in 1u32..=10 {
+            let hash: BlockHash = Hash::hash(height.to_be_bytes().as_slice());
+            cp = cp.push(height, hash).unwrap();
+        }
+
+        // A `tx_update` exercising every field.
+        let tx = Transaction {
+            version: bitcoin::transaction::Version::non_standard(0),
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: Vec::new(),
+            output: Vec::new(),
+        };
+        let txid = tx.compute_txid();
+        let mut tx_update = crate::TxUpdate::<ConfirmationBlockTime>::default();
+        tx_update.txs.push(Arc::new(tx));
+        tx_update.txouts.insert(
+            OutPoint::new(txid, 0),
+            TxOut {
+                value: Amount::from_sat(21_000),
+                script_pubkey: ScriptBuf::new(),
+            },
+        );
+        tx_update.anchors.insert((
+            ConfirmationBlockTime {
+                block_id: BlockId {
+                    height: 5,
+                    hash: Hash::hash(b"anchor"),
+                },
+                confirmation_time: 1_700_000_000,
+            },
+            txid,
+        ));
+        tx_update.seen_ats.insert((txid, 1_700_000_001));
+        tx_update.evicted_ats.insert((txid, 1_700_000_002));
+
+        let response = SyncResponse {
+            tx_update,
+            chain_update: Some(cp),
+        };
+
+        let json = serde_json::to_string(&response).expect("serialization must succeed");
+        let restored: SyncResponse =
+            serde_json::from_str(&json).expect("deserialization must succeed");
+
+        assert_eq!(response.chain_update, restored.chain_update);
+        assert_eq!(response.tx_update.txs, restored.tx_update.txs);
+        assert_eq!(response.tx_update.txouts, restored.tx_update.txouts);
+        assert_eq!(response.tx_update.anchors, restored.tx_update.anchors);
+        assert_eq!(response.tx_update.seen_ats, restored.tx_update.seen_ats);
+        assert_eq!(
+            response.tx_update.evicted_ats,
+            restored.tx_update.evicted_ats
+        );
     }
 }

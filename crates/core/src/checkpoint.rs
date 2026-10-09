@@ -618,6 +618,60 @@ impl<D> IntoIterator for CheckPoint<D> {
     }
 }
 
+/// Serializes a [`CheckPoint`] as a flat sequence of `(height, data)` pairs, ordered from tip to
+/// base (descending height).
+///
+/// A [`CheckPoint`] is a reference-counted linked list, so a derived implementation would recurse
+/// through `prev` (and `skip`) once per checkpoint and overflow the stack on long chains — the same
+/// hazard that forced the hand-written [`Drop`] (see
+/// <https://github.com/bitcoindevkit/bdk/issues/1634>). Iterating with [`CheckPoint::iter`] keeps
+/// serialization flat, and the `skip`/`index` topology is omitted because it is rebuilt
+/// deterministically on deserialization.
+#[cfg(feature = "serde")]
+impl<D> serde::Serialize for CheckPoint<D>
+where
+    D: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        // `index` is the number of checkpoints below the tip, so the chain has `index + 1` nodes.
+        let mut seq = serializer.serialize_seq(Some(self.0.index as usize + 1))?;
+        for cp in self.iter() {
+            seq.serialize_element(&(cp.height(), cp.data_ref()))?;
+        }
+        seq.end()
+    }
+}
+
+/// Deserializes a [`CheckPoint`] from the flat sequence of `(height, data)` pairs produced by its
+/// [`Serialize`](serde::Serialize) implementation.
+///
+/// The chain is rebuilt iteratively with [`CheckPoint::from_blocks`] (which re-derives the
+/// `skip`/`index` topology), so deserialization never recurses regardless of chain length.
+#[cfg(feature = "serde")]
+impl<'de, D> serde::Deserialize<'de> for CheckPoint<D>
+where
+    D: serde::Deserialize<'de> + ToBlockHash + Clone + fmt::Debug,
+{
+    fn deserialize<De>(deserializer: De) -> Result<Self, De::Error>
+    where
+        De: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+        // Serialized tip-first (descending height); `from_blocks` expects ascending order.
+        let mut blocks = Vec::<(u32, D)>::deserialize(deserializer)?;
+        blocks.reverse();
+        CheckPoint::from_blocks(blocks).map_err(|_| {
+            De::Error::custom(
+                "invalid checkpoint chain: blocks must be non-empty, ascending and well-linked",
+            )
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -638,6 +692,60 @@ mod tests {
         std::thread::Builder::new()
             // Restrict stack size.
             .stack_size(32 * 1024)
+            .spawn(run)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// Round-tripping a checkpoint through serde must preserve the block ids and rebuild an
+    /// identical `index`/`skip` topology.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn checkpoint_serde_round_trip() {
+        let mut cp = CheckPoint::new(0, bitcoin::hashes::Hash::hash(b"genesis"));
+        for height in 1u32..=100 {
+            let hash: BlockHash = bitcoin::hashes::Hash::hash(height.to_be_bytes().as_slice());
+            cp = cp.push(height, hash).unwrap();
+        }
+
+        let json = serde_json::to_string(&cp).expect("serialization must succeed");
+        let restored: CheckPoint =
+            serde_json::from_str(&json).expect("deserialization must succeed");
+
+        assert_eq!(cp, restored);
+        assert_eq!(cp.iter().count(), restored.iter().count());
+        for (orig_cp, restored_cp) in cp.iter().zip(restored.iter()) {
+            assert_eq!(orig_cp.block_id(), restored_cp.block_id());
+            assert_eq!(orig_cp.index(), restored_cp.index());
+            assert_eq!(
+                orig_cp.skip().map(|cp| cp.block_id()),
+                restored_cp.skip().map(|cp| cp.block_id()),
+            );
+        }
+    }
+
+    /// Serialization and deserialization must walk the linked list iteratively. A recursive
+    /// implementation (e.g. a naive derive over `prev`) would overflow this deliberately small
+    /// stack on a long chain — the same hazard guarded against in
+    /// `checkpoint_drop_is_not_recursive`.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn checkpoint_serde_is_not_recursive() {
+        let run = || {
+            let mut cp = CheckPoint::new(0, bitcoin::hashes::Hash::hash(b"genesis"));
+            for height in 1u32..=(1024 * 10) {
+                let hash: BlockHash = bitcoin::hashes::Hash::hash(height.to_be_bytes().as_slice());
+                cp = cp.push(height, hash).unwrap();
+            }
+
+            let json = serde_json::to_string(&cp).expect("serialization must not recurse");
+            let restored: CheckPoint =
+                serde_json::from_str(&json).expect("deserialization must not recurse");
+            assert_eq!(cp, restored);
+        };
+        std::thread::Builder::new()
+            .stack_size(128 * 1024)
             .spawn(run)
             .unwrap()
             .join()
