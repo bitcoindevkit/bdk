@@ -656,12 +656,6 @@ fn fetch_tip_and_latest_blocks(
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
     let new_tip_height = height as u32;
 
-    // If electrum returns a tip height that is lower than our previous tip, then checkpoints do
-    // not need updating. We just return the previous tip and use that as the point of agreement.
-    if new_tip_height < prev_tip.height() {
-        return Ok((prev_tip, BTreeMap::new()));
-    }
-
     // Atomically fetch the latest `CHAIN_SUFFIX_LENGTH` count of blocks from Electrum. We use this
     // to construct our checkpoint update.
     let mut new_blocks = {
@@ -679,13 +673,14 @@ fn fetch_tip_and_latest_blocks(
         let mut agreement_cp = Option::<CheckPoint<BlockHash>>::None;
         for cp in prev_tip.iter() {
             let cp_block = cp.block_id();
+            // Electrum's tip may be lower than ours (a re-org to a shorter chain, or a lagging
+            // server). Checkpoints above its tip cannot agree, so skip them.
+            if cp_block.height > new_tip_height {
+                continue;
+            }
             let hash = match new_blocks.get(&cp_block.height) {
                 Some(&hash) => hash,
                 None => {
-                    assert!(
-                        new_tip_height >= cp_block.height,
-                        "already checked that electrum's tip cannot be smaller"
-                    );
                     let hash = client.block_header(cp_block.height as _)?.block_hash();
                     new_blocks.insert(cp_block.height, hash);
                     hash

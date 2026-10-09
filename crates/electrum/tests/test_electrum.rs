@@ -934,3 +934,56 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+// When the Electrum server's tip is lower than our local tip (a re-org to a shorter chain), the
+// local chain must be rewound to the server's tip instead of keeping an orphaned tip.
+#[test]
+fn sync_rewinds_local_tip_when_electrum_tip_height_decreases() -> anyhow::Result<()> {
+    const INVALIDATE_COUNT: usize = 3;
+    const REPLACEMENT_COUNT: usize = 2;
+
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    env.mine_blocks(10, None)?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    let mut chain = LocalChain::from_tip(env.make_checkpoint_tip())?;
+    let old_tip = chain.tip();
+
+    // Replace the last blocks with fewer new ones, so the new tip is lower than the old one.
+    env.invalidate_blocks(INVALIDATE_COUNT)?;
+    env.mine_blocks(REPLACEMENT_COUNT, None)?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    let new_tip_height = old_tip.height() - (INVALIDATE_COUNT - REPLACEMENT_COUNT) as u32;
+    assert_eq!(
+        env.bitcoind.client.get_block_count()?.0,
+        new_tip_height as u64
+    );
+
+    let update = client.sync(
+        SyncRequest::builder()
+            .chain_tip(chain.tip())
+            .spks(core::iter::empty::<ScriptBuf>()),
+        BATCH_SIZE,
+        true,
+    )?;
+    let chain_update = update
+        .chain_update
+        .expect("sync must return a chain update");
+    chain.apply_update(chain_update)?;
+
+    assert_eq!(chain.tip().height(), new_tip_height);
+    assert_eq!(
+        chain.tip().hash(),
+        env.get_block_hash(new_tip_height as u64)?
+    );
+    assert_ne!(
+        chain.tip().hash(),
+        old_tip.get(new_tip_height).unwrap().hash()
+    );
+
+    Ok(())
+}
