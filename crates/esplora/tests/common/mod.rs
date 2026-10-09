@@ -2,6 +2,8 @@
 
 use bdk_core::bitcoin::key::{Secp256k1, UntweakedPublicKey};
 use bdk_core::bitcoin::{Address, ScriptBuf};
+use std::io::{BufRead, BufReader, Write};
+use std::net::TcpListener;
 use std::str::FromStr;
 
 const PK_BYTES: &[u8] = &[
@@ -31,4 +33,74 @@ pub fn test_addresses() -> Vec<Address> {
     .into_iter()
     .map(|s| Address::from_str(s).unwrap().assume_checked())
     .collect()
+}
+
+/// Number of transactions per page requested by `bdk_esplora`.
+const PAGE_SIZE: u32 = 25;
+
+/// A full page of transactions, always ending on the same txid.
+fn non_advancing_page() -> String {
+    let txs = (0..PAGE_SIZE)
+        .map(|i| {
+            serde_json::json!({
+                "txid": format!("{i:064x}"),
+                "version": 2,
+                "locktime": 0,
+                "vin": [],
+                "vout": [],
+                "size": 100,
+                "weight": 400,
+                "status": {
+                    "confirmed": false,
+                    "block_height": null,
+                    "block_hash": null,
+                    "block_time": null
+                },
+                "fee": 0
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string(&txs).expect("page must serialize")
+}
+
+/// Spawns a stub Esplora server which answers every request with the same full page of
+/// transactions, emulating a server that never pages forward.
+///
+/// Returns the base URL to point an Esplora client at. The listener is served until the test
+/// binary exits.
+pub fn spawn_non_advancing_server() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("must bind to loopback");
+    let base_url = format!(
+        "http://{}",
+        listener.local_addr().expect("must have local addr")
+    );
+    let body = non_advancing_page();
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            // Every path gets the same answer, so there is nothing to parse. We still consume the
+            // request head, otherwise closing the connection could abort the client's write.
+            let mut reader = BufReader::new(stream.try_clone().expect("must clone stream"));
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                if line == "\r\n" || line == "\n" {
+                    break;
+                }
+                line.clear();
+            }
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\n\
+                 content-type: application/json\r\n\
+                 content-length: {}\r\n\
+                 connection: close\r\n\
+                 \r\n\
+                 {body}",
+                body.len()
+            );
+        }
+    });
+
+    base_url
 }
