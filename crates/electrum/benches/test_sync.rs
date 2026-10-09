@@ -69,7 +69,7 @@ pub fn test_sync_performance(c: &mut Criterion) {
 
         spks.push(spk);
     }
-    let _ = env.wait_until_electrum_sees_block(Duration::from_secs(6));
+    let _ = env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6));
     assert_eq!(
         spks.iter().cloned().collect::<BTreeSet<_>>().len(),
         spks.len(),
