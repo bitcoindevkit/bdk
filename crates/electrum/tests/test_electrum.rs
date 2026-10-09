@@ -934,3 +934,66 @@ fn test_check_fee_calculation() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+// A `batch_size` of 0 must not make `sync` skip its scripts.
+#[test]
+pub fn test_sync_with_zero_batch_size() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    let addr = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")?.assume_checked();
+    env.mine_blocks(101, None)?;
+    let txid = env
+        .bitcoind
+        .client
+        .send_to_address(&addr, Amount::from_sat(10_000))?
+        .txid()?;
+    env.mine_blocks(1, None)?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    let request = SyncRequest::builder().spks([addr.script_pubkey()]);
+    let update = client.sync(request, 0, false)?;
+
+    assert!(
+        update
+            .tx_update
+            .txs
+            .iter()
+            .any(|tx| tx.compute_txid() == txid),
+        "sync with a batch_size of 0 must still find the funded script's transaction"
+    );
+    Ok(())
+}
+
+// A `batch_size` of 0 must not make `full_scan` skip its scripts.
+#[test]
+pub fn test_full_scan_with_zero_batch_size() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    let addr = Address::from_str("bcrt1qc6fweuf4xjvz4x3gx3t9e0fh4hvqyu2qw4wvxm")?.assume_checked();
+    env.mine_blocks(101, None)?;
+    let txid = env
+        .bitcoind
+        .client
+        .send_to_address(&addr, Amount::from_sat(10_000))?
+        .txid()?;
+    env.mine_blocks(1, None)?;
+    env.wait_until_electrum_sees_block(Duration::from_secs(6))?;
+
+    let request = FullScanRequest::builder().spks_for_keychain(0u32, [(0, addr.script_pubkey())]);
+    let update = client.full_scan(request, 3, 0, false)?;
+
+    assert!(
+        update
+            .tx_update
+            .txs
+            .iter()
+            .any(|tx| tx.compute_txid() == txid),
+        "full scan with a batch_size of 0 must still find the funded script's transaction"
+    );
+    assert_eq!(update.last_active_indices.get(&0), Some(&0));
+    Ok(())
+}

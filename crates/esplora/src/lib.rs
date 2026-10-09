@@ -14,6 +14,14 @@
 //!
 //! A `stop_gap` of 0 will be treated as a `stop_gap` of 1.
 //!
+//! # Parallel Requests
+//!
+//! [`EsploraExt::full_scan`] and [`EsploraExt::sync`] (and their async counterparts in
+//! [`EsploraAsyncExt`]) take in a `parallel_requests` input, which is the maximum number of HTTP
+//! requests to make in parallel.
+//!
+//! A `parallel_requests` of 0 will be treated as a `parallel_requests` of 1.
+//!
 //! # Async
 //!
 //! Just like how [`EsploraExt`] extends the functionality of an
