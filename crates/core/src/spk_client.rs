@@ -179,6 +179,26 @@ impl<I, D> SyncRequestBuilder<I, D> {
     /// Add transactions that are expected to exist under the given spks.
     ///
     /// This is useful for detecting a malicious replacement of an incoming transaction.
+    ///
+    /// # Eviction inference
+    ///
+    /// For each expected txid that the chain source does not list in the history of its script in
+    /// a single response, the Electrum and Esplora clients report the transaction in
+    /// [`TxUpdate::evicted_ats`](crate::TxUpdate::evicted_ats) with the
+    /// [`start_time`](SyncRequest::start_time) of the sync. These clients cannot tell "the
+    /// transaction left the mempool" apart from "the source did not list it", so one incomplete
+    /// or inconsistent response is enough to mark a transaction as evicted. Passing expected
+    /// txids therefore places trust in the chain source to return complete script histories.
+    ///
+    /// Once applied to a `TxGraph`, an eviction removes an unconfirmed transaction from the
+    /// canonical view (unless it is anchored, or is an ancestor of another canonical
+    /// transaction). It then no longer counts towards balances, and the outputs it spent appear
+    /// unspent again, so they may be selected by a conflicting transaction. This applies to the
+    /// wallet's own broadcast transactions as well as incoming ones. See `TxNode::is_evicted` in
+    /// `bdk_chain` for the details.
+    ///
+    /// Not passing expected txids avoids this inference, but also gives up the detection of
+    /// replaced transactions.
     pub fn expected_spk_txids(mut self, txs: impl IntoIterator<Item = (ScriptBuf, Txid)>) -> Self {
         for (spk, txid) in txs {
             self.inner

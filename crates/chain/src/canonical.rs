@@ -396,6 +396,10 @@ impl<A, P: Clone> Canonical<A, P> {
     /// commonly used with
     /// [`SyncRequestBuilder::expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids)
     /// to inform sync operations about known transactions.
+    ///
+    /// Note that a transaction passed this way is recorded as evicted if the chain source omits it
+    /// from its script's history in a single response, see the "Eviction inference" section of
+    /// [`expected_spk_txids`](bdk_core::spk_client::SyncRequestBuilder::expected_spk_txids).
     pub fn list_expected_spk_txids<'v, I>(
         &'v self,
         indexer: &'v impl AsRef<SpkTxOutIndex<I>>,
