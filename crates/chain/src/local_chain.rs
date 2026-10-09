@@ -18,6 +18,18 @@ fn apply_changeset_to_checkpoint<D>(
 where
     D: ToBlockHash + fmt::Debug + Clone,
 {
+    // The genesis block cannot be replaced. `get` only returns a checkpoint with data, so a
+    // placeholder genesis is not compared (same as in `merge_chains`).
+    if let Some(Some(new_genesis)) = changeset.blocks.get(&0) {
+        if let Some(genesis) = init_cp.get(0) {
+            if genesis.hash() != new_genesis.to_blockhash() {
+                return Err(ApplyBlockError::CannotReplaceGenesis {
+                    expected: genesis.block_id(),
+                });
+            }
+        }
+    }
+
     if let Some(start_height) = changeset.blocks.keys().next().cloned() {
         // changes after point of agreement
         let mut extension = BTreeMap::default();
@@ -375,6 +387,14 @@ where
     }
 
     /// Apply the given `changeset`.
+    ///
+    /// # Errors
+    ///
+    /// The genesis block cannot be replaced or removed. This fails with
+    /// [`ApplyBlockError::CannotReplaceGenesis`] if the `changeset` contains a height-0 block with
+    /// a different hash to the chain's genesis, or [`ApplyBlockError::MissingGenesis`] if it
+    /// removes the genesis block. It also fails if the blocks do not link by `prev_blockhash`.
+    /// `self` is unchanged on error.
     pub fn apply_changeset(&mut self, changeset: &ChangeSet<D>) -> Result<(), ApplyBlockError> {
         let old_tip = self.tip.clone();
         let new_tip = apply_changeset_to_checkpoint(old_tip, changeset)?;
@@ -560,6 +580,11 @@ pub enum ApplyBlockError {
         /// The block that `prev_blockhash` should reference.
         expected: BlockId,
     },
+    /// The changeset attempts to replace the genesis block of the chain.
+    CannotReplaceGenesis {
+        /// The genesis block that the chain already has.
+        expected: BlockId,
+    },
 }
 
 impl core::fmt::Display for ApplyBlockError {
@@ -571,6 +596,11 @@ impl core::fmt::Display for ApplyBlockError {
             ApplyBlockError::PrevBlockhashMismatch { expected } => write!(
                 f,
                 "`prev_blockhash` doesn't match block at height {} ({})",
+                expected.height, expected.hash
+            ),
+            ApplyBlockError::CannotReplaceGenesis { expected } => write!(
+                f,
+                "changeset cannot replace the genesis block at height {} ({})",
                 expected.height, expected.hash
             ),
         }
@@ -696,9 +726,11 @@ where
     {
         let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset).map_err(|err| {
             match err {
-                ApplyBlockError::MissingGenesis => CannotConnectError {
-                    try_include_height: 0,
-                },
+                ApplyBlockError::MissingGenesis | ApplyBlockError::CannotReplaceGenesis { .. } => {
+                    CannotConnectError {
+                        try_include_height: 0,
+                    }
+                }
                 // The merge iteration is supposed to detect `prev_blockhash` conflicts and resolve
                 // them by invalidating conflicting blocks in the changeset. Reaching this arm means
                 // either the original chain was internally inconsistent or the iteration missed a
