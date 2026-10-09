@@ -55,7 +55,8 @@
 //!   descendants.
 //! * `last_evicted` - This is the timestamp of when a transaction last went missing from the
 //!   mempool. If this value is equal to or higher than the transaction's `last_seen` value, then it
-//!   will not be considered canonical.
+//!   will not be considered canonical on account of being in the mempool. Evictions are reported by
+//!   the chain source and may be inferred rather than observed, see [`TxNode::is_evicted`].
 //!
 //! # Graph traversal
 //!
@@ -230,6 +231,31 @@ impl<T, A> TxNode<'_, T, A> {
     ///
     /// Only mempool observation timestamps are considered; anchors have no effect. A transaction
     /// is evicted when its last-evicted timestamp is at least as recent as its last-seen timestamp.
+    /// A tie therefore counts as evicted: the transaction only returns once it is recorded as seen
+    /// *strictly later* than its last eviction.
+    ///
+    /// # Trust in the chain source
+    ///
+    /// Evictions are inferred, not necessarily observed. The `bdk_electrum` and `bdk_esplora`
+    /// clients record an eviction for every expected txid (see
+    /// `SyncRequestBuilder::expected_spk_txids` in `bdk_core`) that is missing from the history
+    /// of its script in a single response. They cannot tell "the transaction left the mempool"
+    /// apart from "the source did not list it".
+    ///
+    /// # Effect on the canonical view
+    ///
+    /// An evicted transaction is no longer canonical because of its mempool observation. Unless it
+    /// is anchored in the best chain, or is an ancestor of another canonical transaction, it is
+    /// excluded from the canonical view. As a result:
+    ///
+    /// * it disappears from balances and transaction lists;
+    /// * the outputs it spent appear unspent again, so they are eligible for coin selection in a
+    ///   new, conflicting transaction. This applies to the wallet's own broadcast transactions as
+    ///   much as to incoming ones.
+    ///
+    /// The last-evicted timestamp only ever increases (see [`TxGraph::insert_evicted_at`]) and is
+    /// persisted in the [`ChangeSet`]. A transaction comes back if a later update records it as
+    /// seen at a later time, or if it receives an anchor.
     pub fn is_evicted(&self) -> bool {
         match (self.last_seen, self.last_evicted) {
             (_, None) => false,
@@ -884,6 +910,12 @@ impl<A: Anchor> TxGraph<A> {
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
+    ///
+    /// The recorded value never decreases and is persisted in the returned [`ChangeSet`]. Once it
+    /// is at least the transaction's last-seen timestamp, the transaction is evicted, which can
+    /// remove it from the canonical view and make the outputs it spent appear unspent again. The
+    /// timestamp is supplied by the caller, and chain sources may infer it from a single
+    /// incomplete response. See [`TxNode::is_evicted`] for the implications.
     pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A> {
         let is_changed = match self.last_evicted.entry(txid) {
             hash_map::Entry::Occupied(mut e) => {
@@ -913,6 +945,9 @@ impl<A: Anchor> TxGraph<A> {
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
+    ///
+    /// See [`insert_evicted_at`](Self::insert_evicted_at) and [`TxNode::is_evicted`] for what an
+    /// eviction implies.
     pub fn batch_insert_relevant_evicted_at(
         &mut self,
         evicted_ats: impl IntoIterator<Item = (Txid, u64)>,

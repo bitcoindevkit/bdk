@@ -220,6 +220,10 @@ where
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
+    ///
+    /// See [`TxGraph::insert_evicted_at`] and
+    /// [`TxNode::is_evicted`](crate::tx_graph::TxNode::is_evicted) for what an eviction implies
+    /// for the canonical view and spendable outputs.
     pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A, I::ChangeSet> {
         let tx_graph = self.graph.insert_evicted_at(txid, evicted_at);
         ChangeSet {
@@ -233,6 +237,10 @@ where
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
+    ///
+    /// See [`TxGraph::insert_evicted_at`] and
+    /// [`TxNode::is_evicted`](crate::tx_graph::TxNode::is_evicted) for what an eviction implies
+    /// for the canonical view and spendable outputs.
     pub fn batch_insert_relevant_evicted_at(
         &mut self,
         evicted_ats: impl IntoIterator<Item = (Txid, u64)>,
