@@ -69,8 +69,9 @@ where
         let keychains = request.keychains();
 
         let chain_tip = request.chain_tip();
+        let target = request.target();
         let latest_blocks = if chain_tip.is_some() {
-            Some(fetch_latest_blocks(self).await?)
+            Some(fetch_latest_blocks(self, target).await?)
         } else {
             None
         };
@@ -90,6 +91,7 @@ where
                 keychain_spks,
                 stop_gap,
                 last_revealed,
+                target,
                 parallel_requests,
             )
             .await?;
@@ -122,8 +124,9 @@ where
         let start_time = request.start_time();
 
         let chain_tip = request.chain_tip();
+        let target = request.target();
         let latest_blocks = if chain_tip.is_some() {
-            Some(fetch_latest_blocks(self).await?)
+            Some(fetch_latest_blocks(self, target).await?)
         } else {
             None
         };
@@ -136,6 +139,7 @@ where
                 start_time,
                 &mut inserted_txs,
                 request.iter_spks_with_expected_txids(),
+                target,
                 parallel_requests,
             )
             .await?,
@@ -146,6 +150,7 @@ where
                 start_time,
                 &mut inserted_txs,
                 request.iter_txids(),
+                target,
                 parallel_requests,
             )
             .await?,
@@ -156,6 +161,7 @@ where
                 start_time,
                 &mut inserted_txs,
                 request.iter_outpoints(),
+                target,
                 parallel_requests,
             )
             .await?,
@@ -184,13 +190,21 @@ where
 /// alternating between chain-sources.
 async fn fetch_latest_blocks<S: Sleeper>(
     client: &esplora_client::AsyncClient<S>,
+    target: Option<BlockId>,
 ) -> Result<BTreeMap<u32, BlockHash>, Error> {
-    Ok(client
+    let mut latest_blocks = client
         .get_block_infos(None)
         .await?
         .into_iter()
+        .filter(|b| target.map_or(true, |t| b.height <= t.height))
         .map(|b| (b.height, b.id))
-        .collect())
+        .collect::<BTreeMap<u32, BlockHash>>();
+
+    if let Some(t) = target {
+        latest_blocks.entry(t.height).or_insert(t.hash);
+    }
+
+    Ok(latest_blocks)
 }
 
 /// Used instead of [`esplora_client::BlockingClient::get_block_hash`].
@@ -308,6 +322,7 @@ async fn fetch_txs_with_keychain_spks<I, S>(
     mut keychain_spks: I,
     stop_gap: usize,
     last_revealed: Option<u32>,
+    target: Option<BlockId>,
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error>
 where
@@ -369,7 +384,13 @@ where
                 if inserted_txs.insert(tx.txid) {
                     update.txs.push(tx.to_tx().into());
                 }
-                insert_anchor_or_seen_at_from_status(&mut update, start_time, tx.txid, tx.status);
+                insert_anchor_or_seen_at_from_status(
+                    &mut update,
+                    start_time,
+                    tx.txid,
+                    tx.status,
+                    target,
+                );
                 insert_prevouts(&mut update, tx.vin);
             }
             update
@@ -398,6 +419,7 @@ async fn fetch_txs_with_spks<I, S>(
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     spks: I,
+    target: Option<BlockId>,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error>
 where
@@ -412,6 +434,7 @@ where
         spks.into_iter().enumerate().map(|(i, spk)| (i as u32, spk)),
         usize::MAX,
         None,
+        target,
         parallel_requests,
     )
     .await
@@ -429,6 +452,7 @@ async fn fetch_txs_with_txids<I, S>(
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     txids: I,
+    target: Option<BlockId>,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error>
 where
@@ -462,7 +486,13 @@ where
                 if inserted_txs.insert(txid) {
                     update.txs.push(tx_info.to_tx().into());
                 }
-                insert_anchor_or_seen_at_from_status(&mut update, start_time, txid, tx_info.status);
+                insert_anchor_or_seen_at_from_status(
+                    &mut update,
+                    start_time,
+                    txid,
+                    tx_info.status,
+                    target,
+                );
                 insert_prevouts(&mut update, tx_info.vin);
             }
         }
@@ -481,6 +511,7 @@ async fn fetch_txs_with_outpoints<I, S>(
     start_time: u64,
     inserted_txs: &mut HashSet<Txid>,
     outpoints: I,
+    target: Option<BlockId>,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error>
 where
@@ -499,6 +530,7 @@ where
             start_time,
             inserted_txs,
             outpoints.iter().copied().map(|op| op.txid),
+            target,
             parallel_requests,
         )
         .await?,
@@ -535,6 +567,7 @@ where
                     start_time,
                     spend_txid,
                     spend_status,
+                    target,
                 );
             }
         }
@@ -546,6 +579,7 @@ where
             start_time,
             inserted_txs,
             missing_txs,
+            target,
             parallel_requests,
         )
         .await?,
