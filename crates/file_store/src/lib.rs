@@ -4,13 +4,8 @@ mod entry_iter;
 mod store;
 use std::io;
 
-use bincode::{DefaultOptions, Options};
 pub use entry_iter::*;
 pub use store::*;
-
-pub(crate) fn bincode_options() -> impl bincode::Options {
-    DefaultOptions::new().with_varint_encoding()
-}
 
 /// Error that occurs due to problems encountered with the file.
 #[derive(Debug)]
@@ -20,7 +15,7 @@ pub enum StoreError {
     /// Magic bytes do not match what is expected.
     InvalidMagicBytes { got: Vec<u8>, expected: Vec<u8> },
     /// Failure to decode data from the file.
-    Bincode(bincode::ErrorKind),
+    Decode(postcard::Error),
 }
 
 impl core::fmt::Display for StoreError {
@@ -34,7 +29,7 @@ impl core::fmt::Display for StoreError {
 
         match self {
             Self::Io(e) => write!(f, "io error while reading store file: {}", e),
-            Self::Bincode(e) => write!(f, "bincode error while decoding entry {}", e),
+            Self::Decode(e) => write!(f, "decode error while decoding entry: {}", e),
             Self::InvalidMagicBytes { got, expected } => {
                 write!(f, "invalid magic bytes: ")?;
                 write!(f, "expected 0x")?;
