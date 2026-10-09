@@ -26,7 +26,7 @@ serde_json = { version = "1.0", features = ["alloc"] }
 esplora-client = { version = "0.12.0" }
 bdk_chain = { path = "../chain" }
 bdk_testenv = { path = "../testenv" }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
 
 [features]
 default = ["std", "async-https", "blocking-https"]
