@@ -1551,3 +1551,57 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+#[test]
+fn apply_changeset_roundtrips_first_seen() {
+    let mut graph = TxGraph::<BlockId>::default();
+
+    let tx_a = Arc::new(new_tx(0));
+    let tx_b = Arc::new(new_tx(1));
+    let txid_a = tx_a.compute_txid();
+    let txid_b = tx_b.compute_txid();
+
+    let _ = graph.insert_tx(tx_a);
+    let _ = graph.insert_tx(tx_b);
+
+    // first_seen and last_seen disagree on order across the two txs.
+    let _ = graph.insert_seen_at(txid_a, 100);
+    let _ = graph.insert_seen_at(txid_a, 500);
+    let _ = graph.insert_seen_at(txid_b, 200);
+    let _ = graph.insert_seen_at(txid_b, 300);
+
+    let unconfirmed_order = |graph: &TxGraph<BlockId>| {
+        let mut txids = [txid_a, txid_b];
+        txids.sort_by(|&lhs, &rhs| {
+            let lhs = graph.get_tx_node(lhs).unwrap();
+            let rhs = graph.get_tx_node(rhs).unwrap();
+            ChainPosition::<BlockId>::Unconfirmed {
+                first_seen: lhs.first_seen,
+                last_seen: lhs.last_seen,
+            }
+            .cmp(&ChainPosition::Unconfirmed {
+                first_seen: rhs.first_seen,
+                last_seen: rhs.last_seen,
+            })
+        });
+        txids
+    };
+
+    let original_order = unconfirmed_order(&graph);
+
+    let changeset = graph.initial_changeset();
+    assert_eq!(changeset.first_seen.get(&txid_a), Some(&100));
+    assert_eq!(changeset.first_seen.get(&txid_b), Some(&200));
+    assert_eq!(changeset.last_seen.get(&txid_a), Some(&500));
+    assert_eq!(changeset.last_seen.get(&txid_b), Some(&300));
+
+    let mut reloaded = TxGraph::<BlockId>::default();
+    reloaded.apply_changeset(changeset);
+
+    assert_eq!(reloaded.get_tx_node(txid_a).unwrap().first_seen, Some(100));
+    assert_eq!(reloaded.get_tx_node(txid_a).unwrap().last_seen, Some(500));
+    assert_eq!(reloaded.get_tx_node(txid_b).unwrap().first_seen, Some(200));
+    assert_eq!(reloaded.get_tx_node(txid_b).unwrap().last_seen, Some(300));
+    assert_eq!(unconfirmed_order(&reloaded), original_order);
+    assert_eq!(reloaded, graph);
+}

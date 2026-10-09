@@ -984,6 +984,11 @@ impl<A: Anchor> TxGraph<A> {
         for (anchor, txid) in changeset.anchors {
             let _ = self.insert_anchor(txid, anchor);
         }
+        // Apply first_seen before last_seen. `insert_seen_at` updates both timestamps from one
+        // value, so replaying last_seen first on an empty graph would set first_seen to last_seen.
+        for (txid, seen_at) in changeset.first_seen {
+            let _ = self.insert_seen_at(txid, seen_at);
+        }
         for (txid, seen_at) in changeset.last_seen {
             let _ = self.insert_seen_at(txid, seen_at);
         }
