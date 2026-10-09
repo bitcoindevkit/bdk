@@ -10,3 +10,4 @@ Cargo.lock
 *.sqlite*
 
 crates/electrum/target
+fuzz/target
