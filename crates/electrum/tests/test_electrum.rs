@@ -23,6 +23,18 @@ use std::str::FromStr;
 // Batch size for `sync_with_electrum`.
 const BATCH_SIZE: usize = 5;
 
+/// The last active index reported for `keychain`.
+///
+/// Entries of `last_active_indices` are observations, so they may repeat a keychain and need not
+/// be ordered. The highest index reported for the keychain is the meaningful one.
+fn last_active_index(last_active_indices: &[(u32, u32)], keychain: u32) -> Option<u32> {
+    last_active_indices
+        .iter()
+        .filter(|(k, _)| *k == keychain)
+        .map(|(_, i)| *i)
+        .max()
+}
+
 pub fn get_test_spk() -> ScriptBuf {
     const PK_BYTES: &[u8] = &[
         12, 244, 72, 4, 163, 4, 211, 81, 159, 82, 153, 123, 125, 74, 142, 40, 55, 237, 191, 231,
@@ -449,7 +461,10 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
             .compute_txid(),
         txid_4th_addr
     );
-    assert_eq!(full_scan_update.last_active_indices[&0], 3);
+    assert_eq!(
+        last_active_index(&full_scan_update.last_active_indices, 0),
+        Some(3)
+    );
 
     // Now receive a coin on the last address.
     let txid_last_addr = env
@@ -476,7 +491,10 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         .collect();
     assert_eq!(txs.len(), 1);
     assert!(txs.contains(&txid_4th_addr));
-    assert_eq!(full_scan_update.last_active_indices[&0], 3);
+    assert_eq!(
+        last_active_index(&full_scan_update.last_active_indices, 0),
+        Some(3)
+    );
     let full_scan_update = {
         let request = FullScanRequest::builder()
             .chain_tip(cp_tip.clone())
@@ -491,7 +509,10 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
         .collect();
     assert_eq!(txs.len(), 2);
     assert!(txs.contains(&txid_4th_addr) && txs.contains(&txid_last_addr));
-    assert_eq!(full_scan_update.last_active_indices[&0], 9);
+    assert_eq!(
+        last_active_index(&full_scan_update.last_active_indices, 0),
+        Some(9)
+    );
 
     Ok(())
 }
@@ -538,7 +559,7 @@ pub fn test_stop_gap_past_last_revealed() -> anyhow::Result<()> {
         response.tx_update.txs.first().unwrap().compute_txid(),
         txid_last_addr
     );
-    assert_eq!(response.last_active_indices[&0], 9);
+    assert_eq!(last_active_index(&response.last_active_indices, 0), Some(9));
 
     // Tx sits beyond `last_revealed + stop_gap`. So tx should not be found.
     let request = FullScanRequest::builder()

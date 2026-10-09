@@ -67,7 +67,7 @@ impl EsploraExt for esplora_client::BlockingClient {
 
         let mut tx_update = TxUpdate::default();
         let mut inserted_txs = HashSet::<Txid>::new();
-        let mut last_active_indices = BTreeMap::<K, u32>::new();
+        let mut last_active_indices = Vec::<(K, u32)>::new();
         for keychain in request.keychains() {
             let last_revealed = request.last_revealed(&keychain);
             let keychain_spks = request
@@ -84,7 +84,7 @@ impl EsploraExt for esplora_client::BlockingClient {
             )?;
             tx_update.extend(update);
             if let Some(last_active_index) = last_active_index {
-                last_active_indices.insert(keychain, last_active_index);
+                last_active_indices.push((keychain, last_active_index));
             }
         }
 
