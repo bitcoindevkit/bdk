@@ -410,3 +410,28 @@ pub async fn test_async_stop_gap_past_last_revealed() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// Ensure `sync` gives up on a server that keeps returning the same page of transactions.
+//
+// The per-spk pagination loop advances by asking for the transactions following the last txid of
+// the previous page. A server that answers every request with the same full page leaves the cursor
+// where it was, which used to make the loop request that page forever. See bitcoindevkit/bdk#2339.
+#[tokio::test]
+async fn sync_terminates_when_server_page_does_not_advance() {
+    let base_url = common::spawn_non_advancing_server();
+    let client = Builder::new(&base_url)
+        .build_async()
+        .expect("must build client");
+
+    let request = SyncRequest::builder().spks([common::get_test_spk()]);
+    let result = tokio::time::timeout(Duration::from_secs(10), client.sync(request, 1))
+        .await
+        .expect("`sync` must terminate");
+    assert!(
+        matches!(
+            result.unwrap_err().as_ref(),
+            esplora_client::Error::InvalidResponse
+        ),
+        "`sync` must reject a page that does not advance the cursor"
+    );
+}

@@ -409,3 +409,31 @@ pub fn test_stop_gap_past_last_revealed() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// Ensure `sync` gives up on a server that keeps returning the same page of transactions.
+//
+// The per-spk pagination loop advances by asking for the transactions following the last txid of
+// the previous page. A server that answers every request with the same full page leaves the cursor
+// where it was, which used to make the loop request that page forever. See bitcoindevkit/bdk#2339.
+#[test]
+fn sync_terminates_when_server_page_does_not_advance() {
+    let base_url = common::spawn_non_advancing_server();
+    let client = Builder::new(&base_url).build_blocking();
+
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let request = SyncRequest::builder().spks([common::get_test_spk()]);
+        let _ = result_tx.send(client.sync(request, 1).map(|_| ()));
+    });
+
+    let result = result_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("`sync` must terminate");
+    assert!(
+        matches!(
+            result.unwrap_err().as_ref(),
+            esplora_client::Error::InvalidResponse
+        ),
+        "`sync` must reject a page that does not advance the cursor"
+    );
+}
