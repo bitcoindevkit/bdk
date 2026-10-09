@@ -1,4 +1,4 @@
-use bdk_chain::bitcoin::{Address, Amount};
+use bdk_chain::bitcoin::{hashes::Hash, Address, Amount, OutPoint, ScriptBuf, Txid};
 use bdk_chain::local_chain::LocalChain;
 use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
 use bdk_chain::spk_txout::SpkTxOutIndex;
@@ -434,4 +434,44 @@ async fn sync_terminates_when_server_page_does_not_advance() {
         ),
         "`sync` must reject a page that does not advance the cursor"
     );
+}
+
+/// A `parallel_requests` of 0 must not make `full_scan` skip its scripts.
+///
+/// The client points at a closed port, so a scan that actually requests something returns an
+/// error. If no request is made, the scan returns an empty `Ok`.
+#[tokio::test]
+pub async fn test_full_scan_with_zero_parallel_requests() -> anyhow::Result<()> {
+    let client = Builder::new("http://127.0.0.1:1").build_async()?;
+    let request = FullScanRequest::builder().spks_for_keychain(0u32, [(0, ScriptBuf::new())]);
+
+    let response = client.full_scan(request, 3, 0).await;
+    assert!(
+        response.is_err(),
+        "scan skipped its script and returned {response:?}"
+    );
+    Ok(())
+}
+
+/// A `parallel_requests` of 0 must not make `sync` skip its spks, txids or outpoints (each goes
+/// through a different fetch loop).
+#[tokio::test]
+pub async fn test_sync_with_zero_parallel_requests() -> anyhow::Result<()> {
+    let client = Builder::new("http://127.0.0.1:1").build_async()?;
+    let requests = [
+        ("spks", SyncRequest::builder().spks([ScriptBuf::new()])),
+        ("txids", SyncRequest::builder().txids([Txid::all_zeros()])),
+        (
+            "outpoints",
+            SyncRequest::builder().outpoints([OutPoint::new(Txid::all_zeros(), 0)]),
+        ),
+    ];
+    for (kind, request) in requests {
+        let response = client.sync(request, 0).await;
+        assert!(
+            response.is_err(),
+            "sync skipped its {kind} and returned {response:?}"
+        );
+    }
+    Ok(())
 }
