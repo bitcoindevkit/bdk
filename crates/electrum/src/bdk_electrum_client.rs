@@ -654,7 +654,8 @@ fn fetch_tip_and_latest_blocks(
     prev_tip: CheckPoint<BlockHash>,
 ) -> Result<(CheckPoint<BlockHash>, BTreeMap<u32, BlockHash>), Error> {
     let HeaderNotification { height, .. } = client.block_headers_subscribe()?;
-    let new_tip_height = height as u32;
+    let new_tip_height = u32::try_from(height)
+        .map_err(|_| Error::Message(format!("server tip height {height} overflows u32")))?;
 
     // If electrum returns a tip height that is lower than our previous tip, then checkpoints do
     // not need updating. We just return the previous tip and use that as the point of agreement.
@@ -870,5 +871,243 @@ mod test {
         assert!(cache.get(&(txid, new_hash)).is_some());
 
         Ok(())
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn test_fetch_tip_overflow_tip_height() {
+        use bdk_chain::bitcoin::consensus::Encodable;
+        use electrum_client::RawHeaderNotification;
+
+        struct OverflowTipClient;
+
+        impl ElectrumApi for OverflowTipClient {
+            fn raw_call(
+                &self,
+                _: &str,
+                _: impl IntoIterator<Item = electrum_client::Param>,
+            ) -> Result<serde_json::Value, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn batch_call(
+                &self,
+                _: &electrum_client::Batch,
+            ) -> Result<Vec<serde_json::Value>, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn block_headers_subscribe_raw(&self) -> Result<RawHeaderNotification, ElectrumError> {
+                let genesis = constants::genesis_block(Network::Bitcoin);
+                let mut header_bytes = Vec::new();
+                genesis.header.consensus_encode(&mut header_bytes).unwrap();
+
+                Ok(RawHeaderNotification {
+                    height: (u32::MAX as usize) + 1,
+                    header: header_bytes,
+                })
+            }
+
+            fn block_headers_pop_raw(
+                &self,
+            ) -> Result<Option<RawHeaderNotification>, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn block_header_raw(&self, _: usize) -> Result<Vec<u8>, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn block_headers(
+                &self,
+                _: usize,
+                _: usize,
+            ) -> Result<electrum_client::GetHeadersRes, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn estimate_fee(&self, _: usize) -> Result<f64, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn relay_fee(&self) -> Result<f64, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn script_subscribe(
+                &self,
+                _: &bdk_chain::bitcoin::Script,
+            ) -> Result<Option<electrum_client::ScriptStatus>, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn batch_script_subscribe<'s, I>(
+                &self,
+                _: I,
+            ) -> Result<Vec<Option<electrum_client::ScriptStatus>>, ElectrumError>
+            where
+                I: IntoIterator + Clone,
+                I::Item: std::borrow::Borrow<&'s bdk_chain::bitcoin::Script>,
+            {
+                unimplemented!()
+            }
+
+            fn script_unsubscribe(
+                &self,
+                _: &bdk_chain::bitcoin::Script,
+            ) -> Result<bool, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn script_pop(
+                &self,
+                _: &bdk_chain::bitcoin::Script,
+            ) -> Result<Option<electrum_client::ScriptStatus>, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn script_get_balance(
+                &self,
+                _: &bdk_chain::bitcoin::Script,
+            ) -> Result<electrum_client::GetBalanceRes, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn batch_script_get_balance<'s, I>(
+                &self,
+                _: I,
+            ) -> Result<Vec<electrum_client::GetBalanceRes>, ElectrumError>
+            where
+                I: IntoIterator + Clone,
+                I::Item: std::borrow::Borrow<&'s bdk_chain::bitcoin::Script>,
+            {
+                unimplemented!()
+            }
+
+            fn script_get_history(
+                &self,
+                _: &bdk_chain::bitcoin::Script,
+            ) -> Result<Vec<electrum_client::GetHistoryRes>, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn batch_script_get_history<'s, I>(
+                &self,
+                _: I,
+            ) -> Result<Vec<Vec<electrum_client::GetHistoryRes>>, ElectrumError>
+            where
+                I: IntoIterator + Clone,
+                I::Item: std::borrow::Borrow<&'s bdk_chain::bitcoin::Script>,
+            {
+                unimplemented!()
+            }
+
+            fn script_list_unspent(
+                &self,
+                _: &bdk_chain::bitcoin::Script,
+            ) -> Result<Vec<electrum_client::ListUnspentRes>, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn batch_script_list_unspent<'s, I>(
+                &self,
+                _: I,
+            ) -> Result<Vec<Vec<electrum_client::ListUnspentRes>>, ElectrumError>
+            where
+                I: IntoIterator + Clone,
+                I::Item: std::borrow::Borrow<&'s bdk_chain::bitcoin::Script>,
+            {
+                unimplemented!()
+            }
+
+            fn transaction_get_raw(
+                &self,
+                _: &bdk_chain::bitcoin::Txid,
+            ) -> Result<Vec<u8>, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn batch_transaction_get_raw<'t, I>(&self, _: I) -> Result<Vec<Vec<u8>>, ElectrumError>
+            where
+                I: IntoIterator + Clone,
+                I::Item: std::borrow::Borrow<&'t bdk_chain::bitcoin::Txid>,
+            {
+                unimplemented!()
+            }
+
+            fn batch_block_header_raw<I>(&self, _: I) -> Result<Vec<Vec<u8>>, ElectrumError>
+            where
+                I: IntoIterator + Clone,
+                I::Item: std::borrow::Borrow<u32>,
+            {
+                unimplemented!()
+            }
+
+            fn batch_estimate_fee<I>(&self, _: I) -> Result<Vec<f64>, ElectrumError>
+            where
+                I: IntoIterator + Clone,
+                I::Item: std::borrow::Borrow<usize>,
+            {
+                unimplemented!()
+            }
+
+            fn transaction_broadcast_raw(
+                &self,
+                _: &[u8],
+            ) -> Result<bdk_chain::bitcoin::Txid, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn transaction_get_merkle(
+                &self,
+                _: &bdk_chain::bitcoin::Txid,
+                _: usize,
+            ) -> Result<electrum_client::GetMerkleRes, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn batch_transaction_get_merkle<I>(
+                &self,
+                _: I,
+            ) -> Result<Vec<electrum_client::GetMerkleRes>, ElectrumError>
+            where
+                I: IntoIterator + Clone,
+                I::Item: std::borrow::Borrow<(bdk_chain::bitcoin::Txid, usize)>,
+            {
+                unimplemented!()
+            }
+
+            fn txid_from_pos(
+                &self,
+                _: usize,
+                _: usize,
+            ) -> Result<bdk_chain::bitcoin::Txid, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn txid_from_pos_with_merkle(
+                &self,
+                _: usize,
+                _: usize,
+            ) -> Result<electrum_client::TxidFromPosRes, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn server_features(&self) -> Result<electrum_client::ServerFeaturesRes, ElectrumError> {
+                unimplemented!()
+            }
+
+            fn ping(&self) -> Result<(), ElectrumError> {
+                unimplemented!()
+            }
+        }
+
+        let genesis = constants::genesis_block(Network::Bitcoin);
+        let cp = CheckPoint::new(0, genesis.block_hash());
+        let err = super::fetch_tip_and_latest_blocks(&OverflowTipClient, cp).unwrap_err();
+        assert!(
+            matches!(err, ElectrumError::Message(m) if m.contains("overflows u32")),
+            "expected height overflow error, got {err:?}"
+        );
     }
 }
