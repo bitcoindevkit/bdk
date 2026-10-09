@@ -44,6 +44,8 @@ pub enum Eligibility {
     Immature,
     /// An output not yet settled.
     Unsettled(Trust),
+    /// Locked outputs by a timelock.
+    Locked,
 }
 
 /// Describes whether an [`Unsettled`](Eligibility::Unsettled) output is trusted, untrusted, or of
@@ -436,11 +438,13 @@ impl<A: Anchor> CanonicalView<A> {
     ///   [`taints_unowned`] to classify everything foreign as untrusted.
     /// * `is_settled` - Returns `true` for the [position](ChainPosition) of a transaction we
     ///   consider settled (unlikely to be replaced), for example one with enough confirmations.
+    /// * `is_locked` - Returns `true` for a txout locked by consensus.
     pub fn classify_outpoints<'a>(
         &'a self,
         outpoints: impl IntoIterator<Item = OutPoint> + 'a,
         mut does_taint: impl FnMut(&CanonicalTx<ChainPosition<A>>) -> bool + 'a,
         is_settled: impl Fn(&ChainPosition<A>) -> bool + 'a,
+        is_locked: impl Fn(&CanonicalTxOut<ChainPosition<A>>) -> bool + 'a,
     ) -> impl Iterator<Item = (CanonicalTxOut<ChainPosition<A>>, Eligibility)> + 'a {
         let tip = self.tip.height;
         // Shared across outpoints so an ancestor reached by several of them is only walked once.
@@ -453,7 +457,11 @@ impl<A: Anchor> CanonicalView<A> {
                 let eligibility = if !txout.is_mature(tip) {
                     Eligibility::Immature
                 } else if is_settled(&txout.pos) {
-                    Eligibility::Settled
+                    if is_locked(&txout) {
+                        Eligibility::Locked
+                    } else {
+                        Eligibility::Settled
+                    }
                 } else {
                     Eligibility::Unsettled(self.ancestry_trust(
                         txout.outpoint.txid,
@@ -462,6 +470,7 @@ impl<A: Anchor> CanonicalView<A> {
                         &mut cache,
                     ))
                 };
+
                 (txout, eligibility)
             })
     }
@@ -590,6 +599,7 @@ impl<A: Anchor> CanonicalView<A> {
     ///         pos.confirmation_height_upper_bound()
     ///             .is_some_and(|h| tip_height.saturating_sub(h).saturating_add(1) >= 6)
     ///     },
+    ///     |_txout| false,
     /// );
     /// ```
     pub fn balance(
@@ -597,8 +607,9 @@ impl<A: Anchor> CanonicalView<A> {
         outpoints: impl IntoIterator<Item = OutPoint>,
         does_taint: impl FnMut(&CanonicalTx<ChainPosition<A>>) -> bool,
         is_settled: impl Fn(&ChainPosition<A>) -> bool,
+        is_locked: impl Fn(&CanonicalTxOut<ChainPosition<A>>) -> bool,
     ) -> Balance {
-        self.classify_outpoints(outpoints, does_taint, is_settled)
+        self.classify_outpoints(outpoints, does_taint, is_settled, is_locked)
             .collect()
     }
 }
@@ -617,6 +628,7 @@ impl<A: Anchor> FromIterator<(CanonicalTxOut<ChainPosition<A>>, Eligibility)> fo
                 Eligibility::Unsettled(Trust::Untrusted | Trust::Unknown) => {
                     &mut balance.untrusted_pending
                 }
+                Eligibility::Locked => &mut balance.locked,
             };
             *bucket += txout.txout.value;
         }
