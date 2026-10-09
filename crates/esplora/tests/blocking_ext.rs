@@ -1,4 +1,4 @@
-use bdk_chain::bitcoin::{Address, Amount};
+use bdk_chain::bitcoin::{hashes::Hash, Address, Amount, OutPoint, ScriptBuf, Txid};
 use bdk_chain::local_chain::LocalChain;
 use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
 use bdk_chain::spk_txout::SpkTxOutIndex;
@@ -408,4 +408,58 @@ pub fn test_stop_gap_past_last_revealed() -> anyhow::Result<()> {
     assert!(response.last_active_indices.is_empty());
 
     Ok(())
+}
+
+// A `parallel_requests` of 0 must not make `full_scan` skip its scripts.
+//
+// The client points at a closed port, so a scan that actually requests something returns an
+// error. If no request is made, the scan returns an empty `Ok`.
+#[test]
+pub fn test_full_scan_with_zero_parallel_requests() {
+    let client = Builder::new("http://127.0.0.1:1").build_blocking();
+    let request = FullScanRequest::builder().spks_for_keychain(0u32, [(0, ScriptBuf::new())]);
+
+    let response = client.full_scan(request, 3, 0);
+    assert!(
+        response.is_err(),
+        "scan skipped its script and returned {response:?}"
+    );
+}
+
+// A `parallel_requests` of 0 must not make `sync` skip its spks, txids or outpoints. Each kind
+// goes through a different fetch loop, so each gets its own test.
+#[test]
+pub fn test_sync_spks_with_zero_parallel_requests() {
+    let client = Builder::new("http://127.0.0.1:1").build_blocking();
+    let request = SyncRequest::builder().spks([ScriptBuf::new()]);
+
+    let response = client.sync(request, 0);
+    assert!(
+        response.is_err(),
+        "sync skipped its spks and returned {response:?}"
+    );
+}
+
+#[test]
+pub fn test_sync_txids_with_zero_parallel_requests() {
+    let client = Builder::new("http://127.0.0.1:1").build_blocking();
+    let request = SyncRequest::<()>::builder().txids([Txid::all_zeros()]);
+
+    let response = client.sync(request, 0);
+    assert!(
+        response.is_err(),
+        "sync skipped its txids and returned {response:?}"
+    );
+}
+
+#[test]
+pub fn test_sync_outpoints_with_zero_parallel_requests() {
+    let client = Builder::new("http://127.0.0.1:1").build_blocking();
+    let request = SyncRequest::<()>::builder().outpoints([OutPoint::new(Txid::all_zeros(), 0)]);
+
+    let response = client.sync(request, 0);
+    assert!(
+        response.is_err(),
+        "sync skipped its outpoints and returned {response:?}"
+    );
 }

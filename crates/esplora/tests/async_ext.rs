@@ -1,4 +1,4 @@
-use bdk_chain::bitcoin::{Address, Amount};
+use bdk_chain::bitcoin::{hashes::Hash, Address, Amount, OutPoint, ScriptBuf, Txid};
 use bdk_chain::local_chain::LocalChain;
 use bdk_chain::spk_client::{FullScanRequest, SyncRequest};
 use bdk_chain::spk_txout::SpkTxOutIndex;
@@ -408,5 +408,63 @@ pub async fn test_async_stop_gap_past_last_revealed() -> anyhow::Result<()> {
     assert!(response.tx_update.txs.is_empty());
     assert!(response.last_active_indices.is_empty());
 
+    Ok(())
+}
+
+// A `parallel_requests` of 0 must not make `full_scan` skip its scripts.
+//
+// The client points at a closed port, so a scan that actually requests something returns an
+// error. If no request is made, the scan returns an empty `Ok`.
+#[tokio::test]
+pub async fn test_full_scan_with_zero_parallel_requests() -> anyhow::Result<()> {
+    let client = Builder::new("http://127.0.0.1:1").build_async()?;
+    let request = FullScanRequest::builder().spks_for_keychain(0u32, [(0, ScriptBuf::new())]);
+
+    let response = client.full_scan(request, 3, 0).await;
+    assert!(
+        response.is_err(),
+        "scan skipped its script and returned {response:?}"
+    );
+    Ok(())
+}
+
+// A `parallel_requests` of 0 must not make `sync` skip its spks, txids or outpoints. Each kind
+// goes through a different fetch loop, so each gets its own test.
+#[tokio::test]
+pub async fn test_sync_spks_with_zero_parallel_requests() -> anyhow::Result<()> {
+    let client = Builder::new("http://127.0.0.1:1").build_async()?;
+    let request = SyncRequest::builder().spks([ScriptBuf::new()]);
+
+    let response = client.sync(request, 0).await;
+    assert!(
+        response.is_err(),
+        "sync skipped its spks and returned {response:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+pub async fn test_sync_txids_with_zero_parallel_requests() -> anyhow::Result<()> {
+    let client = Builder::new("http://127.0.0.1:1").build_async()?;
+    let request = SyncRequest::<()>::builder().txids([Txid::all_zeros()]);
+
+    let response = client.sync(request, 0).await;
+    assert!(
+        response.is_err(),
+        "sync skipped its txids and returned {response:?}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+pub async fn test_sync_outpoints_with_zero_parallel_requests() -> anyhow::Result<()> {
+    let client = Builder::new("http://127.0.0.1:1").build_async()?;
+    let request = SyncRequest::<()>::builder().outpoints([OutPoint::new(Txid::all_zeros(), 0)]);
+
+    let response = client.sync(request, 0).await;
+    assert!(
+        response.is_err(),
+        "sync skipped its outpoints and returned {response:?}"
+    );
     Ok(())
 }
