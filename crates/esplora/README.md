@@ -6,6 +6,19 @@ BDK Esplora extends [`esplora-client`] (with extension traits: [`EsploraExt`] an
 The extension traits are primarily intended to satisfy [`SyncRequest`]s with [`sync`] and
 [`FullScanRequest`]s with [`full_scan`].
 
+## Trust assumptions
+
+Esplora's `sync` and `full_scan` responses include previous outputs reported by the
+server. Their values and scripts are inserted into `TxUpdate::txouts` as floating
+transaction outputs, without fetching the full parent transactions to verify them
+against their transaction IDs.
+
+When a parent transaction is not otherwise available in the receiving graph, fee
+and sent/received calculations can therefore depend on these unverified values
+and scripts. This also applies to inputs belonging to other parties, such as in
+payjoin or coinjoin transactions. Use a trusted Esplora server or independently
+verify the relevant parent transactions before relying on these calculations.
+
 ## Usage
 
 For blocking-only:
