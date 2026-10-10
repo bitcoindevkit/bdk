@@ -1,7 +1,7 @@
 use bitcoin::Amount;
 
 /// Balance, differentiated into various categories.
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Balance {
     /// All coinbase outputs not yet matured
@@ -49,5 +49,56 @@ impl core::ops::Add for Balance {
             untrusted_pending: self.untrusted_pending + other.untrusted_pending,
             confirmed: self.confirmed + other.confirmed,
         }
+    }
+}
+
+impl core::ops::AddAssign for Balance {
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
+}
+
+impl core::iter::Sum for Balance {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), core::ops::Add::add)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_balance_add_assign_and_sum() {
+        let b1 = Balance {
+            immature: Amount::from_sat(10),
+            trusted_pending: Amount::from_sat(20),
+            untrusted_pending: Amount::from_sat(30),
+            confirmed: Amount::from_sat(40),
+        };
+        let b2 = Balance {
+            immature: Amount::from_sat(1),
+            trusted_pending: Amount::from_sat(2),
+            untrusted_pending: Amount::from_sat(3),
+            confirmed: Amount::from_sat(4),
+        };
+
+        let mut b = b1;
+        b += b2;
+        assert_eq!(
+            b,
+            Balance {
+                immature: Amount::from_sat(11),
+                trusted_pending: Amount::from_sat(22),
+                untrusted_pending: Amount::from_sat(33),
+                confirmed: Amount::from_sat(44),
+            }
+        );
+
+        assert_eq!(
+            core::iter::empty::<Balance>().sum::<Balance>(),
+            Balance::default()
+        );
+        assert_eq!([b1, b2, b1].into_iter().sum::<Balance>(), b1 + b2 + b1);
     }
 }
