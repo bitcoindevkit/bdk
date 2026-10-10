@@ -372,8 +372,10 @@ where
                 if cp.height() > 0 {
                     continue;
                 }
-                // if we can't find genesis block, we can't create an update that connects
-                break;
+                // Our genesis isn't recognized by this node (e.g. it's on a different
+                // network). Surface the error instead of silently discarding the caller's
+                // chain and adopting the node's own genesis.
+                return Err(e);
             }
             Err(e) => return Err(e),
         };
@@ -466,9 +468,43 @@ impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
 mod test {
     use crate::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
     use bdk_chain::local_chain::LocalChain;
+    use bdk_core::CheckPoint;
     use bdk_testenv::{anyhow, TestEnv};
-    use bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash};
+    use bitcoin::{
+        constants::genesis_block, hashes::Hash, Address, Amount, Network, ScriptBuf, Txid,
+        WScriptHash,
+    };
     use std::collections::HashSet;
+
+    // Reproduces https://github.com/bitcoindevkit/bdk/issues/2290: if the RPC node doesn't
+    // recognize our `last_cp`'s genesis (e.g. we're pointed at a node on a different network),
+    // the emitter must surface an error instead of silently discarding our chain and adopting
+    // the node's own genesis.
+    #[test]
+    fn test_next_block_errors_on_genesis_mismatch() -> anyhow::Result<()> {
+        let env = TestEnv::new()?;
+        env.mine_blocks(1, None)?;
+
+        let rpc_client = bitcoincore_rpc::Client::new(
+            &env.bitcoind.rpc_url(),
+            bitcoincore_rpc::Auth::CookieFile(env.bitcoind.params.cookie_file.clone()),
+        )?;
+
+        // A genesis the regtest node has never heard of.
+        let wrong_genesis_hash = genesis_block(Network::Bitcoin).block_hash();
+        let last_cp = CheckPoint::new(0, wrong_genesis_hash);
+
+        let mut emitter = Emitter::new(&rpc_client, last_cp, 1, NO_EXPECTED_MEMPOOL_TXS);
+
+        let result = emitter.next_block();
+        assert!(
+            result.is_err(),
+            "emitter must error on a genesis mismatch instead of silently adopting the \
+             node's own genesis"
+        );
+
+        Ok(())
+    }
 
     #[test]
     fn test_expected_mempool_txids_accumulate_and_remove() -> anyhow::Result<()> {
