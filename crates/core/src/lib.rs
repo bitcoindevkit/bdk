@@ -1,4 +1,39 @@
 //! This crate is a collection of core structures for [Bitcoin Dev Kit].
+//!
+//! # Feature flags
+//!
+//! This crate has the following features:
+//!
+//! - `std` (default): enables the standard library. Disabling it makes the crate `no_std`, using
+//!   `alloc`'s `BTreeMap`/`BTreeSet` in place of `std`'s `HashMap`/`HashSet`.
+//! - `serde`: implements `serde::Serialize`/`serde::Deserialize` for this crate's types.
+//! - `hashbrown`: see below.
+//!
+//! ## `hashbrown`
+//!
+//! This feature takes precedence over `std`: enabling it switches this crate's internal
+//! `HashMap`/`HashSet` type aliases to [`hashbrown`](https://docs.rs/hashbrown)'s hash
+//! collections on *every* target, including `std` builds — not just the `no_std`
+//! `BTreeMap`/`BTreeSet` fallback. It exists to give `no_std`/`wasm` targets hash-map
+//! performance without depending on `std`.
+//!
+//! `hashbrown` is pulled in with `default-features = false` and neither its `runtime-rng` nor
+//! `compile-time-rng` feature enabled, so its `ahash` hasher falls back to **fixed, publicly
+//! known keys**. This makes hashing deterministic across processes, machines, and builds:
+//! every `HashMap`/`HashSet` built on this feature (for example `bdk_chain`'s `TxGraph`, keyed
+//! by `Txid`, or its `SpkTxOutIndex`, keyed by `ScriptBuf`) hashes the same keys to the same
+//! buckets every time, on `std` builds as well as `no_std` ones. An attacker who controls
+//! high-volume input into one of these maps (for example a malicious or compromised chain
+//! source returning many crafted entries) can exploit this to force worst-case quadratic
+//! insertion and stall a sync.
+//!
+//! This tradeoff is specific to this feature: `std`'s `HashMap`/`HashSet` (seeded per-process
+//! via `RandomState`) and the `no_std` `BTreeMap`/`BTreeSet` fallback are only used while
+//! `hashbrown` is disabled. Only enable `hashbrown` when the data fed into these collections is
+//! trusted or otherwise bounded. If you need randomized hashing on a `no_std` target, depend on
+//! `hashbrown` directly with its `runtime-rng` or `compile-time-rng` feature enabled yourself —
+//! Cargo's feature unification will then apply it to this crate's internal use of `hashbrown`
+//! too.
 
 // only enables the `doc_cfg` feature when the `docsrs` configuration attribute is defined
 #![cfg_attr(docsrs, feature(doc_cfg))]
