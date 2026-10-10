@@ -1,7 +1,7 @@
 use bitcoin::Amount;
 
 /// Balance, differentiated into various categories.
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct Balance {
     /// All coinbase outputs not yet matured
@@ -49,5 +49,202 @@ impl core::ops::Add for Balance {
             untrusted_pending: self.untrusted_pending + other.untrusted_pending,
             confirmed: self.confirmed + other.confirmed,
         }
+    }
+}
+
+impl core::ops::Add<&Balance> for Balance {
+    type Output = Self;
+
+    fn add(self, other: &Self) -> Self {
+        self + *other
+    }
+}
+
+impl core::ops::Add<Balance> for &Balance {
+    type Output = Balance;
+
+    fn add(self, other: Balance) -> Balance {
+        *self + other
+    }
+}
+
+impl core::ops::Add<&Balance> for &Balance {
+    type Output = Balance;
+
+    fn add(self, other: &Balance) -> Balance {
+        *self + *other
+    }
+}
+
+impl core::ops::AddAssign for Balance {
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
+}
+
+impl core::ops::AddAssign<&Balance> for Balance {
+    fn add_assign(&mut self, other: &Self) {
+        *self = *self + *other;
+    }
+}
+
+impl core::ops::Sub for Balance {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self {
+            immature: self.immature - other.immature,
+            trusted_pending: self.trusted_pending - other.trusted_pending,
+            untrusted_pending: self.untrusted_pending - other.untrusted_pending,
+            confirmed: self.confirmed - other.confirmed,
+        }
+    }
+}
+
+impl core::ops::Sub<&Balance> for Balance {
+    type Output = Self;
+
+    fn sub(self, other: &Self) -> Self {
+        self - *other
+    }
+}
+
+impl core::ops::Sub<Balance> for &Balance {
+    type Output = Balance;
+
+    fn sub(self, other: Balance) -> Balance {
+        *self - other
+    }
+}
+
+impl core::ops::Sub<&Balance> for &Balance {
+    type Output = Balance;
+
+    fn sub(self, other: &Balance) -> Balance {
+        *self - *other
+    }
+}
+
+impl core::ops::SubAssign for Balance {
+    fn sub_assign(&mut self, other: Self) {
+        *self = *self - other;
+    }
+}
+
+impl core::ops::SubAssign<&Balance> for Balance {
+    fn sub_assign(&mut self, other: &Self) {
+        *self = *self - *other;
+    }
+}
+
+impl core::iter::Sum for Balance {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), core::ops::Add::add)
+    }
+}
+
+impl<'a> core::iter::Sum<&'a Balance> for Balance {
+    fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
+        iter.fold(Self::default(), core::ops::Add::add)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_balance_copy() {
+        let b1 = Balance {
+            immature: Amount::from_sat(100),
+            trusted_pending: Amount::from_sat(200),
+            untrusted_pending: Amount::from_sat(300),
+            confirmed: Amount::from_sat(400),
+        };
+        let b2 = b1;
+        assert_eq!(b1, b2);
+    }
+
+    #[test]
+    fn test_balance_ops() {
+        let b1 = Balance {
+            immature: Amount::from_sat(10),
+            trusted_pending: Amount::from_sat(20),
+            untrusted_pending: Amount::from_sat(30),
+            confirmed: Amount::from_sat(40),
+        };
+        let b2 = Balance {
+            immature: Amount::from_sat(1),
+            trusted_pending: Amount::from_sat(2),
+            untrusted_pending: Amount::from_sat(3),
+            confirmed: Amount::from_sat(4),
+        };
+
+        // Add
+        let added = b1 + b2;
+        assert_eq!(added, b1 + &b2);
+        assert_eq!(added, &b1 + b2);
+        assert_eq!(added, &b1 + &b2);
+        assert_eq!(
+            added,
+            Balance {
+                immature: Amount::from_sat(11),
+                trusted_pending: Amount::from_sat(22),
+                untrusted_pending: Amount::from_sat(33),
+                confirmed: Amount::from_sat(44),
+            }
+        );
+
+        // AddAssign
+        let mut b_acc = b1;
+        b_acc += b2;
+        assert_eq!(b_acc, added);
+        b_acc += &b2;
+        assert_eq!(
+            b_acc,
+            Balance {
+                immature: Amount::from_sat(12),
+                trusted_pending: Amount::from_sat(24),
+                untrusted_pending: Amount::from_sat(36),
+                confirmed: Amount::from_sat(48),
+            }
+        );
+
+        // Sub
+        let subbed = b1 - b2;
+        assert_eq!(subbed, b1 - &b2);
+        assert_eq!(subbed, &b1 - b2);
+        assert_eq!(subbed, &b1 - &b2);
+        assert_eq!(
+            subbed,
+            Balance {
+                immature: Amount::from_sat(9),
+                trusted_pending: Amount::from_sat(18),
+                untrusted_pending: Amount::from_sat(27),
+                confirmed: Amount::from_sat(36),
+            }
+        );
+
+        // SubAssign
+        let mut b_sub = b1;
+        b_sub -= b2;
+        assert_eq!(b_sub, subbed);
+        b_sub -= &b2;
+        assert_eq!(
+            b_sub,
+            Balance {
+                immature: Amount::from_sat(8),
+                trusted_pending: Amount::from_sat(16),
+                untrusted_pending: Amount::from_sat(24),
+                confirmed: Amount::from_sat(32),
+            }
+        );
+
+        // Sum
+        let list = alloc::vec![b1, b2, b1];
+        let sum_by_val: Balance = list.clone().into_iter().sum();
+        let sum_by_ref: Balance = list.iter().sum();
+        assert_eq!(sum_by_val, (b1 + b2) + b1);
+        assert_eq!(sum_by_ref, (b1 + b2) + b1);
     }
 }
