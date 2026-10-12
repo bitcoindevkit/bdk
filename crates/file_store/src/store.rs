@@ -108,7 +108,7 @@ where
     /// # let mut file = OpenOptions::new().append(true).open(file_path.clone())?;
     /// # let new_len = file.seek(SeekFrom::End(-2))?;
     /// # file.set_len(new_len)?;
-    ///
+    /// #
     /// let (mut new_store, _aggregate_changeset) =
     ///     match Store::<TestChangeSet>::load(&MAGIC_BYTES, &file_path) {
     /// #   Ok(_) => panic!("should have errored"),
@@ -599,4 +599,21 @@ mod test {
         // current position matches EOF
         assert_eq!(current_pointer, expected_pointer);
     }
+
+    #[test]
+    fn load_stops_on_zero_length_deserialization() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+
+        let mut store = Store::<Vec<u8>>::create(&TEST_MAGIC_BYTES, &file_path).unwrap();
+        store.append(&Vec::new()).unwrap();
+        drop(store);
+
+        let (mut store, changeset) = Store::<Vec<u8>>::load(&TEST_MAGIC_BYTES, &file_path).unwrap();
+        assert_eq!(changeset, None);
+        let mut iter = EntryIter::new(TEST_MAGIC_BYTES_LEN as u64, &mut store.db_file);
+        assert_eq!(iter.next(), None);
+    }
 }
+
+

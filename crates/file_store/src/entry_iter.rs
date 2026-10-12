@@ -51,7 +51,16 @@ where
 
             let pos_before_read = self.db_file.stream_position()?;
             match bincode_options().deserialize_from(&mut self.db_file) {
-                Ok(changeset) => Ok(Some(changeset)),
+                Ok(changeset) => {
+                    let pos_after_read = self.db_file.stream_position()?;
+                    // If deserialization made no forward progress, stop iterating to avoid
+                    // infinite loops on zero-sized elements or malformed/corrupt length prefixes.
+                    if pos_after_read == pos_before_read {
+                        self.finished = true;
+                        return Ok(None);
+                    }
+                    Ok(Some(changeset))
+                }
                 Err(e) => {
                     self.finished = true;
                     let pos_after_read = self.db_file.stream_position()?;
