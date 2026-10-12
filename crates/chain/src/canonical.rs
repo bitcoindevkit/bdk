@@ -576,6 +576,14 @@ impl<A: Anchor> CanonicalView<A> {
     ///
     /// See `classify_outpoints` for `does_taint` and `is_settled` meaning.
     ///
+    /// The position of an output confirmed [`transitively`](ChainPosition::Confirmed::transitively)
+    /// carries a descendant's anchor, so its confirmation height may be an upper bound (see
+    /// [`confirmation_height_upper_bound`]). An `is_settled` that requires a minimum number of
+    /// confirmations may therefore count such an output as pending even though it actually has
+    /// enough.
+    ///
+    /// [`confirmation_height_upper_bound`]: ChainPosition::confirmation_height_upper_bound
+    ///
     /// # Example
     ///
     /// ```
