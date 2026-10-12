@@ -81,6 +81,13 @@ well as test out the patch set and opine on the technical merits of the patch.
 PR should be reviewed first on the conceptual level before focusing on code
 style or grammar fixes.
 
+AI-assisted contributions
+--------------------------
+
+If you use AI tools (e.g. LLMs) while contributing, read and follow the
+[AI Policy](AI_POLICY.md). You remain fully responsible for understanding,
+explaining, and standing behind any contribution regardless of tooling used.
+
 Repository maintainers
 ----------------------
 
