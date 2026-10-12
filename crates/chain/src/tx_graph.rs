@@ -48,13 +48,10 @@
 //!   the transaction is anchored in chain of `chain_tip`, or is an ancestor of a transaction
 //!   anchored in chain of `chain_tip`, then the transaction must be canonical.
 //! * `last_seen` - This is the timestamp of when a transaction was last observed in the mempool.
-//!   Transactions seen later have higher conflict priority. If a supplied timestamp does not sort
-//!   after a later eviction observation, it is advanced by one second to preserve observation
-//!   order despite wall-clock changes. Values are transitive: a transaction's effective `last_seen`
-//!   is the maximum of its own and its descendants' `last_seen` values.
+//!   Transactions seen later have higher conflict priority. Values are transitive: a transaction's
+//!   effective `last_seen` is the maximum of its own and its descendants' `last_seen` values.
 //! * `last_evicted` - This is the timestamp of when a transaction was last observed missing from
-//!   the mempool. If a supplied timestamp does not sort after a later sighting, it is advanced by
-//!   one second. A transaction is excluded from canonicalization when `last_evicted >= last_seen`.
+//!   the mempool. A transaction is excluded from canonicalization when `last_evicted >= last_seen`.
 //!
 //! # Graph traversal
 //!
@@ -584,6 +581,20 @@ impl<A> TxGraph<A> {
     pub fn is_empty(&self) -> bool {
         self.txs.is_empty()
     }
+
+    /// Returns a timestamp for a new mempool observation that sorts after every recorded
+    /// sighting and eviction, or `now` if that is later.
+    ///
+    /// Use it as the `start_time` of a sync so a clock that moved backwards or forwards can't
+    /// order observations incorrectly. Timestamps are stored as given, so this is the only place
+    /// where ordering is enforced.
+    pub fn next_observation_time(&self, now: u64) -> u64 {
+        self.last_seen
+            .values()
+            .chain(self.last_evicted.values())
+            .max()
+            .map_or(now, |&latest| now.max(latest.saturating_add(1)))
+    }
 }
 
 impl<A: Anchor> TxGraph<A> {
@@ -814,17 +825,12 @@ impl<A: Anchor> TxGraph<A> {
     /// - the **last-seen** timestamp, which only changes if `seen_at` is later than the current
     ///   value.
     ///
-    /// `seen_at` is a UNIX timestamp in seconds. If it is not later than a recorded eviction, the
-    /// stored `last_seen` is advanced to one second after that eviction. Thus `last_seen` may differ
-    /// from the supplied wall-clock timestamp when clocks move backwards.
+    /// `seen_at` is a UNIX timestamp in seconds. It is stored as given, so a sighting that is not
+    /// later than a recorded eviction leaves the transaction evicted.
     ///
     /// Returns a [`ChangeSet`] representing any changes applied.
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
         let mut changeset_first_seen = self.update_first_seen(txid, seen_at);
-        let seen_at = match self.last_evicted.get(&txid) {
-            Some(last_evicted) if seen_at <= *last_evicted => last_evicted.saturating_add(1),
-            _ => seen_at,
-        };
         let changeset_last_seen = self.update_last_seen(txid, seen_at);
         changeset_first_seen.merge(changeset_last_seen);
         changeset_first_seen
@@ -887,14 +893,8 @@ impl<A: Anchor> TxGraph<A> {
     /// Inserts the given `evicted_at` for `txid` into [`TxGraph`].
     ///
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
-    /// to be missing from the mempool. If it is not later than a recorded sighting, the stored
-    /// `last_evicted` is advanced to one second after that sighting. Thus `last_evicted` may differ
-    /// from the supplied wall-clock timestamp when clocks move backwards.
+    /// to be missing from the mempool. The timestamp is stored as given and only ever increases.
     pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A> {
-        let evicted_at = match self.last_seen.get(&txid) {
-            Some(last_seen) if evicted_at <= *last_seen => last_seen.saturating_add(1),
-            _ => evicted_at,
-        };
         let is_changed = match self.last_evicted.entry(txid) {
             hash_map::Entry::Occupied(mut e) => {
                 let last_evicted = e.get_mut();
