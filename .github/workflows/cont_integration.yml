@@ -57,6 +57,7 @@ jobs:
           cargo update -p rayon --precise "1.10.0"
           cargo update -p rayon-core --precise "1.12.1"
           cargo update -p time --precise "0.3.41"
+          cargo update -p powerfmt --precise "0.2.0"
           cargo update -p proptest --precise "1.8.0"
           cargo update -p jobserver --precise "0.1.34"
           cargo update -p quinn --precise "0.11.9"
