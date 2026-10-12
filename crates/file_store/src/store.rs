@@ -31,17 +31,31 @@ where
     /// `magic` is the prefixed bytes to write to the new file. This will be checked when loading
     /// the [`Store`] in the future with [`load`].
     ///
+    /// # File permissions
+    ///
+    /// The file may contain sensitive wallet data. On Unix, it is created readable and writable
+    /// only by its owner (`0o600`); on other platforms the default file permissions apply.
+    /// The caller is responsible for restricting access to the parent directory, which this method
+    /// does not modify.
+    ///
     /// [`load`]: Store::load
     pub fn create<P>(magic: &[u8], file_path: P) -> Result<Self, StoreError>
     where
         P: AsRef<Path>,
     {
-        let mut f = OpenOptions::new()
+        let mut options = OpenOptions::new();
+        options
             .create_new(true)
             .read(true)
             .write(true)
-            .truncate(true)
-            .open(file_path)?;
+            .truncate(true);
+        // Wallet changesets may be sensitive, so keep the new file to its owner only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut f = options.open(file_path)?;
         f.write_all(magic)?;
         Ok(Self {
             magic_len: magic.len(),
@@ -205,7 +219,8 @@ where
 
     /// Attempt to load existing [`Store`] file; create it if the file does not exist.
     ///
-    /// Internally, this calls either [`load`] or [`create`].
+    /// Internally, this calls either [`load`] or [`create`]. New files are created with the
+    /// permissions described in [`create`].
     ///
     /// [`load`]: Store::load
     /// [`create`]: Store::create
