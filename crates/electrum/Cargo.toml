@@ -1,6 +1,6 @@
 [package]
 name = "bdk_electrum"
-version = "0.23.2"
+version = "0.25.0-alpha.0"
 edition = "2021"
 rust-version = "1.85.0"
 homepage = "https://bitcoindevkit.org"
@@ -14,7 +14,7 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bdk_core = { path = "../core", version = "0.6.1" }
+bdk_core = { path = "../core", version = "0.7.0-alpha.0" }
 electrum-client = { version = "0.24.0", features = [ "proxy" ], default-features = false }
 
 [dev-dependencies]
