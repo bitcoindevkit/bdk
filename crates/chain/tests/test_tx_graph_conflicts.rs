@@ -931,6 +931,72 @@ fn test_tx_conflict_handling() {
             exp_balance: Balance {
                 ..Default::default()
             }
+        },
+        Scenario {
+            name: "coinbase tx with last_seen is not canonical",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "coinbase",
+                    inputs: &[TxInTemplate::Coinbase],
+                    outputs: &[TxOutTemplate::new(21_000, Some(0))],
+                    // A coinbase cannot be in the mempool, so this is bad data.
+                    last_seen: Some(100),
+                    ..Default::default()
+                }
+            ],
+            exp_chain_txs: HashSet::from([]),
+            exp_chain_txouts: HashSet::from([]),
+            exp_unspents: HashSet::from([]),
+            exp_balance: Balance {
+                ..Default::default()
+            }
+        },
+        Scenario {
+            name: "unanchored coinbase tx is canonical via an unconfirmed spend",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "coinbase",
+                    inputs: &[TxInTemplate::Coinbase],
+                    // The second output is unspent, so `balance` checks its maturity.
+                    outputs: &[TxOutTemplate::new(21_000, Some(0)), TxOutTemplate::new(4_000, Some(1))],
+                    ..Default::default()
+                },
+                TxTemplate {
+                    tx_name: "spend",
+                    inputs: &[TxInTemplate::PrevTx("coinbase", 0)],
+                    outputs: &[TxOutTemplate::new(20_000, Some(2))],
+                    last_seen: Some(100),
+                    ..Default::default()
+                }
+            ],
+            exp_chain_txs: HashSet::from(["coinbase", "spend"]),
+            exp_chain_txouts: HashSet::from([("coinbase", 0), ("coinbase", 1), ("spend", 0)]),
+            exp_unspents: HashSet::from([("coinbase", 1), ("spend", 0)]),
+            exp_balance: Balance {
+                // No anchor is held for the coinbase, so its maturity cannot be proven.
+                immature: Amount::from_sat(4_000),
+                trusted_pending: Amount::from_sat(20_000),
+                ..Default::default()
+            }
+        },
+        Scenario {
+            name: "assumed canonical coinbase tx without anchor is canonical",
+            tx_templates: &[
+                TxTemplate {
+                    tx_name: "coinbase",
+                    inputs: &[TxInTemplate::Coinbase],
+                    outputs: &[TxOutTemplate::new(21_000, Some(0))],
+                    assume_canonical: true,
+                    ..Default::default()
+                }
+            ],
+            exp_chain_txs: HashSet::from(["coinbase"]),
+            exp_chain_txouts: HashSet::from([("coinbase", 0)]),
+            exp_unspents: HashSet::from([("coinbase", 0)]),
+            exp_balance: Balance {
+                immature: Amount::from_sat(21_000),
+                ..Default::default()
+            }
         }
     ];
 
