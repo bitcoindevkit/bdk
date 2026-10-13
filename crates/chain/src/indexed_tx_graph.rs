@@ -364,11 +364,24 @@ where
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
     /// A transaction that conflicts with a relevant transaction is also considered relevant.
     /// Irrelevant transactions in `block` will be ignored.
+    ///
+    /// # Trust assumption
+    ///
+    /// This method does not verify that `block.txdata` matches `block.header.merkle_root` --
+    /// doing so would recompute the merkle tree on every call, which is wasted work for callers
+    /// that already obtained the block from a source that validated it (e.g. a full node). It is
+    /// the caller's responsibility to only pass in blocks it trusts; passing a block whose body
+    /// was not validated against its header lets fabricated transactions be anchored as if
+    /// confirmed. In debug builds, a mismatch trips a `debug_assert`.
     pub fn apply_block_relevant(
         &mut self,
         block: &Block,
         height: u32,
     ) -> ChangeSet<A, I::ChangeSet> {
+        debug_assert!(
+            block.check_merkle_root(),
+            "block's txdata must match its header's merkle root"
+        );
         let block_id = BlockId {
             hash: block.block_hash(),
             height,
@@ -399,8 +412,21 @@ where
     ///
     /// To only insert relevant transactions, use [`apply_block_relevant`] instead.
     ///
+    /// # Trust assumption
+    ///
+    /// This method does not verify that `block.txdata` matches `block.header.merkle_root` --
+    /// doing so would recompute the merkle tree on every call, which is wasted work for callers
+    /// that already obtained the block from a source that validated it (e.g. a full node). It is
+    /// the caller's responsibility to only pass in blocks it trusts; passing a block whose body
+    /// was not validated against its header lets fabricated transactions be anchored as if
+    /// confirmed. In debug builds, a mismatch trips a `debug_assert`.
+    ///
     /// [`apply_block_relevant`]: IndexedTxGraph::apply_block_relevant
     pub fn apply_block(&mut self, block: Block, height: u32) -> ChangeSet<A, I::ChangeSet> {
+        debug_assert!(
+            block.check_merkle_root(),
+            "block's txdata must match its header's merkle root"
+        );
         let block_id = BlockId {
             hash: block.block_hash(),
             height,

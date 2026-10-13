@@ -20,8 +20,8 @@ use bdk_testenv::{
     TestEnv,
 };
 use bitcoin::{
-    secp256k1::Secp256k1, Address, Amount, BlockHash, Network, OutPoint, ScriptBuf, Transaction,
-    TxIn, TxOut, Txid,
+    absolute, constants::genesis_block, hashes::Hash, secp256k1::Secp256k1, transaction, Address,
+    Amount, BlockHash, Network, OutPoint, ScriptBuf, Transaction, TxIn, TxOut, Txid,
 };
 use miniscript::Descriptor;
 
@@ -949,4 +949,54 @@ fn test_get_chain_position() {
     ]
     .into_iter()
     .for_each(|t| run(&chain, &mut graph, t));
+}
+
+/// A block whose header hash is genuine but whose `txdata` was swapped out for a transaction not
+/// committed by the header's merkle root. `apply_block`/`apply_block_relevant` trust `txdata`
+/// matches the header, so a caller passing in such a block previously got the fabricated
+/// transaction anchored as confirmed with no indication anything was wrong.
+/// See <https://github.com/bitcoindevkit/bdk/issues/2278>.
+fn tampered_block(spk: ScriptBuf) -> bitcoin::Block {
+    let mut block = genesis_block(Network::Bitcoin);
+    let genuine_hash = block.block_hash();
+
+    block.txdata = vec![Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::new(Txid::from_byte_array([1; 32]), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: spk,
+        }],
+    }];
+
+    // The header is untouched, so the block hash is unchanged -- only the body was swapped.
+    assert_eq!(block.block_hash(), genuine_hash);
+    assert!(!block.check_merkle_root());
+    block
+}
+
+#[test]
+#[should_panic(expected = "block's txdata must match its header's merkle root")]
+fn apply_block_relevant_rejects_tampered_txdata() {
+    let spk = gen_spk();
+    let mut graph = IndexedTxGraph::<bdk_chain::BlockId, SpkTxOutIndex<()>>::default();
+    graph.index.insert_spk((), spk.clone());
+
+    let block = tampered_block(spk);
+    let _ = graph.apply_block_relevant(&block, 0);
+}
+
+#[test]
+#[should_panic(expected = "block's txdata must match its header's merkle root")]
+fn apply_block_rejects_tampered_txdata() {
+    let spk = gen_spk();
+    let mut graph = IndexedTxGraph::<bdk_chain::BlockId, SpkTxOutIndex<()>>::default();
+    graph.index.insert_spk((), spk.clone());
+
+    let block = tampered_block(spk);
+    let _ = graph.apply_block(block, 0);
 }
