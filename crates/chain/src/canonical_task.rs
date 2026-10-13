@@ -174,11 +174,11 @@ impl<'g, A: Anchor> ChainQuery for CanonicalTask<'g, A> {
                                 tx,
                                 anchors
                                     .iter()
-                                    .last()
+                                    .map(Anchor::confirmation_height_upper_bound)
+                                    .max()
                                     .expect(
                                         "tx taken from `unprocessed_anchored_txs` so it must have at least one anchor",
-                                    )
-                                    .confirmation_height_upper_bound(),
+                                    ),
                             ))
                         }
                     }
@@ -454,6 +454,22 @@ mod tests {
     use crate::ChainPosition;
     use bitcoin::{hashes::Hash, BlockHash, TxIn, TxOut};
 
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct TestAnchor {
+        block_id: BlockId,
+        confirmation_height: u32,
+    }
+
+    impl Anchor for TestAnchor {
+        fn anchor_block(&self) -> BlockId {
+            self.block_id
+        }
+
+        fn confirmation_height_upper_bound(&self) -> u32 {
+            self.confirmation_height
+        }
+    }
+
     #[test]
     fn test_canonicalization_task_sans_io() {
         // Create a simple chain
@@ -503,5 +519,43 @@ mod tests {
 
         // Should be confirmed (anchored)
         assert!(matches!(canon_tx.pos, ChainPosition::Confirmed { .. }));
+    }
+
+    #[test]
+    fn leftover_uses_max_confirmation_height_across_anchors() {
+        let chain_tip = BlockId {
+            height: 0,
+            hash: BlockHash::all_zeros(),
+        };
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::ONE,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: bitcoin::ScriptBuf::new(),
+            }],
+        };
+        let txid = tx.compute_txid();
+        let mut tx_graph = TxGraph::<TestAnchor>::default();
+        let _ = tx_graph.insert_tx(tx);
+        for (block_height, confirmation_height) in [(100, 10), (90, 80), (110, 20)] {
+            let _ = tx_graph.insert_anchor(
+                txid,
+                TestAnchor {
+                    block_id: BlockId {
+                        height: block_height,
+                        hash: BlockHash::from_byte_array([block_height as u8; 32]),
+                    },
+                    confirmation_height,
+                },
+            );
+        }
+
+        let mut task = CanonicalTask::new(&tx_graph, chain_tip, CanonicalParams::default());
+        assert!(task.next_query().is_some());
+        task.resolve_query(None);
+
+        assert_eq!(task.unprocessed_leftover_txs.front().unwrap().2, 80);
     }
 }

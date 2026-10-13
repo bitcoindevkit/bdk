@@ -773,8 +773,8 @@ impl<A: Anchor> TxGraph<A> {
                 old_top_h = e
                     .get()
                     .iter()
-                    .last()
-                    .map(Anchor::confirmation_height_upper_bound);
+                    .map(Anchor::confirmation_height_upper_bound)
+                    .max();
                 if let Some(old_top_h) = old_top_h {
                     if old_top_h > new_top_h {
                         new_top_h = old_top_h;
