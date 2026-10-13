@@ -1,8 +1,9 @@
-use std::{collections::BTreeSet, ops::Deref};
+use std::collections::BTreeSet;
+use std::sync::Arc;
 
-use bdk_bitcoind_rpc::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
+use bdk_bitcoind_rpc::EmitterError;
 use bdk_chain::{
-    bitcoin::{Address, Amount, Txid},
+    bitcoin::{Address, Amount, BlockHash, Transaction, Txid},
     local_chain::{CheckPoint, LocalChain},
     spk_txout::SpkTxOutIndex,
     Balance, BlockId, IndexedTxGraph, Merge,
@@ -18,23 +19,30 @@ use crate::common::ClientExt;
 
 mod common;
 
-/// Ensure that blocks are emitted in order even after reorg.
+type Emitter<'a> = bdk_bitcoind_rpc::Emitter<'a, BlockHash>;
+
+/// Ensures blocks are emitted consecutively with correct hashes, and that after a reorg the
+/// emitter re-emits the replacement blocks at the same heights with updated hashes.
 ///
 /// 1. Mine 101 blocks.
 /// 2. Emit blocks from [`Emitter`] and update the [`LocalChain`].
 /// 3. Reorg highest 6 blocks.
 /// 4. Emit blocks from [`Emitter`] and re-update the [`LocalChain`].
 #[test]
-pub fn test_sync_local_chain() -> anyhow::Result<()> {
+pub fn blocks_emitted_in_order_and_after_reorg() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
     let network_tip = env.rpc_client().get_block_count()?.into_model().0;
     let (mut local_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
 
     let client = ClientExt::get_rpc_client(&env)?;
-    let mut emitter = Emitter::new(&client, local_chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
+    let mut emitter = Emitter::new(
+        &client,
+        local_chain.tip(),
+        core::iter::empty::<bitcoin::Transaction>(),
+    );
 
     // Mine some blocks and return the actual block hashes.
-    // Because initializing `ElectrsD` already mines some blocks, we must include those too when
+    // Because initializing `TestEnv` already mines some blocks, we must include those too when
     // returning block hashes.
     let exp_hashes = {
         let mut hashes = (0..=network_tip)
@@ -133,27 +141,18 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ensure that [`EmittedUpdate::into_tx_graph_update`] behaves appropriately for both mempool and
-/// block updates.
+/// Verifies the mempool → confirmation pipeline: unconfirmed transactions appear in
+/// [`Emitter::mempool`] and receive block anchors once mined.
 ///
-/// [`EmittedUpdate::into_tx_graph_update`]: bdk_bitcoind_rpc::EmittedUpdate::into_tx_graph_update
+/// 1. Mine 101 blocks and sync emitter to tip.
+/// 2. Send 3 transactions to a tracked address — they will be in the mempool.
+/// 3. Assert `next_block` returns `None` (at tip) and `mempool` returns all 3 txs.
+/// 4. Mine a block confirming those txs and assert the emitter produces anchors for them.
 #[test]
-fn test_into_tx_graph() -> anyhow::Result<()> {
+fn unconfirmed_txs_anchored_on_confirmation() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
 
     let addr_0 = env
-        .rpc_client()
-        .get_new_address(None, None)?
-        .address()?
-        .assume_checked();
-
-    let addr_1 = env
-        .rpc_client()
-        .get_new_address(None, None)?
-        .address()?
-        .assume_checked();
-
-    let addr_2 = env
         .rpc_client()
         .get_new_address(None, None)?
         .address()?
@@ -165,19 +164,21 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     let mut indexed_tx_graph = IndexedTxGraph::<BlockId, _>::new({
         let mut index = SpkTxOutIndex::<usize>::default();
         index.insert_spk(0, addr_0.script_pubkey());
-        index.insert_spk(1, addr_1.script_pubkey());
-        index.insert_spk(2, addr_2.script_pubkey());
         index
     });
 
     let client = ClientExt::get_rpc_client(&env)?;
-    let emitter = &mut Emitter::new(&client, chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
+    let emitter = &mut Emitter::new(
+        &client,
+        chain.tip(),
+        core::iter::empty::<bitcoin::Transaction>(),
+    );
 
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
         let _ = chain.apply_update(emission.checkpoint)?;
-        let indexed_additions = indexed_tx_graph.apply_block_relevant(&emission.block, height);
-        assert!(indexed_additions.is_empty());
+        let changeset = indexed_tx_graph.apply_block_relevant(&emission.block, height);
+        assert!(changeset.is_empty());
     }
 
     // send 3 txs to a tracked address, these txs will be in the mempool
@@ -199,9 +200,9 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         assert!(emitter.next_block()?.is_none());
 
         let mempool_txs = emitter.mempool()?;
-        let indexed_additions = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs.update);
+        let changeset = indexed_tx_graph.batch_insert_unconfirmed(mempool_txs.update);
         assert_eq!(
-            indexed_additions
+            changeset
                 .tx_graph
                 .txs
                 .iter()
@@ -210,7 +211,7 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
             exp_txids,
             "changeset should have the 3 mempool transactions",
         );
-        assert!(indexed_additions.tx_graph.anchors.is_empty());
+        assert!(changeset.tx_graph.anchors.is_empty());
     }
 
     // mine a block that confirms the 3 txs
@@ -235,10 +236,10 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
         let emission = emitter.next_block()?.expect("must get mined block");
         let height = emission.block_height();
         let _ = chain.apply_update(emission.checkpoint)?;
-        let indexed_additions = indexed_tx_graph.apply_block_relevant(&emission.block, height);
-        assert!(indexed_additions.tx_graph.txs.is_empty());
-        assert!(indexed_additions.tx_graph.txouts.is_empty());
-        assert_eq!(indexed_additions.tx_graph.anchors, exp_anchors);
+        let changeset = indexed_tx_graph.apply_block_relevant(&emission.block, height);
+        assert!(changeset.tx_graph.txs.is_empty());
+        assert!(changeset.tx_graph.txouts.is_empty());
+        assert_eq!(changeset.tx_graph.anchors, exp_anchors);
     }
 
     Ok(())
@@ -246,28 +247,31 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 
 /// Ensure next block emitted after reorg is at reorg height.
 ///
-/// After a reorg, if the last-emitted block height is equal or greater than the reorg height, and
-/// the fallback height is equal to or lower than the reorg height, the next block/header emission
-/// should be at the reorg height.
-///
-/// TODO: If the reorg height is lower than the fallback height, how do we find a block height to
-/// emit that can connect with our receiver chain?
+/// After a reorg, if the last-emitted block height is equal or greater than the reorg height,
+/// the next emission should be at the reorg height. This is guaranteed by the agreement-scanning
+/// algorithm: the emitter walks back through its checkpoint list to find the deepest block still
+/// in the best chain and resumes consecutive emission from there. Because `last_cp` is built from
+/// the actual birthday hash (not just a height integer), the agreement point is always well-defined
+/// regardless of how deep the reorg goes.
 #[test]
 fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
-    const EMITTER_START_HEIGHT: usize = 100;
+    const EMITTER_START_HEIGHT: u64 = 100;
     const CHAIN_TIP_HEIGHT: usize = 110;
 
     let env = TestEnv::new()?;
-
     let client = ClientExt::get_rpc_client(&env)?;
-    let mut emitter = Emitter::new(
-        &client,
-        CheckPoint::new(0, env.genesis_hash()?),
-        EMITTER_START_HEIGHT as _,
-        NO_EXPECTED_MEMPOOL_TXS,
-    );
 
     env.mine_blocks(CHAIN_TIP_HEIGHT, None)?;
+
+    // Encode the birthday directly in last_cp rather than using a bare start_height integer.
+    // This ensures agreement-scanning works correctly even when the birthday block is reorged out.
+    let start_hash = env.get_block_hash(EMITTER_START_HEIGHT)?;
+    let mut emitter = Emitter::new(
+        &client,
+        CheckPoint::new(EMITTER_START_HEIGHT as u32, start_hash),
+        core::iter::empty::<bitcoin::Transaction>(),
+    );
+
     while emitter.next_block()?.is_some() {}
 
     for reorg_count in 1..=10 {
@@ -298,15 +302,11 @@ fn process_block(
     Ok(())
 }
 
-fn sync_from_emitter<C>(
+fn sync_from_emitter(
     recv_chain: &mut LocalChain,
     recv_graph: &mut IndexedTxGraph<BlockId, SpkTxOutIndex<()>>,
-    emitter: &mut Emitter<C>,
-) -> anyhow::Result<()>
-where
-    C: Deref,
-    C::Target: bitcoincore_rpc::RpcApi,
-{
+    emitter: &mut Emitter,
+) -> anyhow::Result<()> {
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
         process_block(recv_chain, recv_graph, emission.block, height)?;
@@ -347,8 +347,7 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     let mut emitter = Emitter::new(
         &client,
         CheckPoint::new(0, env.genesis_hash()?),
-        0,
-        NO_EXPECTED_MEMPOOL_TXS,
+        core::iter::empty::<bitcoin::Transaction>(),
     );
 
     // setup addresses
@@ -424,13 +423,10 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ensure avoid-re-emission-logic is sound when [`Emitter`] is synced to tip.
-///
-/// The receiver (bdk_chain structures) is synced to the chain tip, and there is txs in the mempool.
-/// When we call Emitter::mempool multiple times, mempool txs should not be re-emitted, even if the
-/// chain tip is extended.
+/// Every call to mempool should return all currently-known unconfirmed transactions,
+/// including ones returned on previous calls.
 #[test]
-fn mempool_avoids_re_emission() -> anyhow::Result<()> {
+fn mempool_update_is_complete_snapshot() -> anyhow::Result<()> {
     const BLOCKS_TO_MINE: usize = 101;
     const MEMPOOL_TX_COUNT: usize = 2;
 
@@ -440,8 +436,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     let mut emitter = Emitter::new(
         &client,
         CheckPoint::new(0, env.genesis_hash()?),
-        0,
-        NO_EXPECTED_MEMPOOL_TXS,
+        core::iter::empty::<bitcoin::Transaction>(),
     );
 
     // mine blocks and sync up emitter
@@ -491,80 +486,71 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// If blockchain re-org includes the start height, emit new start height block
+/// If a reorg invalidates the emitter's starting checkpoint, the emitter must find a lower
+/// agreement point and resume consecutive emission from there.
 ///
 /// 1. mine 101 blocks
-/// 2. emit blocks 98a, 99a, 100a
-/// 3. invalidate blocks 99a, 100a, 101a
-/// 4. mine new blocks 99b, 100b, 101b
-/// 5. emit block 99b
+/// 2. create emitter with last_cp at block 98 (one below the reorg point)
+/// 3. emit blocks 99a, 100a
+/// 4. reorg 3 blocks deep (replaces 99a, 100a, 101a with 99b, 100b, 101b)
+/// 5. emit block 99b — agreement found at 98, next consecutive block is 99b
 ///
 /// The block hash of 99b should be different than 99a, but their previous block hashes should
-/// be the same.
+/// be the same (both build on block 98).
 #[test]
-fn no_agreement_point() -> anyhow::Result<()> {
-    const PREMINE_COUNT: usize = 101;
-
+fn reorg_past_start_checkpoint() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
-
     let client = ClientExt::get_rpc_client(&env)?;
-    // start height is 99
+
+    // mine 101 blocks first so block 98 exists for the checkpoint
+    env.mine_blocks(100, None)?;
+
+    assert_eq!(env.bitcoind.client.get_block_count()?.0, 101);
+
+    // Encode last_cp at block 98 — the last block before the reorg zone.
+    let cp_height: u64 = 98;
+    let cp_hash = env.get_block_hash(cp_height)?;
     let mut emitter = Emitter::new(
         &client,
-        CheckPoint::new(0, env.genesis_hash()?),
-        (PREMINE_COUNT - 3) as u32,
-        NO_EXPECTED_MEMPOOL_TXS,
+        CheckPoint::new(cp_height as u32, cp_hash),
+        core::iter::empty::<bitcoin::Transaction>(),
     );
 
-    // mine 101 blocks
-    env.mine_blocks(PREMINE_COUNT, None)?;
+    // emit block 99a
+    let event_99a = emitter.next_block()?.expect("block 99a header");
+    assert_eq!(event_99a.block_height(), 99);
+    let block_header_99a = event_99a.block.header;
+    let block_hash_99a = block_header_99a.block_hash();
+    let block_hash_98a = block_header_99a.prev_blockhash;
 
-    // emit blocks: 98a, 99a, 100a
-    let block_98a = emitter.next_block()?.expect("block 98a");
-    let block_99a = emitter.next_block()?.expect("block 99a");
-    let block_100a = emitter.next_block()?.expect("block 100a");
-    assert_eq!(block_98a.block_height(), 98);
-    assert_eq!(block_99a.block_height(), 99);
-    assert_eq!(block_100a.block_height(), 100);
+    // emit block 100a (advance the emitter past 99a so the reorg spans 3 blocks)
+    let _block_100a = emitter.next_block()?.expect("block 100a header");
 
-    // get hash for block 101a
-    let blockhash_101a = env.rpc_client().get_block_hash(101)?.block_hash()?;
+    // Reorg depth 3: invalidates 99a, 100a, 101a and mines new 99b, 100b, 101b.
+    env.reorg(3)?;
 
-    // invalidate blocks 99a, 100a, 101a
-    env.rpc_client().invalidate_block(blockhash_101a)?;
-    env.rpc_client().invalidate_block(block_100a.block_hash())?;
-    env.rpc_client().invalidate_block(block_99a.block_hash())?;
+    // emit block 99b: agreement found at block 98, which is unchanged, so next block is 99b
+    let event_99b = emitter.next_block()?.expect("block 99b header");
+    assert_eq!(event_99b.block_height(), 99);
+    let block_header_99b = event_99b.block.header;
+    let block_hash_99b = block_header_99b.block_hash();
 
-    // mine new blocks 99b, 100b, 101b
-    env.mine_blocks(3, None)?;
-
-    // emit block header 99b
-    let block_99b = emitter.next_block()?.expect("block 99b");
-    assert_eq!(block_99b.block_height(), 99);
-
-    assert_ne!(block_99a.block_hash(), block_99b.block_hash());
-    assert_eq!(
-        block_98a.block_hash(),
-        block_99a.block.header.prev_blockhash
-    );
-    assert_eq!(
-        block_98a.block_hash(),
-        block_99b.block.header.prev_blockhash
-    );
+    assert_ne!(block_hash_99a, block_hash_99b);
+    assert_eq!(block_hash_98a, block_header_99a.prev_blockhash);
+    assert_eq!(block_hash_98a, block_header_99b.prev_blockhash);
 
     Ok(())
 }
 
 /// Validates that when an unconfirmed transaction is double-spent (and thus evicted from the
-/// mempool), the emitter reports it in `evicted_txids`, and after inserting that eviction into the
+/// mempool), the emitter reports it in `evicted`, and after inserting that eviction into the
 /// graph it no longer appears in the set of canonical transactions.
 ///
 /// 1. Broadcast a first tx (tx1) and confirm it arrives in unconfirmed set.
 /// 2. Double-spend tx1 with tx1b and verify `mempool()` reports tx1 as evicted.
 /// 3. Insert the eviction into the graph and assert tx1 is no longer canonical.
 #[test]
-fn test_expect_tx_evicted() -> anyhow::Result<()> {
-    use bdk_bitcoind_rpc::bitcoincore_rpc::bitcoin;
+fn double_spent_tx_evicted_and_removed_from_canonical_set() -> anyhow::Result<()> {
     use bdk_chain::miniscript;
     use bdk_chain::spk_txout::SpkTxOutIndex;
     use bitcoin::constants::genesis_block;
@@ -572,11 +558,11 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     use bitcoin::Network;
     let env = TestEnv::new()?;
 
-    let s = bdk_testenv::utils::DESCRIPTORS[0];
-    let desc = miniscript::Descriptor::parse_descriptor(&Secp256k1::new(), s)
+    let desc_str = bdk_testenv::utils::DESCRIPTORS[0];
+    let descriptor = miniscript::Descriptor::parse_descriptor(&Secp256k1::new(), desc_str)
         .unwrap()
         .0;
-    let spk = desc.at_derivation_index(0)?.script_pubkey();
+    let spk = descriptor.at_derivation_index(0)?.script_pubkey();
 
     let mut chain = LocalChain::from_genesis(genesis_block(Network::Regtest).block_hash()).0;
     let chain_tip = chain.tip().block_id();
@@ -594,7 +580,7 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     let tx_1 = env.rpc_client().get_transaction(txid_1)?.into_model()?.tx;
 
     let client = ClientExt::get_rpc_client(&env)?;
-    let mut emitter = Emitter::new(&client, chain.tip(), 1, core::iter::once(tx_1));
+    let mut emitter = Emitter::new(&client, chain.tip(), core::iter::once(tx_1));
     while let Some(emission) = emitter.next_block()? {
         let height = emission.block_height();
         chain.apply_header(&emission.block.header, height)?;
@@ -609,33 +595,36 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
 
     // Double spend tx1.
 
-    // Get `prevout` from core.
-    let core = env.rpc_client();
-    let tx1 = core.get_transaction(txid_1)?.into_model()?.tx;
+    // Get `prevout` from bitcoin core.
+    let rpc_client = env.rpc_client();
+    let tx1 = rpc_client.get_transaction(txid_1)?.into_model()?.tx;
     let txin = &tx1.input[0];
     let op = txin.previous_output;
 
     // Create `tx1b` using the previous output from tx1.
-    let utxo = Input {
+    let input = Input {
         txid: op.txid,
         vout: op.vout as u64,
         sequence: None,
     };
 
-    let addr = core
+    let addr = rpc_client
         .get_new_address(None, None)?
         .address()?
         .assume_checked();
 
     let outputs = [Output::new(addr, Amount::from_btc(49.99)?)];
-    let tx = core
-        .create_raw_transaction(&[utxo], &outputs)?
+    let tx = rpc_client
+        .create_raw_transaction(&[input], &outputs)?
         .into_model()?
         .0;
-    let tx1b = core.sign_raw_transaction_with_wallet(&tx)?.into_model()?.tx;
+    let tx1b = rpc_client
+        .sign_raw_transaction_with_wallet(&tx)?
+        .into_model()?
+        .tx;
 
     // Send the tx.
-    let _txid_2 = core.send_raw_transaction(&tx1b)?;
+    let _txid_2 = rpc_client.send_raw_transaction(&tx1b)?;
 
     // Retrieve the expected unconfirmed txids and spks from the graph.
     let exp_spk_txids = chain
@@ -665,47 +654,6 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Creating a new [`Emitter`] after a reorg with `start_height` at the tip should still
-/// produce a connectable checkpoint. When blocks are invalidated, the emitted checkpoint must
-/// include the invalidation height so the update can connect with the original chain.
-#[test]
-fn test_sync_with_new_emitter_after_reorg() -> anyhow::Result<()> {
-    let env = TestEnv::new()?;
-    let (mut local_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
-    let client = ClientExt::get_rpc_client(&env)?;
-
-    env.mine_blocks(110, None)?;
-
-    let mut emitter = Emitter::new(&client, local_chain.tip(), 0, NO_EXPECTED_MEMPOOL_TXS);
-    while let Some(emission) = emitter.next_block()? {
-        let _ = local_chain.apply_update(emission.checkpoint)?;
-    }
-
-    let pre_reorg_tip = local_chain.tip();
-    let tip_height = pre_reorg_tip.height();
-
-    env.reorg(6)?;
-
-    // New emitter with start_height = tip height (common caller pattern).
-    let mut emitter = Emitter::new(
-        &client,
-        local_chain.tip(),
-        tip_height,
-        NO_EXPECTED_MEMPOOL_TXS,
-    );
-
-    while let Some(emission) = emitter.next_block()? {
-        let _ = local_chain
-            .apply_update(emission.checkpoint)
-            .expect("emission checkpoint must connect with local chain");
-    }
-
-    assert_eq!(local_chain.tip().height(), tip_height);
-    assert_ne!(local_chain.tip().hash(), pre_reorg_tip.hash());
-
-    Ok(())
-}
-
 #[test]
 fn detect_new_mempool_txs() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
@@ -721,8 +669,7 @@ fn detect_new_mempool_txs() -> anyhow::Result<()> {
     let mut emitter = Emitter::new(
         &client,
         CheckPoint::new(0, env.genesis_hash()?),
-        0,
-        NO_EXPECTED_MEMPOOL_TXS,
+        core::iter::empty::<bitcoin::Transaction>(),
     );
 
     while emitter.next_block()?.is_some() {}
@@ -735,6 +682,390 @@ fn detect_new_mempool_txs() -> anyhow::Result<()> {
             "must detect new tx {n}"
         );
     }
+
+    Ok(())
+}
+
+/// Verifies that encoding a birthday block directly in `last_cp` causes the emitter to skip all
+/// blocks at or below the checkpoint height, starting emission from the next block.
+#[test]
+fn birthday_checkpoint_skips_earlier_blocks() -> anyhow::Result<()> {
+    const BIRTHDAY_HEIGHT: u64 = 50;
+    const CHAIN_TIP: usize = 101;
+
+    let env = TestEnv::new()?;
+    let client = ClientExt::get_rpc_client(&env)?;
+
+    env.mine_blocks(CHAIN_TIP, None)?;
+
+    let birthday_hash = env.get_block_hash(BIRTHDAY_HEIGHT)?;
+    let mut emitter = Emitter::new(
+        &client,
+        CheckPoint::new(BIRTHDAY_HEIGHT as u32, birthday_hash),
+        core::iter::empty::<bitcoin::Transaction>(),
+    );
+
+    let mut emitted_heights = Vec::new();
+    while let Some(event) = emitter.next_block()? {
+        emitted_heights.push(event.block_height());
+    }
+
+    assert!(
+        !emitted_heights.is_empty(),
+        "should emit blocks above birthday"
+    );
+    assert_eq!(
+        emitted_heights.first().copied(),
+        Some(BIRTHDAY_HEIGHT as u32 + 1),
+        "first emitted block must be immediately after birthday"
+    );
+    assert!(
+        emitted_heights.iter().all(|&h| h > BIRTHDAY_HEIGHT as u32),
+        "no block at or below birthday height should be emitted"
+    );
+
+    Ok(())
+}
+
+/// Verifies that all `(tx, ts)` pairs in a [`MempoolEvent`] carry the exact `sync_time` passed
+/// to [`Emitter::mempool_at`], ensuring callers control the timestamp semantics.
+#[test]
+fn mempool_at_uses_provided_timestamp() -> anyhow::Result<()> {
+    const SYNC_TIME: u64 = 42;
+
+    let env = TestEnv::new()?;
+    env.mine_blocks(101, None)?;
+
+    let addr = env
+        .rpc_client()
+        .get_new_address(None, None)?
+        .address()?
+        .require_network(Network::Regtest)?;
+
+    let client = ClientExt::get_rpc_client(&env)?;
+    let mut emitter = Emitter::new(
+        &client,
+        CheckPoint::new(0, env.genesis_hash()?),
+        core::iter::empty::<bitcoin::Transaction>(),
+    );
+
+    // Advance to tip so the emitter tracks the current chain position.
+    while emitter.next_block()?.is_some() {}
+
+    // Place a few transactions in the mempool.
+    for _ in 0..3 {
+        env.send(&addr, Amount::ONE_BTC)?;
+    }
+
+    let event = emitter.mempool_at(SYNC_TIME)?;
+
+    assert!(
+        !event.update.is_empty(),
+        "should have received mempool transactions"
+    );
+    for (_, sync_time) in &event.update {
+        assert_eq!(
+            *sync_time, SYNC_TIME,
+            "all update timestamps must equal sync_time"
+        );
+    }
+
+    Ok(())
+}
+
+/// Verifies that when a reorg's agreement point falls below `start_height`, the emitter resets
+/// `start_height` to the agreement height so that no reorged heights are skipped.
+///
+/// Concretely, with a 6-block reorg the emitter must re-emit all 6 reorged heights in order
+/// without skipping any, even though `start_height` was set to the pre-reorg tip.
+#[test]
+fn start_height_reset_on_reorg_prevents_height_gaps() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let (mut local_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
+    let client = ClientExt::get_rpc_client(&env)?;
+
+    const REORG_DEPTH: u32 = 6;
+
+    env.mine_blocks(110, None)?;
+
+    let mut emitter = Emitter::new(
+        &client,
+        local_chain.tip(),
+        core::iter::empty::<Arc<Transaction>>(),
+    );
+    while let Some(emission) = emitter.next_block()? {
+        let _ = local_chain.apply_update(emission.checkpoint)?;
+    }
+
+    let pre_reorg_tip = local_chain.tip();
+    let tip_height = pre_reorg_tip.height();
+
+    env.reorg(REORG_DEPTH as usize)?;
+
+    // New emitter with start_height = tip height. The emitter must detect the reorg, walk back
+    // to the agreement point, and reset start_height so no invalidated heights are skipped.
+    let mut emitter = Emitter::new(
+        &client,
+        local_chain.tip(),
+        core::iter::empty::<Arc<Transaction>>(),
+    )
+    .start_height(tip_height);
+
+    let mut emitted_heights = Vec::new();
+    while let Some(emission) = emitter.next_block()? {
+        emitted_heights.push(emission.block_height());
+        let _ = local_chain
+            .apply_update(emission.checkpoint)
+            .expect("emission checkpoint must connect with local chain");
+    }
+
+    // All reorged heights must be re-emitted consecutively — no gaps.
+    let reorg_start = tip_height - REORG_DEPTH + 1;
+    let exp_heights: Vec<u32> = (reorg_start..=tip_height).collect();
+    assert_eq!(
+        emitted_heights, exp_heights,
+        "emitter must re-emit all reorged heights without skipping; \
+         got {:?}, expected {:?}",
+        emitted_heights, exp_heights,
+    );
+
+    assert_eq!(local_chain.tip().height(), tip_height);
+    assert_ne!(local_chain.tip().hash(), pre_reorg_tip.hash());
+
+    Ok(())
+}
+
+/// Evictions are withheld while the emitter is behind the node's best-block tip and are only
+/// surfaced once [`Emitter::next_block`] has drained the chain to tip. This applies both to
+/// live evictions and to transactions seeded via `expected_mempool_txs` at construction time
+/// (the wallet-restart scenario).
+///
+/// **Phase 1 — live eviction while catching up:**
+/// 1. Mine 110 blocks; emitter starts at genesis — behind tip.
+/// 2. Broadcast tx1; `mempool()` shows tx1 in `update`, `evicted` is empty (behind tip).
+/// 3. Double-spend tx1 (tx1b) to evict it from the mempool.
+/// 4. Call `mempool()` again — still behind tip, `evicted` must still be empty.
+/// 5. Drain all blocks to tip; `mempool()` — tx1 must appear in `evicted`.
+///
+/// **Phase 2 — wallet-restart: seeded tx already absent from mempool:**
+/// 6. Create a fresh emitter from genesis, seeding tx1 (already evicted) as a known-unconfirmed tx.
+/// 7. Drain all blocks to tip; `mempool()` — tx1 must again appear in `evicted`.
+#[test]
+fn evictions_withheld_until_at_tip() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let rpc_client = env.rpc_client();
+    let client = ClientExt::get_rpc_client(&env)?;
+
+    env.mine_blocks(110, None)?;
+
+    let spk = ScriptBuf::new_p2wsh(&WScriptHash::all_zeros());
+    let recipient = Address::from_script(&spk, Network::Regtest)?;
+    let txid_1 = env.send(&recipient, Amount::from_sat(10_000))?;
+    // Fetch the full tx now so we can seed it in phase 2.
+    let tx_1 = rpc_client.get_transaction(txid_1)?.into_model()?.tx;
+
+    // --- Phase 1: live eviction while catching up ---
+
+    // Emitter starts at genesis — deliberately behind the node's tip.
+    let mut emitter = Emitter::new(
+        &client,
+        CheckPoint::new(0, env.genesis_hash()?),
+        core::iter::empty::<bitcoin::Transaction>(),
+    );
+
+    // Behind tip: tx1 appears in update, but no evictions are reported yet.
+    let event = emitter.mempool()?;
+    assert!(
+        event
+            .update
+            .iter()
+            .any(|(tx, _)| tx.compute_txid() == txid_1),
+        "phase 1: tx1 should appear in mempool update",
+    );
+    assert!(
+        event.evicted.is_empty(),
+        "phase 1: evicted must be empty while emitter is behind tip",
+    );
+
+    // Double-spend tx1 to evict it from the mempool.
+    let outpoint = tx_1.input[0].previous_output;
+    let new_addr = rpc_client
+        .get_new_address(None, None)?
+        .address()?
+        .assume_checked();
+    let input = Input {
+        txid: outpoint.txid,
+        vout: outpoint.vout as u64,
+        sequence: None,
+    };
+    let outputs = [Output::new(new_addr, Amount::from_btc(49.99)?)];
+    let raw = rpc_client
+        .create_raw_transaction(&[input], &outputs)?
+        .into_model()?
+        .0;
+    let tx1b = rpc_client
+        .sign_raw_transaction_with_wallet(&raw)?
+        .into_model()?
+        .tx;
+    rpc_client.send_raw_transaction(&tx1b)?;
+
+    // Still behind tip: evicted must remain empty even though tx1 is gone from the mempool.
+    let event = emitter.mempool()?;
+    assert!(
+        event.evicted.is_empty(),
+        "phase 1: evicted must remain empty while emitter is still catching up",
+    );
+
+    // Drain all blocks to tip.
+    while emitter.next_block()?.is_some() {}
+
+    // Now at tip: tx1 was evicted and must be reported.
+    let event = emitter.mempool()?;
+    assert!(
+        event.evicted.iter().any(|(txid, _)| txid == &txid_1),
+        "phase 1: tx1 must appear in evicted once emitter is at tip",
+    );
+
+    // --- Phase 2: wallet restart — seeded tx already absent from mempool ---
+
+    // tx1 is still evicted. Simulate a wallet restart by creating a fresh emitter from
+    // genesis and seeding tx1 as a known-unconfirmed transaction.
+    let mut emitter2 = Emitter::new(
+        &client,
+        CheckPoint::new(0, env.genesis_hash()?),
+        core::iter::once(tx_1),
+    );
+
+    // Drain all blocks to tip. tx1 is not confirmed in any of them (it was evicted, not mined).
+    while emitter2.next_block()?.is_some() {}
+
+    // At tip: the snapshot has tx1 (from seeding) but the node's mempool does not. Must be evicted.
+    let event = emitter2.mempool()?;
+    assert!(
+        event.evicted.iter().any(|(txid, _)| txid == &txid_1),
+        "phase 2: seeded-but-absent tx1 must be reported as evicted once at tip",
+    );
+
+    Ok(())
+}
+
+/// Setting `start_height` to a height that does not yet exist on the remote node results in
+/// [`EmitterError::Rpc`] on the first [`Emitter::next_block`] call that tries to fetch that block.
+///
+/// This is the documented contract: callers should not set `start_height` beyond the node's
+/// current tip. The error is recoverable — the caller can reinitialise with a valid height.
+#[test]
+fn start_height_beyond_tip_returns_rpc_error() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let client = ClientExt::get_rpc_client(&env)?;
+
+    // Mine enough to be able to coinbase-spend, but well short of 999_999.
+    env.mine_blocks(10, None)?;
+
+    let mut emitter = Emitter::new(
+        &client,
+        CheckPoint::new(0, env.genesis_hash()?),
+        core::iter::empty::<bitcoin::Transaction>(),
+    )
+    .start_height(999_999);
+
+    // The emitter finds agreement at genesis, then tries get_block_hash(999_999) which the
+    // node rejects because that height does not exist.
+    let err = emitter
+        .next_block()
+        .expect_err("must fail with Rpc error for out-of-range start_height");
+    assert!(
+        matches!(err, EmitterError::Rpc(_)),
+        "expected EmitterError::Rpc, got {err:?}",
+    );
+
+    Ok(())
+}
+
+/// An emitter whose `last_cp` has a genesis hash that does not exist on the connected node
+/// (e.g. a mainnet genesis hash used against a regtest node) exhausts all agreement candidates
+/// and returns [`EmitterError::AgreementNotFound`].
+///
+/// This is the documented "catastrophic mismatch" safety net: the caller should reinitialise
+/// the emitter against the correct node.
+#[test]
+fn wrong_genesis_returns_agreement_not_found() -> anyhow::Result<()> {
+    use bitcoin::constants::genesis_block;
+
+    let env = TestEnv::new()?;
+    let client = ClientExt::get_rpc_client(&env)?;
+
+    env.mine_blocks(10, None)?;
+
+    // Use the mainnet genesis hash — it will never exist on the regtest node.
+    let mainnet_genesis = genesis_block(bitcoin::params::Params::MAINNET).block_hash();
+    let mut emitter = Emitter::new(
+        &client,
+        CheckPoint::new(0, mainnet_genesis),
+        core::iter::empty::<bitcoin::Transaction>(),
+    );
+
+    // The agreement scanner finds no matching block and, after MAX_AGREEMENT_FAILURES retries
+    // within this single call, surfaces the error.
+    let err = emitter
+        .next_block()
+        .expect_err("must fail with AgreementNotFound for wrong genesis hash");
+    assert!(
+        matches!(err, EmitterError::AgreementNotFound),
+        "expected EmitterError::AgreementNotFound, got {err:?}",
+    );
+
+    Ok(())
+}
+
+/// Exercises the emitter with a generic `CheckPoint<Header>` rather than the default
+/// `CheckPoint<BlockHash>`. The generic `B` parameter must thread full block [`Header`]s through
+/// every emitted checkpoint, and the checkpoint's derived block hash must match the emitted block.
+#[test]
+fn emitter_collects_header_checkpoints() -> anyhow::Result<()> {
+    use bitcoin::block::Header;
+    use bitcoin::constants::genesis_block;
+
+    const CHAIN_TIP: usize = 20;
+
+    let env = TestEnv::new()?;
+    let client = ClientExt::get_rpc_client(&env)?;
+
+    env.mine_blocks(CHAIN_TIP, None)?;
+    let network_tip = env.rpc_client().get_block_count()?.into_model().0;
+
+    // Start from a genesis checkpoint whose `data` is a full block `Header`.
+    let genesis_header = genesis_block(Network::Regtest).header;
+    let cp = CheckPoint::<Header>::new(0, genesis_header);
+
+    let mut emitter =
+        bdk_bitcoind_rpc::Emitter::new(&client, cp, core::iter::empty::<bitcoin::Transaction>());
+
+    let mut last_height = 0;
+    while let Some(block_event) = emitter.next_block()? {
+        let height = block_event.block_height();
+        assert_eq!(height, last_height + 1, "heights must be consecutive");
+
+        // The emitted checkpoint carries the block's `Header`; its hash must match the block.
+        let header: Header = block_event.checkpoint.data();
+        assert_eq!(
+            header, block_event.block.header,
+            "checkpoint header must match block header"
+        );
+        assert_eq!(
+            header.block_hash(),
+            block_event.block_hash(),
+            "checkpoint hash must derive from the header",
+        );
+
+        last_height = height;
+    }
+
+    assert_eq!(
+        u64::from(last_height),
+        network_tip,
+        "emitter must advance to the node's tip",
+    );
 
     Ok(())
 }

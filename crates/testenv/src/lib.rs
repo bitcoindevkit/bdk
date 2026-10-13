@@ -163,6 +163,7 @@ impl TestEnv {
                     TemplateRules::Taproot,
                     TemplateRules::Csv,
                 ],
+                ..Default::default()
             })?
             .into_model()?)
     }

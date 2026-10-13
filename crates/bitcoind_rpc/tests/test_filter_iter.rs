@@ -1,8 +1,7 @@
 use bdk_bitcoind_rpc::bip158::{Error, FilterIter};
 use bdk_core::CheckPoint;
 use bdk_testenv::{anyhow, bitcoind, TestEnv};
-use bitcoin::{Address, Amount, Network, ScriptBuf};
-use bitcoincore_rpc::RpcApi;
+use bitcoin::{Address, Amount, BlockHash, Network, ScriptBuf};
 
 use crate::common::ClientExt;
 
@@ -21,9 +20,7 @@ fn testenv() -> anyhow::Result<TestEnv> {
 #[test]
 fn filter_iter_matches_blocks() -> anyhow::Result<()> {
     let env = testenv()?;
-    let addr = ClientExt::get_rpc_client(&env)?
-        .get_new_address(None, None)?
-        .assume_checked();
+    let addr = env.bitcoind.client.new_address()?;
 
     let _ = env.mine_blocks(100, Some(addr.clone()))?;
     assert_eq!(ClientExt::get_rpc_client(&env)?.get_block_count()?, 101);
@@ -63,7 +60,7 @@ fn filter_iter_error_wrong_network() -> anyhow::Result<()> {
     let _ = env.mine_blocks(10, None)?;
 
     // Try to initialize FilterIter with a CP on the wrong network
-    let cp = CheckPoint::new(0, bitcoin::hashes::Hash::hash(b"wrong-hash"));
+    let cp = CheckPoint::<BlockHash>::new(0, bitcoin::hashes::Hash::hash(b"wrong-hash"));
     let client = ClientExt::get_rpc_client(&env)?;
     let mut iter = FilterIter::new(&client, cp, [ScriptBuf::new()]);
     assert!(matches!(iter.next(), Some(Err(Error::ReorgDepthExceeded))));
@@ -78,7 +75,7 @@ fn filter_iter_detects_reorgs() -> anyhow::Result<()> {
 
     let env = testenv()?;
     let rpc = ClientExt::get_rpc_client(&env)?;
-    while rpc.get_block_count()? < MINE_TO as u64 {
+    while rpc.get_block_count()? < MINE_TO {
         let _ = env.mine_blocks(1, None)?;
     }
 

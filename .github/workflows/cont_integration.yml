@@ -226,12 +226,10 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+      - name: Build (no default features + download)
+        run: cargo build --no-default-features --features download
       - name: Build (default features)
         run: cargo build
-      - name: Build (no default features)
-        run: cargo build --no-default-features
-      - name: Build (std, no download)
-        run: cargo build --no-default-features --features std
       - name: Build (all features)
         run: cargo build --all-features
       - name: Test (all features)
