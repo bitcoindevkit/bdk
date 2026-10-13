@@ -291,7 +291,8 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// *sent* when a script pubkey in the `range` is on an input and *received* when it is on an
     /// output. For `sent` to be computed correctly, the output being spent must have already been
     /// scanned by the index. Calculating received just uses the [`Transaction`] outputs directly,
-    /// so it will be correct even if it has not been scanned.
+    /// so it will be correct even if it has not been scanned. If `tx` spends the same outpoint in
+    /// more than one input, that outpoint is only counted once.
     pub fn sent_and_received(
         &self,
         tx: &Transaction,
@@ -300,7 +301,12 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
         let mut sent = Amount::ZERO;
         let mut received = Amount::ZERO;
 
+        let mut seen = BTreeSet::new();
         for txin in &tx.input {
+            // A repeated prevout is spending the same txout again, so only count it once.
+            if !seen.insert(txin.previous_output) {
+                continue;
+            }
             if let Some((index, txout)) = self.txout(txin.previous_output) {
                 if range.contains(index) {
                     sent += txout.value;
@@ -322,7 +328,8 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     ///
     /// TxOuts are *spent* when an indexed script pubkey is found in one of the transaction's
     /// inputs. For these to be computed correctly, the index must have already scanned the
-    /// output being spent.
+    /// output being spent. If the transaction spends the same outpoint in more than one input, only
+    /// the first of those inputs is reported.
     ///
     /// # Example
     /// Shows the addresses of the TxOut spent from a Transaction relevant to spks in this index.
@@ -354,10 +361,15 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
         &'a self,
         tx: &'a Transaction,
     ) -> impl Iterator<Item = SpentTxOut<I>> + 'a {
+        let mut seen = BTreeSet::new();
         tx.input
             .iter()
             .enumerate()
-            .filter_map(|(input_index, txin)| {
+            .filter_map(move |(input_index, txin)| {
+                // A repeated prevout is spending the same txout again, so only report it once.
+                if !seen.insert(txin.previous_output) {
+                    return None;
+                }
                 self.txout(txin.previous_output)
                     .map(|(index, txout)| SpentTxOut {
                         txout: txout.clone(),

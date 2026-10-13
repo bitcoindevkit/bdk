@@ -430,3 +430,48 @@ fn outputs_in_range_excluded_bounds() {
         .collect();
     assert_eq!(outputs_empty.len(), 0);
 }
+
+#[test]
+fn spk_txout_duplicate_inputs_are_counted_once() {
+    let spk = ScriptBuf::from_hex("001404f1e52ce2bab3423c6a8c63b7cd730d8f12542c").unwrap();
+    let mut index = SpkTxOutIndex::default();
+    index.insert_spk(0, spk.clone());
+
+    let funding = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![TxOut {
+            value: Amount::from_sat(10_000),
+            script_pubkey: spk,
+        }],
+    };
+    index.scan(&funding);
+    let outpoint = OutPoint::new(funding.compute_txid(), 0);
+
+    // Same prevout listed on two inputs.
+    let spend = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![
+            TxIn {
+                previous_output: outpoint,
+                ..Default::default()
+            };
+            2
+        ],
+        output: vec![TxOut {
+            value: Amount::from_sat(9_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+    };
+
+    assert_eq!(
+        index.sent_and_received(&spend, ..),
+        (Amount::from_sat(10_000), Amount::ZERO)
+    );
+    assert_eq!(index.net_value(&spend, ..), SignedAmount::from_sat(-10_000));
+    let spent: Vec<_> = index.spent_txouts(&spend).collect();
+    assert_eq!(spent.len(), 1);
+    assert_eq!(spent[0].outpoint(), outpoint);
+}

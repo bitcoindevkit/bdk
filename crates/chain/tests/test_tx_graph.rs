@@ -1551,3 +1551,42 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+#[test]
+fn calculate_fee_counts_a_repeated_prevout_once() {
+    let outpoint = OutPoint::new(hash!("funding"), 0);
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.insert_txout(
+        outpoint,
+        TxOut {
+            value: Amount::from_sat(10_000),
+            script_pubkey: ScriptBuf::new(),
+        },
+    );
+
+    let mut tx = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![
+            TxIn {
+                previous_output: outpoint,
+                ..Default::default()
+            };
+            2
+        ],
+        output: vec![TxOut {
+            value: Amount::from_sat(9_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+    };
+    assert_eq!(graph.calculate_fee(&tx), Ok(Amount::from_sat(1_000)));
+
+    // Outputs larger than the single 10,000 sat input must not look like a valid fee.
+    tx.output[0].value = Amount::from_sat(19_000);
+    assert_eq!(
+        graph.calculate_fee(&tx),
+        Err(CalculateFeeError::NegativeFee(SignedAmount::from_sat(
+            -9_000
+        )))
+    );
+}

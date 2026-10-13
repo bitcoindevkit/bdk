@@ -433,6 +433,8 @@ impl<A> TxGraph<A> {
     /// first manually insert the foreign TxOuts into the tx graph using the [`insert_txout`]
     /// function. Only insert TxOuts you trust the values for!
     ///
+    /// If `tx` spends the same outpoint in more than one input, that outpoint is only counted once.
+    ///
     /// Note `tx` does not have to be in the graph for this to work.
     ///
     /// [`insert_txout`]: Self::insert_txout
@@ -441,11 +443,18 @@ impl<A> TxGraph<A> {
             return Ok(Amount::ZERO);
         }
 
-        let (inputs_sum, missing_outputs) = tx.input.iter().fold(
+        // A repeated prevout is spending the same txout again, so only count it once.
+        let mut seen = BTreeSet::new();
+        let unique_prevouts = tx
+            .input
+            .iter()
+            .map(|txin| txin.previous_output)
+            .filter(|prevout| seen.insert(*prevout));
+        let (inputs_sum, missing_outputs) = unique_prevouts.fold(
             (SignedAmount::ZERO, Vec::new()),
-            |(mut sum, mut missing_outpoints), txin| match self.get_txout(txin.previous_output) {
+            |(mut sum, mut missing_outpoints), prevout| match self.get_txout(prevout) {
                 None => {
-                    missing_outpoints.push(txin.previous_output);
+                    missing_outpoints.push(prevout);
                     (sum, missing_outpoints)
                 }
                 Some(txout) => {
