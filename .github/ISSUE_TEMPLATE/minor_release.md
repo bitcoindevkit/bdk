@@ -23,21 +23,9 @@ assignees: ''
 
 ### Checklist
 
-Release numbering must follow [Semantic Versioning]. These steps assume the current `master`
-branch **development** version is *MAJOR.MINOR.0*.
+Release numbering must follow [Semantic Versioning]. These steps assume the current `master` branch **development** version is *MAJOR.MINOR+1.0-alpha.0*.
 
 #### On the day of the feature freeze
-
-Change the `master` branch to the next MINOR+1 version:
-
-- [ ] Switch to the `master` branch.
-- [ ] Create a new PR branch called `bump_dev_MAJOR_MINOR+1`, eg. `bump_dev_0_22`.
-- [ ] Bump the `bump_dev_MAJOR_MINOR+1` branch to the next development MINOR+1 version.
-  - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0`.
-  - Update the `CHANGELOG.md` file.
-  - The commit message should be "Bump version to MAJOR.MINOR+1.0".
-- [ ] Create PR and merge the `bump_dev_MAJOR_MINOR+1` branch to `master`.
-  - Title PR "Bump version to MAJOR.MINOR+1.0".
 
 Create a new release branch and release candidate tag:
 
@@ -52,6 +40,18 @@ Create a new release branch and release candidate tag:
   - Make sure the tag is signed, for extra safety use the explicit `--sign` flag.
 - [ ] Push the `release/MAJOR.MINOR` branch and new tag to the `bitcoindevkit/bdk` repo.
   - Use `git push --tags` option to push the new `vMAJOR.MINOR+1.0-rc.1` tag.
+
+Change the `master` branch to the next MINOR+2 alpha version:
+
+- [ ] Switch to the `master` branch.
+- [ ] Create a new PR branch called `bump_dev_MAJOR_MINOR+2`, eg. `bump_dev_0_25`.
+- [ ] Bump the `bump_dev_MAJOR_MINOR+2` branch to the next development MINOR+2 version.
+  - Change the `Cargo.toml` version value to `MAJOR.MINOR+2.0-alpha.0`.
+  - Update the `version` of internal `bdk_*` dependencies in each crate's `Cargo.toml` to match.
+  - Update the `CHANGELOG.md` file.
+  - The commit message should be "Bump version to MAJOR.MINOR+2.0-alpha.0".
+- [ ] Create PR and merge the `bump_dev_MAJOR_MINOR+2` branch to `master`.
+  - Title PR "Bump version to MAJOR.MINOR+2.0-alpha.0".
 
 If any issues need to be fixed before the *MAJOR.MINOR+1.0* version is released:
 
@@ -74,6 +74,7 @@ Tag and publish new release:
 
 - [ ] Bump the `release/MAJOR.MINOR+1` branch to `MAJOR.MINOR+1.0` version.
   - Change the `Cargo.toml` version value to `MAJOR.MINOR+1.0`.
+  - Update the `version` of internal `bdk_*` dependencies in each crate's `Cargo.toml` to match.
   - The commit message should be "Bump version to MAJOR.MINOR+1.0".
 - [ ] Add a tag to the `HEAD` commit in the `release/MAJOR.MINOR+1` branch.
   - The tag name should be `vMAJOR.MINOR+1.0`
