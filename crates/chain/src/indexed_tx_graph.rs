@@ -364,6 +364,10 @@ where
     /// Relevancy is determined by the internal [`Indexer::is_tx_relevant`] implementation of `I`.
     /// A transaction that conflicts with a relevant transaction is also considered relevant.
     /// Irrelevant transactions in `block` will be ignored.
+    ///
+    /// The caller must supply a valid block at `height` from a trusted source. This method does not
+    /// validate the block: neither the header's place in the chain nor that `block.txdata` matches
+    /// the header's merkle root.
     pub fn apply_block_relevant(
         &mut self,
         block: &Block,
@@ -398,6 +402,10 @@ where
     /// Each inserted transaction's anchor will be constructed using [`TxPosInBlock`].
     ///
     /// To only insert relevant transactions, use [`apply_block_relevant`] instead.
+    ///
+    /// The caller must supply a valid block at `height` from a trusted source. This method does not
+    /// validate the block: neither the header's place in the chain nor that `block.txdata` matches
+    /// the header's merkle root.
     ///
     /// [`apply_block_relevant`]: IndexedTxGraph::apply_block_relevant
     pub fn apply_block(&mut self, block: Block, height: u32) -> ChangeSet<A, I::ChangeSet> {
