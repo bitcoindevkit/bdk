@@ -1,4 +1,17 @@
 //! This crate is a collection of core structures for [Bitcoin Dev Kit].
+//!
+//! # Features
+//!
+//! - `std` (default): use the standard library, including its `HashMap`/`HashSet`. Without it,
+//!   this crate is `no_std` and uses `alloc`'s `BTreeMap`/`BTreeSet` instead.
+//! - `serde`: implement `serde::Serialize`/`serde::Deserialize` for this crate's types.
+//! - `hashbrown`: use [`hashbrown`](https://docs.rs/hashbrown)'s `HashMap`/`HashSet` for this
+//!   crate's hash collections (e.g. `bdk_chain`'s `TxGraph`), on `std` builds too. These hash
+//!   with `ahash` using fixed, publicly known keys unless `ahash`'s `runtime-rng` or
+//!   `compile-time-rng` feature is enabled somewhere in the dependency graph. With fixed keys, a
+//!   malicious chain source can send transactions crafted to collide, making insertion
+//!   quadratic. To randomize the keys, depend on
+//!   `ahash = { version = "0.8", features = ["runtime-rng"] }` (or `compile-time-rng`) yourself.
 
 // only enables the `doc_cfg` feature when the `docsrs` configuration attribute is defined
 #![cfg_attr(docsrs, feature(doc_cfg))]
