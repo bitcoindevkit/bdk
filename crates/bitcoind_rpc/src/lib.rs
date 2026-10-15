@@ -7,6 +7,18 @@
 //! To only get block updates (exclude mempool transactions), the caller can use
 //! [`Emitter::next_block`] until it returns `Ok(None)` (which means the chain tip is reached). A
 //! separate method, [`Emitter::mempool`] can be used to emit the whole mempool.
+//!
+//! # Trust in the RPC connection
+//!
+//! The recommended practice is to connect only to a `bitcoind` node that **you run and control**.
+//! Bitcoin Core's RPC is a privileged, administrative interface rather than a public API. A wallet
+//! inherently trusts its chain data source for the validity of blocks and transactions, for
+//! confirmation status, and for privacy.
+//!
+//! If you must reach a node over a network, tunnel the connection (for example over SSH, a VPN, or
+//! a Tor hidden service) and never expose RPC to the public internet. As a defense mechanism, the
+//! emitter verifies that a fetched transaction's computed txid matches the one requested, but this
+//! is not a substitute for connecting to a node you trust.
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![warn(missing_docs)]
 
@@ -137,6 +149,8 @@ where
     /// }
     /// # Ok::<_, bdk_bitcoind_rpc::bitcoincore_rpc::Error>(())
     /// ```
+    ///
+    /// See [`mempool_at`](Self::mempool_at) for errors.
     #[cfg(feature = "std")]
     pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let sync_time = std::time::UNIX_EPOCH
@@ -151,6 +165,15 @@ where
     /// `sync_time` is in unix seconds.
     ///
     /// This is the no-std version of [`mempool`](Self::mempool).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`bitcoincore_rpc::Error::UnexpectedStructure`] if the node returns a transaction
+    /// body whose computed txid does not match the requested txid. A single mismatch fails the
+    /// whole poll. Retry on the next call.
+    ///
+    /// The txid does not commit to witness data, so this check does not detect a transaction
+    /// served with altered witnesses.
     pub fn mempool_at(&mut self, sync_time: u64) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let client = &*self.client;
 
@@ -179,6 +202,10 @@ where
                     let tx = match self.mempool_snapshot.get(&txid) {
                         Some(tx) => tx.clone(),
                         None => match client.get_raw_transaction(&txid, None) {
+                            // Reject a tx whose computed txid does not match the requested one.
+                            Ok(tx) if tx.compute_txid() != txid => {
+                                return Some(Err(bitcoincore_rpc::Error::UnexpectedStructure));
+                            }
                             Ok(tx) => {
                                 let tx = Arc::new(tx);
                                 self.mempool_snapshot.insert(txid, tx.clone());
@@ -466,8 +493,16 @@ impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
 mod test {
     use crate::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
     use bdk_chain::local_chain::LocalChain;
-    use bdk_testenv::{anyhow, TestEnv};
-    use bitcoin::{hashes::Hash, Address, Amount, ScriptBuf, Txid, WScriptHash};
+    use bdk_core::CheckPoint;
+    use bdk_testenv::{anyhow, utils::new_tx, TestEnv};
+    use bitcoin::{
+        consensus::encode::serialize_hex, hashes::Hash, Address, Amount, BlockHash, ScriptBuf,
+        Transaction, Txid, WScriptHash,
+    };
+    use bitcoincore_rpc::{
+        jsonrpc::{serde, serde_json},
+        Error, RpcApi,
+    };
     use std::collections::HashSet;
 
     #[test]
@@ -535,5 +570,58 @@ mod test {
         assert!(emitter.mempool_snapshot.is_empty());
 
         Ok(())
+    }
+
+    // A fetched mempool tx whose body does not match the requested txid is rejected.
+    #[test]
+    fn mismatched_tx_body_is_rejected_and_not_cached() {
+        struct LyingNode {
+            announced: Txid,
+            tip_hash: BlockHash,
+            served: Transaction,
+        }
+
+        impl RpcApi for LyingNode {
+            fn call<T: for<'a> serde::de::Deserialize<'a>>(
+                &self,
+                cmd: &str,
+                _args: &[serde_json::Value],
+            ) -> Result<T, Error> {
+                let value = match cmd {
+                    "getblockcount" => serde_json::json!(100),
+                    "getblockhash" => serde_json::to_value(self.tip_hash)?,
+                    "getrawmempool" => serde_json::to_value([self.announced])?,
+                    "getrawtransaction" => serialize_hex(&self.served).into(),
+                    _ => unimplemented!("unexpected RPC call {cmd}"),
+                };
+                Ok(serde_json::from_value(value)?)
+            }
+        }
+
+        let served = new_tx(0);
+        let announced = new_tx(1).compute_txid();
+        assert_ne!(
+            announced,
+            served.compute_txid(),
+            "announced txid must differ from the served body",
+        );
+
+        let node = LyingNode {
+            announced,
+            tip_hash: BlockHash::from_byte_array([2u8; 32]),
+            served,
+        };
+        let last_cp = CheckPoint::new(0, BlockHash::all_zeros());
+        let mut emitter = Emitter::new(&node, last_cp, 0, NO_EXPECTED_MEMPOOL_TXS);
+
+        let result = emitter.mempool_at(0);
+        assert!(
+            matches!(result, Err(Error::UnexpectedStructure)),
+            "mismatched tx body must be rejected, got {result:?}",
+        );
+        assert!(
+            !emitter.mempool_snapshot.contains_key(&announced),
+            "rejected tx must not be cached under the announced txid",
+        );
     }
 }
