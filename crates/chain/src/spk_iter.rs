@@ -3,16 +3,21 @@ use crate::{
     miniscript::{Descriptor, DescriptorPublicKey},
     Indexed,
 };
-use core::{borrow::Borrow, ops::Bound, ops::RangeBounds};
+use core::{
+    borrow::Borrow,
+    iter::FusedIterator,
+    ops::{Bound, RangeBounds},
+};
 
 /// Maximum [BIP32](https://bips.xyz/32) derivation index.
 pub const BIP32_MAX_INDEX: u32 = (1 << 31) - 1;
 
 /// An iterator for derived script pubkeys.
 ///
-/// [`SpkIterator`] is an implementation of the [`Iterator`] trait which possesses its own `next()`
-/// and `nth()` functions, both of which circumvent the unnecessary intermediate derivations
-/// required when using their default implementations.
+/// [`SpkIterator`] is an implementation of [`Iterator`], [`ExactSizeIterator`], and
+/// [`FusedIterator`] traits which possesses its own `next()` and `nth()` functions, both of which
+/// circumvent the unnecessary intermediate derivations required when using their default
+/// implementations.
 ///
 /// ## Examples
 ///
@@ -29,10 +34,12 @@ pub const BIP32_MAX_INDEX: u32 = (1 << 31) - 1;
 ///
 /// // Creates a new script pubkey iterator starting at 0 from a descriptor.
 /// let mut spk_iter = SpkIterator::new(&descriptor);
+/// assert_eq!(spk_iter.len(), 1);
 /// assert_eq!(spk_iter.next(), Some((0, external_spk_0)));
+/// assert_eq!(spk_iter.len(), 0);
 /// assert_eq!(spk_iter.next(), None);
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpkIterator<D> {
     next_index: u32,
     end: u32,
@@ -92,6 +99,22 @@ where
     pub fn descriptor(&self) -> &D {
         &self.descriptor
     }
+
+    /// Returns the exact number of remaining script pubkeys in the iterator.
+    pub fn len(&self) -> usize {
+        if self.descriptor.borrow().has_wildcard() {
+            (self.end.saturating_sub(self.next_index)) as usize
+        } else if self.next_index == 0 && self.end > 0 {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// Returns `true` if the iterator contains no more script pubkeys.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<D> Iterator for SpkIterator<D>
@@ -131,7 +154,23 @@ where
             .saturating_add(u32::try_from(n).unwrap_or(u32::MAX));
         self.next()
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
 }
+
+impl<D> ExactSizeIterator for SpkIterator<D>
+where
+    D: Borrow<Descriptor<DescriptorPublicKey>>,
+{
+    fn len(&self) -> usize {
+        SpkIterator::len(self)
+    }
+}
+
+impl<D> FusedIterator for SpkIterator<D> where D: Borrow<Descriptor<DescriptorPublicKey>> {}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -290,6 +329,87 @@ mod test {
             None,
             "range starting after u32::MAX should be empty"
         );
+    }
+
+    #[test]
+    fn test_spkiterator_exact_size_wildcard() {
+        let (_, external_desc, _) = init_txout_index();
+        let mut iter = SpkIterator::new_with_range(&external_desc, 0..5);
+
+        assert_eq!(iter.len(), 5);
+        assert!(!iter.is_empty());
+        assert_eq!(iter.size_hint(), (5, Some(5)));
+        assert_eq!(ExactSizeIterator::len(&iter), 5);
+
+        assert!(iter.next().is_some());
+        assert_eq!(iter.len(), 4);
+        assert_eq!(iter.size_hint(), (4, Some(4)));
+
+        assert!(iter.nth(2).is_some()); // advances past 2 items (indices 1, 2) and returns index 3
+        assert_eq!(iter.len(), 1);
+        assert_eq!(iter.size_hint(), (1, Some(1)));
+
+        assert!(iter.next().is_some());
+        assert_eq!(iter.len(), 0);
+        assert!(iter.is_empty());
+        assert_eq!(iter.size_hint(), (0, Some(0)));
+
+        // FusedIterator property: once exhausted, remains None
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.len(), 0);
+        assert!(iter.is_empty());
+
+        let default_iter = SpkIterator::new(&external_desc);
+        assert_eq!(default_iter.len(), (BIP32_MAX_INDEX + 1) as usize);
+        assert_eq!(
+            default_iter.size_hint(),
+            (
+                (BIP32_MAX_INDEX + 1) as usize,
+                Some((BIP32_MAX_INDEX + 1) as usize)
+            )
+        );
+    }
+
+    #[test]
+    fn test_spkiterator_exact_size_non_wildcard() {
+        let secp = bitcoin::secp256k1::Secp256k1::signing_only();
+        let (no_wildcard_desc, _) = Descriptor::<DescriptorPublicKey>::parse_descriptor(
+            &secp,
+            "wpkh([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/1/0)",
+        )
+        .unwrap();
+
+        let mut iter = SpkIterator::new(&no_wildcard_desc);
+        assert_eq!(iter.len(), 1);
+        assert!(!iter.is_empty());
+        assert_eq!(iter.size_hint(), (1, Some(1)));
+        assert_eq!(ExactSizeIterator::len(&iter), 1);
+
+        assert!(iter.next().is_some());
+        assert_eq!(iter.len(), 0);
+        assert!(iter.is_empty());
+        assert_eq!(iter.size_hint(), (0, Some(0)));
+
+        // FusedIterator property: once exhausted, remains None
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next(), None);
+
+        let empty_range_iter = SpkIterator::new_with_range(&no_wildcard_desc, 0..0);
+        assert_eq!(empty_range_iter.len(), 0);
+        assert!(empty_range_iter.is_empty());
+
+        let non_zero_start = SpkIterator::new_with_range(&no_wildcard_desc, 1..5);
+        assert_eq!(non_zero_start.len(), 0);
+        assert!(non_zero_start.is_empty());
+    }
+
+    #[test]
+    fn test_spkiterator_debug() {
+        let (_, external_desc, _) = init_txout_index();
+        let iter = SpkIterator::new(&external_desc);
+        let debug_str = format!("{:?}", iter);
+        assert!(debug_str.starts_with("SpkIterator"));
     }
 }
 
