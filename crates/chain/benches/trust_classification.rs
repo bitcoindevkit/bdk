@@ -21,15 +21,17 @@ fn make_chain() -> LocalChain {
     LocalChain::from_blocks(blocks).unwrap()
 }
 
-// The two predicates `classify_outpoints` takes, faking what a wallet would pass:
-// `does_taint` = the tx pulls in coins that aren't ours, `is_settled` = the tx is confirmed.
+// The three predicates `classify_outpoints` takes, faking what a wallet would pass:
+// `does_taint` = the tx pulls in coins that aren't ours; `is_settled` = the tx is confirmed;
+// `is_locked` = the tx has timelocked outputs.
 #[allow(clippy::type_complexity)]
-fn does_taint_and_is_settled<'a>(
+fn classify_outpoints_predicates<'a>(
     view: &'a CanonicalView<ConfirmationBlockTime>,
     owned: &ScriptBuf,
 ) -> (
     impl FnMut(&bdk_chain::CanonicalTx<ChainPosition<ConfirmationBlockTime>>) -> bool + 'a,
     impl Fn(&ChainPosition<ConfirmationBlockTime>) -> bool,
+    impl Fn(&bdk_chain::CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>) -> bool,
 ) {
     let owned = owned.clone();
     let is_mine = move |spk: &Script| spk == owned.as_script();
@@ -47,7 +49,11 @@ fn does_taint_and_is_settled<'a>(
     };
     let is_settled =
         |pos: &ChainPosition<ConfirmationBlockTime>| matches!(pos, ChainPosition::Confirmed { .. });
-    (does_taint, is_settled)
+
+    let is_locked =
+        |_txout: &bdk_chain::CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>| false;
+
+    (does_taint, is_settled, is_locked)
 }
 
 // Per-UTXO memoized classification (`classify_outpoints`).
@@ -57,8 +63,8 @@ fn run_classify(
     owned: &ScriptBuf,
 ) {
     let outpoints = utxo_txids.iter().map(|&txid| OutPoint::new(txid, 0));
-    let (does_taint, is_settled) = does_taint_and_is_settled(view, owned);
-    for item in view.classify_outpoints(outpoints, does_taint, is_settled) {
+    let (does_taint, is_settled, is_locked) = classify_outpoints_predicates(view, owned);
+    for item in view.classify_outpoints(outpoints, does_taint, is_settled, is_locked) {
         std::hint::black_box(item);
     }
 }

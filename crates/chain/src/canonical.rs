@@ -40,7 +40,9 @@ pub enum Eligibility {
     /// [`classify_outpoints`](CanonicalView::classify_outpoints). Typically confirmed deeply
     /// enough to be unlikely to be replaced, but the caller decides.
     Settled,
-    /// A coinbase output that has not yet matured and is not spendable.
+    /// An output not yet spendable by consensus: an immature coinbase output, or one the
+    /// `is_locked` predicate reports as timelocked. May be unconfirmed; its [`Trust`] is not
+    /// evaluated.
     Immature,
     /// An output not yet settled.
     Unsettled(Trust),
@@ -428,7 +430,7 @@ impl<A: Anchor> CanonicalView<A> {
     /// This is the primitive behind [`balance`](Self::balance).
     ///  
     /// Callers that need richer handling (coin selection, coin control, or
-    /// wallet-specific categories like "locked") can fold over this instead of `balance`.
+    /// wallet-specific categories) can fold over this instead of `balance`.
     ///
     /// Outpoints that are already spent, or that aren't part of this canonical view, are skipped.
     ///
@@ -442,11 +444,16 @@ impl<A: Anchor> CanonicalView<A> {
     ///   [`taints_unowned`] to classify everything foreign as untrusted.
     /// * `is_settled` - Returns `true` for the [position](ChainPosition) of a transaction we
     ///   consider settled (unlikely to be replaced), for example one with enough confirmations.
+    /// * `is_locked` - Returns `true` for a txout whose timelock is not met yet, classifying it as
+    ///   [`Immature`](Eligibility::Immature). For an output confirmed
+    ///   [`transitively`](ChainPosition::Confirmed::transitively), the confirmation height is only
+    ///   an upper bound, so a relative timelock may look unmet when it is already met.
     pub fn classify_outpoints<'a>(
         &'a self,
         outpoints: impl IntoIterator<Item = OutPoint> + 'a,
         mut does_taint: impl FnMut(&CanonicalTx<ChainPosition<A>>) -> bool + 'a,
         is_settled: impl Fn(&ChainPosition<A>) -> bool + 'a,
+        is_locked: impl Fn(&CanonicalTxOut<ChainPosition<A>>) -> bool + 'a,
     ) -> impl Iterator<Item = (CanonicalTxOut<ChainPosition<A>>, Eligibility)> + 'a {
         let tip = self.tip.height;
         // Shared across outpoints so an ancestor reached by several of them is only walked once.
@@ -456,7 +463,7 @@ impl<A: Anchor> CanonicalView<A> {
             .filter_map(move |op| self.txout(op))
             .filter(|txo| txo.spent_by.is_none())
             .map(move |txout| {
-                let eligibility = if !txout.is_mature(tip) {
+                let eligibility = if !txout.is_mature(tip) || is_locked(&txout) {
                     Eligibility::Immature
                 } else if is_settled(&txout.pos) {
                     Eligibility::Settled
@@ -604,6 +611,7 @@ impl<A: Anchor> CanonicalView<A> {
     ///         pos.confirmation_height_upper_bound()
     ///             .is_some_and(|h| tip_height.saturating_sub(h).saturating_add(1) >= 6)
     ///     },
+    ///     |_txout| false,
     /// );
     /// ```
     pub fn balance(
@@ -611,8 +619,9 @@ impl<A: Anchor> CanonicalView<A> {
         outpoints: impl IntoIterator<Item = OutPoint>,
         does_taint: impl FnMut(&CanonicalTx<ChainPosition<A>>) -> bool,
         is_settled: impl Fn(&ChainPosition<A>) -> bool,
+        is_locked: impl Fn(&CanonicalTxOut<ChainPosition<A>>) -> bool,
     ) -> Balance {
-        self.classify_outpoints(outpoints, does_taint, is_settled)
+        self.classify_outpoints(outpoints, does_taint, is_settled, is_locked)
             .collect()
     }
 }
