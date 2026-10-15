@@ -55,15 +55,18 @@ impl<'a> FilterIter<'a> {
         }
     }
 
-    /// Return the agreement header with the remote node.
+    /// Return the agreement header with the remote node, updating `self.cp` to the agreement point.
     ///
     /// Error if no agreement header is found.
-    fn find_base(&self) -> Result<GetBlockHeaderResult, Error> {
+    fn find_base(&mut self) -> Result<GetBlockHeaderResult, Error> {
         for cp in self.cp.iter() {
             match self.client.get_block_header_info(&cp.hash()) {
                 Err(e) if is_not_found(&e) => continue,
                 Ok(header) if header.confirmations <= 0 => continue,
-                Ok(header) => return Ok(header),
+                Ok(header) => {
+                    self.cp = cp;
+                    return Ok(header);
+                }
                 Err(e) => return Err(Error::Rpc(e)),
             }
         }
@@ -97,14 +100,14 @@ impl Iterator for FilterIter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         (|| -> Result<Option<_>, Error> {
-            let mut cp = self.cp.clone();
-
             let header = match self.header.take() {
                 Some(header) => header,
                 // If no header is cached we need to locate a base of the local
                 // checkpoint from which the scan may proceed.
                 None => self.find_base()?,
             };
+
+            let mut cp = self.cp.clone();
 
             let mut next_hash = match header.next_block_hash {
                 Some(hash) => hash,
