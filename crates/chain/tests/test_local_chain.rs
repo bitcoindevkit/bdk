@@ -5,8 +5,8 @@ use std::ops::{Bound, RangeBounds};
 
 use bdk_chain::{
     local_chain::{
-        AlterCheckPointError, ApplyBlockError, ApplyChangeSetError, ApplyHeaderError,
-        CannotConnectError, ChangeSet, CheckPoint, LocalChain, MissingGenesisError,
+        ApplyBlockError, ApplyChangeSetError, ApplyHeaderError, CannotConnectError, ChangeSet,
+        CheckPoint, InsertBlockError, LocalChain, MissingGenesisError,
     },
     BlockId,
 };
@@ -342,7 +342,7 @@ fn local_chain_insert_block() {
     struct TestCase {
         original: LocalChain,
         insert: (u32, BlockHash),
-        expected_result: Result<ChangeSet, AlterCheckPointError>,
+        expected_result: Result<ChangeSet, InsertBlockError>,
         expected_final: LocalChain,
     }
 
@@ -374,10 +374,10 @@ fn local_chain_insert_block() {
         TestCase {
             original: local_chain![(0, hash!("_")), (2, hash!("K"))],
             insert: (2, hash!("J")),
-            expected_result: Err(AlterCheckPointError {
+            expected_result: Err(InsertBlockError::CannotReplace {
                 height: 2,
                 original_hash: hash!("K"),
-                update_hash: Some(hash!("J")),
+                update_hash: hash!("J"),
             }),
             expected_final: local_chain![(0, hash!("_")), (2, hash!("K"))],
         },
@@ -432,7 +432,7 @@ fn local_chain_insert_header() {
     struct TestCase {
         original: LocalChain<Header>,
         insert: (u32, Header),
-        expected_result: Result<ChangeSet<Header>, AlterCheckPointError>,
+        expected_result: Result<ChangeSet<Header>, InsertBlockError>,
         expected_final: LocalChain<Header>,
     }
 
@@ -470,12 +470,38 @@ fn local_chain_insert_header() {
         TestCase {
             original: local_chain(vec![(0, headers[0]), (2, headers[2])]),
             insert: (2, header(hash!("conflict"))),
-            expected_result: Err(AlterCheckPointError {
+            expected_result: Err(InsertBlockError::CannotReplace {
                 height: 2,
                 original_hash: headers[2].block_hash(),
-                update_hash: Some(header(hash!("conflict")).block_hash()),
+                update_hash: header(hash!("conflict")).block_hash(),
             }),
             expected_final: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+        },
+        // Test case 6: start with headers at heights 0 and 2. Insert header at height 3 that does
+        // not link to height 2.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+            insert: (3, header(hash!("not_2"))),
+            expected_result: Err(InsertBlockError::PrevBlockhashMismatch {
+                expected: BlockId {
+                    height: 2,
+                    hash: headers[2].block_hash(),
+                },
+            }),
+            expected_final: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+        },
+        // Test case 7: start with headers at heights 0 and 3. Insert header at height 2 that
+        // header 3 does not link to.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (3, headers[3])]),
+            insert: (2, header(hash!("not_1"))),
+            expected_result: Err(InsertBlockError::PrevBlockhashMismatch {
+                expected: BlockId {
+                    height: 2,
+                    hash: header(hash!("not_1")).block_hash(),
+                },
+            }),
+            expected_final: local_chain(vec![(0, headers[0]), (3, headers[3])]),
         },
     ];
 
