@@ -420,19 +420,16 @@ where
     ///
     /// # Errors
     ///
-    /// Replacing the block hash of an existing checkpoint will result in an error.
-    pub fn insert_block(
-        &mut self,
-        height: u32,
-        data: D,
-    ) -> Result<ChangeSet<D>, AlterCheckPointError> {
+    /// Replacing the block hash of an existing checkpoint will result in an error. So will a block
+    /// that does not link to its neighbors by `prev_blockhash`.
+    pub fn insert_block(&mut self, height: u32, data: D) -> Result<ChangeSet<D>, InsertBlockError> {
         if let Some(original_cp) = self.tip.get(height) {
             let original_hash = original_cp.hash();
             if original_hash != data.to_blockhash() {
-                return Err(AlterCheckPointError {
+                return Err(InsertBlockError::CannotReplace {
                     height,
                     original_hash,
-                    update_hash: Some(data.to_blockhash()),
+                    update_hash: data.to_blockhash(),
                 });
             }
             return Ok(ChangeSet::default());
@@ -440,17 +437,14 @@ where
 
         let mut changeset = ChangeSet::<D>::default();
         changeset.blocks.insert(height, Some(data));
-        self.apply_changeset(&changeset)
-            .map_err(|_| AlterCheckPointError {
-                height: 0,
-                original_hash: self.genesis_hash(),
-                update_hash: changeset
-                    .blocks
-                    .get(&0)
-                    .cloned()
-                    .flatten()
-                    .map(|d| d.to_blockhash()),
-            })?;
+        self.apply_changeset(&changeset).map_err(|err| match err {
+            ApplyChangeSetError::CannotAlterGenesis { .. } => {
+                unreachable!("`height` is not in the chain, so it cannot be genesis")
+            }
+            ApplyChangeSetError::PrevBlockhashMismatch { expected } => {
+                InsertBlockError::PrevBlockhashMismatch { expected }
+            }
+        })?;
         Ok(changeset)
     }
 
@@ -658,35 +652,47 @@ impl core::fmt::Display for MissingGenesisError {
 
 impl core::error::Error for MissingGenesisError {}
 
-/// Represents a failure when trying to insert/remove a checkpoint to/from [`LocalChain`].
+/// The error type for [`LocalChain::insert_block`].
 #[derive(Clone, Debug, PartialEq)]
-pub struct AlterCheckPointError {
-    /// The checkpoint's height.
-    pub height: u32,
-    /// The original checkpoint's block hash which cannot be replaced/removed.
-    pub original_hash: BlockHash,
-    /// The attempted update to the `original_block` hash.
-    pub update_hash: Option<BlockHash>,
+#[non_exhaustive]
+pub enum InsertBlockError {
+    /// The block conflicts with an existing checkpoint at the same height.
+    CannotReplace {
+        /// The checkpoint's height.
+        height: u32,
+        /// The original checkpoint's block hash which cannot be replaced.
+        original_hash: BlockHash,
+        /// The attempted replacement block hash.
+        update_hash: BlockHash,
+    },
+    /// Block's `prev_blockhash` doesn't match the expected block.
+    PrevBlockhashMismatch {
+        /// The block that `prev_blockhash` should reference.
+        expected: BlockId,
+    },
 }
 
-impl core::fmt::Display for AlterCheckPointError {
+impl core::fmt::Display for InsertBlockError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self.update_hash {
-            Some(update_hash) => write!(
+        match self {
+            InsertBlockError::CannotReplace {
+                height,
+                original_hash,
+                update_hash,
+            } => write!(
                 f,
-                "failed to insert block at height {}: original={} update={}",
-                self.height, self.original_hash, update_hash
+                "failed to insert block at height {height}: original={original_hash} update={update_hash}"
             ),
-            None => write!(
+            InsertBlockError::PrevBlockhashMismatch { expected } => write!(
                 f,
-                "failed to remove block at height {}: original={}",
-                self.height, self.original_hash
+                "`prev_blockhash` doesn't match block at height {} ({})",
+                expected.height, expected.hash
             ),
         }
     }
 }
 
-impl core::error::Error for AlterCheckPointError {}
+impl core::error::Error for InsertBlockError {}
 
 /// Occurs when an update does not have a common checkpoint with the original chain.
 #[derive(Clone, Debug, PartialEq)]
