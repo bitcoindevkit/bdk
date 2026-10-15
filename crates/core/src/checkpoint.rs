@@ -149,11 +149,14 @@ impl<D> Drop for CPInner<D> {
 
 /// Trait that converts [`CheckPoint`] `data` to [`BlockHash`].
 ///
-/// Implementations of [`ToBlockHash`] must always return the block's consensus-defined hash. If
-/// your type contains extra fields (timestamps, metadata, etc.), these must be ignored. For
-/// example, [`BlockHash`] trivially returns itself, [`Header`] calls its `block_hash()`, and a
-/// wrapper type around a [`Header`] should delegate to the header's hash rather than derive one
-/// from other fields.
+/// Implementations of [`ToBlockHash`] must always return the block's consensus-defined hash. For
+/// example, [`BlockHash`] trivially returns itself and [`Header`] calls its `block_hash()`.
+///
+/// The data must be fully determined by its block hash: it may only contain a subset of what the
+/// block hash commits to, so two values with the same [`BlockHash`] are always identical.
+/// [`CheckPoint`] treats such values as interchangeable and may keep either one. Data that the
+/// block hash does not commit to (local metadata, the time a block was seen, etc.) must be stored
+/// outside of the checkpoint.
 pub trait ToBlockHash {
     /// Returns the [`BlockHash`] for the associated [`CheckPoint`] `data` type.
     fn to_blockhash(&self) -> BlockHash;
