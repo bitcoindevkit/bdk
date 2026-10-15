@@ -5,8 +5,8 @@ use std::ops::{Bound, RangeBounds};
 
 use bdk_chain::{
     local_chain::{
-        AlterCheckPointError, ApplyHeaderError, CannotConnectError, ChangeSet, CheckPoint,
-        LocalChain, MissingGenesisError,
+        AlterCheckPointError, ApplyBlockError, ApplyChangeSetError, ApplyHeaderError,
+        CannotConnectError, ChangeSet, CheckPoint, LocalChain, MissingGenesisError,
     },
     BlockId,
 };
@@ -564,6 +564,71 @@ fn local_chain_disconnect_from() {
             i, t.name
         );
     }
+}
+
+#[test]
+fn local_chain_apply_changeset_cannot_alter_genesis() {
+    let chain: LocalChain = local_chain![(0, hash!("G")), (1, hash!("A"))];
+    for (update_hash, changeset) in [
+        (
+            Some(hash!("not_G")),
+            ChangeSet::from([(0, Some(hash!("not_G")))]),
+        ),
+        (None, ChangeSet::from([(0, None)])),
+    ] {
+        let mut chain = chain.clone();
+        assert_eq!(
+            chain.apply_changeset(&changeset),
+            Err(ApplyChangeSetError::CannotAlterGenesis {
+                original_hash: hash!("G"),
+                update_hash,
+            }),
+        );
+        assert_eq!(chain, local_chain![(0, hash!("G")), (1, hash!("A"))]);
+    }
+
+    // A matching genesis entry is fine.
+    let mut chain = chain;
+    let changeset = ChangeSet::from([(0, Some(hash!("G"))), (2, Some(hash!("B")))]);
+    assert_eq!(chain.apply_changeset(&changeset), Ok(()));
+    assert_eq!(
+        chain,
+        local_chain![(0, hash!("G")), (1, hash!("A")), (2, hash!("B"))]
+    );
+}
+
+#[test]
+fn local_chain_apply_changeset_with_genesis_checks_prev_blockhash() {
+    let header = |prev_blockhash| Header {
+        version: bitcoin::block::Version::default(),
+        prev_blockhash,
+        merkle_root: bitcoin::hash_types::TxMerkleNode::all_zeros(),
+        time: 0,
+        bits: bitcoin::CompactTarget::default(),
+        nonce: 0,
+    };
+    let genesis = header(hash!("_"));
+    let (mut chain, _) = LocalChain::from_genesis(genesis);
+    let changeset = ChangeSet::from([(0, Some(genesis)), (1, Some(header(hash!("not_G"))))]);
+    assert_eq!(
+        chain.apply_changeset(&changeset),
+        Err(ApplyChangeSetError::PrevBlockhashMismatch {
+            expected: BlockId {
+                height: 0,
+                hash: genesis.block_hash(),
+            },
+        }),
+    );
+    assert_eq!(chain, LocalChain::from_genesis(genesis).0);
+}
+
+#[test]
+fn local_chain_from_changeset_without_genesis() {
+    let changeset: ChangeSet = [(0, None), (1, Some(hash!("A")))].into_iter().collect();
+    assert_eq!(
+        LocalChain::from_changeset(changeset),
+        Err(ApplyBlockError::MissingGenesis),
+    );
 }
 
 // Test that `apply_update` can connect 1 `Header` at a time
