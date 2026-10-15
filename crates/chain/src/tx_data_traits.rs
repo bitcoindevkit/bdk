@@ -65,22 +65,11 @@ use crate::{BlockId, ConfirmationBlockTime};
 pub trait Anchor: core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash::Hash {
     /// Returns the [`BlockId`] that the associated blockchain data is "anchored" in.
     fn anchor_block(&self) -> BlockId;
-
-    /// Get the height of the block that confirmed the associated chain data.
-    ///
-    /// This is the height of [`anchor_block`](Anchor::anchor_block).
-    fn confirmation_height(&self) -> u32 {
-        self.anchor_block().height
-    }
 }
 
 impl<A: Anchor> Anchor for &A {
     fn anchor_block(&self) -> BlockId {
         <A as Anchor>::anchor_block(self)
-    }
-
-    fn confirmation_height(&self) -> u32 {
-        <A as Anchor>::confirmation_height(self)
     }
 }
 

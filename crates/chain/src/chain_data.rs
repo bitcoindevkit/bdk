@@ -81,7 +81,7 @@ impl<A: Anchor> ChainPosition<A> {
     /// descendant, so the chain data may be confirmed in an earlier block.
     pub fn confirmation_height_upper_bound(&self) -> Option<u32> {
         match self {
-            ChainPosition::Confirmed { anchor, .. } => Some(anchor.confirmation_height()),
+            ChainPosition::Confirmed { anchor, .. } => Some(anchor.anchor_block().height),
             ChainPosition::Unconfirmed { .. } => None,
         }
     }

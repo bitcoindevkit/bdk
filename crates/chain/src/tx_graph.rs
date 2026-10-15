@@ -766,11 +766,11 @@ impl<A: Anchor> TxGraph<A> {
         // `txs_by_highest_conf_heights`.
         // We want to remove `(old_top_h?, txid)` and insert `(new_top_h?, txid)`.
         let mut old_top_h = None;
-        let mut new_top_h = anchor.confirmation_height();
+        let mut new_top_h = anchor.anchor_block().height;
 
         let is_changed = match self.anchors.entry(txid) {
             hash_map::Entry::Occupied(mut e) => {
-                old_top_h = e.get().iter().last().map(Anchor::confirmation_height);
+                old_top_h = e.get().iter().last().map(|a| a.anchor_block().height);
                 if let Some(old_top_h) = old_top_h {
                     if old_top_h > new_top_h {
                         new_top_h = old_top_h;
