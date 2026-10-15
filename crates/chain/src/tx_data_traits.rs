@@ -2,10 +2,8 @@ use crate::{BlockId, ConfirmationBlockTime};
 
 /// Trait that "anchors" blockchain data to a specific block of height and hash.
 ///
-/// If transaction A is anchored in block B, and block B is in the best chain, we can
-/// assume that transaction A is also confirmed in the best chain. This does not necessarily mean
-/// that transaction A is confirmed in block B. It could also mean transaction A is confirmed in a
-/// parent block of B.
+/// If transaction A is anchored in block B, then block B is the block that confirmed transaction
+/// A. If block B is in the best chain, transaction A is confirmed in the best chain.
 ///
 /// Every [`Anchor`] implementation must contain a [`BlockId`] parameter, and must implement
 /// [`Ord`]. When implementing [`Ord`], the anchors' [`BlockId`]s should take precedence
@@ -67,23 +65,11 @@ use crate::{BlockId, ConfirmationBlockTime};
 pub trait Anchor: core::fmt::Debug + Clone + Eq + PartialOrd + Ord + core::hash::Hash {
     /// Returns the [`BlockId`] that the associated blockchain data is "anchored" in.
     fn anchor_block(&self) -> BlockId;
-
-    /// Get the upper bound of the chain data's confirmation height.
-    ///
-    /// The default definition gives a pessimistic answer. This can be overridden by the `Anchor`
-    /// implementation for a more accurate value.
-    fn confirmation_height_upper_bound(&self) -> u32 {
-        self.anchor_block().height
-    }
 }
 
 impl<A: Anchor> Anchor for &A {
     fn anchor_block(&self) -> BlockId {
         <A as Anchor>::anchor_block(self)
-    }
-
-    fn confirmation_height_upper_bound(&self) -> u32 {
-        <A as Anchor>::confirmation_height_upper_bound(self)
     }
 }
 
@@ -96,10 +82,6 @@ impl Anchor for BlockId {
 impl Anchor for ConfirmationBlockTime {
     fn anchor_block(&self) -> BlockId {
         self.block_id
-    }
-
-    fn confirmation_height_upper_bound(&self) -> u32 {
-        self.block_id.height
     }
 }
 

@@ -131,11 +131,17 @@ impl<P: Ord> PartialOrd for CanonicalTxOut<P> {
 impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
     /// Whether the `txout` is considered mature.
     ///
-    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpreted confirmation count may be
-    /// less than the actual value.
+    /// A coinbase output is mature once a transaction spending it can be included in the block
+    /// after `tip`. Consensus requires the spending block to be at least [`COINBASE_MATURITY`]
+    /// blocks above the confirming block, so the output is mature once `tip` is at least
+    /// `COINBASE_MATURITY - 1` blocks above the confirming block. Non-coinbase outputs are always
+    /// mature.
     ///
-    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
+    /// If the position is confirmed [`transitively`](ChainPosition::Confirmed::transitively), the
+    /// confirmation height may be an upper bound (see [`confirmation_height_upper_bound`]), so
+    /// this method may return false-negatives.
+    ///
+    /// [`confirmation_height_upper_bound`]: ChainPosition::confirmation_height_upper_bound
     pub fn is_mature(&self, tip: u32) -> bool {
         if self.is_on_coinbase {
             let conf_height = match self.pos.confirmation_height_upper_bound() {
@@ -158,11 +164,11 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
     ///
     /// This method does not take into account the lock time.
     ///
-    /// Depending on the implementation of [`confirmation_height_upper_bound`] in [`Anchor`], this
-    /// method may return false-negatives. In other words, interpreted confirmation count may be
-    /// less than the actual value.
+    /// If the position is confirmed [`transitively`](ChainPosition::Confirmed::transitively), the
+    /// confirmation height may be an upper bound (see [`confirmation_height_upper_bound`]), so
+    /// this method may return false-negatives.
     ///
-    /// [`confirmation_height_upper_bound`]: Anchor::confirmation_height_upper_bound
+    /// [`confirmation_height_upper_bound`]: ChainPosition::confirmation_height_upper_bound
     pub fn is_confirmed_and_spendable(&self, tip: u32) -> bool {
         if !self.is_mature(tip) {
             return false;
@@ -569,6 +575,14 @@ impl<A: Anchor> CanonicalView<A> {
     /// added to the bucket matching its [`Eligibility`].
     ///
     /// See `classify_outpoints` for `does_taint` and `is_settled` meaning.
+    ///
+    /// The position of an output confirmed [`transitively`](ChainPosition::Confirmed::transitively)
+    /// carries a descendant's anchor, so its confirmation height may be an upper bound (see
+    /// [`confirmation_height_upper_bound`]). An `is_settled` that requires a minimum number of
+    /// confirmations may therefore count such an output as pending even though it actually has
+    /// enough.
+    ///
+    /// [`confirmation_height_upper_bound`]: ChainPosition::confirmation_height_upper_bound
     ///
     /// # Example
     ///
