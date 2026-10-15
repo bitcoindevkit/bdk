@@ -145,7 +145,7 @@ where
                 self,
                 start_time,
                 &mut inserted_txs,
-                request.iter_txids(),
+                request.drain_txids(),
                 parallel_requests,
             )
             .await?,
@@ -155,7 +155,7 @@ where
                 self,
                 start_time,
                 &mut inserted_txs,
-                request.iter_outpoints(),
+                request.drain_outpoints(),
                 parallel_requests,
             )
             .await?,
