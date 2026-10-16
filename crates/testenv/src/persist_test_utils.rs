@@ -8,9 +8,7 @@ use bdk_chain::{
 
 #[cfg(feature = "miniscript")]
 use bdk_chain::{indexer::keychain_txout, DescriptorExt, SpkIterator};
-use core::{cmp::PartialEq, fmt::Debug};
-
-use core::error::Error as Err;
+use core::{cmp::PartialEq, error::Error, fmt::Debug};
 
 use crate::utils::{create_test_tx, create_txout};
 
@@ -24,92 +22,63 @@ const ADDRS: [&str; 2] = [
 
 /// Asserts a persistence backend correctly stores and reloads a sequence of `ChangeSet`s.
 ///
-/// Checks that `load` always returns the merge of everything `persist`ed so far - including after
-/// the store is dropped and reopened. The backend is supplied as three closures:
+/// Persists every changeset, drops and reopens the store, then checks that `load` returns the merge
+/// of everything `persist`ed. The backend is supplied as three closures:
 ///
 /// - `init`: open-or-create a handle. This must never wipe existing data.
 /// - `load`: return the full persisted changeset (`C::default()` on a fresh store).
 /// - `persist`: durably write one changeset on top of what's stored; must survive the handle being
 ///   dropped.
 ///
-/// Returns `Err` naming the failing step if a closure errors or a load doesn't match the expected
-/// merge.
+/// # Panics
+///
+/// Panics naming the failing step if a closure errors or a load doesn't match the expected merge.
+#[track_caller]
 pub fn assert_persist_changesets<C, Store, Init, Load, Persist>(
     init: Init,
     load: Load,
     persist: Persist,
     changesets: &[C],
-) -> Result<(), String>
-where
+) where
     C: Debug + PartialEq + Default + Merge + Clone,
-    Init: Fn() -> Result<Store, Box<dyn Err>>,
-    Load: Fn(&mut Store) -> Result<C, Box<dyn Err>>,
-    Persist: Fn(&mut Store, &C) -> Result<(), Box<dyn Err>>,
+    Init: Fn() -> Result<Store, Box<dyn Error>>,
+    Load: Fn(&mut Store) -> Result<C, Box<dyn Error>>,
+    Persist: Fn(&mut Store, &C) -> Result<(), Box<dyn Error>>,
 {
+    let mut store = match init() {
+        Ok(store) => store,
+        Err(err) => panic!("Failed to initialize the store: {err}"),
+    };
+    let init_changeset = match load(&mut store) {
+        Ok(changeset) => changeset,
+        Err(err) => panic!("Failed to load from the new store: {err}"),
+    };
+    assert!(
+        init_changeset.is_empty(),
+        "Loading from a new store should return an empty changeset."
+    );
+
     let mut merged_changeset = C::default();
-    let mut store = init().map_err(|err| {
-        format!(
-            "Encountered an error from the persister while initializing the store.\nGot:\n{}",
-            err
-        )
-    })?;
-
-    let init_changeset = load(&mut store).map_err(|err| {
-        format!(
-            "Encountered an error from the persister while loading from the new store.\nGot:\n{}",
-            err
-        )
-    })?;
-
-    if init_changeset != C::default() {
-        Err("Loading from a new store should return an empty changeset.")?;
-    }
-
     for (i, changeset) in changesets.iter().enumerate() {
-        persist(&mut store, changeset).map_err(|err| {
-            format!(
-                "Persisting changeset no. {} failed. Got an error from the persister instead:\n{} ",
-                i + 1,
-                err
-            )
-        })?;
-
-        merged_changeset.merge(changeset.clone());
-
-        let persisted_changeset = load(&mut store).map_err(|err| format!("Encountered an error from the persister while loading (after persisting changeset no. {}).\nGot:\n {}", i+1, err))?;
-
-        if persisted_changeset != merged_changeset {
-            Err(format!(
-                "Persisting changeset no. {} failed.\nExpected:\n\n{:?}\n\n\nLoaded:\n\n{:?};",
-                i + 1,
-                merged_changeset,
-                persisted_changeset
-            ))?;
+        if let Err(err) = persist(&mut store, changeset) {
+            panic!("Failed to persist changeset no. {}: {err}", i + 1);
         }
+        merged_changeset.merge(changeset.clone());
     }
 
-    let mut store = init().map_err(|err| {
-        format!(
-            "Encountered an error while reopening the store.\nGot:\n{}",
-            err
-        )
-    })?;
-
-    let persisted_changeset = load(&mut store).map_err(|err| {
-        format!(
-            "Unable to load the persisted changeset after reopening the store.\nGot an error from the persister:\n{}",
-            err
-        )
-    })?;
-
-    if persisted_changeset != merged_changeset {
-        Err(format!(
-            "Did not get the expected changeset after reopening the store and loading.\nExpected:\n\n{:?}\n\n\nLoaded:\n\n{:?};",
-            merged_changeset, persisted_changeset
-        ))?;
-    }
-
-    Ok(())
+    drop(store);
+    let mut store = match init() {
+        Ok(store) => store,
+        Err(err) => panic!("Failed to reopen the store: {err}"),
+    };
+    let persisted_changeset = match load(&mut store) {
+        Ok(changeset) => changeset,
+        Err(err) => panic!("Failed to load after reopening the store: {err}"),
+    };
+    assert_eq!(
+        persisted_changeset, merged_changeset,
+        "Loaded changeset after reopening doesn't match what was persisted."
+    );
 }
 
 /// Get two [`tx_graph::ChangeSet`]s.

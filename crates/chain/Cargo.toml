@@ -30,7 +30,6 @@ proptest = "1.2.0"
 bdk_testenv = { path = "../testenv" } # `miniscript` is active by default
 criterion = { version = "0.7" }
 tempfile = "3"
-anyhow = "1"
 
 [features]
 default = ["std", "miniscript"]

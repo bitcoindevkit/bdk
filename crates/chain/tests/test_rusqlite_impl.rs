@@ -1,10 +1,9 @@
 #![cfg(feature = "rusqlite")]
-use anyhow::anyhow;
 use bdk_chain::{keychain_txout, local_chain, tx_graph, ConfirmationBlockTime};
 use bdk_testenv::persist_test_utils::*;
 
 #[test]
-fn txgraph_is_persisted() -> anyhow::Result<()> {
+fn txgraph_is_persisted() {
     let temp_dir = tempfile::tempdir().unwrap();
     let changesets = tx_graph_changesets();
     assert_persist_changesets(
@@ -27,13 +26,12 @@ fn txgraph_is_persisted() -> anyhow::Result<()> {
             Ok(())
         },
         &changesets,
-    )
-    .map_err(|err| anyhow!(err))
+    );
 }
 
 #[test]
 #[cfg(feature = "miniscript")]
-fn indexer_is_persisted() -> anyhow::Result<()> {
+fn indexer_is_persisted() {
     let temp_dir = tempfile::tempdir().unwrap();
     let changesets = keychain_txout_changesets();
     assert_persist_changesets(
@@ -56,12 +54,11 @@ fn indexer_is_persisted() -> anyhow::Result<()> {
             Ok(())
         },
         &changesets,
-    )
-    .map_err(|err| anyhow!(err))
+    );
 }
 
 #[test]
-fn local_chain_is_persisted() -> anyhow::Result<()> {
+fn local_chain_is_persisted() {
     let temp_dir = tempfile::tempdir().unwrap();
     let changesets = local_chain_changesets();
     assert_persist_changesets(
@@ -84,6 +81,5 @@ fn local_chain_is_persisted() -> anyhow::Result<()> {
             Ok(())
         },
         &changesets,
-    )
-    .map_err(|err| anyhow!(err))
+    );
 }
