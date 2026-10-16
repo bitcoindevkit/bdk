@@ -15,8 +15,6 @@ use core::time::Duration;
 use electrsd::bitcoind::mtype::GetBlockTemplate;
 use electrsd::bitcoind::{TemplateRequest, TemplateRules};
 
-extern crate alloc;
-
 pub use electrsd;
 pub use electrsd::bitcoind;
 pub use electrsd::bitcoind::anyhow;

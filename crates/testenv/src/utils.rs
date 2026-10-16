@@ -97,12 +97,12 @@ pub fn create_txout(sats: u64, addr: &str) -> TxOut {
 /// Utility function to create a transaction given txids, vouts of inputs and amounts (in satoshis),
 /// addresses of outputs.
 ///
-/// The locktime should be in the form given to `OP_CHEKCLOCKTIMEVERIFY`.
-pub fn create_test_tx(
+/// The locktime should be in the form given to `OP_CHECKLOCKTIMEVERIFY`.
+pub fn create_test_tx<'a>(
     txids: impl IntoIterator<Item = Txid>,
     vouts: impl IntoIterator<Item = u32>,
     amounts: impl IntoIterator<Item = u64>,
-    addrs: impl IntoIterator<Item = &'static str>,
+    addrs: impl IntoIterator<Item = &'a str>,
     version: transaction::Version,
     locktime: u32,
 ) -> Transaction {
@@ -116,7 +116,6 @@ pub fn create_test_tx(
         .map(|(amount, addr)| create_txout(amount, addr))
         .collect();
     let lock_time = absolute::LockTime::from_consensus(locktime);
-    assert_eq!(lock_time.to_consensus_u32(), locktime);
     Transaction {
         version,
         lock_time,

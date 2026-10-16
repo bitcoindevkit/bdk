@@ -29,5 +29,6 @@ download = ["electrsd/bitcoind_download", "electrsd/bitcoind_28_2", "electrsd/es
 std = ["bdk_chain/std", "bitcoin/rand-std"]
 serde = ["bdk_chain/serde"]
 miniscript = ["bdk_chain/miniscript"]
+
 [package.metadata.docs.rs]
 no-default-features = true

@@ -1,14 +1,14 @@
 //! This module provides utility functions for testing custom persistence backends.
 use crate::{block_id, hash};
-use alloc::sync::Arc;
 use bdk_chain::{
     bitcoin::{self, transaction::Version, OutPoint},
     local_chain, tx_graph, ConfirmationBlockTime, Merge,
 };
+use std::sync::Arc;
 
 #[cfg(feature = "miniscript")]
 use bdk_chain::{indexer::keychain_txout, DescriptorExt, SpkIterator};
-use core::{cmp::PartialEq, error::Error, fmt::Debug};
+use core::{error::Error, fmt::Debug};
 
 use crate::utils::{create_test_tx, create_txout};
 
@@ -151,8 +151,8 @@ pub fn keychain_txout_changesets() -> [keychain_txout::ChangeSet; 2] {
     use crate::utils::DESCRIPTORS;
     use keychain_txout::ChangeSet;
 
-    let descriptor_ids = DESCRIPTORS.map(|d| parse_descriptor(d).0.descriptor_id());
     let descs = DESCRIPTORS.map(|desc| parse_descriptor(desc).0);
+    let descriptor_ids = descs.each_ref().map(|d| d.descriptor_id());
 
     let changeset = ChangeSet {
         last_revealed: [(descriptor_ids[0], 1), (descriptor_ids[1], 100)].into(),
