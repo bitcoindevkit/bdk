@@ -64,8 +64,10 @@ struct BlockWithTime(u32, u32);
 
 impl ToBlockHash for BlockWithTime {
     fn to_blockhash(&self) -> BlockHash {
-        // Generate a deterministic hash from the height
-        let hash_bytes = bitcoin::hashes::sha256d::Hash::hash(&self.0.to_le_bytes());
+        // Commit to every field so the data is fully determined by its hash.
+        let mut bytes = self.0.to_le_bytes().to_vec();
+        bytes.extend(self.1.to_le_bytes());
+        let hash_bytes = bitcoin::hashes::sha256d::Hash::hash(&bytes);
         BlockHash::from_raw_hash(hash_bytes)
     }
 }
