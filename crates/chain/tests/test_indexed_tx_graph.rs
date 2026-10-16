@@ -12,8 +12,8 @@ use bdk_chain::{
 use bdk_testenv::{
     anyhow::{self},
     bitcoind::{Input, Output},
-    block_id, hash, spk,
-    utils::{new_tx, DESCRIPTORS},
+    block_id, hash,
+    utils::{new_tx, spk, DESCRIPTORS},
     TestEnv,
 };
 use bitcoin::{
@@ -53,7 +53,7 @@ fn relevant_conflicts() -> anyhow::Result<()> {
                 .address()?
                 .require_network(Network::Regtest)?;
 
-            let recv_spk = spk!();
+            let recv_spk = spk();
             let recv_addr = Address::from_script(&recv_spk, &bitcoin::params::REGTEST)?;
 
             let mut graph = SpkTxGraph::default();
