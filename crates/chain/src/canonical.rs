@@ -146,10 +146,10 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
         if self.is_on_coinbase {
             let conf_height = match self.pos.confirmation_height_upper_bound() {
                 Some(height) => height,
-                None => {
-                    debug_assert!(false, "coinbase tx can never be unconfirmed");
-                    return false;
-                }
+                // A coinbase can be canonical without us holding an anchor for it (i.e. it is an
+                // ancestor of a canonical tx, or is assumed canonical). With no known
+                // confirmation height, maturity cannot be proven.
+                None => return false,
             };
             let age = tip.saturating_sub(conf_height);
             if age + 1 < COINBASE_MATURITY {
