@@ -1,10 +1,11 @@
-use bdk_chain::bitcoin::{
-    self, absolute, transaction, Address, Amount, OutPoint, Transaction, TxIn, TxOut, Txid,
-};
-use core::str::FromStr;
-
 #[cfg(feature = "miniscript")]
 use bdk_chain::miniscript::{descriptor::KeyMap, Descriptor, DescriptorPublicKey};
+use bdk_chain::{bitcoin, BlockId};
+use bitcoin::{
+    absolute, absolute::LockTime, constants, hashes::Hash, transaction, transaction::Version,
+    Address, Amount, BlockHash, Network, OutPoint, Transaction, TxIn, TxOut, Txid,
+};
+use core::str::FromStr;
 
 #[allow(unused_macros)]
 #[macro_export]
@@ -73,13 +74,40 @@ macro_rules! changeset {
     }};
 }
 
+/// Generate a dummy script pubkey.
+#[allow(unused_macros)]
+#[macro_export]
+macro_rules! spk {
+    () => {{
+        let secp = bitcoin::secp256k1::Secp256k1::new();
+        let (x_only_pk, _) = bitcoin::secp256k1::SecretKey::new(&mut rand::thread_rng())
+            .public_key(&secp)
+            .x_only_public_key();
+        bitcoin::ScriptBuf::new_p2tr(&secp, x_only_pk, None)
+    }};
+}
+
 #[allow(unused)]
-pub fn new_tx(lt: u32) -> bitcoin::Transaction {
-    bitcoin::Transaction {
-        version: bitcoin::transaction::Version::non_standard(0x00),
-        lock_time: bitcoin::absolute::LockTime::from_consensus(lt),
+pub fn new_tx(lt: u32) -> Transaction {
+    Transaction {
+        version: Version::non_standard(0),
+        lock_time: LockTime::from_consensus(lt),
         input: vec![],
         output: vec![],
+    }
+}
+
+pub fn genesis_block_id() -> BlockId {
+    BlockId {
+        height: 0,
+        hash: constants::genesis_block(Network::Regtest).block_hash(),
+    }
+}
+
+pub fn tip_block_id(height: u32) -> BlockId {
+    BlockId {
+        height,
+        hash: BlockHash::all_zeros(),
     }
 }
 
