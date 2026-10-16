@@ -7,9 +7,9 @@ use bdk_chain::{
 };
 use bdk_testenv::{
     hash,
-    utils::{new_tx, DESCRIPTORS},
+    utils::{new_tx, spk_at_index, DESCRIPTORS},
 };
-use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxOut};
+use bitcoin::{Amount, OutPoint, ScriptBuf, Transaction, TxOut};
 use miniscript::{Descriptor, DescriptorPublicKey};
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
@@ -50,13 +50,6 @@ fn init_txout_index(
         .unwrap();
 
     txout_index
-}
-
-fn spk_at_index(descriptor: &Descriptor<DescriptorPublicKey>, index: u32) -> ScriptBuf {
-    descriptor
-        .derived_descriptor(&Secp256k1::verification_only(), index)
-        .expect("must derive")
-        .script_pubkey()
 }
 
 // We create two empty changesets lhs and rhs, we then insert various descriptors with various
