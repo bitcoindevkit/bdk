@@ -723,7 +723,7 @@ fn test_tx_conflict_handling() {
         let exp_txs = scenario
             .exp_chain_txs
             .iter()
-            .map(|&txid| *env.txid_to_name.get(txid).expect("txid must exist"))
+            .map(|&txid| *env.txids.get(txid).expect("txid must exist"))
             .collect::<BTreeSet<_>>();
         assert_eq!(
             txs, exp_txs,
@@ -739,7 +739,7 @@ fn test_tx_conflict_handling() {
             .exp_chain_txouts
             .iter()
             .map(|&(txid, vout)| OutPoint {
-                txid: *env.txid_to_name.get(txid).expect("txid must exist"),
+                txid: *env.txids.get(txid).expect("txid must exist"),
                 vout,
             })
             .collect::<BTreeSet<_>>();
@@ -757,7 +757,7 @@ fn test_tx_conflict_handling() {
             .exp_unspents
             .iter()
             .map(|&(txid, vout)| OutPoint {
-                txid: *env.txid_to_name.get(txid).expect("txid must exist"),
+                txid: *env.txids.get(txid).expect("txid must exist"),
                 vout,
             })
             .collect::<BTreeSet<_>>();
@@ -806,8 +806,8 @@ fn transitively_confirmed_tx_reports_descendant_anchor_height() {
             .with_anchors(vec![child_anchor]),
     ];
     let mut env = init_graph(templates);
-    let parent_txid = env.txid_to_name["parent"];
-    let child_txid = env.txid_to_name["child"];
+    let parent_txid = env.txids["parent"];
+    let child_txid = env.txids["child"];
 
     let parent_position = |tx_graph: &TxGraph<BlockId>| {
         chain
