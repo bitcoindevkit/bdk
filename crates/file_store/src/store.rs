@@ -603,38 +603,31 @@ mod test {
     }
 
     #[test]
-    fn txgraph_is_persisted() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let changesets = tx_graph_changesets();
-        assert_persist_changesets(
-            || Ok(Store::load_or_create(&TEST_MAGIC_BYTES, temp_dir.path().join("store.db"))?.0),
-            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
-            |db, changeset| Ok(db.append(changeset)?),
-            &changesets,
-        );
-    }
+    fn changesets_are_persisted() {
+        #[track_caller]
+        fn assert_store_persists<C>(changesets: &[C])
+        where
+            C: Merge
+                + serde::Serialize
+                + serde::de::DeserializeOwned
+                + Debug
+                + PartialEq
+                + Default
+                + Clone
+                + 'static,
+        {
+            let temp_dir = tempfile::tempdir().unwrap();
+            let path = temp_dir.path().join("store.db");
+            assert_persist_changesets(
+                || Ok(Store::load_or_create(&TEST_MAGIC_BYTES, &path)?.0),
+                |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+                |db, changeset| Ok(db.append(changeset)?),
+                changesets,
+            );
+        }
 
-    #[test]
-    fn indexer_is_persisted() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let changesets = keychain_txout_changesets();
-        assert_persist_changesets(
-            || Ok(Store::load_or_create(&TEST_MAGIC_BYTES, temp_dir.path().join("store.db"))?.0),
-            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
-            |db, changeset| Ok(db.append(changeset)?),
-            &changesets,
-        );
-    }
-
-    #[test]
-    fn local_chain_is_persisted() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let changesets = local_chain_changesets();
-        assert_persist_changesets(
-            || Ok(Store::load_or_create(&TEST_MAGIC_BYTES, temp_dir.path().join("store.db"))?.0),
-            |db| Ok(db.dump().map(Option::unwrap_or_default)?),
-            |db, changeset| Ok(db.append(changeset)?),
-            &changesets,
-        );
+        assert_store_persists(&tx_graph_changesets());
+        assert_store_persists(&keychain_txout_changesets());
+        assert_store_persists(&local_chain_changesets());
     }
 }
