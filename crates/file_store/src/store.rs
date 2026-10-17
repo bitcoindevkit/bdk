@@ -1,15 +1,18 @@
-use crate::{bincode_options, EntryIter, StoreError};
+use crate::{EntryIter, StoreError};
 use bdk_core::Merge;
-use bincode::Options;
 use std::{
     fmt::{self, Debug},
     fs::{File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, Write},
     marker::PhantomData,
     path::Path,
 };
 
 /// Persists an append-only list of changesets (`C`) to a single file.
+///
+/// After the magic bytes, each changeset is stored as a `postcard`-encoded `u64` varint length
+/// prefix followed by the `postcard`-encoded changeset. Files written by versions that used
+/// `bincode` cannot be read, so use new magic bytes when upgrading.
 ///
 /// > ⚠ This is a development/testing database. It does not natively support backwards compatible
 /// > BDK version upgrades so should not be used in production.
@@ -60,7 +63,7 @@ where
     ///
     /// If there exist changesets in the file, [`load`] will try to aggregate them in
     /// a single changeset to verify their integrity. If aggregation fails
-    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::Bincode`] error variant in
+    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::Decode`] error variant in
     /// its error field and the aggregated changeset so far in the changeset field.
     ///
     /// To get a new working file store from this error use [`Store::create`] and [`Store::append`]
@@ -178,7 +181,7 @@ where
     ///
     /// If there exist changesets in the file, [`dump`] will try to aggregate them in a single
     /// changeset. If aggregation fails [`StoreErrorWithDump`] will be returned with the
-    /// [`StoreError::Bincode`] error variant in its error field and the aggregated changeset so
+    /// [`StoreError::Decode`] error variant in its error field and the aggregated changeset so
     /// far in the changeset field.
     ///
     /// [`dump`]: Store::dump
@@ -230,6 +233,10 @@ where
     /// not needed because file pointer is always moved to the end of the last decodable data from
     /// beginning to end.
     ///
+    /// Before writing, valid changesets appended through other handles to the same file since this
+    /// handle last read or wrote are skipped over, so they are not overwritten. Concurrent writes
+    /// are still not synchronized.
+    ///
     /// If multiple garbage writes are produced on the file, the next load will only retrieve the
     /// first chunk of valid changesets.
     ///
@@ -242,14 +249,27 @@ where
             return Ok(());
         }
 
-        bincode_options()
-            .serialize_into(&mut self.db_file, changeset)
-            .map_err(|e| match *e {
-                bincode::ErrorKind::Io(error) => error,
-                unexpected_err => panic!("unexpected bincode error: {unexpected_err}"),
-            })?;
+        // Skip over valid entries that other handles appended since this handle's cursor was last
+        // synced, so we never overwrite them. `EntryIter` leaves the cursor right after the last
+        // decodable entry, or at the start of an undecodable one, so trailing garbage is handled
+        // as before.
+        let pos = self.db_file.stream_position()?;
+        for entry in EntryIter::<C>::new(pos, &mut self.db_file) {
+            match entry {
+                Ok(_) => {}
+                // A real I/O failure means we cannot tell where the valid data ends.
+                Err(StoreError::Io(error)) => return Err(error),
+                // Undecodable or partial entry: write from here, as before.
+                Err(_) => break,
+            }
+        }
 
-        Ok(())
+        // Each entry is a `postcard` varint length prefix followed by the `postcard` payload,
+        // written in one call.
+        let payload = postcard::to_allocvec(changeset).map_err(io::Error::other)?;
+        let mut frame = postcard::to_allocvec(&(payload.len() as u64)).map_err(io::Error::other)?;
+        frame.extend_from_slice(&payload);
+        self.db_file.write_all(&frame)
     }
 }
 
@@ -296,6 +316,14 @@ mod test {
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
 
     type TestChangeSet = BTreeSet<String>;
+
+    /// The bytes [`Store::append`] writes for `changeset`: varint length prefix + payload.
+    fn frame(changeset: &TestChangeSet) -> Vec<u8> {
+        let payload = postcard::to_allocvec(changeset).unwrap();
+        let mut frame = postcard::to_allocvec(&(payload.len() as u64)).unwrap();
+        frame.extend_from_slice(&payload);
+        frame
+    }
 
     /// Check behavior of [`Store::create`] and [`Store::load`].
     #[test]
@@ -369,7 +397,7 @@ mod test {
         match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, file_path) {
             Err(StoreErrorWithDump {
                 changeset,
-                error: StoreError::Bincode(_),
+                error: StoreError::Decode(_),
             }) => {
                 assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
@@ -397,7 +425,7 @@ mod test {
         match store.dump() {
             Err(StoreErrorWithDump {
                 changeset,
-                error: StoreError::Bincode(_),
+                error: StoreError::Decode(_),
             }) => {
                 assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
@@ -474,7 +502,7 @@ mod test {
             TestChangeSet::from(["4".into(), "5".into(), "6".into()]),
         ];
         let last_changeset = TestChangeSet::from(["7".into(), "8".into(), "9".into()]);
-        let last_changeset_bytes = bincode_options().serialize(&last_changeset).unwrap();
+        let last_changeset_bytes = frame(&last_changeset);
 
         for short_write_len in 1..last_changeset_bytes.len() - 1 {
             let file_path = temp_dir.path().join(format!("{short_write_len}.dat"));
@@ -542,6 +570,178 @@ mod test {
                 );
             }
         }
+    }
+
+    /// Appending after a failed `dump` must still write at the start of the undecodable data, not
+    /// after it, so the new changeset stays reachable.
+    #[test]
+    fn append_after_failed_dump_writes_at_start_of_garbage() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let changeset1 = TestChangeSet::from(["a".to_string()]);
+        let changeset2 = TestChangeSet::from(["b".to_string()]);
+
+        let mut store =
+            Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
+        store.append(&changeset1).expect("must append");
+        store
+            .db_file
+            .write_all(&[255_u8; 20])
+            .expect("should write");
+        store.dump().expect_err("must fail on garbage");
+
+        store.append(&changeset2).expect("must append");
+        drop(store);
+
+        let err = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path)
+            .expect_err("leftover garbage must still fail to load");
+        let mut expected = changeset1;
+        expected.extend(changeset2);
+        assert_eq!(err.changeset, Some(Box::new(expected)));
+    }
+
+    /// A partial trailing entry written by another handle ends the catch-up scan; the append then
+    /// starts at that point, as it did before the scan existed.
+    #[test]
+    fn append_over_partial_trailing_entry_from_other_handle() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let changeset1 = TestChangeSet::from(["a".to_string()]);
+        let changeset2 = TestChangeSet::from(["b".to_string()]);
+        let torn = frame(&TestChangeSet::from(["zzzzzz".to_string()]));
+
+        let mut first =
+            Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
+        first.append(&changeset1).expect("must append");
+        let (mut second, _) =
+            Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).expect("must load");
+        first.db_file.write_all(&torn[..2]).expect("should write");
+
+        second.append(&changeset2).expect("must append");
+        drop((first, second));
+
+        let (_, recovered) =
+            Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).expect("must load");
+        let mut expected = changeset1;
+        expected.extend(changeset2);
+        assert_eq!(recovered, Some(expected));
+    }
+
+    /// After `append` the cursor must sit right after the new entry, both for a single handle and
+    /// for a handle that had to skip entries written by another one.
+    #[test]
+    fn append_leaves_cursor_after_new_entry() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let file_len = || fs::metadata(&file_path).unwrap().len();
+
+        let mut first =
+            Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
+        first.append(&TestChangeSet::from(["a".into()])).unwrap();
+        assert_eq!(first.db_file.stream_position().unwrap(), file_len());
+
+        let (mut second, _) =
+            Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).expect("must load");
+        first.append(&TestChangeSet::from(["b".into()])).unwrap();
+        assert_eq!(first.db_file.stream_position().unwrap(), file_len());
+
+        second.append(&TestChangeSet::from(["c".into()])).unwrap();
+        assert_eq!(second.db_file.stream_position().unwrap(), file_len());
+    }
+
+    /// An I/O error while scanning must be returned, not ignored, and nothing may be written.
+    #[test]
+    fn append_returns_io_error_from_scan() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let changeset = TestChangeSet::from(["a".to_string()]);
+
+        let mut store =
+            Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
+        store.append(&changeset).expect("must append");
+        let bytes_before = fs::read(&file_path).unwrap();
+
+        // A write-only handle cannot be read, so the scan fails with an I/O error.
+        store.db_file = OpenOptions::new().write(true).open(&file_path).unwrap();
+        store
+            .append(&TestChangeSet::from(["b".to_string()]))
+            .expect_err("scan error must be returned");
+
+        assert_eq!(fs::read(&file_path).unwrap(), bytes_before);
+    }
+
+    /// Write `bytes` after the magic bytes of a fresh file and try to load it.
+    fn load_raw(bytes: &[u8]) -> Result<(Store<TestChangeSet>, Option<TestChangeSet>), StoreError> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        fs::write(&file_path, [&TEST_MAGIC_BYTES[..], bytes].concat()).unwrap();
+        Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).map_err(|e| e.error)
+    }
+
+    /// The length prefix is 1 byte below 128 and 2 bytes from 128 on; both must round-trip.
+    #[test]
+    fn roundtrip_at_varint_length_boundaries() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        // a one-entry set encodes as: count (1 byte) + string length (1 byte) + the string
+        let overhead = postcard::to_allocvec(&TestChangeSet::from([String::new()]))
+            .unwrap()
+            .len();
+
+        let mut store = Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).unwrap();
+        let mut expected = TestChangeSet::new();
+        for payload_len in [127_usize, 128] {
+            let changeset = TestChangeSet::from(["x".repeat(payload_len - overhead)]);
+            assert_eq!(
+                postcard::to_allocvec(&changeset).unwrap().len(),
+                payload_len
+            );
+            store.append(&changeset).unwrap();
+            expected.extend(changeset);
+        }
+        drop(store);
+
+        let (_, recovered) = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).unwrap();
+        assert_eq!(recovered, Some(expected));
+    }
+
+    /// A corrupt, huge length prefix must be reported as a decode error, not panic or abort.
+    #[test]
+    fn load_fails_on_oversized_length_prefix() {
+        let bytes = postcard::to_allocvec(&u64::MAX).unwrap();
+        assert!(matches!(
+            load_raw(&bytes),
+            Err(StoreError::Decode(
+                postcard::Error::DeserializeUnexpectedEnd
+            ))
+        ));
+    }
+
+    /// Bytes left in a frame after the payload decoded are corruption.
+    #[test]
+    fn load_fails_on_trailing_bytes_in_frame() {
+        let mut payload =
+            postcard::to_allocvec(&TestChangeSet::from(["hello".to_string()])).unwrap();
+        payload.extend_from_slice(&[0xaa, 0xbb]);
+        let mut bytes = postcard::to_allocvec(&(payload.len() as u64)).unwrap();
+        bytes.extend_from_slice(&payload);
+        assert!(matches!(load_raw(&bytes), Err(StoreError::Decode(_))));
+    }
+
+    /// A length prefix cut short by the end of the file is a torn entry, and so is one that never
+    /// terminates.
+    #[test]
+    fn load_fails_on_torn_or_overlong_length_prefix() {
+        assert!(matches!(
+            load_raw(&[0x80]),
+            Err(StoreError::Decode(
+                postcard::Error::DeserializeUnexpectedEnd
+            ))
+        ));
+        assert!(matches!(
+            load_raw(&[0xff; 10]),
+            Err(StoreError::Decode(postcard::Error::DeserializeBadVarint))
+        ));
     }
 
     #[test]
