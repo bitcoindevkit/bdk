@@ -24,7 +24,8 @@ pub trait EsploraExt {
     /// `request` provides the data required to perform a script-pubkey-based full scan
     /// (see [`FullScanRequest`]). The full scan for each keychain (`K`) stops after a gap of
     /// `stop_gap` script pubkeys with no associated transactions. `parallel_requests` specifies
-    /// the maximum number of HTTP requests to make in parallel.
+    /// the maximum number of HTTP requests to make in parallel. A `parallel_requests` of 0 is
+    /// treated as 1.
     ///
     /// Refer to [crate-level docs](crate) for more.
     fn full_scan<K: Ord + Clone, R: Into<FullScanRequest<K>>>(
@@ -38,7 +39,7 @@ pub trait EsploraExt {
     ///
     /// `request` provides the data required to perform a script-pubkey-based sync (see
     /// [`SyncRequest`]). `parallel_requests` specifies the maximum number of HTTP requests to make
-    /// in parallel.
+    /// in parallel. A `parallel_requests` of 0 is treated as 1.
     ///
     /// Refer to [crate-level docs](crate) for more.
     fn sync<I: 'static, R: Into<SyncRequest<I>>>(
@@ -290,6 +291,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
     let mut consecutive_unused = 0usize;
     // Treat stop_gap = 0 as 1 while preserving original semantics for other values.
     let gap_limit = stop_gap.max(1);
+    let parallel_requests = parallel_requests.max(1);
 
     loop {
         let handles = keychain_spks
@@ -401,6 +403,7 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
         .filter(|txid| !inserted_txs.contains(txid))
         .collect::<Vec<Txid>>()
         .into_iter();
+    let parallel_requests = parallel_requests.max(1);
     loop {
         let handles = txids
             .by_ref()
@@ -447,6 +450,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     outpoints: I,
     parallel_requests: usize,
 ) -> Result<TxUpdate<ConfirmationBlockTime>, Error> {
+    let parallel_requests = parallel_requests.max(1);
     let outpoints = outpoints.into_iter().collect::<Vec<_>>();
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
 
