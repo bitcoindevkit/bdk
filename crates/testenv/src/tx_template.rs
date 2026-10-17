@@ -1,6 +1,4 @@
-#![cfg(feature = "miniscript")]
-
-use bdk_testenv::utils::DESCRIPTORS;
+use crate::utils::DESCRIPTORS;
 use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 
@@ -27,7 +25,6 @@ pub struct TxTemplate<'a, A> {
     pub assume_canonical: bool,
 }
 
-#[allow(dead_code)]
 pub enum TxInTemplate<'a> {
     /// This will give a random txid and vout.
     Bogus,
@@ -45,14 +42,12 @@ pub struct TxOutTemplate {
     pub spk_index: Option<u32>, // some = get spk from SpkTxOutIndex, none = random spk
 }
 
-#[allow(unused)]
 impl TxOutTemplate {
     pub fn new(value: u64, spk_index: Option<u32>) -> Self {
         TxOutTemplate { value, spk_index }
     }
 }
 
-#[allow(dead_code)]
 pub struct TxTemplateEnv<'a, A> {
     pub tx_graph: TxGraph<A>,
     pub indexer: SpkTxOutIndex<u32>,
@@ -60,7 +55,7 @@ pub struct TxTemplateEnv<'a, A> {
     pub canonicalization_params: CanonicalParams,
 }
 
-#[allow(dead_code)]
+/// Build a [`TxGraph`] and associated indexer from a series of [`TxTemplate`]s.
 pub fn init_graph<'a, A: Anchor + Clone + 'a>(
     tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
 ) -> TxTemplateEnv<'a, A> {

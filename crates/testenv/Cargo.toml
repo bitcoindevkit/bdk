@@ -19,6 +19,8 @@ workspace = true
 bdk_chain = { path = "../chain", version = "0.23.1", default-features = false }
 electrsd = { version = "0.38.0", features = [ "legacy" ], default-features = false }
 bitcoin = { version = "0.32.0", default-features = false }
+miniscript = { version = "13.0.0", optional = true, default-features = false }
+rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
 bdk_testenv = { path = "." }
@@ -28,6 +30,7 @@ default = ["std", "download"]
 download = ["electrsd/bitcoind_download", "electrsd/bitcoind_28_2", "electrsd/esplora_a33e97e1"]
 std = ["bdk_chain/std", "bitcoin/rand-std"]
 serde = ["bdk_chain/serde"]
+miniscript = ["dep:miniscript", "bdk_chain/miniscript", "rand"]
 
 [package.metadata.docs.rs]
 no-default-features = true

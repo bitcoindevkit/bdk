@@ -2,6 +2,9 @@
 
 pub mod utils;
 
+#[cfg(feature = "miniscript")]
+pub mod tx_template;
+
 use anyhow::Context;
 use bdk_chain::bitcoin::{
     block::Header, hash_types::TxMerkleNode, hex::FromHex, script::PushBytesBuf, transaction,
