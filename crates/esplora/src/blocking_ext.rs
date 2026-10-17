@@ -266,7 +266,12 @@ fn chain_update(
 
     // insert the most recent blocks at the tip to make sure we update the tip and make the update
     // robust.
-    for (&height, &hash) in latest_blocks.iter() {
+    //
+    // Height 0 is skipped: genesis stays immutable in a `CheckPoint`, so an entry agreeing with our
+    // genesis is a no-op while one disagreeing with it panics `insert`, poisoning every later sync.
+    // A server on a different chain is still rejected above, where we fail to find a point of
+    // agreement.
+    for (&height, &hash) in latest_blocks.range(1..) {
         tip = tip.insert(height, hash);
     }
 
@@ -568,6 +573,34 @@ mod test {
         assert!(
             matches!(*res.unwrap_err(), Error::HeaderHashNotFound(hash) if hash == genesis_hash),
             "`chain_update` should error if it can't connect to the local CP",
+        );
+
+        Ok(())
+    }
+
+    // Test that `chain_update` does not panic when the `/blocks` response carries a height-0
+    // entry conflicting with the local genesis.
+    // See <https://github.com/bitcoindevkit/bdk/issues/2341>.
+    #[test]
+    fn test_chain_update_ignores_genesis_in_latest_blocks() -> anyhow::Result<()> {
+        // `latest_blocks` covers the local tip height, so no request is made.
+        let client = Builder::new("http://127.0.0.1:1").build_blocking();
+
+        let genesis_hash: BlockHash = h!("genesis");
+        let block_1_hash: BlockHash = h!("block 1");
+        let local_tip = bdk_chain::CheckPoint::new(0, genesis_hash)
+            .push(1, block_1_hash)
+            .expect("height is above genesis");
+
+        let latest_blocks = BTreeMap::from([(0, h!("other genesis")), (1, block_1_hash)]);
+
+        let update = chain_update(&client, &latest_blocks, &local_tip, &BTreeSet::new())?;
+
+        assert_eq!(update.height(), 1);
+        assert_eq!(
+            update.get(0).map(|cp| cp.hash()),
+            Some(genesis_hash),
+            "the local genesis must be left untouched",
         );
 
         Ok(())
