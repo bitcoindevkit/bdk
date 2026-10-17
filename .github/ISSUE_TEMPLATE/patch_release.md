@@ -23,21 +23,9 @@ assignees: ''
 
 ### Checklist
 
-Release numbering must follow [Semantic Versioning]. These steps assume the current `master`
-branch **development** version is *MAJOR.MINOR.PATCH*.
+Release numbering must follow [Semantic Versioning]. These steps assume the current `release/MAJOR.MINOR` branch version is *MAJOR.MINOR.PATCH*. The `master` branch stays on its *MAJOR.MINOR+1.0-alpha.0* development version and is not bumped for patch releases.
 
 ### On the day of the patch release
-
-Change the `master` branch to the new PATCH+1 version:
-
-- [ ] Switch to the `master` branch.
-- [ ] Create a new PR branch called `bump_dev_MAJOR_MINOR_PATCH+1`, eg. `bump_dev_0_22_1`.
-- [ ] Bump the `bump_dev_MAJOR_MINOR` branch to the next development PATCH+1 version.
-  - Change the `Cargo.toml` version value to `MAJOR.MINOR.PATCH+1`.
-  - Update the `CHANGELOG.md` file.
-  - The commit message should be "Bump version to MAJOR.MINOR.PATCH+1".
-- [ ] Create PR and merge the `bump_dev_MAJOR_MINOR_PATCH+1` branch to `master`.
-  - Title PR "Bump version to MAJOR.MINOR.PATCH+1".
 
 Cherry-pick, tag and publish new PATCH+1 release:
 
@@ -46,6 +34,7 @@ Cherry-pick, tag and publish new PATCH+1 release:
 - [ ] Verify fixes in `release/MAJOR.MINOR` branch.
 - [ ] Bump the `release/MAJOR.MINOR.PATCH+1` branch to `MAJOR.MINOR.PATCH+1` version.
   - Change the `Cargo.toml` version value to `MAJOR.MINOR.MINOR.PATCH+1`.
+  - Update the `CHANGELOG.md` file.
   - The commit message should be "Bump version to MAJOR.MINOR.PATCH+1".
 - [ ] Add a tag to the `HEAD` commit in the `release/MAJOR.MINOR` branch.
   - The tag name should be `vMAJOR.MINOR.PATCH+1`
