@@ -451,7 +451,8 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
 
     // make sure txs exists in graph and tx statuses are updated
-    // TODO: We should maintain a tx cache (like we do with Electrum).
+    // TODO: The per-outpoint get_output_status round trips can be optimized.
+    // A tx cache does not apply in this scenario.
     update.extend(fetch_txs_with_txids(
         client,
         start_time,
