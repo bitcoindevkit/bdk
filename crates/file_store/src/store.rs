@@ -443,6 +443,29 @@ mod test {
     }
 
     #[test]
+    fn load_returns_error_on_oversized_length_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+
+        // Build a file with valid magic followed by a crafted bincode payload:
+        //   - 1 byte: BTreeSet length = 1 element
+        //   - 1 byte: bincode varint tag 253 => u64 follows
+        //   - 8 bytes: String length = u64::MAX (little-endian)
+        // Before the fix this would panic with "capacity overflow".
+        let mut bytes = TEST_MAGIC_BYTES.to_vec();
+        bytes.push(1); // BTreeSet length: 1 element
+        bytes.push(253); // bincode varint tag: u64 follows
+        bytes.extend_from_slice(&u64::MAX.to_le_bytes()); // String length: u64::MAX
+        fs::write(&path, &bytes).unwrap();
+
+        let result = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &path);
+        assert!(
+            result.is_err(),
+            "load should fail with an error, not panic"
+        );
+    }
+
+    #[test]
     fn load_or_create() {
         let temp_dir = tempfile::tempdir().unwrap();
         let file_path = temp_dir.path().join("db_file");
