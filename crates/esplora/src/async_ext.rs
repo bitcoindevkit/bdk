@@ -29,6 +29,29 @@ pub trait EsploraAsyncExt {
     /// `stop_gap` script pubkeys with no associated transactions. `parallel_requests` specifies
     /// the maximum number of HTTP requests to make in parallel.
     ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bdk_core::bitcoin::{constants, Network};
+    /// use bdk_core::spk_client::FullScanRequest;
+    /// use bdk_core::CheckPoint;
+    /// use bdk_esplora::{esplora_client, EsploraAsyncExt};
+    ///
+    /// # async fn example() -> Result<(), bdk_esplora::Error> {
+    /// let client = esplora_client::Builder::new("https://blockstream.info/api").build_async()?;
+    ///
+    /// let request = FullScanRequest::<&str>::builder()
+    ///     .chain_tip(CheckPoint::new(
+    ///         0,
+    ///         constants::genesis_block(Network::Bitcoin).block_hash(),
+    ///     ))
+    ///     .build();
+    ///
+    /// let response = client.full_scan(request, 10, 5).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
     /// Refer to [crate-level docs](crate) for more.
     async fn full_scan<K: Ord + Clone + Send, R: Into<FullScanRequest<K>> + Send>(
         &self,
@@ -42,6 +65,25 @@ pub trait EsploraAsyncExt {
     /// `request` provides the data required to perform a script-pubkey-based sync (see
     /// [`SyncRequest`]). `parallel_requests` specifies the maximum number of HTTP requests to make
     /// in parallel.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bdk_core::bitcoin::ScriptBuf;
+    /// use bdk_core::spk_client::SyncRequest;
+    /// use bdk_esplora::{esplora_client, EsploraAsyncExt};
+    ///
+    /// # async fn example() -> Result<(), bdk_esplora::Error> {
+    /// let client = esplora_client::Builder::new("https://blockstream.info/api").build_async()?;
+    ///
+    /// let request = SyncRequest::builder()
+    ///     .spks([ScriptBuf::new_op_return(&[0x00; 20])])
+    ///     .build();
+    ///
+    /// let response = client.sync(request, 5).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// Refer to [crate-level docs](crate) for more.
     async fn sync<I: Send, R: Into<SyncRequest<I>> + Send>(
