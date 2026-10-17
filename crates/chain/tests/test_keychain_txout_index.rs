@@ -139,7 +139,7 @@ fn test_set_all_derivation_indices() {
     ]
     .into();
     assert_eq!(
-        txout_index.reveal_to_target_multi(&derive_to),
+        txout_index.reveal_to_target_multi(derive_to.clone()),
         ChangeSet {
             last_revealed: last_revealed.clone(),
             spk_cache: spk_cache.clone(),
@@ -147,7 +147,7 @@ fn test_set_all_derivation_indices() {
     );
     assert_eq!(txout_index.last_revealed_indices(), derive_to);
     assert_eq!(
-        txout_index.reveal_to_target_multi(&derive_to),
+        txout_index.reveal_to_target_multi(derive_to.clone()),
         ChangeSet::default(),
         "no changes if we set to the same thing"
     );
