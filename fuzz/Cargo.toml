@@ -1,0 +1,37 @@
+[package]
+name = "bdk_fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+bdk_chain = { path = "../crates/chain" }
+arbitrary = { version = "1.4.1", features = ["derive"] }
+libfuzzer-sys = { version = "0.4", optional = true }
+honggfuzz = { version = "0.5.61", optional = true }
+afl = { version = "0.18.2", optional = true }
+
+[features]
+afl_fuzz = ["afl"]
+honggfuzz_fuzz = ["honggfuzz"]
+libfuzzer_fuzz = ["libfuzzer-sys"]
+
+[[bin]]
+name = "local_chain_apply_update"
+path = "fuzz_targets/chain/local_chain_apply_update.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "local_chain_apply_update_header"
+path = "fuzz_targets/chain/local_chain_apply_update_header.rs"
+test = false
+doc = false
+bench = false
