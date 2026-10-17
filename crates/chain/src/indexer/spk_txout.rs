@@ -193,11 +193,15 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
         &self.spks
     }
 
-    /// Adds a script pubkey to scan for. Returns `false` and does nothing if spk already exists in
-    /// the map
+    /// Adds a script pubkey to scan for.
     ///
-    /// the index will look for outputs spending to this spk whenever it scans new data.
+    /// The indexer will look for outputs spending to this spk whenever it scans new data.
+    ///
+    /// Returns `false` and does nothing if the script pubkey or index already exists.
     pub fn insert_spk(&mut self, index: I, spk: ScriptBuf) -> bool {
+        if self.spks.contains_key(&index) {
+            return false;
+        }
         match self.spk_indices.entry(spk.clone()) {
             Entry::Vacant(value) => {
                 value.insert(index.clone());
