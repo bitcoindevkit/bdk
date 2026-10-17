@@ -1253,6 +1253,55 @@ fn insert_anchor_without_tx() {
 }
 
 #[test]
+fn insert_anchor_keeps_one_index_entry_at_highest_block_height() {
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+    let mut recovered = TxGraph::default();
+    let txid = new_tx(42).compute_txid();
+    let other_txid = new_tx(43).compute_txid();
+    let other_anchor = ConfirmationBlockTime {
+        block_id: block_id!(95, "other"),
+        confirmation_time: 0,
+    };
+    recovered.apply_changeset(graph.insert_anchor(other_txid, other_anchor));
+
+    // Include a lower anchor, a new highest anchor, a same-height fork, and a duplicate.
+    // Timestamps deliberately do not follow block height order.
+    for (height, block, time, expected_height, is_new) in [
+        (100, "A", 30, 100, true),
+        (90, "B", 80, 100, true),
+        (110, "C", 20, 110, true),
+        (110, "D", 10, 110, true),
+        (110, "C", 20, 110, false),
+    ] {
+        let anchor = ConfirmationBlockTime {
+            block_id: BlockId {
+                height,
+                hash: BlockHash::hash(block.as_bytes()),
+            },
+            confirmation_time: time,
+        };
+        let changeset = graph.insert_anchor(txid, anchor);
+        assert_eq!(changeset.anchors.contains(&(anchor, txid)), is_new);
+        assert_eq!(changeset.is_empty(), !is_new);
+        recovered.apply_changeset(changeset);
+
+        let expected = vec![(expected_height, txid), (95, other_txid)];
+        assert_eq!(
+            graph
+                .txids_by_descending_anchor_height()
+                .collect::<Vec<_>>(),
+            expected,
+        );
+        assert_eq!(
+            recovered
+                .txids_by_descending_anchor_height()
+                .collect::<Vec<_>>(),
+            expected,
+        );
+    }
+}
+
+#[test]
 /// The `map_anchors` allow a caller to pass a function to reconstruct the [`TxGraph`] with any
 /// [`Anchor`], even though the function is non-deterministic.
 fn call_map_anchors_with_non_deterministic_anchor() {

@@ -503,4 +503,46 @@ mod tests {
         // Should be confirmed (anchored)
         assert!(matches!(canon_tx.pos, ChainPosition::Confirmed { .. }));
     }
+
+    #[test]
+    fn leftover_uses_highest_anchor_block_height() {
+        let tx = bitcoin::Transaction {
+            version: bitcoin::transaction::Version::ONE,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: bitcoin::OutPoint::new(Txid::all_zeros(), 0),
+                ..Default::default()
+            }],
+            output: vec![TxOut {
+                value: bitcoin::Amount::from_sat(1000),
+                script_pubkey: bitcoin::ScriptBuf::new(),
+            }],
+        };
+        let txid = tx.compute_txid();
+        let mut tx_graph = TxGraph::<crate::ConfirmationBlockTime>::default();
+        let _ = tx_graph.insert_tx(tx);
+        // The highest timestamp and the last insertion are both at lower block heights.
+        for (height, confirmation_time) in [(100, 30), (110, 20), (90, 80)] {
+            let _ = tx_graph.insert_anchor(
+                txid,
+                crate::ConfirmationBlockTime {
+                    block_id: BlockId {
+                        height,
+                        hash: BlockHash::from_byte_array([height as u8; 32]),
+                    },
+                    confirmation_time,
+                },
+            );
+        }
+
+        let mut task = CanonicalTask::new(&tx_graph, BlockId::default(), Default::default());
+        assert!(task.next_query().is_some());
+        // None of the anchors is in the best chain, so the tx is processed as a leftover.
+        task.resolve_query(None);
+        assert!(task.next_query().is_none());
+        assert_eq!(
+            task.canonical.get(&txid).unwrap().1,
+            CanonicalReason::from_observed_in(ObservedIn::Block(110)),
+        );
+    }
 }
