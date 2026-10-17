@@ -26,6 +26,11 @@ pub trait EsploraExt {
     /// `stop_gap` script pubkeys with no associated transactions. `parallel_requests` specifies
     /// the maximum number of HTTP requests to make in parallel.
     ///
+    /// Previous outputs reported by the server are returned in `tx_update.txouts`
+    /// without verifying their values or scripts against full parent transactions.
+    /// See the [trust assumptions](crate#trust-assumptions) before relying on
+    /// fee or sent/received calculations using these outputs.
+    ///
     /// Refer to [crate-level docs](crate) for more.
     fn full_scan<K: Ord + Clone, R: Into<FullScanRequest<K>>>(
         &self,
@@ -39,6 +44,11 @@ pub trait EsploraExt {
     /// `request` provides the data required to perform a script-pubkey-based sync (see
     /// [`SyncRequest`]). `parallel_requests` specifies the maximum number of HTTP requests to make
     /// in parallel.
+    ///
+    /// Previous outputs reported by the server are returned in `tx_update.txouts`
+    /// without verifying their values or scripts against full parent transactions.
+    /// See the [trust assumptions](crate#trust-assumptions) before relying on
+    /// fee or sent/received calculations using these outputs.
     ///
     /// Refer to [crate-level docs](crate) for more.
     fn sync<I: 'static, R: Into<SyncRequest<I>>>(
