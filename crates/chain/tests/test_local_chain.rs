@@ -490,6 +490,52 @@ fn local_chain_insert_header() {
     }
 }
 
+/// `insert_block` must surface `PrevBlockhashMismatch` with the insert height and
+/// attempted hash, not a fake genesis removal error.
+#[test]
+fn insert_block_prev_blockhash_mismatch_error_is_not_genesis() {
+    fn header(prev_blockhash: BlockHash) -> Header {
+        Header {
+            version: bitcoin::block::Version::default(),
+            prev_blockhash,
+            merkle_root: bitcoin::hash_types::TxMerkleNode::all_zeros(),
+            time: 0,
+            bits: bitcoin::CompactTarget::default(),
+            nonce: 0,
+        }
+    }
+
+    let genesis = header(hash!("_"));
+    let genesis_hash = genesis.block_hash();
+    let mut chain = LocalChain::from_blocks([(0, genesis)].into_iter().collect())
+        .expect("genesis chain");
+
+    // Contiguous insert at height 1 with a prev_blockhash that does not match genesis.
+    let bad_header = header(hash!("not_genesis"));
+    let bad_hash = bad_header.block_hash();
+    let err = chain
+        .insert_block(1, bad_header)
+        .expect_err("prev_blockhash mismatch must fail");
+
+    assert_eq!(
+        err,
+        AlterCheckPointError {
+            height: 1,
+            original_hash: genesis_hash,
+            update_hash: Some(bad_hash),
+        }
+    );
+    let msg = err.to_string();
+    assert!(
+        msg.contains("failed to insert block at height 1"),
+        "Display must describe the failed insert; got {msg:?}"
+    );
+    assert!(
+        !msg.contains("failed to remove block at height 0"),
+        "Display must not claim a genesis removal; got {msg:?}"
+    );
+}
+
 #[test]
 fn local_chain_disconnect_from() {
     struct TestCase {

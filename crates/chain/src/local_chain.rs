@@ -417,19 +417,23 @@ where
             return Ok(ChangeSet::default());
         }
 
+        let update_hash = data.to_blockhash();
         let mut changeset = ChangeSet::<D>::default();
         changeset.blocks.insert(height, Some(data));
-        self.apply_changeset(&changeset)
-            .map_err(|_| AlterCheckPointError {
+        self.apply_changeset(&changeset).map_err(|err| match err {
+            // Preserve the insert height and attempted hash so callers can tell a
+            // mid-chain `prev_blockhash` clash from a genesis alteration.
+            ApplyBlockError::PrevBlockhashMismatch { expected } => AlterCheckPointError {
+                height,
+                original_hash: expected.hash,
+                update_hash: Some(update_hash),
+            },
+            ApplyBlockError::MissingGenesis => AlterCheckPointError {
                 height: 0,
                 original_hash: self.genesis_hash(),
-                update_hash: changeset
-                    .blocks
-                    .get(&0)
-                    .cloned()
-                    .flatten()
-                    .map(|d| d.to_blockhash()),
-            })?;
+                update_hash: Some(update_hash),
+            },
+        })?;
         Ok(changeset)
     }
 
