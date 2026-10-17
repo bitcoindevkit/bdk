@@ -162,3 +162,34 @@ fn event_checkpoint_connects_to_local_chain() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn filter_iter_event_height_after_walkback_from_orphan_tip() -> anyhow::Result<()> {
+    let env = testenv()?;
+    let _ = env.mine_blocks(10, None)?;
+
+    let genesis_hash = env.genesis_hash()?;
+    // Sparse checkpoint: genesis + a non-existent block at height 5. `find_base` walks
+    // past the fake entry (not on the main chain) and returns genesis as the base.
+    let fake_hash: bitcoin::BlockHash = bitcoin::hashes::Hash::hash(b"not-a-real-block");
+    let cp = CheckPoint::new(0, genesis_hash).insert(5, fake_hash);
+
+    let client = ClientExt::get_rpc_client(&env)?;
+    let mut iter = FilterIter::new(&client, cp, [ScriptBuf::new()]);
+
+    let event = iter.next().unwrap()?;
+    assert_eq!(
+        event.height(),
+        1,
+        "Event::height() must reflect the actual emitted block (1), not the stale orphan cp tip (5)"
+    );
+
+    let event2 = iter.next().unwrap()?;
+    assert_eq!(
+        event2.height(),
+        2,
+        "Event::height() must progress sequentially to the next block"
+    );
+
+    Ok(())
+}
