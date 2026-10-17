@@ -47,15 +47,11 @@
 //! * [`Anchor`] - This bit of data represents that a transaction is anchored in a given block. If
 //!   the transaction is anchored in chain of `chain_tip`, or is an ancestor of a transaction
 //!   anchored in chain of `chain_tip`, then the transaction must be canonical.
-//! * `last_seen` - This is the timestamp of when a transaction is last-seen in the mempool. This
-//!   value is updated by [`insert_seen_at`](TxGraph::insert_seen_at) and
-//!   [`apply_update`](TxGraph::apply_update). Transactions that are seen later have higher priority
-//!   than those that are seen earlier. `last_seen` values are transitive. This means that the
-//!   actual `last_seen` value of a transaction is the max of all the `last_seen` values from it's
-//!   descendants.
-//! * `last_evicted` - This is the timestamp of when a transaction last went missing from the
-//!   mempool. If this value is equal to or higher than the transaction's `last_seen` value, then it
-//!   will not be considered canonical.
+//! * `last_seen` - This is the timestamp of when a transaction was last observed in the mempool.
+//!   Transactions seen later have higher conflict priority. Values are transitive: a transaction's
+//!   effective `last_seen` is the maximum of its own and its descendants' `last_seen` values.
+//! * `last_evicted` - This is the timestamp of when a transaction was last observed missing from
+//!   the mempool. A transaction is excluded from canonicalization when `last_evicted >= last_seen`.
 //!
 //! # Graph traversal
 //!
@@ -585,6 +581,20 @@ impl<A> TxGraph<A> {
     pub fn is_empty(&self) -> bool {
         self.txs.is_empty()
     }
+
+    /// Returns a timestamp for a new mempool observation that sorts after every recorded
+    /// sighting and eviction, or `now` if that is later.
+    ///
+    /// Use it as the `start_time` of a sync so a clock that moved backwards or forwards can't
+    /// order observations incorrectly. Timestamps are stored as given, so this is the only place
+    /// where ordering is enforced.
+    pub fn next_observation_time(&self, now: u64) -> u64 {
+        self.last_seen
+            .values()
+            .chain(self.last_evicted.values())
+            .max()
+            .map_or(now, |&latest| now.max(latest.saturating_add(1)))
+    }
 }
 
 impl<A: Anchor> TxGraph<A> {
@@ -805,13 +815,14 @@ impl<A: Anchor> TxGraph<A> {
 
     /// Updates the first-seen and last-seen timestamps for a given `txid` in the [`TxGraph`].
     ///
-    /// This method records the time a transaction was observed by updating both:
+    /// This method records when a transaction was observed by updating both:
     /// - the **first-seen** timestamp, which only changes if `seen_at` is earlier than the current
     ///   value, and
     /// - the **last-seen** timestamp, which only changes if `seen_at` is later than the current
     ///   value.
     ///
-    /// `seen_at` is a UNIX timestamp in seconds.
+    /// `seen_at` is a UNIX timestamp in seconds. It is stored as given, so a sighting that is not
+    /// later than a recorded eviction leaves the transaction evicted.
     ///
     /// Returns a [`ChangeSet`] representing any changes applied.
     pub fn insert_seen_at(&mut self, txid: Txid, seen_at: u64) -> ChangeSet<A> {
@@ -878,8 +889,7 @@ impl<A: Anchor> TxGraph<A> {
     /// Inserts the given `evicted_at` for `txid` into [`TxGraph`].
     ///
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
-    /// to be missing from the mempool. If `txid` was previously recorded with an earlier
-    /// `evicted_at` value, it is updated only if the new value is greater.
+    /// to be missing from the mempool. The timestamp is stored as given and only ever increases.
     pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A> {
         let is_changed = match self.last_evicted.entry(txid) {
             hash_map::Entry::Occupied(mut e) => {
@@ -941,11 +951,25 @@ impl<A: Anchor> TxGraph<A> {
         for (anchor, txid) in update.anchors {
             changeset.merge(self.insert_anchor(txid, anchor));
         }
-        for (txid, seen_at) in update.seen_ats {
-            changeset.merge(self.insert_seen_at(txid, seen_at));
-        }
-        for (txid, evicted_at) in update.evicted_ats {
-            changeset.merge(self.insert_evicted_at(txid, evicted_at));
+        let mut mempool_updates = update
+            .seen_ats
+            .into_iter()
+            .map(|(txid, timestamp)| (timestamp, false, txid))
+            .chain(
+                update
+                    .evicted_ats
+                    .into_iter()
+                    .map(|(txid, timestamp)| (timestamp, true, txid)),
+            )
+            .collect::<Vec<_>>();
+        mempool_updates.sort_unstable();
+        for (timestamp, is_evicted, txid) in mempool_updates {
+            let update_changeset = if is_evicted {
+                self.insert_evicted_at(txid, timestamp)
+            } else {
+                self.insert_seen_at(txid, timestamp)
+            };
+            changeset.merge(update_changeset);
         }
         changeset
     }
@@ -980,11 +1004,17 @@ impl<A: Anchor> TxGraph<A> {
         for (anchor, txid) in changeset.anchors {
             let _ = self.insert_anchor(txid, anchor);
         }
+        for (txid, first_seen) in changeset.first_seen {
+            let _ = self.update_first_seen(txid, first_seen);
+        }
         for (txid, seen_at) in changeset.last_seen {
-            let _ = self.insert_seen_at(txid, seen_at);
+            let _ = self.update_last_seen(txid, seen_at);
         }
         for (txid, evicted_at) in changeset.last_evicted {
-            let _ = self.insert_evicted_at(txid, evicted_at);
+            self.last_evicted
+                .entry(txid)
+                .and_modify(|stored| *stored = core::cmp::max(*stored, evicted_at))
+                .or_insert(evicted_at);
         }
     }
 

@@ -282,6 +282,10 @@ impl<I, D> SyncRequest<I, D> {
     /// [`TxUpdate::seen_ats`](crate::TxUpdate::seen_ats) for mempool transactions. A transaction
     /// without any `seen_ats` is assumed to be unseen in the mempool.
     ///
+    /// `start_time` must sort after earlier mempool observations of the same transactions, or an
+    /// eviction can be ignored (or a sighting hidden). If the clock may have changed, pass
+    /// `TxGraph::next_observation_time` from `bdk_chain` with the current time.
+    ///
     /// Use [`SyncRequest::builder`] to use the current timestamp as `start_time` (this requires
     /// `feature = "std"`).
     pub fn builder_at(start_time: u64) -> SyncRequestBuilder<I, D> {
@@ -512,6 +516,10 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
     /// `start_time` specifies the start time of sync. Chain sources can use this value to set
     /// [`TxUpdate::seen_ats`](crate::TxUpdate::seen_ats) for mempool transactions. A transaction
     /// without any `seen_ats` is assumed to be unseen in the mempool.
+    ///
+    /// `start_time` must sort after earlier mempool observations of the same transactions, or an
+    /// eviction can be ignored (or a sighting hidden). If the clock may have changed, pass
+    /// `TxGraph::next_observation_time` from `bdk_chain` with the current time.
     ///
     /// Use [`FullScanRequest::builder`] to use the current timestamp as `start_time` (this
     /// requires `feature = "std`).

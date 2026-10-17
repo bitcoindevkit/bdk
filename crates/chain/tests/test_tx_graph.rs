@@ -1551,3 +1551,64 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+#[test]
+fn next_observation_time_survives_clock_changes() {
+    let txid = hash!("tx1");
+    let is_evicted = |g: &TxGraph<BlockId>| {
+        let cs = g.initial_changeset();
+        cs.last_evicted.get(&txid) >= cs.last_seen.get(&txid)
+    };
+
+    let mut graph = TxGraph::<BlockId>::default();
+    assert_eq!(graph.next_observation_time(100), 100);
+    let _ = graph.insert_seen_at(txid, 1000);
+
+    // Clock moved backwards: the eviction is still stamped after the sighting.
+    let t = graph.next_observation_time(900);
+    assert_eq!(t, 1001);
+    let _ = graph.insert_evicted_at(txid, t);
+    assert!(is_evicted(&graph));
+
+    // Future-dated eviction followed by a corrected clock: the sighting wins.
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.insert_seen_at(txid, 1000);
+    let _ = graph.insert_evicted_at(txid, 5000);
+    let t = graph.next_observation_time(2000);
+    assert_eq!(t, 5001);
+    let _ = graph.insert_seen_at(txid, t);
+    assert!(!is_evicted(&graph));
+
+    // A later clock is used as is.
+    assert_eq!(graph.next_observation_time(9000), 9000);
+
+    // Reapplying the same observations changes nothing.
+    assert!(graph.insert_seen_at(txid, 5001).is_empty());
+    assert!(graph.insert_evicted_at(txid, 5000).is_empty());
+}
+
+#[test]
+fn late_or_replayed_observations_do_not_change_eviction_state() {
+    let txid = hash!("tx1");
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.insert_seen_at(txid, 500);
+    let _ = graph.insert_evicted_at(txid, 2000);
+
+    // A late sighting older than the eviction keeps the tx evicted.
+    let _ = graph.insert_seen_at(txid, 1000);
+    assert_eq!(graph.initial_changeset().last_seen[&txid], 1000);
+    assert_eq!(graph.initial_changeset().last_evicted[&txid], 2000);
+
+    // Replaying an observation is a no-op.
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.insert_seen_at(txid, 100);
+    let _ = graph.insert_evicted_at(txid, 200);
+    assert!(graph.insert_seen_at(txid, 100).is_empty());
+    assert!(graph.insert_evicted_at(txid, 200).is_empty());
+
+    // A late eviction older than the sighting is stored as given.
+    let mut graph = TxGraph::<BlockId>::default();
+    let _ = graph.insert_seen_at(txid, 100);
+    let _ = graph.insert_evicted_at(txid, 50);
+    assert_eq!(graph.initial_changeset().last_evicted[&txid], 50);
+}
