@@ -1,15 +1,17 @@
-use crate::{bincode_options, EntryIter, StoreError};
+use crate::{EntryIter, StoreError};
 use bdk_core::Merge;
-use bincode::Options;
 use std::{
     fmt::{self, Debug},
     fs::{File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, Write},
     marker::PhantomData,
     path::Path,
 };
 
 /// Persists an append-only list of changesets (`C`) to a single file.
+///
+/// A [`Store`] assumes exclusive access to its file: never have more than one handle open on the
+/// same file at a time.
 ///
 /// > ⚠ This is a development/testing database. It does not natively support backwards compatible
 /// > BDK version upgrades so should not be used in production.
@@ -29,17 +31,31 @@ where
     /// `magic` is the prefixed bytes to write to the new file. This will be checked when loading
     /// the [`Store`] in the future with [`load`].
     ///
+    /// # File permissions
+    ///
+    /// The file may contain sensitive wallet data. On Unix, it is created readable and writable
+    /// only by its owner (`0o600`); on other platforms the default file permissions apply.
+    /// The caller is responsible for restricting access to the parent directory, which this method
+    /// does not modify.
+    ///
     /// [`load`]: Store::load
     pub fn create<P>(magic: &[u8], file_path: P) -> Result<Self, StoreError>
     where
         P: AsRef<Path>,
     {
-        let mut f = OpenOptions::new()
+        let mut options = OpenOptions::new();
+        options
             .create_new(true)
             .read(true)
             .write(true)
-            .truncate(true)
-            .open(file_path)?;
+            .truncate(true);
+        // Wallet changesets may be sensitive, so keep the new file to its owner only.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut f = options.open(file_path)?;
         f.write_all(magic)?;
         Ok(Self {
             magic_len: magic.len(),
@@ -60,7 +76,7 @@ where
     ///
     /// If there exist changesets in the file, [`load`] will try to aggregate them in
     /// a single changeset to verify their integrity. If aggregation fails
-    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::Bincode`] error variant in
+    /// [`StoreErrorWithDump`] will be returned with the [`StoreError::Decode`] error variant in
     /// its error field and the aggregated changeset so far in the changeset field.
     ///
     /// To get a new working file store from this error use [`Store::create`] and [`Store::append`]
@@ -178,7 +194,7 @@ where
     ///
     /// If there exist changesets in the file, [`dump`] will try to aggregate them in a single
     /// changeset. If aggregation fails [`StoreErrorWithDump`] will be returned with the
-    /// [`StoreError::Bincode`] error variant in its error field and the aggregated changeset so
+    /// [`StoreError::Decode`] error variant in its error field and the aggregated changeset so
     /// far in the changeset field.
     ///
     /// [`dump`]: Store::dump
@@ -203,7 +219,8 @@ where
 
     /// Attempt to load existing [`Store`] file; create it if the file does not exist.
     ///
-    /// Internally, this calls either [`load`] or [`create`].
+    /// Internally, this calls either [`load`] or [`create`]. New files are created with the
+    /// permissions described in [`create`].
     ///
     /// [`load`]: Store::load
     /// [`create`]: Store::create
@@ -226,28 +243,41 @@ where
         }
     }
 
-    /// Append a new changeset to the file. Does nothing if the changeset is empty. Truncation is
-    /// not needed because file pointer is always moved to the end of the last decodable data from
-    /// beginning to end.
+    /// Append a new changeset to the file. Does nothing if the changeset is empty.
     ///
-    /// If multiple garbage writes are produced on the file, the next load will only retrieve the
-    /// first chunk of valid changesets.
+    /// The changeset is written at the current file position, which always follows the last valid
+    /// entry: [`create`] leaves it after the magic bytes, [`load`] leaves it at the end of the
+    /// fully validated file, and each [`append`] leaves it after the frame it writes.
+    /// Because a [`Store`] assumes exclusive access to its file and [`load`] rejects files with
+    /// undecodable data (returning no [`Store`]), appends only ever land after valid data; see
+    /// [`load`] for the recovery procedure of broken files.
     ///
-    /// If garbage data is written and then valid changesets, the next load will still only
-    /// retrieve the first chunk of valid changesets. The recovery of those valid changesets after
-    /// the garbage data is responsibility of the user.
+    /// If a write fails partway through, the partial frame is truncated before the error is
+    /// returned, so a failed append leaves the file unchanged.
+    ///
+    /// [`create`]: Store::create
+    /// [`load`]: Store::load
+    /// [`append`]: Self::append
     pub fn append(&mut self, changeset: &C) -> Result<(), io::Error> {
         // no need to write anything if changeset is empty
         if changeset.is_empty() {
             return Ok(());
         }
 
-        bincode_options()
-            .serialize_into(&mut self.db_file, changeset)
-            .map_err(|e| match *e {
-                bincode::ErrorKind::Io(error) => error,
-                unexpected_err => panic!("unexpected bincode error: {unexpected_err}"),
-            })?;
+        let bytes = postcard::to_allocvec(changeset).map_err(io::Error::other)?;
+        let len_bytes = postcard::to_allocvec(&(bytes.len() as u64)).map_err(io::Error::other)?;
+
+        let start = self.db_file.stream_position()?;
+
+        let result = self
+            .db_file
+            .write_all(&len_bytes)
+            .and_then(|()| self.db_file.write_all(&bytes));
+        if let Err(e) = result {
+            // Roll back the partial frame so a failed append leaves no torn data behind.
+            let _ = self.db_file.set_len(start);
+            return Err(e);
+        }
 
         Ok(())
     }
@@ -369,7 +399,7 @@ mod test {
         match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, file_path) {
             Err(StoreErrorWithDump {
                 changeset,
-                error: StoreError::Bincode(_),
+                error: StoreError::Decode(_),
             }) => {
                 assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
@@ -397,7 +427,7 @@ mod test {
         match store.dump() {
             Err(StoreErrorWithDump {
                 changeset,
-                error: StoreError::Bincode(_),
+                error: StoreError::Decode(_),
             }) => {
                 assert_eq!(changeset, Some(Box::new(test_changesets)))
             }
@@ -406,7 +436,7 @@ mod test {
     }
 
     #[test]
-    fn append() {
+    fn append_succeeds() {
         let temp_dir = tempfile::tempdir().unwrap();
         let file_path = temp_dir.path().join("db_file");
 
@@ -474,7 +504,10 @@ mod test {
             TestChangeSet::from(["4".into(), "5".into(), "6".into()]),
         ];
         let last_changeset = TestChangeSet::from(["7".into(), "8".into(), "9".into()]);
-        let last_changeset_bytes = bincode_options().serialize(&last_changeset).unwrap();
+        let last_changeset_payload = postcard::to_allocvec(&last_changeset).unwrap();
+        let mut last_changeset_bytes =
+            postcard::to_allocvec(&(last_changeset_payload.len() as u64)).unwrap();
+        last_changeset_bytes.extend_from_slice(&last_changeset_payload);
 
         for short_write_len in 1..last_changeset_bytes.len() - 1 {
             let file_path = temp_dir.path().join(format!("{short_write_len}.dat"));
@@ -598,5 +631,168 @@ mod test {
 
         // current position matches EOF
         assert_eq!(current_pointer, expected_pointer);
+    }
+
+    #[test]
+    fn load_does_not_panic_on_oversized_length_prefix() {
+        // Build a file whose varint length prefix decodes to `u64::MAX`. Without a guard on the
+        // length prefix, this would trigger an allocation of that many bytes, panicking/aborting
+        // instead of returning a graceful error.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&TEST_MAGIC_BYTES);
+        let huge_len_encoded: Vec<u8> = postcard::to_allocvec(&u64::MAX).unwrap();
+        bytes.extend_from_slice(&huge_len_encoded);
+
+        std::fs::write(&file_path, &bytes).unwrap();
+
+        let result = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path);
+        assert!(
+            result.is_err(),
+            "load should fail gracefully on oversized length prefix"
+        );
+    }
+
+    #[test]
+    fn load_fails_on_frame_with_trailing_bytes() {
+        // Craft a well-formed frame whose declared length is 2 bytes longer than the valid
+        // payload it contains. The length prefix stays authoritative for framing, but the
+        // payload itself doesn't consume its whole declared length, which must be treated as
+        // corruption rather than silently ignored.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+
+        let changeset = TestChangeSet::from(["hello".to_string()]);
+        let payload = postcard::to_allocvec(&changeset).unwrap();
+
+        let mut bytes = TEST_MAGIC_BYTES.to_vec();
+        bytes.extend_from_slice(&postcard::to_allocvec(&((payload.len() + 2) as u64)).unwrap());
+        bytes.extend_from_slice(&payload);
+        bytes.extend_from_slice(&[0xaa, 0xbb]);
+
+        fs::write(&file_path, bytes).expect("should write crafted store");
+
+        match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path) {
+            Err(StoreErrorWithDump {
+                error: StoreError::Decode(_),
+                ..
+            }) => {}
+            unexpected => panic!("unexpected result: {unexpected:?}"),
+        }
+    }
+
+    #[test]
+    fn load_fails_on_genuinely_undecodable_payload() {
+        // Craft a frame with a correct length prefix but invalid payload (a string that claims 4
+        // bytes which are not valid UTF-8).
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+
+        let payload = vec![0x01, 0x04, 0xff, 0xff, 0xff, 0xff];
+        let mut bytes = TEST_MAGIC_BYTES.to_vec();
+        bytes.extend_from_slice(&postcard::to_allocvec(&(payload.len() as u64)).unwrap());
+        bytes.extend_from_slice(&payload);
+
+        fs::write(&file_path, bytes).expect("should write crafted store");
+
+        match Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path) {
+            Err(StoreErrorWithDump {
+                error: StoreError::Decode(postcard::Error::DeserializeBadUtf8),
+                ..
+            }) => {}
+            unexpected => panic!("unexpected result: {unexpected:?}"),
+        }
+    }
+
+    #[test]
+    fn load_decodes_zero_width_changeset() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let mut bytes = TEST_MAGIC_BYTES.to_vec();
+        // A single, well-formed frame with a zero-length payload loads and returns.
+        bytes.extend_from_slice(&postcard::to_allocvec(&0u64).unwrap());
+        fs::write(&file_path, bytes).expect("should write crafted store");
+
+        let (_, changeset) = Store::<()>::load(&TEST_MAGIC_BYTES, &file_path)
+            .expect("zero-width changeset should load successfully");
+        assert!(changeset.is_some());
+    }
+
+    #[test]
+    fn load_roundtrips_at_varint_length_boundaries() {
+        // The varint length prefix is 1 byte for values < 128 and 2 bytes for values >= 128.
+        // Exercise both sides of that boundary: a payload of exactly 127 bytes (1-byte prefix)
+        // and exactly 128 bytes (2-byte prefix).
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+
+        // `TestChangeSet` (`BTreeSet<String>`) with one entry encodes as:
+        // varint(1) [1 byte] + varint(str.len()) [1 byte, for str.len() < 128] + str bytes.
+        // i.e., base_len = 2 bytes
+        let base_len = postcard::to_allocvec(&TestChangeSet::from([String::new()]))
+            .unwrap()
+            .len();
+
+        let mut store = Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).unwrap();
+        let mut changesets = Vec::new();
+        for target_len in [127_usize, 128] {
+            let changeset = TestChangeSet::from(["x".repeat(target_len - base_len)]);
+            assert_eq!(
+                postcard::to_allocvec(&changeset).unwrap().len(),
+                target_len,
+                "test setup: payload should be exactly {target_len} bytes"
+            );
+            store.append(&changeset).unwrap();
+            changesets.push(changeset);
+        }
+        drop(store);
+
+        let (_, aggregated) = Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).unwrap();
+        let expected = changesets
+            .into_iter()
+            .reduce(|mut acc, cs| {
+                Merge::merge(&mut acc, cs);
+                acc
+            })
+            .unwrap();
+        assert_eq!(aggregated, Some(expected));
+    }
+
+    // A failed append must roll back the partial frame so the file is left unchanged.
+    //
+    // The write is forced to fail by swapping the store's private file handle for a read-only
+    // one: `write_all` then errors, the rollback (`set_len`) runs, and the original file is
+    // untouched.
+    #[test]
+    fn append_failure_leaves_file_unchanged() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let file_path = temp_dir.path().join("db_file");
+        let changeset = TestChangeSet::from(["one".to_string()]);
+
+        let mut store =
+            Store::<TestChangeSet>::create(&TEST_MAGIC_BYTES, &file_path).expect("must create");
+        store.append(&changeset).expect("must append changeset");
+        let bytes_before = fs::read(&file_path).expect("must read store file");
+
+        // Replace the writable handle with a read-only one so the next write fails.
+        store.db_file = fs::File::open(&file_path).expect("must open read-only handle");
+        let result = store.append(&changeset);
+
+        assert!(
+            result.is_err(),
+            "append through a read-only handle must fail"
+        );
+        let bytes_after = fs::read(&file_path).expect("must read store file");
+        assert_eq!(
+            bytes_before, bytes_after,
+            "failed append left torn data behind"
+        );
+
+        // The store still loads and recovers the original changeset.
+        let (_, recovered) =
+            Store::<TestChangeSet>::load(&TEST_MAGIC_BYTES, &file_path).expect("must load");
+        assert_eq!(recovered, Some(changeset));
     }
 }
