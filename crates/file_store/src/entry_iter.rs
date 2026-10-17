@@ -51,7 +51,25 @@ where
 
             let pos_before_read = self.db_file.stream_position()?;
             match bincode_options().deserialize_from(&mut self.db_file) {
-                Ok(changeset) => Ok(Some(changeset)),
+                Ok(changeset) => {
+                    let pos_after_read = self.db_file.stream_position()?;
+                    if pos_after_read == pos_before_read {
+                        // The deserialized type consumed zero bytes (e.g. `()`).
+                        // The file offset will never advance, so stop iterating
+                        // to avoid an infinite loop.
+                        //
+                        // This only covers a changeset that itself decodes to zero
+                        // bytes. A collection of zero-sized elements with a corrupt
+                        // length prefix (e.g. `Vec<()>`) loops inside the decoder
+                        // and never returns here, so it is not caught by this check
+                        // or by a byte-counting size limit. `postcard` has the same
+                        // hole, so the migration tracked in #2258 does not remove
+                        // the need for this check.
+                        self.finished = true;
+                        return Ok(None);
+                    }
+                    Ok(Some(changeset))
+                }
                 Err(e) => {
                     self.finished = true;
                     let pos_after_read = self.db_file.stream_position()?;
