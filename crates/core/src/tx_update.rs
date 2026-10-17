@@ -54,6 +54,18 @@ pub struct TxUpdate<A = ()> {
 
     /// When transactions were discovered to be missing (evicted) from the mempool.
     ///
+    /// An entry means that the transaction was *not observed* where the chain source was expected
+    /// to report it, which is not necessarily a verified eviction. The Electrum and Esplora
+    /// clients record an entry for every txid passed to
+    /// [`SyncRequestBuilder::expected_spk_txids`](crate::spk_client::SyncRequestBuilder::expected_spk_txids)
+    /// that is missing from its script's history in a single response, so one incomplete response
+    /// is enough. Other sources may infer evictions differently (`bdk_bitcoind_rpc` compares
+    /// successive `getrawmempool` results).
+    ///
+    /// Applying an entry to a `TxGraph` can remove an unconfirmed transaction from the canonical
+    /// view and make the outputs it spent appear unspent again. See `TxNode::is_evicted` in
+    /// `bdk_chain` for the details.
+    ///
     /// [`SyncRequest::start_time`](crate::spk_client::SyncRequest::start_time) can be used to
     /// provide the `evicted_at` value.
     pub evicted_ats: HashSet<(Txid, u64)>,
