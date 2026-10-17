@@ -305,11 +305,18 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
                     loop {
                         let txs = client.scripthash_txs(&spk, last_txid)?;
                         let tx_count = txs.len();
-                        last_txid = txs.last().map(|tx| tx.txid);
+                        let next_last_txid = txs.last().map(|tx| tx.txid);
                         spk_txs.extend(txs);
                         if tx_count < 25 {
                             break;
                         }
+                        // A full page ending on the txid we just paged from means the server is
+                        // not paging forward. Requesting again would return the same page
+                        // forever, so bail out instead of looping.
+                        if next_last_txid == last_txid {
+                            return Err(Box::new(esplora_client::Error::InvalidResponse));
+                        }
+                        last_txid = next_last_txid;
                     }
                     let got_txids = spk_txs.iter().map(|tx| tx.txid).collect::<HashSet<_>>();
                     let evicted_txids = expected_txids

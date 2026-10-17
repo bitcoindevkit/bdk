@@ -337,11 +337,18 @@ where
                     loop {
                         let txs = client.scripthash_txs(&spk, last_seen).await?;
                         let tx_count = txs.len();
-                        last_seen = txs.last().map(|tx| tx.txid);
+                        let next_last_seen = txs.last().map(|tx| tx.txid);
                         spk_txs.extend(txs);
                         if tx_count < 25 {
                             break;
                         }
+                        // A full page ending on the txid we just paged from means the server is
+                        // not paging forward. Requesting again would return the same page
+                        // forever, so bail out instead of looping.
+                        if next_last_seen == last_seen {
+                            return Err(Box::new(esplora_client::Error::InvalidResponse));
+                        }
+                        last_seen = next_last_seen;
                     }
                     let got_txids = spk_txs.iter().map(|tx| tx.txid).collect::<HashSet<_>>();
                     let evicted_txids = expected_txids
