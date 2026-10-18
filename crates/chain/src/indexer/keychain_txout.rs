@@ -1227,37 +1227,6 @@ mod test {
         assert!(index.spk_cache.is_empty());
     }
 
-    #[test]
-    fn apply_changeset_clamps_out_of_range_index_and_derives_correct_spk() {
-        let s = DESCRIPTORS[0];
-        let desc = Descriptor::parse_descriptor(&Secp256k1::new(), s)
-            .unwrap()
-            .0;
-        let mut index = KeychainTxOutIndex::new(0, false);
-        let did = desc.descriptor_id();
-        let _ = index.insert_descriptor(0i32, desc.clone());
-        let seed_index = BIP32_MAX_INDEX - 1;
-        let spk = desc
-            .at_derivation_index(seed_index)
-            .unwrap()
-            .script_pubkey();
-        index.inner.insert_spk((0i32, seed_index), spk);
-        let changeset = ChangeSet {
-            last_revealed: [(did, BIP32_MAX_INDEX + 1)].into(),
-            ..Default::default()
-        };
-        index.apply_changeset(changeset);
-        assert_eq!(index.last_revealed_index(0i32), Some(BIP32_MAX_INDEX));
-        assert_eq!(
-            index.spk_at_index(0i32, BIP32_MAX_INDEX),
-            Some(
-                desc.at_derivation_index(BIP32_MAX_INDEX)
-                    .unwrap()
-                    .script_pubkey()
-            )
-        );
-    }
-
     /// Build an index with `last_revealed` (and the matching spk) at `last_revealed_index`.
     fn indexer_with_last_revealed_at(last_revealed_index: u32) -> KeychainTxOutIndex<i32> {
         let s = DESCRIPTORS[0];
@@ -1275,6 +1244,26 @@ mod test {
         index.inner.insert_spk((0i32, last_revealed_index), spk);
         index.last_revealed.insert(did, last_revealed_index);
         index
+    }
+
+    #[test]
+    fn apply_changeset_clamps_out_of_range_index_and_derives_correct_spk() {
+        let mut index = indexer_with_last_revealed_at(BIP32_MAX_INDEX - 1);
+        let desc = index.get_descriptor(0i32).unwrap().clone();
+        let changeset = ChangeSet {
+            last_revealed: [(desc.descriptor_id(), BIP32_MAX_INDEX + 1)].into(),
+            ..Default::default()
+        };
+        index.apply_changeset(changeset);
+        assert_eq!(index.last_revealed_index(0i32), Some(BIP32_MAX_INDEX));
+        assert_eq!(
+            index.spk_at_index(0i32, BIP32_MAX_INDEX),
+            Some(
+                desc.at_derivation_index(BIP32_MAX_INDEX)
+                    .unwrap()
+                    .script_pubkey()
+            )
+        );
     }
 
     #[test]
