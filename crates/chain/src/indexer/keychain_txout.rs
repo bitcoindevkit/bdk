@@ -563,11 +563,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     pub fn lookahead_to_target(&mut self, keychain: K, target_index: u32) -> ChangeSet {
         let mut changeset = ChangeSet::default();
         if let Some((next_index, _)) = self.next_index(keychain.clone()) {
-            let temp_lookahead = (target_index + 1)
-                .checked_sub(next_index)
-                .filter(|&index| index > 0);
+            let temp_lookahead = target_index.saturating_add(1).saturating_sub(next_index);
 
-            if let Some(temp_lookahead) = temp_lookahead {
+            if temp_lookahead > 0 {
                 self.replenish_inner_index_keychain(keychain, temp_lookahead);
             }
         }
@@ -601,7 +599,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         // Exclusive: index to stop at.
         let stop_index = if descriptor.has_wildcard() {
             let next_reveal_index = self.last_revealed.get(&did).map_or(0, |v| *v + 1);
-            (next_reveal_index + lookahead).min(BIP32_MAX_INDEX)
+            next_reveal_index
+                .saturating_add(lookahead)
+                .min(BIP32_MAX_INDEX + 1)
         } else {
             1
         };
@@ -992,6 +992,7 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             }
         }
         for (did, index) in changeset.last_revealed {
+            let index = index.min(BIP32_MAX_INDEX);
             let v = self.last_revealed.entry(did).or_default();
             *v = index.max(*v);
             self.replenish_inner_index_did(did, self.lookahead);
@@ -1225,5 +1226,107 @@ mod test {
         // The cache is optional at load time
         let index = KeychainTxOutIndex::<i32>::from_changeset(lookahead, false, init_cs);
         assert!(index.spk_cache.is_empty());
+    }
+
+    #[test]
+    fn apply_changeset_clamps_out_of_range_index_and_derives_correct_spk() {
+        let s = DESCRIPTORS[0];
+        let desc = Descriptor::parse_descriptor(&Secp256k1::new(), s)
+            .unwrap()
+            .0;
+        let mut index = KeychainTxOutIndex::new(0, false);
+        let did = desc.descriptor_id();
+        let _ = index.insert_descriptor(0i32, desc.clone());
+        let seed_index = BIP32_MAX_INDEX - 1;
+        let spk = desc
+            .at_derivation_index(seed_index)
+            .unwrap()
+            .script_pubkey();
+        index.inner.insert_spk((0i32, seed_index), spk);
+        let changeset = ChangeSet {
+            last_revealed: [(did, BIP32_MAX_INDEX + 1)].into(),
+            ..Default::default()
+        };
+        index.apply_changeset(changeset);
+        assert_eq!(index.last_revealed_index(0i32), Some(BIP32_MAX_INDEX));
+        assert_eq!(
+            index.spk_at_index(0i32, BIP32_MAX_INDEX),
+            Some(
+                desc.at_derivation_index(BIP32_MAX_INDEX)
+                    .unwrap()
+                    .script_pubkey()
+            )
+        );
+    }
+
+    /// Build an index with `last_revealed` (and the matching spk) at `last_revealed_index`.
+    fn indexer_with_last_revealed_at(last_revealed_index: u32) -> KeychainTxOutIndex<i32> {
+        let s = DESCRIPTORS[0];
+        let desc = Descriptor::parse_descriptor(&Secp256k1::new(), s)
+            .unwrap()
+            .0;
+        let mut index = KeychainTxOutIndex::new(0, false);
+        let did = desc.descriptor_id();
+        let _ = index.insert_descriptor(0i32, desc.clone());
+
+        let spk = desc
+            .at_derivation_index(last_revealed_index)
+            .unwrap()
+            .script_pubkey();
+        index.inner.insert_spk((0i32, last_revealed_index), spk);
+        index.last_revealed.insert(did, last_revealed_index);
+        index
+    }
+
+    #[test]
+    fn reveal_next_spk_and_next_unused_spk_return_last_script_when_saturated() {
+        let mut index = indexer_with_last_revealed_at(BIP32_MAX_INDEX);
+        let (i, changeset) = index.reveal_next_spk(0i32).unwrap();
+        assert_eq!(i.0, BIP32_MAX_INDEX);
+        assert!(changeset.is_empty());
+        assert!(index.mark_used(0i32, BIP32_MAX_INDEX));
+        let (i, changeset) = index.next_unused_spk(0i32).unwrap();
+        assert_eq!(i.0, BIP32_MAX_INDEX);
+        assert!(changeset.is_empty());
+    }
+
+    #[test]
+    fn reveal_to_target_with_target_at_bip32_max_index() {
+        let mut index = indexer_with_last_revealed_at(BIP32_MAX_INDEX - 1);
+        let (spks, _changeset) = index.reveal_to_target(0i32, BIP32_MAX_INDEX).unwrap();
+        assert_eq!(spks.len(), 1);
+        assert_eq!(spks[0].0, BIP32_MAX_INDEX);
+    }
+
+    #[test]
+    fn reveal_to_target_with_target_above_bip32_max_index() {
+        let mut index = indexer_with_last_revealed_at(BIP32_MAX_INDEX - 1);
+        let (spks, _changeset) = index.reveal_to_target(0i32, BIP32_MAX_INDEX + 5).unwrap();
+        assert_eq!(spks.len(), 1);
+        assert_eq!(spks[0].0, BIP32_MAX_INDEX);
+    }
+
+    #[test]
+    fn lookahead_to_target_past_bip32_max_clamps() {
+        let mut index = indexer_with_last_revealed_at(BIP32_MAX_INDEX - 1);
+        // `u32::MAX` is past `BIP32_MAX_INDEX`, so it must clamp down to it and store the final
+        // spk.
+        let changeset = index.lookahead_to_target(0i32, u32::MAX);
+        assert!(
+            changeset.last_revealed.is_empty(),
+            "lookahead must not reveal"
+        );
+        // `spk_at_index` is aware of lookahead spks.
+        assert!(index.spk_at_index(0i32, BIP32_MAX_INDEX).is_some());
+    }
+
+    #[test]
+    fn lookahead_to_target_at_bip32_max_does_not_overflow() {
+        let mut index = indexer_with_last_revealed_at(BIP32_MAX_INDEX);
+        let changeset = index.lookahead_to_target(0i32, u32::MAX - 1);
+        assert!(
+            changeset.last_revealed.is_empty(),
+            "lookahead must not reveal"
+        );
     }
 }
