@@ -641,6 +641,47 @@ fn local_chain_apply_changeset_with_genesis_checks_prev_blockhash() {
 }
 
 #[test]
+fn local_chain_error_display() {
+    let (a, b) = (hash!("A"), hash!("B"));
+    let expected = BlockId { height: 2, hash: a };
+    let cases: [(Box<dyn std::error::Error>, String); 5] = [
+        (
+            Box::new(ApplyChangeSetError::CannotAlterGenesis {
+                original_hash: a,
+                update_hash: Some(b),
+            }),
+            format!("cannot replace genesis block: original={a} update={b}"),
+        ),
+        (
+            Box::new(ApplyChangeSetError::CannotAlterGenesis {
+                original_hash: a,
+                update_hash: None,
+            }),
+            format!("cannot remove genesis block: original={a}"),
+        ),
+        (
+            Box::new(ApplyChangeSetError::PrevBlockhashMismatch { expected }),
+            format!("`prev_blockhash` doesn't match block at height 2 ({a})"),
+        ),
+        (
+            Box::new(InsertBlockError::CannotReplace {
+                height: 2,
+                original_hash: a,
+                update_hash: b,
+            }),
+            format!("failed to insert block at height 2: original={a} update={b}"),
+        ),
+        (
+            Box::new(InsertBlockError::PrevBlockhashMismatch { expected }),
+            format!("`prev_blockhash` doesn't match block at height 2 ({a})"),
+        ),
+    ];
+    for (err, msg) in cases {
+        assert_eq!(err.to_string(), msg);
+    }
+}
+
+#[test]
 fn local_chain_from_changeset_without_genesis() {
     let changeset: ChangeSet = [(0, None), (1, Some(hash!("A")))].into_iter().collect();
     assert_eq!(
