@@ -37,9 +37,9 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 /// and only one descriptor and each descriptor has one and only one keychain. The
 /// [`insert_descriptor`] method will return an error if you try and violate this invariant. This
 /// rule is a proxy for a stronger rule: no two descriptors should produce the same script pubkey.
-/// Having two descriptors produce the same script pubkey should cause whichever keychain derives
-/// the script pubkey first to be the effective owner of it but you should not rely on this
-/// behaviour. ⚠ It is up you, the developer, not to violate this invariant.
+/// Violating this is a contract violation: debug builds panic, and in release builds the keychain
+/// that did not derive the script pubkey first cannot reveal it. ⚠ It is up you, the developer,
+/// not to violate this invariant.
 ///
 /// # Revealed script pubkeys
 ///
@@ -497,10 +497,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// [`KeychainTxOutIndex`] will prevent you from inserting two descriptors which derive the same
     /// script pubkey at index 0, but it's up to you to ensure that descriptors don't collide at
-    /// other indices. If they do nothing catastrophic happens at the `KeychainTxOutIndex` level
-    /// (one keychain just becomes the defacto owner of that spk arbitrarily) but this may have
-    /// subtle implications up the application stack like one UTXO being missing from one keychain
-    /// because it has been assigned to another which produces the same script pubkey.
+    /// other indices. A collision at any other index is a contract violation (see
+    /// [`KeychainTxOutIndex`]).
     pub fn insert_descriptor(
         &mut self,
         keychain: K,
@@ -881,7 +879,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     ///  1. The descriptor has no wildcard and already has one script revealed.
     ///  2. The descriptor has already revealed scripts up to the numeric bound.
-    ///  3. There is no descriptor associated with the given keychain.
+    ///
+    /// Also returns `None` if the next script pubkey is owned by another keychain, which is a
+    /// contract violation (see [`KeychainTxOutIndex`]).
     pub fn reveal_next_spk(&mut self, keychain: K) -> Option<(Indexed<ScriptBuf>, ChangeSet)> {
         let mut changeset = ChangeSet::default();
         let indexed_spk = self._reveal_next_spk(&mut changeset, keychain)?;
@@ -900,10 +900,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
             changeset.last_revealed.insert(*did, next_index);
             self.replenish_inner_index(*did, &keychain, self.lookahead);
         }
-        let script = self
-            .inner
-            .spk_at_index(&(keychain.clone(), next_index))
-            .expect("we just inserted it");
+        // `None` only if another keychain owns this spk (a contract violation, which already
+        // trips the `debug_assert!` in `replenish_inner_index`).
+        let script = self.inner.spk_at_index(&(keychain.clone(), next_index))?;
         Some((next_index, script))
     }
 

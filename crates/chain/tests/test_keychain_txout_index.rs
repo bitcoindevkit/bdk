@@ -746,3 +746,18 @@ fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
         (10_000 * (6 - 3 - /*the skipped one*/ 1)) as i64
     );
 }
+
+/// Overlapping descriptors are a contract violation, but must not panic in release builds.
+/// See <https://github.com/bitcoindevkit/bdk/issues/2277>.
+#[test]
+#[cfg(not(debug_assertions))]
+fn overlapping_descriptor_does_not_panic_in_release() {
+    const XPUB: &str = "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp";
+    let wildcard = parse_descriptor(&format!("wpkh({XPUB}/0/*)"));
+    let single = parse_descriptor(&format!("wpkh({XPUB}/0/3)"));
+
+    let mut index = KeychainTxOutIndex::<u8>::new(25, true);
+    let _ = index.insert_descriptor(0, wildcard);
+    let _ = index.insert_descriptor(1, single);
+    assert!(index.reveal_next_spk(1).is_none());
+}
