@@ -301,6 +301,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
                 let spk = spk.spk;
                 std::thread::spawn(move || -> Result<TxsOfSpkIndex, Error> {
                     let mut last_txid = None;
+                    let mut seen_cursors = HashSet::new();
                     let mut spk_txs = Vec::new();
                     loop {
                         let txs = client.scripthash_txs(&spk, last_txid)?;
@@ -309,6 +310,11 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
                         spk_txs.extend(txs);
                         if tx_count < 25 {
                             break;
+                        }
+                        // Paging from a cursor we have already paged from means the server is
+                        // not paging forward (it repeats or cycles), so we would loop forever.
+                        if !seen_cursors.insert(last_txid) {
+                            return Err(Box::new(esplora_client::Error::InvalidResponse));
                         }
                     }
                     let got_txids = spk_txs.iter().map(|tx| tx.txid).collect::<HashSet<_>>();

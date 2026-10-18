@@ -333,6 +333,7 @@ where
                 let spk = spk.spk;
                 async move {
                     let mut last_seen = None;
+                    let mut seen_cursors = HashSet::new();
                     let mut spk_txs = Vec::new();
                     loop {
                         let txs = client.scripthash_txs(&spk, last_seen).await?;
@@ -341,6 +342,11 @@ where
                         spk_txs.extend(txs);
                         if tx_count < 25 {
                             break;
+                        }
+                        // Paging from a cursor we have already paged from means the server is
+                        // not paging forward (it repeats or cycles), so we would loop forever.
+                        if !seen_cursors.insert(last_seen) {
+                            return Err(Box::new(esplora_client::Error::InvalidResponse));
                         }
                     }
                     let got_txids = spk_txs.iter().map(|tx| tx.txid).collect::<HashSet<_>>();
