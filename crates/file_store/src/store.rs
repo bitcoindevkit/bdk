@@ -24,7 +24,7 @@ impl<C> Store<C>
 where
     C: Merge + serde::Serialize + serde::de::DeserializeOwned,
 {
-    /// Create a new [`Store`] file in write-only mode; error if the file exists.
+    /// Create a new [`Store`] file in read-write mode; error if the file exists.
     ///
     /// `magic` is the prefixed bytes to write to the new file. This will be checked when loading
     /// the [`Store`] in the future with [`load`].
@@ -66,9 +66,9 @@ where
     /// To get a new working file store from this error use [`Store::create`] and [`Store::append`]
     /// to add the aggregated changeset obtained from [`StoreErrorWithDump`].
     ///
-    /// To analyze the causes of the problem in the original database do not recreate the [`Store`]
-    /// using the same file path. Not changing the file path will overwrite previous file without
-    /// being able to recover its original data.
+    /// [`Store::create`] fails if the path already exists, so create the recovered [`Store`] at a
+    /// different path. This keeps the original file for analysis; to replace it, rename the new
+    /// file over it afterwards, as shown in the example below.
     ///
     /// # Examples
     /// ```
