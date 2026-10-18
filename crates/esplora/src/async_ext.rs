@@ -282,6 +282,12 @@ async fn chain_update<S: Sleeper>(
     // insert the most recent blocks at the tip to make sure we update the tip and make the update
     // robust.
     for (&height, &hash) in latest_blocks.iter() {
+        // A well-behaved server never reports the genesis block from `/blocks`. Inserting a
+        // conflicting height-0 entry would panic, and the update is rebuilt on every sync, so
+        // the wallet could never sync against that server again.
+        if height == 0 {
+            continue;
+        }
         tip = tip.insert(height, hash);
     }
 
@@ -562,7 +568,10 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use std::{collections::BTreeSet, time::Duration};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        time::Duration,
+    };
 
     use bdk_chain::{
         bitcoin::{hashes::Hash, Txid},
@@ -571,7 +580,7 @@ mod test {
     };
     use bdk_core::{bitcoin, ConfirmationBlockTime};
     use bdk_testenv::{anyhow, TestEnv};
-    use esplora_client::Builder;
+    use esplora_client::{BlockHash, Builder};
 
     use crate::async_ext::{chain_update, fetch_latest_blocks};
 
@@ -613,6 +622,25 @@ mod test {
             "`chain_update` should error if it can't connect to the local CP",
         );
 
+        Ok(())
+    }
+
+    // A conflicting height-0 entry from `/blocks` must not panic `chain_update`.
+    #[tokio::test]
+    async fn test_chain_update_ignores_conflicting_genesis() -> anyhow::Result<()> {
+        let genesis = BlockHash::from_byte_array([0x01; 32]);
+        let block1 = BlockHash::from_byte_array([0x02; 32]);
+        let local_tip = bdk_chain::CheckPoint::new(0, genesis).insert(1, block1);
+
+        let mut latest_blocks = BTreeMap::new();
+        latest_blocks.insert(0, BlockHash::from_byte_array([0x03; 32]));
+        latest_blocks.insert(1, block1);
+
+        let client = Builder::new("http://127.0.0.1:1").build_async()?;
+        let update = chain_update(&client, &latest_blocks, &local_tip, &BTreeSet::new()).await?;
+
+        assert_eq!(update.height(), 1);
+        assert_eq!(update.get(0).map(|cp| cp.hash()), Some(genesis));
         Ok(())
     }
 
