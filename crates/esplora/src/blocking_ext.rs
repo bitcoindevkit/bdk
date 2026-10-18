@@ -551,7 +551,7 @@ mod test {
     #[test]
     fn test_chain_update_wrong_network_error() -> anyhow::Result<()> {
         let env = TestEnv::new()?;
-        let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+        let base_url = format!("http://{}", env.electrsd.esplora_url.clone().unwrap());
         let client = Builder::new(base_url.as_str()).build_blocking();
         let initial_height = env.rpc_client().get_block_count()?.into_model().0 as u32;
 
@@ -623,7 +623,7 @@ mod test {
 
         for t in test_cases.into_iter() {
             let env = TestEnv::new()?;
-            let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+            let base_url = format!("http://{}", env.electrsd.esplora_url.clone().unwrap());
             let client = Builder::new(base_url.as_str()).build_blocking();
 
             // set env to `initial_env_height`
@@ -770,7 +770,7 @@ mod test {
         };
         // so new blocks can be seen by Electrs
         let env = env.reset_electrsd()?;
-        let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+        let base_url = format!("http://{}", env.electrsd.esplora_url.clone().unwrap());
         let client = Builder::new(base_url.as_str()).build_blocking();
 
         struct TestCase {
