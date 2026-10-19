@@ -6,6 +6,9 @@ use alloc::vec::Vec;
 /// Tracks block-height queries: which heights have been requested,
 /// which are still pending, and the resolved data.
 ///
+/// Every answer is for the chain ending at [`tip`](Self::tip), so a height has only one right
+/// answer, however many times it is fetched.
+///
 /// This is a helper for [`ChainTask`](crate::ChainTask) implementors that need to
 /// track which block heights have been requested from the chain source and which
 /// responses have been received. It deduplicates requests and stores resolved blocks.
@@ -19,17 +22,24 @@ use alloc::vec::Vec;
 /// 4. Check for outstanding requests with [`unresolved`](Self::unresolved).
 #[derive(Debug)]
 pub struct BlockQueries<B> {
+    tip: BlockId,
     pending: BTreeSet<u32>,
     blocks: BTreeMap<u32, Option<B>>,
 }
 
 impl<B> BlockQueries<B> {
-    /// Creates an empty `BlockQueries`.
-    pub fn new() -> Self {
+    /// Creates an empty `BlockQueries` for the chain ending at `tip`.
+    pub fn new(tip: BlockId) -> Self {
         Self {
+            tip,
             pending: BTreeSet::new(),
             blocks: BTreeMap::new(),
         }
+    }
+
+    /// The chain tip that every answer is relative to.
+    pub fn tip(&self) -> BlockId {
+        self.tip
     }
 
     /// Filters out already-resolved/pending heights, inserts new ones into pending,
@@ -48,8 +58,10 @@ impl<B> BlockQueries<B> {
     /// never return it again. So do not pass `None` for a *failed* fetch; leave the height
     /// pending and retry it, or the failure is silently recorded as "no such block".
     ///
-    /// `height` need not be pending: after [`clear_pending`](Self::clear_pending), an answer to a
-    /// dropped request, or a second answer to one requested again, is recorded like any other.
+    /// `block` must be the block at `height` in the chain ending at [`tip`](Self::tip), so a
+    /// second answer for a height repeats the first. `height` need not be pending: after
+    /// [`clear_pending`](Self::clear_pending), a late answer to a dropped request is recorded
+    /// like any other.
     pub fn resolve(&mut self, height: u32, block: Option<B>) {
         self.pending.remove(&height);
         self.blocks.insert(height, block);
@@ -123,12 +135,6 @@ impl<B: ToBlockHash> BlockQueries<B> {
         }
 
         BlockCandidateResolution::NotConfirmed
-    }
-}
-
-impl<B> Default for BlockQueries<B> {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -252,7 +258,7 @@ mod test {
         ];
 
         for case in cases {
-            let mut q = BlockQueries::<BlockHash>::new();
+            let mut q = BlockQueries::<BlockHash>::new(id(10, 10));
             (case.setup)(&mut q);
 
             let res = q.resolve_candidates(case.candidates.iter().map(|id| (*id, *id)));

@@ -38,7 +38,6 @@ enum ViewStage {
 /// for confirmed heights and stores them in the resulting [`CanonicalView`].
 pub struct CanonicalViewTask<'g, A, B> {
     tx_graph: &'g TxGraph<A>,
-    tip: BlockId,
 
     queries: BlockQueries<B>,
 
@@ -61,7 +60,6 @@ impl<'g, A: Anchor, B> CanonicalViewTask<'g, A, B> {
     /// already fetched during phase 1 (to avoid redundant queries).
     pub(crate) fn new(
         tx_graph: &'g TxGraph<A>,
-        tip: BlockId,
         order: Vec<Txid>,
         txs: HashMap<Txid, CanonicalEntry<CanonicalReason<A>>>,
         spends: HashMap<OutPoint, Txid>,
@@ -107,7 +105,6 @@ impl<'g, A: Anchor, B> CanonicalViewTask<'g, A, B> {
 
         Self {
             tx_graph,
-            tip,
             queries,
             canonical_order: order,
             canonical_txs: txs,
@@ -157,7 +154,7 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
     type Output = CanonicalView<A>;
 
     fn tip(&self) -> BlockId {
-        self.tip
+        self.queries.tip()
     }
 
     fn unresolved_queries<'a>(&'a self) -> impl Iterator<Item = u32> + 'a {
@@ -210,7 +207,7 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
                 // is rebuilt on every poll of this stage. It also makes the emitted `Query`
                 // ascending and deterministic — `direct_anchors` is a `HashMap`, so iterating its
                 // values would otherwise vary the height order between runs.
-                let required: BTreeSet<u32> = core::iter::once(self.tip.height)
+                let required: BTreeSet<u32> = core::iter::once(self.queries.tip().height)
                     .chain(
                         self.direct_anchors
                             .values()
@@ -256,7 +253,7 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
         };
 
         // Compute tip MTP.
-        let tip_mtp = try_compute_mtp_at(self.tip.height);
+        let tip_mtp = try_compute_mtp_at(self.queries.tip().height);
 
         let mut view_order = Vec::new();
         let mut view_txs = HashMap::<Txid, CanonicalEntry<_>>::new();
@@ -367,6 +364,12 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
             );
         }
 
-        CanonicalView::new(self.tip, view_order, view_txs, self.spends, tip_mtp)
+        CanonicalView::new(
+            self.queries.tip(),
+            view_order,
+            view_txs,
+            self.spends,
+            tip_mtp,
+        )
     }
 }

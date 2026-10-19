@@ -227,8 +227,24 @@ fn view_task_requests_again_heights_left_pending() {
     let tip = chain.tip().block_id();
 
     let (txs, _) = chain.run_task(CanonicalTask::new(&tx_graph, tip, Default::default()));
-    let mut queries = BlockQueries::new();
+    let mut queries = BlockQueries::new(tip);
     let _ = queries.request([tip.height].into_iter());
+
+    let view = chain.run_task(txs.view_task(&tx_graph, queries).with_mtp());
+    assert_eq!(view.tip_mtp(), Some(7));
+}
+
+/// Phase 2 does not reuse blocks fetched for a different tip, since they may not be in its chain.
+#[test]
+fn view_task_ignores_queries_for_another_tip() {
+    let chain = chain_with_time_equal_to_height(12);
+    let tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+    let tip = chain.tip().block_id();
+
+    let (txs, _) = chain.run_task(CanonicalTask::new(&tx_graph, tip, Default::default()));
+    let mut queries = BlockQueries::new(chain.get(11).expect("height 11 exists").block_id());
+    let _ = queries.request([tip.height].into_iter());
+    queries.resolve(tip.height, None);
 
     let view = chain.run_task(txs.view_task(&tx_graph, queries).with_mtp());
     assert_eq!(view.tip_mtp(), Some(7));
