@@ -127,21 +127,21 @@ impl EsploraExt for esplora_client::BlockingClient {
             self,
             start_time,
             &mut inserted_txs,
-            request.iter_spks_with_expected_txids(),
+            request.drain_spks_with_expected_txids(),
             parallel_requests,
         )?);
         tx_update.extend(fetch_txs_with_txids(
             self,
             start_time,
             &mut inserted_txs,
-            request.iter_txids(),
+            request.drain_txids(),
             parallel_requests,
         )?);
         tx_update.extend(fetch_txs_with_outpoints(
             self,
             start_time,
             &mut inserted_txs,
-            request.iter_outpoints(),
+            request.drain_outpoints(),
             parallel_requests,
         )?);
 
