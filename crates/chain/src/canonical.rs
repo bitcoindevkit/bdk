@@ -27,7 +27,9 @@ use alloc::vec::Vec;
 use core::{fmt, ops::RangeBounds};
 
 use bdk_core::{BlockId, BlockQueries};
-use bitcoin::{constants::COINBASE_MATURITY, OutPoint, ScriptBuf, Transaction, TxOut, Txid};
+use bitcoin::{
+    absolute, constants::COINBASE_MATURITY, relative, OutPoint, ScriptBuf, Transaction, TxOut, Txid,
+};
 
 use crate::{spk_txout::SpkTxOutIndex, Anchor, Balance, CanonicalViewTask, ChainPosition, TxGraph};
 
@@ -39,12 +41,20 @@ pub enum Eligibility {
     /// [`classify_outpoints`](CanonicalView::classify_outpoints). Typically confirmed deeply
     /// enough to be unlikely to be replaced, but the caller decides.
     Settled,
-    /// An output not yet spendable by consensus: an immature coinbase output, or one the
-    /// `is_locked` predicate reports as timelocked. May be unconfirmed; its [`Trust`] is not
-    /// evaluated.
+    /// An output not yet spendable by consensus: an immature coinbase output, or one whose
+    /// [`Timelocks`] are not met. May be unconfirmed; its [`Trust`] is not evaluated.
     Immature,
     /// An output not yet settled.
     Unsettled(Trust),
+}
+
+/// The timelocks of the spend path the caller will use for an output. A path can have both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Timelocks {
+    /// The `nLockTime` the spending transaction needs (BIP-65, e.g. miniscript `after`).
+    pub absolute: Option<absolute::LockTime>,
+    /// The `nSequence` the spending input needs (BIP-112, e.g. miniscript `older`).
+    pub relative: Option<relative::LockTime>,
 }
 
 /// Describes whether an [`Unsettled`](Eligibility::Unsettled) output is trusted, untrusted, or of
@@ -175,6 +185,50 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
         // of a canonical tx, or is assumed canonical). It then has no confirmations, so maturity
         // cannot be proven.
         !self.is_on_coinbase || self.pos.confirmations_lower_bound(tip) >= COINBASE_MATURITY
+    }
+
+    /// Whether `timelocks` are met for a transaction spending this output in the block after
+    /// `tip`, where `tip_mtp` is the MTP at `tip` (see [`Canonical::tip_mtp`]).
+    ///
+    /// This follows consensus (BIP-65, BIP-68, BIP-113). An unconfirmed output is treated as
+    /// confirming in the block after `tip`, as Bitcoin Core does for mempool coins. A lock that
+    /// needs an unknown MTP (`None` [`prev_mtp`](Self::prev_mtp) or `tip_mtp`) counts as unmet.
+    ///
+    /// If the position is confirmed [`transitively`](ChainPosition::Confirmed::transitively), the
+    /// number of confirmations may be a lower bound (see [`confirmations_lower_bound`]), so this
+    /// method may return false-negatives.
+    ///
+    /// [`confirmations_lower_bound`]: ChainPosition::confirmations_lower_bound
+    pub fn are_timelocks_met(&self, timelocks: Timelocks, tip: u32, tip_mtp: Option<u32>) -> bool {
+        let next_height = tip.saturating_add(1);
+        let absolute_met = match timelocks.absolute {
+            None => true,
+            Some(absolute::LockTime::Blocks(h)) => h.to_consensus_u32() < next_height,
+            Some(absolute::LockTime::Seconds(t)) => {
+                tip_mtp.is_some_and(|mtp| t.to_consensus_u32() < mtp)
+            }
+        };
+        let relative_met = match timelocks.relative {
+            None => true,
+            // An unconfirmed output has 0 confirmations: as if it confirms in `next_height`.
+            Some(relative::LockTime::Blocks(n)) => {
+                self.pos.confirmations_lower_bound(tip) >= u32::from(n.value())
+            }
+            Some(relative::LockTime::Time(n)) => {
+                let coin_mtp = if self.pos.is_confirmed() {
+                    self.prev_mtp
+                } else {
+                    tip_mtp
+                };
+                match (coin_mtp, tip_mtp) {
+                    (Some(coin_mtp), Some(tip_mtp)) => {
+                        u64::from(coin_mtp) + u64::from(n.value()) * 512 <= u64::from(tip_mtp)
+                    }
+                    _ => false,
+                }
+            }
+        };
+        absolute_met && relative_met
     }
 
     /// Whether the utxo is/was/will be spendable with chain `tip`.
@@ -470,18 +524,20 @@ impl<A: Anchor> CanonicalView<A> {
     ///   [`taints_unowned`] to classify everything foreign as untrusted.
     /// * `is_settled` - Returns `true` for the [position](ChainPosition) of a transaction we
     ///   consider settled (unlikely to be replaced), for example one with enough confirmations.
-    /// * `is_locked` - Returns `true` for a txout whose timelock is not met yet, classifying it as
-    ///   [`Immature`](Eligibility::Immature). For an output confirmed
-    ///   [`transitively`](ChainPosition::Confirmed::transitively), the confirmation height is only
-    ///   an upper bound, so a relative timelock may look unmet when it is already met.
+    /// * `timelocks` - Returns the [`Timelocks`] of the spend path the caller will use for a txout.
+    ///   A txout whose timelocks are not met (see
+    ///   [`are_timelocks_met`](CanonicalTxOut::are_timelocks_met)) is
+    ///   [`Immature`](Eligibility::Immature). Time-based locks need MTP, so on a view without it
+    ///   (see [`CanonicalViewTask::with_mtp`]) they are never met.
     pub fn classify_outpoints<'a>(
         &'a self,
         outpoints: impl IntoIterator<Item = OutPoint> + 'a,
         mut does_taint: impl FnMut(&CanonicalTx<ChainPosition<A>>) -> bool + 'a,
         is_settled: impl Fn(&ChainPosition<A>) -> bool + 'a,
-        is_locked: impl Fn(&CanonicalTxOut<ChainPosition<A>>) -> bool + 'a,
+        timelocks: impl Fn(&CanonicalTxOut<ChainPosition<A>>) -> Timelocks + 'a,
     ) -> impl Iterator<Item = (CanonicalTxOut<ChainPosition<A>>, Eligibility)> + 'a {
         let tip = self.tip.height;
+        let tip_mtp = self.tip_mtp;
         // Shared across outpoints so an ancestor reached by several of them is only walked once.
         let mut cache = HashMap::<Txid, Trust>::new();
         outpoints
@@ -489,7 +545,9 @@ impl<A: Anchor> CanonicalView<A> {
             .filter_map(move |op| self.txout(op))
             .filter(|txo| txo.spent_by.is_none())
             .map(move |txout| {
-                let eligibility = if !txout.is_mature(tip) || is_locked(&txout) {
+                let eligibility = if !txout.is_mature(tip)
+                    || !txout.are_timelocks_met(timelocks(&txout), tip, tip_mtp)
+                {
                     Eligibility::Immature
                 } else if is_settled(&txout.pos) {
                     Eligibility::Settled
@@ -607,7 +665,7 @@ impl<A: Anchor> CanonicalView<A> {
     /// This is a fold over [`classify_outpoints`](Self::classify_outpoints): each output's value is
     /// added to the bucket matching its [`Eligibility`].
     ///
-    /// See `classify_outpoints` for `does_taint` and `is_settled` meaning.
+    /// See `classify_outpoints` for `does_taint`, `is_settled` and `timelocks` meaning.
     ///
     /// The position of an output confirmed [`transitively`](ChainPosition::Confirmed::transitively)
     /// carries a descendant's anchor, so its confirmation height may be an upper bound (see
@@ -634,7 +692,7 @@ impl<A: Anchor> CanonicalView<A> {
     ///     indexer.outpoints().iter().map(|(_, op)| *op),
     ///     bdk_chain::taints_unowned(&indexer),
     ///     |pos: &ChainPosition<_>| pos.confirmations_lower_bound(tip_height) >= 6,
-    ///     |_txout| false,
+    ///     |_txout| Default::default(),
     /// );
     /// ```
     pub fn balance(
@@ -642,9 +700,9 @@ impl<A: Anchor> CanonicalView<A> {
         outpoints: impl IntoIterator<Item = OutPoint>,
         does_taint: impl FnMut(&CanonicalTx<ChainPosition<A>>) -> bool,
         is_settled: impl Fn(&ChainPosition<A>) -> bool,
-        is_locked: impl Fn(&CanonicalTxOut<ChainPosition<A>>) -> bool,
+        timelocks: impl Fn(&CanonicalTxOut<ChainPosition<A>>) -> Timelocks,
     ) -> Balance {
-        self.classify_outpoints(outpoints, does_taint, is_settled, is_locked)
+        self.classify_outpoints(outpoints, does_taint, is_settled, timelocks)
             .collect()
     }
 }
