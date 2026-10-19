@@ -1551,3 +1551,23 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+/// `next_observation_time` orders new observations after recorded ones when the clock moves
+/// backwards (#2280).
+#[test]
+fn test_next_observation_time() {
+    let txid = hash!("tx");
+    let mut graph = TxGraph::<BlockId>::default();
+    assert_eq!(graph.next_observation_time(100), 100);
+
+    // Clock moved backwards: the eviction still sorts after the sighting.
+    let _ = graph.insert_seen_at(txid, 1000);
+    assert_eq!(graph.next_observation_time(900), 1001);
+
+    // Future-dated eviction, then a corrected clock: the next sighting sorts after it.
+    let _ = graph.insert_evicted_at(txid, 5000);
+    assert_eq!(graph.next_observation_time(2000), 5001);
+
+    // A later clock is used as is.
+    assert_eq!(graph.next_observation_time(9000), 9000);
+}
