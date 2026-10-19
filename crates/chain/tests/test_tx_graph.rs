@@ -1551,3 +1551,51 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+#[test]
+fn test_apply_update_eviction_for_unknown_txid() {
+    let mut graph_update = TxGraph::<BlockId>::default();
+    let mut graph_batch = TxGraph::<BlockId>::default();
+
+    let tx = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::null(),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+    };
+    let txid = tx.compute_txid();
+
+    // 1. apply_update records eviction even for unknown txids
+    let mut update = tx_graph::TxUpdate::default();
+    update.evicted_ats.insert((txid, 200));
+    let changeset_update = graph_update.apply_update(update);
+    assert_eq!(changeset_update.last_evicted.get(&txid), Some(&200));
+
+    // 2. batch_insert_relevant_evicted_at ignores unknown txids
+    let changeset_batch = graph_batch.batch_insert_relevant_evicted_at([(txid, 200)]);
+    assert!(changeset_batch.last_evicted.is_empty());
+
+    // 3. Later insert the transaction with seen_at = 100 <= evicted_at
+    let _ = graph_update.insert_tx(tx.clone());
+    let _ = graph_update.insert_seen_at(txid, 100);
+
+    let _ = graph_batch.insert_tx(tx);
+    let _ = graph_batch.insert_seen_at(txid, 100);
+
+    // In graph_update, the tx is immediately treated as evicted because seen_at (100) <= evicted_at
+    // (200)
+    assert!(graph_update.get_tx_node(txid).unwrap().is_evicted());
+
+    // In graph_batch, the tx is not evicted because the earlier eviction was ignored
+    assert!(!graph_batch.get_tx_node(txid).unwrap().is_evicted());
+
+    // 4. A newer seen_at > evicted_at revives the transaction in graph_update
+    let _ = graph_update.insert_seen_at(txid, 201);
+    assert!(!graph_update.get_tx_node(txid).unwrap().is_evicted());
+}

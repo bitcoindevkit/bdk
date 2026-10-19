@@ -176,9 +176,14 @@ where
     /// `update` is a [`tx_graph::TxUpdate<A>`] and the resultant changes is returned as
     /// [`ChangeSet`].
     ///
-    /// **Note**: Transactions in the `update` without temporal context (anchors or seen_ats)
-    /// will be stored but will not be considered canonical. See [`tx_graph::TxUpdate`] for
-    /// more details.
+    /// **Note on unconfirmed transactions**: Transactions in the `update` without temporal
+    /// context (anchors or seen_ats) will be stored but will not be considered canonical. See
+    /// [`tx_graph::TxUpdate`] for more details.
+    ///
+    /// **Note on evictions**: Evictions in `update.evicted_ats` are applied unconditionally to the
+    /// underlying [`TxGraph`]. See
+    /// [`TxGraph::apply_update`](tx_graph::TxGraph::apply_update) for details on how evictions
+    /// for unknown transactions affect subsequent insertions and canonicalization.
     pub fn apply_update(&mut self, update: tx_graph::TxUpdate<A>) -> ChangeSet<A, I::ChangeSet> {
         let tx_graph = self.graph.apply_update(update);
         let indexer = self.index_tx_graph_changeset(&tx_graph);
@@ -220,6 +225,9 @@ where
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
+    ///
+    /// The eviction is recorded regardless of whether the transaction is already tracked in the
+    /// graph.
     pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A, I::ChangeSet> {
         let tx_graph = self.graph.insert_evicted_at(txid, evicted_at);
         ChangeSet {
@@ -233,6 +241,9 @@ where
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
+    ///
+    /// Unlike [`apply_update`](Self::apply_update), this only records evictions for transactions
+    /// already tracked in the graph; unknown transactions are ignored.
     pub fn batch_insert_relevant_evicted_at(
         &mut self,
         evicted_ats: impl IntoIterator<Item = (Txid, u64)>,

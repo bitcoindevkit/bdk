@@ -880,6 +880,11 @@ impl<A: Anchor> TxGraph<A> {
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
+    ///
+    /// The eviction is recorded regardless of whether the transaction is currently stored in the
+    /// graph. If the transaction is subsequently inserted with a `seen_at` timestamp less than or
+    /// equal to `evicted_at`, it will be considered evicted (see [`TxNode::is_evicted`]) until a
+    /// newer sighting (`seen_at > evicted_at`) is recorded.
     pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A> {
         let is_changed = match self.last_evicted.entry(txid) {
             hash_map::Entry::Occupied(mut e) => {
@@ -909,6 +914,11 @@ impl<A: Anchor> TxGraph<A> {
     /// The `evicted_at` timestamp represents the last known time when the transaction was observed
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
+    ///
+    /// Unlike [`apply_update`](Self::apply_update), which records evictions for all provided
+    /// transaction IDs unconditionally (even for transactions not yet in the graph), this method
+    /// only records evictions for transactions already tracked in `self.txs`. Any unknown `txid`s
+    /// are ignored and omitted from the returned [`ChangeSet`].
     pub fn batch_insert_relevant_evicted_at(
         &mut self,
         evicted_ats: impl IntoIterator<Item = (Txid, u64)>,
@@ -928,8 +938,20 @@ impl<A: Anchor> TxGraph<A> {
     /// The returned [`ChangeSet`] is the set difference between `update` and `self` (transactions
     /// that exist in `update` but not in `self`).
     ///
-    /// **Note**: Transactions in the `update` without temporal context (anchors or seen_ats)
-    /// will be stored but will not be considered canonical. See [`TxUpdate`] for more details.
+    /// **Note on unconfirmed transactions**: Transactions in the `update` without temporal
+    /// context (anchors or seen_ats) will be stored but will not be considered canonical. See
+    /// [`TxUpdate`] for more details.
+    ///
+    /// **Note on evictions**: Unlike
+    /// [`batch_insert_relevant_evicted_at`](Self::batch_insert_relevant_evicted_at),
+    /// which ignores evictions for transactions not currently tracked in the graph, `apply_update`
+    /// records all [`update.evicted_ats`](TxUpdate::evicted_ats) unconditionally via
+    /// [`insert_evicted_at`](Self::insert_evicted_at). If an evicted transaction is not yet in the
+    /// graph, its eviction timestamp is still recorded and persisted in the returned [`ChangeSet`].
+    /// If that transaction is later inserted with a `seen_at` timestamp less than or equal to the
+    /// recorded `evicted_at`, it will immediately be considered evicted (see
+    /// [`TxNode::is_evicted`]) and excluded from the unconfirmed canonical view until a newer
+    /// sighting (`seen_at > evicted_at`) is recorded.
     pub fn apply_update(&mut self, update: TxUpdate<A>) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         for tx in update.txs {

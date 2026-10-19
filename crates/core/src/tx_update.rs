@@ -56,6 +56,13 @@ pub struct TxUpdate<A = ()> {
     ///
     /// [`SyncRequest::start_time`](crate::spk_client::SyncRequest::start_time) can be used to
     /// provide the `evicted_at` value.
+    ///
+    /// Note that `evicted_ats` may contain `txid`s not present in [`Self::txs`]. When applied to a
+    /// transaction graph (such as `bdk_chain::TxGraph::apply_update`), these evictions are
+    /// recorded unconditionally, even for transactions not yet tracked in the graph. If an
+    /// unknown transaction is later inserted with a `seen_at` timestamp earlier than or equal
+    /// to this `evicted_at`, it will immediately be treated as evicted until a newer sighting
+    /// (`seen_at > evicted_at`) is recorded.
     pub evicted_ats: HashSet<(Txid, u64)>,
 }
 
