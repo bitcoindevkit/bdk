@@ -14,7 +14,7 @@ use bitcoin::BlockHash;
 fn apply_changeset_to_checkpoint<D>(
     mut init_cp: CheckPoint<D>,
     changeset: &ChangeSet<D>,
-) -> Result<CheckPoint<D>, ApplyBlockError>
+) -> Result<CheckPoint<D>, ApplyChangeSetError>
 where
     D: ToBlockHash + fmt::Debug + Clone,
 {
@@ -44,17 +44,29 @@ where
             };
         }
 
-        let new_tip = match base {
-            Some(base) => base
-                .extend(extension)
-                // Since `extension` is in height order, the only failure case is `prev_blockhash`
-                // mismatch.
-                .map_err(|last_cp| ApplyBlockError::PrevBlockhashMismatch {
-                    expected: last_cp.block_id(),
-                })?,
-            None => LocalChain::from_blocks(extension)?.tip(),
+        let base = match base {
+            Some(base) => base,
+            // No point of agreement means `changeset` touches genesis, which cannot be altered.
+            None => {
+                let genesis = init_cp.get(0).expect("`LocalChain` always has genesis");
+                let update_hash = extension.remove(&0).as_ref().map(ToBlockHash::to_blockhash);
+                if update_hash != Some(genesis.hash()) {
+                    return Err(ApplyChangeSetError::CannotAlterGenesis {
+                        original_hash: genesis.hash(),
+                        update_hash,
+                    });
+                }
+                genesis
+            }
         };
-        init_cp = new_tip;
+
+        init_cp = base
+            .extend(extension)
+            // Since `extension` is in height order, the only failure case is `prev_blockhash`
+            // mismatch.
+            .map_err(|last_cp| ApplyChangeSetError::PrevBlockhashMismatch {
+                expected: last_cp.block_id(),
+            })?;
     }
 
     Ok(init_cp)
@@ -327,15 +339,19 @@ where
     }
 
     /// Construct a [`LocalChain`] from an initial `changeset`.
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`ApplyBlockError::MissingGenesis`] if `changeset` has no genesis block, or
+    /// [`ApplyBlockError::PrevBlockhashMismatch`] if its blocks do not link by `prev_blockhash`.
     pub fn from_changeset(changeset: ChangeSet<D>) -> Result<Self, ApplyBlockError> {
-        let genesis_entry = changeset.blocks.get(&0).cloned().flatten();
-        let genesis_data = match genesis_entry {
-            Some(data) => data,
-            None => return Err(ApplyBlockError::MissingGenesis),
-        };
-
-        let (mut chain, _) = Self::from_genesis(genesis_data);
-        chain.apply_changeset(&changeset)?;
+        let chain = Self::from_blocks(
+            changeset
+                .blocks
+                .iter()
+                .filter_map(|(&height, data)| Some((height, data.clone()?)))
+                .collect(),
+        )?;
         debug_assert!(chain._check_changeset_is_applied(&changeset));
         Ok(chain)
     }
@@ -375,7 +391,12 @@ where
     }
 
     /// Apply the given `changeset`.
-    pub fn apply_changeset(&mut self, changeset: &ChangeSet<D>) -> Result<(), ApplyBlockError> {
+    ///
+    /// # Errors
+    ///
+    /// Fails if `changeset` replaces or removes the genesis block, or if the resulting blocks do
+    /// not link by `prev_blockhash`. `self` is unchanged on error.
+    pub fn apply_changeset(&mut self, changeset: &ChangeSet<D>) -> Result<(), ApplyChangeSetError> {
         let old_tip = self.tip.clone();
         let new_tip = apply_changeset_to_checkpoint(old_tip, changeset)?;
         self.tip = new_tip;
@@ -399,19 +420,16 @@ where
     ///
     /// # Errors
     ///
-    /// Replacing the block hash of an existing checkpoint will result in an error.
-    pub fn insert_block(
-        &mut self,
-        height: u32,
-        data: D,
-    ) -> Result<ChangeSet<D>, AlterCheckPointError> {
+    /// Replacing the block hash of an existing checkpoint will result in an error. So will a block
+    /// that does not link to its neighbors by `prev_blockhash`.
+    pub fn insert_block(&mut self, height: u32, data: D) -> Result<ChangeSet<D>, InsertBlockError> {
         if let Some(original_cp) = self.tip.get(height) {
             let original_hash = original_cp.hash();
             if original_hash != data.to_blockhash() {
-                return Err(AlterCheckPointError {
+                return Err(InsertBlockError::CannotReplace {
                     height,
                     original_hash,
-                    update_hash: Some(data.to_blockhash()),
+                    update_hash: data.to_blockhash(),
                 });
             }
             return Ok(ChangeSet::default());
@@ -419,17 +437,14 @@ where
 
         let mut changeset = ChangeSet::<D>::default();
         changeset.blocks.insert(height, Some(data));
-        self.apply_changeset(&changeset)
-            .map_err(|_| AlterCheckPointError {
-                height: 0,
-                original_hash: self.genesis_hash(),
-                update_hash: changeset
-                    .blocks
-                    .get(&0)
-                    .cloned()
-                    .flatten()
-                    .map(|d| d.to_blockhash()),
-            })?;
+        self.apply_changeset(&changeset).map_err(|err| match err {
+            ApplyChangeSetError::CannotAlterGenesis { .. } => {
+                unreachable!("`height` is not in the chain, so it cannot be genesis")
+            }
+            ApplyChangeSetError::PrevBlockhashMismatch { expected } => {
+                InsertBlockError::PrevBlockhashMismatch { expected }
+            }
+        })?;
         Ok(changeset)
     }
 
@@ -579,6 +594,49 @@ impl core::fmt::Display for ApplyBlockError {
 
 impl core::error::Error for ApplyBlockError {}
 
+/// Error when applying a [`ChangeSet`] to a [`LocalChain`].
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum ApplyChangeSetError {
+    /// The changeset attempts to replace or remove the genesis block.
+    CannotAlterGenesis {
+        /// The genesis block hash which cannot be replaced or removed.
+        original_hash: BlockHash,
+        /// The attempted replacement, or `None` if the changeset removes genesis.
+        update_hash: Option<BlockHash>,
+    },
+    /// Block's `prev_blockhash` doesn't match the expected block.
+    PrevBlockhashMismatch {
+        /// The block that `prev_blockhash` should reference.
+        expected: BlockId,
+    },
+}
+
+impl core::fmt::Display for ApplyChangeSetError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ApplyChangeSetError::CannotAlterGenesis {
+                original_hash,
+                update_hash: Some(update_hash),
+            } => write!(
+                f,
+                "cannot replace genesis block: original={original_hash} update={update_hash}"
+            ),
+            ApplyChangeSetError::CannotAlterGenesis {
+                original_hash,
+                update_hash: None,
+            } => write!(f, "cannot remove genesis block: original={original_hash}"),
+            ApplyChangeSetError::PrevBlockhashMismatch { expected } => write!(
+                f,
+                "`prev_blockhash` doesn't match block at height {} ({})",
+                expected.height, expected.hash
+            ),
+        }
+    }
+}
+
+impl core::error::Error for ApplyChangeSetError {}
+
 /// An error which occurs when a [`LocalChain`] is constructed without a genesis checkpoint.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MissingGenesisError;
@@ -594,35 +652,47 @@ impl core::fmt::Display for MissingGenesisError {
 
 impl core::error::Error for MissingGenesisError {}
 
-/// Represents a failure when trying to insert/remove a checkpoint to/from [`LocalChain`].
+/// The error type for [`LocalChain::insert_block`].
 #[derive(Clone, Debug, PartialEq)]
-pub struct AlterCheckPointError {
-    /// The checkpoint's height.
-    pub height: u32,
-    /// The original checkpoint's block hash which cannot be replaced/removed.
-    pub original_hash: BlockHash,
-    /// The attempted update to the `original_block` hash.
-    pub update_hash: Option<BlockHash>,
+#[non_exhaustive]
+pub enum InsertBlockError {
+    /// The block conflicts with an existing checkpoint at the same height.
+    CannotReplace {
+        /// The checkpoint's height.
+        height: u32,
+        /// The original checkpoint's block hash which cannot be replaced.
+        original_hash: BlockHash,
+        /// The attempted replacement block hash.
+        update_hash: BlockHash,
+    },
+    /// Block's `prev_blockhash` doesn't match the expected block.
+    PrevBlockhashMismatch {
+        /// The block that `prev_blockhash` should reference.
+        expected: BlockId,
+    },
 }
 
-impl core::fmt::Display for AlterCheckPointError {
+impl core::fmt::Display for InsertBlockError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self.update_hash {
-            Some(update_hash) => write!(
+        match self {
+            InsertBlockError::CannotReplace {
+                height,
+                original_hash,
+                update_hash,
+            } => write!(
                 f,
-                "failed to insert block at height {}: original={} update={}",
-                self.height, self.original_hash, update_hash
+                "failed to insert block at height {height}: original={original_hash} update={update_hash}"
             ),
-            None => write!(
+            InsertBlockError::PrevBlockhashMismatch { expected } => write!(
                 f,
-                "failed to remove block at height {}: original={}",
-                self.height, self.original_hash
+                "`prev_blockhash` doesn't match block at height {} ({})",
+                expected.height, expected.hash
             ),
         }
     }
 }
 
-impl core::error::Error for AlterCheckPointError {}
+impl core::error::Error for InsertBlockError {}
 
 /// Occurs when an update does not have a common checkpoint with the original chain.
 #[derive(Clone, Debug, PartialEq)]
@@ -696,15 +766,19 @@ where
     {
         let new_tip = apply_changeset_to_checkpoint(original_tip, &changeset).map_err(|err| {
             match err {
-                ApplyBlockError::MissingGenesis => CannotConnectError {
-                    try_include_height: 0,
-                },
+                // `merge_chains` rejects a genesis mismatch before reaching here.
+                err @ ApplyChangeSetError::CannotAlterGenesis { .. } => {
+                    debug_assert!(false, "merge_chains should have rejected {err:?}");
+                    CannotConnectError {
+                        try_include_height: 0,
+                    }
+                }
                 // The merge iteration is supposed to detect `prev_blockhash` conflicts and resolve
                 // them by invalidating conflicting blocks in the changeset. Reaching this arm means
                 // either the original chain was internally inconsistent or the iteration missed a
                 // case — a bug on our side. Debug builds panic; release builds surface the height
                 // where the mismatch surfaced so the caller at least has a useful pointer.
-                ApplyBlockError::PrevBlockhashMismatch { expected } => {
+                ApplyChangeSetError::PrevBlockhashMismatch { expected } => {
                     debug_assert!(
                         false,
                         "merge_chains should have resolved prev_blockhash mismatch at {expected:?}",

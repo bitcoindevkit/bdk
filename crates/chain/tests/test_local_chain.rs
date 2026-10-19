@@ -5,8 +5,8 @@ use std::ops::{Bound, RangeBounds};
 
 use bdk_chain::{
     local_chain::{
-        AlterCheckPointError, ApplyHeaderError, CannotConnectError, ChangeSet, CheckPoint,
-        LocalChain, MissingGenesisError,
+        ApplyBlockError, ApplyChangeSetError, ApplyHeaderError, CannotConnectError, ChangeSet,
+        CheckPoint, InsertBlockError, LocalChain, MissingGenesisError,
     },
     BlockId,
 };
@@ -342,7 +342,7 @@ fn local_chain_insert_block() {
     struct TestCase {
         original: LocalChain,
         insert: (u32, BlockHash),
-        expected_result: Result<ChangeSet, AlterCheckPointError>,
+        expected_result: Result<ChangeSet, InsertBlockError>,
         expected_final: LocalChain,
     }
 
@@ -374,10 +374,10 @@ fn local_chain_insert_block() {
         TestCase {
             original: local_chain![(0, hash!("_")), (2, hash!("K"))],
             insert: (2, hash!("J")),
-            expected_result: Err(AlterCheckPointError {
+            expected_result: Err(InsertBlockError::CannotReplace {
                 height: 2,
                 original_hash: hash!("K"),
-                update_hash: Some(hash!("J")),
+                update_hash: hash!("J"),
             }),
             expected_final: local_chain![(0, hash!("_")), (2, hash!("K"))],
         },
@@ -395,19 +395,19 @@ fn local_chain_insert_block() {
     }
 }
 
+fn header(prev_blockhash: BlockHash) -> Header {
+    Header {
+        version: bitcoin::block::Version::default(),
+        prev_blockhash,
+        merkle_root: bitcoin::hash_types::TxMerkleNode::all_zeros(),
+        time: 0,
+        bits: bitcoin::CompactTarget::default(),
+        nonce: 0,
+    }
+}
+
 #[test]
 fn local_chain_insert_header() {
-    fn header(prev_blockhash: BlockHash) -> Header {
-        Header {
-            version: bitcoin::block::Version::default(),
-            prev_blockhash,
-            merkle_root: bitcoin::hash_types::TxMerkleNode::all_zeros(),
-            time: 0,
-            bits: bitcoin::CompactTarget::default(),
-            nonce: 0,
-        }
-    }
-
     // Create consecutive headers of height `n`, where the genesis header is height 0.
     fn build_headers(n: u32) -> Vec<Header> {
         let mut headers = Vec::new();
@@ -432,7 +432,7 @@ fn local_chain_insert_header() {
     struct TestCase {
         original: LocalChain<Header>,
         insert: (u32, Header),
-        expected_result: Result<ChangeSet<Header>, AlterCheckPointError>,
+        expected_result: Result<ChangeSet<Header>, InsertBlockError>,
         expected_final: LocalChain<Header>,
     }
 
@@ -470,12 +470,38 @@ fn local_chain_insert_header() {
         TestCase {
             original: local_chain(vec![(0, headers[0]), (2, headers[2])]),
             insert: (2, header(hash!("conflict"))),
-            expected_result: Err(AlterCheckPointError {
+            expected_result: Err(InsertBlockError::CannotReplace {
                 height: 2,
                 original_hash: headers[2].block_hash(),
-                update_hash: Some(header(hash!("conflict")).block_hash()),
+                update_hash: header(hash!("conflict")).block_hash(),
             }),
             expected_final: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+        },
+        // Test case 6: start with headers at heights 0 and 2. Insert header at height 3 that does
+        // not link to height 2.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+            insert: (3, header(hash!("not_2"))),
+            expected_result: Err(InsertBlockError::PrevBlockhashMismatch {
+                expected: BlockId {
+                    height: 2,
+                    hash: headers[2].block_hash(),
+                },
+            }),
+            expected_final: local_chain(vec![(0, headers[0]), (2, headers[2])]),
+        },
+        // Test case 7: start with headers at heights 0 and 3. Insert header at height 2 that
+        // header 3 does not link to.
+        TestCase {
+            original: local_chain(vec![(0, headers[0]), (3, headers[3])]),
+            insert: (2, header(hash!("not_1"))),
+            expected_result: Err(InsertBlockError::PrevBlockhashMismatch {
+                expected: BlockId {
+                    height: 2,
+                    hash: header(hash!("not_1")).block_hash(),
+                },
+            }),
+            expected_final: local_chain(vec![(0, headers[0]), (3, headers[3])]),
         },
     ];
 
@@ -564,6 +590,104 @@ fn local_chain_disconnect_from() {
             i, t.name
         );
     }
+}
+
+#[test]
+fn local_chain_apply_changeset_cannot_alter_genesis() {
+    let chain: LocalChain = local_chain![(0, hash!("G")), (1, hash!("A"))];
+    for (update_hash, changeset) in [
+        (
+            Some(hash!("not_G")),
+            ChangeSet::from([(0, Some(hash!("not_G")))]),
+        ),
+        (None, ChangeSet::from([(0, None)])),
+    ] {
+        let mut chain = chain.clone();
+        assert_eq!(
+            chain.apply_changeset(&changeset),
+            Err(ApplyChangeSetError::CannotAlterGenesis {
+                original_hash: hash!("G"),
+                update_hash,
+            }),
+        );
+        assert_eq!(chain, local_chain![(0, hash!("G")), (1, hash!("A"))]);
+    }
+
+    // A matching genesis entry is fine.
+    let mut chain = chain;
+    let changeset = ChangeSet::from([(0, Some(hash!("G"))), (2, Some(hash!("B")))]);
+    assert_eq!(chain.apply_changeset(&changeset), Ok(()));
+    assert_eq!(
+        chain,
+        local_chain![(0, hash!("G")), (1, hash!("A")), (2, hash!("B"))]
+    );
+}
+
+#[test]
+fn local_chain_apply_changeset_with_genesis_checks_prev_blockhash() {
+    let genesis = header(hash!("_"));
+    let (mut chain, _) = LocalChain::from_genesis(genesis);
+    let changeset = ChangeSet::from([(0, Some(genesis)), (1, Some(header(hash!("not_G"))))]);
+    assert_eq!(
+        chain.apply_changeset(&changeset),
+        Err(ApplyChangeSetError::PrevBlockhashMismatch {
+            expected: BlockId {
+                height: 0,
+                hash: genesis.block_hash(),
+            },
+        }),
+    );
+    assert_eq!(chain, LocalChain::from_genesis(genesis).0);
+}
+
+#[test]
+fn local_chain_error_display() {
+    let (a, b) = (hash!("A"), hash!("B"));
+    let expected = BlockId { height: 2, hash: a };
+    let cases: [(Box<dyn std::error::Error>, String); 5] = [
+        (
+            Box::new(ApplyChangeSetError::CannotAlterGenesis {
+                original_hash: a,
+                update_hash: Some(b),
+            }),
+            format!("cannot replace genesis block: original={a} update={b}"),
+        ),
+        (
+            Box::new(ApplyChangeSetError::CannotAlterGenesis {
+                original_hash: a,
+                update_hash: None,
+            }),
+            format!("cannot remove genesis block: original={a}"),
+        ),
+        (
+            Box::new(ApplyChangeSetError::PrevBlockhashMismatch { expected }),
+            format!("`prev_blockhash` doesn't match block at height 2 ({a})"),
+        ),
+        (
+            Box::new(InsertBlockError::CannotReplace {
+                height: 2,
+                original_hash: a,
+                update_hash: b,
+            }),
+            format!("failed to insert block at height 2: original={a} update={b}"),
+        ),
+        (
+            Box::new(InsertBlockError::PrevBlockhashMismatch { expected }),
+            format!("`prev_blockhash` doesn't match block at height 2 ({a})"),
+        ),
+    ];
+    for (err, msg) in cases {
+        assert_eq!(err.to_string(), msg);
+    }
+}
+
+#[test]
+fn local_chain_from_changeset_without_genesis() {
+    let changeset: ChangeSet = [(0, None), (1, Some(hash!("A")))].into_iter().collect();
+    assert_eq!(
+        LocalChain::from_changeset(changeset),
+        Err(ApplyBlockError::MissingGenesis),
+    );
 }
 
 // Test that `apply_update` can connect 1 `Header` at a time
