@@ -60,7 +60,6 @@ pub struct CanonicalParams {
 /// into [`ChainPosition`](crate::ChainPosition)s.
 pub struct CanonicalTask<'g, A, B> {
     tx_graph: &'g TxGraph<A>,
-    chain_tip: BlockId,
 
     queries: BlockQueries<B>,
 
@@ -83,7 +82,7 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalTask<'g, A, B> {
     type Output = (CanonicalTxs<A>, BlockQueries<B>);
 
     fn tip(&self) -> BlockId {
-        self.chain_tip
+        self.queries.tip()
     }
 
     fn unresolved_queries<'a>(&'a self) -> impl Iterator<Item = u32> + 'a {
@@ -215,7 +214,7 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalTask<'g, A, B> {
 
         (
             CanonicalTxs::new(
-                self.chain_tip,
+                self.queries.tip(),
                 self.canonical_order,
                 self.canonical,
                 view_spends,
@@ -249,7 +248,6 @@ impl<'g, A: Anchor, B: ToBlockHash> CanonicalTask<'g, A, B> {
 
         Self {
             tx_graph,
-            chain_tip,
 
             unprocessed_assumed_txs,
             unprocessed_anchored_txs,
@@ -262,7 +260,7 @@ impl<'g, A: Anchor, B: ToBlockHash> CanonicalTask<'g, A, B> {
             canonical_order: Vec::new(),
             current_stage: CanonicalStage::default(),
 
-            queries: BlockQueries::new(),
+            queries: BlockQueries::new(chain_tip),
         }
     }
 

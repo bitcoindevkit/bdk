@@ -710,7 +710,8 @@ impl<A: Anchor> CanonicalTxs<A> {
     ///
     /// This is the second phase of the canonicalization pipeline. Blocks resolved during
     /// phase 1 are reused without redundant queries; requests still outstanding in `queries` are
-    /// dropped and made again if needed.
+    /// dropped and made again if needed. If `queries` is for a different tip than this set, its
+    /// blocks are not reused at all.
     ///
     /// To also compute median-time-past (MTP) values for the resulting view, call
     /// [`CanonicalViewTask::with_mtp`] on the returned task.
@@ -719,13 +720,12 @@ impl<A: Anchor> CanonicalTxs<A> {
         tx_graph: &'g TxGraph<A>,
         queries: BlockQueries<B>,
     ) -> CanonicalViewTask<'g, A, B> {
-        CanonicalViewTask::new(
-            tx_graph,
-            self.tip,
-            self.order,
-            self.txs,
-            self.spends,
-            queries,
-        )
+        // Blocks fetched for another tip may not be in this tip's chain.
+        let queries = if queries.tip() == self.tip {
+            queries
+        } else {
+            BlockQueries::new(self.tip)
+        };
+        CanonicalViewTask::new(tx_graph, self.order, self.txs, self.spends, queries)
     }
 }
