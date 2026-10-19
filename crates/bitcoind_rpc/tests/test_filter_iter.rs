@@ -59,6 +59,28 @@ fn filter_iter_matches_blocks() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The headers `FilterIter` rebuilds from `getblockheader` must match the node's, so their hashes
+/// (the `BlockHash` checkpoint data) do too.
+#[test]
+fn filter_iter_emits_node_headers() -> anyhow::Result<()> {
+    let env = testenv()?;
+    let _ = env.mine_blocks(10, None)?;
+
+    let client = ClientExt::get_rpc_client(&env)?;
+    let cp = CheckPoint::new(0, client.get_block_header(&env.genesis_hash()?)?);
+
+    let mut count = 0;
+    for res in FilterIter::new(&client, cp, [ScriptBuf::new()]) {
+        let cp = res?.cp;
+        let expected = client.get_block_header(&client.get_block_hash(cp.height().into())?)?;
+        assert_eq!(cp.data(), expected, "header at height {}", cp.height());
+        count += 1;
+    }
+    assert_eq!(count, client.get_block_count()?);
+
+    Ok(())
+}
+
 #[test]
 fn filter_iter_error_wrong_network() -> anyhow::Result<()> {
     let env = testenv()?;
