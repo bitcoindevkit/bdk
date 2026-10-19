@@ -8,7 +8,6 @@ use bdk_chain::indexer::keychain_txout::KeychainTxOutIndex;
 use bdk_chain::local_chain::LocalChain;
 use bdk_chain::miniscript::Descriptor;
 use bdk_chain::{ConfirmationBlockTime, IndexedTxGraph, SpkIterator};
-use bdk_testenv::anyhow;
 
 // This example shows how BDK chain and tx-graph structures are updated using compact
 // filters syncing. Assumes a connection can be made to a bitcoin node via environment
