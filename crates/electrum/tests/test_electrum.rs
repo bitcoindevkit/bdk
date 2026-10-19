@@ -1029,3 +1029,31 @@ fn test_sync_outpoints_propagates_connection_error() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// A `batch_size` of 0 must not make `sync` or `full_scan` skip their scripts.
+///
+/// The server drops every connection, so a scan that actually requests something returns an error.
+/// If no request is made, the scan returns an empty `Ok`.
+#[test]
+fn test_zero_batch_size() -> anyhow::Result<()> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let url = format!("tcp://{}", listener.local_addr()?);
+    std::thread::spawn(move || listener.incoming().for_each(drop));
+
+    let config = electrum_client::ConfigBuilder::new().retry(0).build();
+    let client = BdkElectrumClient::new(electrum_client::Client::from_config(&url, config)?);
+
+    let response = client.sync(SyncRequest::builder().spks([get_test_spk()]), 0, false);
+    assert!(
+        response.is_err(),
+        "sync skipped its script and returned {response:?}"
+    );
+
+    let request = FullScanRequest::builder().spks_for_keychain(0u32, [(0, get_test_spk())]);
+    let response = client.full_scan(request, 3, 0, false);
+    assert!(
+        response.is_err(),
+        "full scan skipped its script and returned {response:?}"
+    );
+    Ok(())
+}
