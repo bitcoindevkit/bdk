@@ -4,10 +4,13 @@ use std::collections::BTreeMap;
 
 use bdk_chain::{
     local_chain::LocalChain, BlockId, CanonicalTxOut, ChainPosition, ConfirmationBlockTime,
-    Eligibility, Trust, TxGraph,
+    Eligibility, Timelocks, Trust, TxGraph,
 };
 use bdk_testenv::{hash, utils::new_tx};
-use bitcoin::{key::Secp256k1, Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{
+    absolute, key::Secp256k1, relative, Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn,
+    TxOut,
+};
 use miniscript::Descriptor;
 
 /// Builds an `is_settled` predicate requiring at least `min_confirmations` confirmations.
@@ -98,7 +101,7 @@ fn test_is_settled_boundary() {
         [outpoint],
         |_tx| false, // leave trust to ancestry
         settled(tip_height, 1),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     assert_eq!(balance_1_conf.confirmed, Amount::from_sat(50_000));
@@ -109,7 +112,7 @@ fn test_is_settled_boundary() {
         [outpoint],
         |_tx| false, // leave trust to ancestry
         settled(tip_height, 6),
-        |_txout| false,
+        |_txout| Default::default(),
     );
     assert_eq!(balance_6_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_6_conf.trusted_pending, Amount::ZERO);
@@ -119,7 +122,7 @@ fn test_is_settled_boundary() {
         [outpoint],
         |_tx| false, // leave trust to ancestry
         settled(tip_height, 7),
-        |_txout| false,
+        |_txout| Default::default(),
     );
     assert_eq!(balance_7_conf.confirmed, Amount::ZERO);
     assert_eq!(balance_7_conf.trusted_pending, Amount::from_sat(50_000));
@@ -202,7 +205,7 @@ fn test_min_confirmations_with_untrusted_tx() {
         [outpoint],
         |_tx| true, // taint everything
         settled(tip_height, 5),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     // Should be untrusted pending (not enough confirmations and not trusted)
@@ -215,7 +218,7 @@ fn test_min_confirmations_with_untrusted_tx() {
         [outpoint],
         |_tx| false, // leave trust to ancestry
         settled(tip_height, 5),
-        |_txout| false,
+        |_txout| Default::default(),
     );
     assert_eq!(balance.trusted_pending, Amount::from_sat(25_000));
     assert_eq!(balance.untrusted_pending, Amount::ZERO);
@@ -367,7 +370,7 @@ fn test_min_confirmations_multiple_transactions() {
         outpoints.clone(),
         |_tx| false,
         settled(tip_height, 5),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     assert_eq!(
@@ -388,7 +391,7 @@ fn test_min_confirmations_multiple_transactions() {
         outpoints,
         |_tx| false,
         settled(tip_height, 10),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     assert_eq!(
@@ -511,7 +514,7 @@ fn test_balance_taint_propagates_through_unconfirmed_ancestry() {
                 .any(|txin| !owned.contains(&txin.previous_output))
         },
         |pos| pos.is_confirmed(),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     assert_eq!(balance.confirmed, Amount::ZERO);
@@ -550,7 +553,12 @@ fn test_balance_is_settled_is_authoritative_for_unconfirmed() {
 
     // An `is_settled` that claims everything is settled counts the (mature, non-coinbase)
     // unconfirmed output as settled rather than dropping it, even when it is tainted.
-    let balance = view.balance([OutPoint::new(txid, 0)], |_| true, |_| true, |_txout| false);
+    let balance = view.balance(
+        [OutPoint::new(txid, 0)],
+        |_| true,
+        |_| true,
+        |_txout| Default::default(),
+    );
     assert_eq!(balance.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance.immature, Amount::ZERO);
     assert_eq!(balance.trusted_pending, Amount::ZERO);
@@ -631,7 +639,7 @@ fn test_balance_taint_stops_at_settled_ancestor() {
                     .any(|txin| !owned.contains(&txin.previous_output))
             },
             |pos| pos.is_confirmed(),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .map(|(txout, eligibility)| (txout.outpoint, eligibility))
         .collect::<std::collections::HashMap<_, _>>();
@@ -700,7 +708,12 @@ fn test_classify_immature_and_settled() {
     ];
 
     let by_op = view
-        .classify_outpoints(ops, |_| false, |pos| pos.is_confirmed(), |_txout| false)
+        .classify_outpoints(
+            ops,
+            |_| false,
+            |pos| pos.is_confirmed(),
+            |_txout| Default::default(),
+        )
         .map(|(txout, eligibility)| (txout.outpoint, eligibility))
         .collect::<std::collections::HashMap<_, _>>();
     assert_eq!(
@@ -710,7 +723,12 @@ fn test_classify_immature_and_settled() {
     assert_eq!(by_op[&OutPoint::new(normal_txid, 0)], Eligibility::Settled);
 
     // The balance buckets reflect the same classification.
-    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), |_txout| false);
+    let balance = view.balance(
+        ops,
+        |_| false,
+        |pos| pos.is_confirmed(),
+        |_txout| Default::default(),
+    );
     assert_eq!(balance.immature, Amount::from_sat(50_000));
     assert_eq!(balance.confirmed, Amount::from_sat(30_000));
 }
@@ -802,7 +820,7 @@ fn test_balance_taint_shared_ancestor() {
                 .any(|txin| !owned.contains(&txin.previous_output))
         },
         |pos| pos.is_confirmed(),
-        |_txout| false,
+        |_txout| Default::default(),
     );
     assert_eq!(balance.trusted_pending, Amount::ZERO);
     assert_eq!(balance.untrusted_pending, Amount::from_sat(29_000 + 19_000));
@@ -858,7 +876,7 @@ fn test_classify_skips_spent_and_unknown() {
             ],
             |_| false,
             |pos| pos.is_confirmed(),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .collect::<Vec<_>>();
 
@@ -904,7 +922,7 @@ fn test_immature_coinbase_stays_immature_when_unsettled() {
             [OutPoint::new(txid, 0)],
             |_| false,
             settled(tip_height, 3),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .map(|(txout, e)| (txout.outpoint, e))
         .collect::<std::collections::HashMap<_, _>>();
@@ -950,7 +968,7 @@ fn test_mature_coinbase_is_settled_not_immature() {
             [OutPoint::new(txid, 0)],
             |_| false,
             settled(tip_height, 3),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .map(|(txout, e)| (txout.outpoint, e))
         .collect::<std::collections::HashMap<_, _>>();
@@ -1006,7 +1024,7 @@ fn test_unsettled_unknown_when_parent_root_missing() {
             [OutPoint::new(child2_txid, 0)],
             |_| false,
             |pos| pos.is_confirmed(),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .map(|(txout, e)| (txout.outpoint, e))
         .collect::<std::collections::HashMap<_, _>>();
@@ -1061,7 +1079,7 @@ fn test_evicted_stale_anchored_tx_not_canonical() {
     );
 }
 
-/// A settled output for which `is_locked` returns true is classified `Immature` and counted in
+/// A settled output whose `Timelocks` are unmet is classified `Immature` and counted in
 /// `Balance::immature` instead of `confirmed`.
 #[test]
 fn test_classify_locked() {
@@ -1095,27 +1113,36 @@ fn test_classify_locked() {
     let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let ops = [OutPoint::new(txid, 0)];
 
-    // Timelock unmet
+    // Timelock unmet: the spend needs height 2, the tip is at 1.
+    let locked = |_: &CanonicalTxOut<_>| Timelocks {
+        absolute: Some(absolute::LockTime::from_consensus(2)),
+        relative: None,
+    };
     let (_, eligibility) = view
-        .classify_outpoints(ops, |_| false, |pos| pos.is_confirmed(), |_| true)
+        .classify_outpoints(ops, |_| false, |pos| pos.is_confirmed(), locked)
         .next()
         .unwrap();
     assert_eq!(eligibility, Eligibility::Immature);
 
-    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), |_| true);
+    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), locked);
     assert_eq!(balance.immature, Amount::from_sat(40_000));
     assert_eq!(balance.confirmed, Amount::ZERO);
 
-    // Timelock met
-    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), |_| false);
+    // No timelock
+    let balance = view.balance(
+        ops,
+        |_| false,
+        |pos| pos.is_confirmed(),
+        |_| Timelocks::default(),
+    );
     assert_eq!(balance.confirmed, Amount::from_sat(40_000));
     assert_eq!(balance.immature, Amount::ZERO);
 }
 
-/// `is_locked` gets what a wallet needs to evaluate its descriptors' timelocks: the spk, and the
-/// position to count confirmations. Both outputs are `Immature` while unconfirmed (here also
-/// untrusted). Once confirmed, the `older(100)` one is `Immature` until its 100th confirmation,
-/// and the `after(200)` one until the tip reaches 200.
+/// `timelocks` gets what a wallet needs to look up its descriptors' timelocks: the spk. Both
+/// outputs are `Immature` while unconfirmed (here also untrusted). Once confirmed, the
+/// `older(100)` one is `Immature` until its 100th confirmation, and the `after(200)` one until the
+/// tip reaches 200.
 #[test]
 fn test_classify_locked_descriptor_timelocks() {
     let key = "tprv8ZgxMBicQKsPd3krDUsBAmtnRsK3rb8u5yi1zhQgMhF1tR8MW7xfE4rnrbbsrbPR52e7rKapu6ztw1jXveJSCGHEriUGZV7mCe88duLp5pj/0/*";
@@ -1125,10 +1152,12 @@ fn test_classify_locked_descriptor_timelocks() {
         desc.at_derivation_index(0).unwrap().script_pubkey()
     };
     let (csv_spk, cltv_spk) = (spk("older(100)"), spk("after(200)"));
-    let is_locked = |tip: u32, txout: &CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>| {
+    let timelocks = |txout: &CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>| {
         let spk = &txout.txout.script_pubkey;
-        (*spk == csv_spk && txout.pos.confirmations_lower_bound(tip) < 100)
-            || (*spk == cltv_spk && tip < 200)
+        Timelocks {
+            absolute: (*spk == cltv_spk).then(|| absolute::LockTime::from_consensus(200)),
+            relative: (*spk == csv_spk).then(|| relative::LockTime::from_height(100)),
+        }
     };
 
     let mut chain =
@@ -1157,16 +1186,10 @@ fn test_classify_locked_descriptor_timelocks() {
 
     let classify = |chain: &LocalChain, tx_graph: &TxGraph<ConfirmationBlockTime>| {
         let view = chain.canonicalize(tx_graph, chain.tip().block_id(), Default::default());
-        let tip = view.tip().height;
         let ops = [OutPoint::new(txid, 0), OutPoint::new(txid, 1)];
-        view.classify_outpoints(
-            ops,
-            |_| true,
-            |pos| pos.is_confirmed(),
-            |o| is_locked(tip, o),
-        )
-        .map(|(_, eligibility)| eligibility)
-        .collect::<Vec<_>>()
+        view.classify_outpoints(ops, |_| true, |pos| pos.is_confirmed(), timelocks)
+            .map(|(_, eligibility)| eligibility)
+            .collect::<Vec<_>>()
     };
 
     assert_eq!(classify(&chain, &tx_graph), [Eligibility::Immature; 2]);
@@ -1183,6 +1206,96 @@ fn test_classify_locked_descriptor_timelocks() {
     ] {
         chain.insert_block(tip, hash!("tip")).unwrap();
         assert_eq!(classify(&chain, &tx_graph), expected, "tip {tip}");
+    }
+}
+
+/// `are_timelocks_met` follows consensus for each kind of lock, one step either side of the
+/// boundary, and counts a lock that needs an unknown MTP as unmet.
+#[test]
+fn test_are_timelocks_met_boundaries() {
+    // Above `LOCKTIME_THRESHOLD`, so an absolute lock this large is a time.
+    const MTP: u32 = 600_000_000;
+    let tip = 100;
+
+    let txout = |pos, prev_mtp| CanonicalTxOut {
+        pos,
+        outpoint: OutPoint::null(),
+        txout: TxOut::NULL,
+        spent_by: None,
+        is_on_coinbase: false,
+        prev_mtp,
+    };
+    let confirmed_at_90 = ChainPosition::Confirmed {
+        anchor: ConfirmationBlockTime {
+            block_id: BlockId {
+                height: 90,
+                hash: hash!("90"),
+            },
+            confirmation_time: 0,
+        },
+        transitively: None,
+    };
+    let unconfirmed = ChainPosition::Unconfirmed {
+        first_seen: Some(1),
+        last_seen: Some(1),
+    };
+    // Confirmed at 90, with the block before it 1024s (two intervals) older than the tip's MTP.
+    let confirmed = txout(confirmed_at_90, Some(MTP - 1024));
+    let no_prev_mtp = txout(confirmed_at_90, None);
+    let mempool = txout(unconfirmed, None);
+
+    let abs = |n| Timelocks {
+        absolute: Some(absolute::LockTime::from_consensus(n)),
+        relative: None,
+    };
+    let blocks = |n| Timelocks {
+        absolute: None,
+        relative: Some(relative::LockTime::from_height(n)),
+    };
+    let time = |n| Timelocks {
+        absolute: None,
+        relative: Some(relative::LockTime::from_512_second_intervals(n)),
+    };
+
+    let cases = [
+        // (name, txout, timelocks, tip_mtp, expected)
+        ("no lock", &mempool, Timelocks::default(), None, true),
+        // Spendable in block 101, so a lock height of 100 is met (BIP-65).
+        ("abs height met", &confirmed, abs(100), None, true),
+        ("abs height unmet", &confirmed, abs(101), None, false),
+        // Met once the lock time is below the tip's MTP (BIP-113).
+        ("abs time met", &confirmed, abs(MTP - 1), Some(MTP), true),
+        ("abs time unmet", &confirmed, abs(MTP), Some(MTP), false),
+        ("abs time, no mtp", &confirmed, abs(MTP - 1), None, false),
+        // Confirmed at 90, spendable in block 101: 101 - 90 = 11 blocks (BIP-68).
+        ("rel blocks met", &confirmed, blocks(11), None, true),
+        ("rel blocks unmet", &confirmed, blocks(12), None, false),
+        // An unconfirmed output confirms in block 101 at the earliest.
+        ("rel blocks 0, mempool", &mempool, blocks(0), None, true),
+        ("rel blocks 1, mempool", &mempool, blocks(1), None, false),
+        // `prev_mtp` is 1024s (two intervals) below the tip's MTP.
+        ("rel time met", &confirmed, time(2), Some(MTP), true),
+        ("rel time unmet", &confirmed, time(3), Some(MTP), false),
+        ("rel time, no tip mtp", &confirmed, time(0), None, false),
+        ("no prev mtp", &no_prev_mtp, time(0), Some(MTP), false),
+        ("rel time 0, mempool", &mempool, time(0), Some(MTP), true),
+        (
+            "both, one unmet",
+            &confirmed,
+            Timelocks {
+                absolute: Some(absolute::LockTime::from_consensus(100)),
+                relative: Some(relative::LockTime::from_height(12)),
+            },
+            None,
+            false,
+        ),
+    ];
+    for (name, txout, timelocks, tip_mtp, expected) in cases {
+        assert_eq!(
+            txout.are_timelocks_met(timelocks, tip, tip_mtp),
+            expected,
+            "{name}"
+        );
     }
 }
 

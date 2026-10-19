@@ -552,7 +552,7 @@ fn test_list_owned_txouts() {
                 graph.index.outpoints().iter().map(|(_, op)| *op),
                 bdk_chain::taints_unowned(&graph.index),
                 |pos| pos.is_confirmed(),
-                |_txout| false,
+                |_txout| Default::default(),
             );
 
             let confirmed_txouts_txid = txouts
