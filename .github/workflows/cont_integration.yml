@@ -12,7 +12,7 @@ jobs:
       rust_version: ${{ steps.read_toolchain.outputs.rust_version }}
     steps:
       - name: "Checkout repo"
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: "Read rust version"
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -49,7 +49,7 @@ jobs:
         working-directory: ./crates/core
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -76,7 +76,7 @@ jobs:
         working-directory: ./crates/chain
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -107,7 +107,7 @@ jobs:
         working-directory: ./crates/bitcoind_rpc
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -134,7 +134,7 @@ jobs:
         working-directory: ./crates/electrum
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -163,7 +163,7 @@ jobs:
         working-directory: ./crates/esplora
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -198,7 +198,7 @@ jobs:
         working-directory: ./crates/file_store
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -219,7 +219,7 @@ jobs:
         working-directory: ./crates/testenv
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -246,7 +246,7 @@ jobs:
       CFLAGS: -I/usr/include
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
         # Install a recent version of clang that supports wasm32
@@ -269,7 +269,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -290,7 +290,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install Rust toolchain
@@ -309,7 +309,7 @@ jobs:
     permissions:
       checks: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install Rust toolchain
@@ -327,7 +327,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Install Rust toolchain
