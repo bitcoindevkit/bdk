@@ -284,6 +284,11 @@ where
     /// }
     /// # Ok::<_, bdk_bitcoind_rpc::bitcoincore_rpc::Error>(())
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns the node's "not found" RPC error if it doesn't have the genesis block of `last_cp`
+    /// (passed in [`Emitter::new`]), e.g. when the node is on another network.
     pub fn next_block(&mut self) -> Result<Option<BlockEvent<Block>>, bitcoincore_rpc::Error> {
         if let Some((checkpoint, block)) = poll(self, move |hash, client| client.get_block(hash))? {
             // Stop tracking unconfirmed transactions that have been confirmed in this block.
@@ -395,13 +400,10 @@ where
             // block not in best chain
             Ok(res) if res.confirmations < 0 => continue,
             Ok(res) => res,
-            Err(e) if e.is_not_found_error() => {
-                if cp.height() > 0 {
-                    continue;
-                }
-                // if we can't find genesis block, we can't create an update that connects
-                break;
-            }
+            // the node doesn't have our genesis (e.g. it's on another network), so nothing it
+            // emits can connect
+            Err(e) if e.is_not_found_error() && cp.height() == 0 => return Err(e),
+            Err(e) if e.is_not_found_error() => continue,
             Err(e) => return Err(e),
         };
 
@@ -491,7 +493,7 @@ impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use crate::{Emitter, NO_EXPECTED_MEMPOOL_TXS};
+    use crate::{BitcoindRpcErrorExt, Emitter, NO_EXPECTED_MEMPOOL_TXS};
     use bdk_chain::local_chain::LocalChain;
     use bdk_core::CheckPoint;
     use bdk_testenv::{anyhow, utils::new_tx, TestEnv};
@@ -500,7 +502,7 @@ mod test {
         Transaction, Txid, WScriptHash,
     };
     use bitcoincore_rpc::{
-        jsonrpc::{serde, serde_json},
+        jsonrpc::{self, error::RpcError, serde, serde_json},
         Error, RpcApi,
     };
     use std::collections::HashSet;
@@ -622,6 +624,42 @@ mod test {
         assert!(
             !emitter.mempool_snapshot.contains_key(&announced),
             "rejected tx must not be cached under the announced txid",
+        );
+    }
+
+    /// A node without our genesis (e.g. on another network) is an error, rather than re-rooting the
+    /// emitted chain at the node's genesis.
+    #[test]
+    fn next_block_errors_when_genesis_not_found() {
+        struct OtherNetworkNode;
+
+        impl RpcApi for OtherNetworkNode {
+            fn call<T: for<'a> serde::de::Deserialize<'a>>(
+                &self,
+                cmd: &str,
+                _args: &[serde_json::Value],
+            ) -> Result<T, Error> {
+                assert_eq!(cmd, "getblock", "unexpected RPC call");
+                let not_found = RpcError {
+                    code: -5,
+                    message: "Block not found".into(),
+                    data: None,
+                };
+                Err(Error::JsonRpc(jsonrpc::Error::Rpc(not_found)))
+            }
+        }
+
+        let last_cp = CheckPoint::from_blocks([
+            (0, BlockHash::from_byte_array([0; 32])),
+            (1, BlockHash::from_byte_array([1; 32])),
+        ])
+        .expect("must construct checkpoint");
+        let mut emitter = Emitter::new(&OtherNetworkNode, last_cp, 0, NO_EXPECTED_MEMPOOL_TXS);
+
+        let result = emitter.next_block();
+        assert!(
+            matches!(&result, Err(e) if e.is_not_found_error()),
+            "expected a \"not found\" error, got {result:?}",
         );
     }
 }
