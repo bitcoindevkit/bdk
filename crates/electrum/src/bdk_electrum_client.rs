@@ -235,7 +235,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             start_time,
             &mut tx_update,
             request
-                .iter_spks_with_expected_txids()
+                .drain_spks_with_expected_txids()
                 .enumerate()
                 .map(|(i, spk)| (i as u32, spk)),
             usize::MAX,
@@ -246,13 +246,13 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         self.populate_with_txids(
             start_time,
             &mut tx_update,
-            request.iter_txids(),
+            request.drain_txids(),
             &mut pending_anchors,
         )?;
         self.populate_with_outpoints(
             start_time,
             &mut tx_update,
-            request.iter_outpoints(),
+            request.drain_outpoints(),
             &mut pending_anchors,
         )?;
 
