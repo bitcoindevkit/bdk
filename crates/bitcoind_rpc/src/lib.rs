@@ -488,7 +488,7 @@ impl BitcoindRpcErrorExt for bitcoincore_rpc::Error {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use crate::{Emitter, NO_EXPECTED_MEMPOOL_TXS};

@@ -21,9 +21,14 @@ bitcoincore-rpc = { version = "0.19.0" }
 bdk_core = { path = "../core", version = "0.6.1", default-features = false }
 
 [dev-dependencies]
+anyhow = "1"
 bdk_bitcoind_rpc = { path = "." }
-bdk_testenv = { path = "../testenv" }
 bdk_chain = { path = "../chain" }
+
+# electrsd's build script (via bdk_testenv) doesn't compile on Windows. Drop this gate, and the
+# tests' `cfg(not(windows))`, once it does.
+[target.'cfg(not(windows))'.dev-dependencies]
+bdk_testenv = { path = "../testenv" }
 
 [features]
 default = ["std"]

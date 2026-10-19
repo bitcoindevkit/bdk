@@ -1,3 +1,5 @@
+#![cfg(not(windows))]
+
 use bdk_bitcoind_rpc::bip158::{Error, FilterIter};
 use bdk_core::CheckPoint;
 use bdk_testenv::{anyhow, bitcoind, TestEnv};
