@@ -1,24 +1,4 @@
-//! This crate is used for emitting blockchain data from the `bitcoind` RPC interface. It does not
-//! use the wallet RPC API, so this crate can be used with wallet-disabled Bitcoin Core nodes.
-//!
-//! [`Emitter`] is the main structure which sources blockchain data from
-//! [`bitcoincore_rpc::Client`].
-//!
-//! To only get block updates (exclude mempool transactions), the caller can use
-//! [`Emitter::next_block`] until it returns `Ok(None)` (which means the chain tip is reached). A
-//! separate method, [`Emitter::mempool`] can be used to emit the whole mempool.
-//!
-//! # Trust in the RPC connection
-//!
-//! The recommended practice is to connect only to a `bitcoind` node that **you run and control**.
-//! Bitcoin Core's RPC is a privileged, administrative interface rather than a public API. A wallet
-//! inherently trusts its chain data source for the validity of blocks and transactions, for
-//! confirmation status, and for privacy.
-//!
-//! If you must reach a node over a network, tunnel the connection (for example over SSH, a VPN, or
-//! a Tor hidden service) and never expose RPC to the public internet. As a defense mechanism, the
-//! emitter verifies that a fetched transaction's computed txid matches the one requested, but this
-//! is not a substitute for connecting to a node you trust.
+#![doc = include_str!("../README.md")]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![warn(missing_docs)]
 
