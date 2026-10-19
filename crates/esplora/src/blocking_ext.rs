@@ -27,6 +27,9 @@ pub trait EsploraExt {
     /// the maximum number of HTTP requests to make in parallel. A `parallel_requests` of 0 is
     /// treated as 1.
     ///
+    /// Previous outputs in `tx_update.txouts` are server-reported and unverified; see
+    /// [trust assumptions](crate#trust-assumptions).
+    ///
     /// Refer to [crate-level docs](crate) for more.
     fn full_scan<K: Ord + Clone, R: Into<FullScanRequest<K>>>(
         &self,
@@ -40,6 +43,9 @@ pub trait EsploraExt {
     /// `request` provides the data required to perform a script-pubkey-based sync (see
     /// [`SyncRequest`]). `parallel_requests` specifies the maximum number of HTTP requests to make
     /// in parallel. A `parallel_requests` of 0 is treated as 1.
+    ///
+    /// Previous outputs in `tx_update.txouts` are server-reported and unverified; see
+    /// [trust assumptions](crate#trust-assumptions).
     ///
     /// Refer to [crate-level docs](crate) for more.
     fn sync<I: 'static, R: Into<SyncRequest<I>>>(
