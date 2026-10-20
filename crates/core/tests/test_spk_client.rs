@@ -12,6 +12,15 @@ fn test_empty() {
         SyncResponse::<()>::default().is_empty(),
         "Default `SyncResponse` must be empty"
     );
+    // Custom checkpoint data type `D` must also support `is_empty()`
+    assert!(
+        FullScanResponse::<(), (), ()>::default().is_empty(),
+        "Default `FullScanResponse` with custom checkpoint type must be empty"
+    );
+    assert!(
+        SyncResponse::<(), ()>::default().is_empty(),
+        "Default `SyncResponse` with custom checkpoint type must be empty"
+    );
 }
 
 #[test]

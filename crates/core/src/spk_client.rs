@@ -446,7 +446,7 @@ impl<I, D> SyncRequest<I, D> {
 ///
 /// See also [`SyncRequest`].
 #[must_use]
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SyncResponse<A = ConfirmationBlockTime, D = BlockHash> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,
@@ -463,7 +463,7 @@ impl<A, D> Default for SyncResponse<A, D> {
     }
 }
 
-impl<A> SyncResponse<A> {
+impl<A, D> SyncResponse<A, D> {
     /// Returns true if the `SyncResponse` is empty.
     pub fn is_empty(&self) -> bool {
         self.tx_update.is_empty() && self.chain_update.is_none()
@@ -629,7 +629,7 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
 ///
 /// See also [`FullScanRequest`].
 #[must_use]
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FullScanResponse<K, A = ConfirmationBlockTime, D = BlockHash> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,
@@ -650,7 +650,7 @@ impl<K, A, D> Default for FullScanResponse<K, A, D> {
     }
 }
 
-impl<K, A> FullScanResponse<K, A> {
+impl<K, A, D> FullScanResponse<K, A, D> {
     /// Returns true if the `FullScanResponse` is empty.
     pub fn is_empty(&self) -> bool {
         self.tx_update.is_empty()
