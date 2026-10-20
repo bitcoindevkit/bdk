@@ -1431,6 +1431,31 @@ fn merge_chains_with_prev_blockhash() {
                 init_changeset: &[(0, Some(block_genesis)), (1, Some(block_a_alt))],
             },
         },
+        // Test: prev_blockhash connects update without explicit genesis
+        //
+        // ```text
+        //        | 0 | 1 | 2        |
+        // chain  | _   A
+        // update |         B(prev=A)
+        // result | _   A   B
+        // ```
+        //
+        // The update only contains block B at height 2 with `prev_blockhash = A`. It creates a
+        // placeholder at height 1 which matches chain's block A, connecting without requiring
+        // an explicit genesis checkpoint in the update.
+        TestLocalChain {
+            name: "prev_blockhash connects update without explicit genesis",
+            chain: LocalChain::from_blocks([(0, block_genesis), (1, block_a)].into()).unwrap(),
+            update: CheckPoint::new(2, block_b),
+            exp: ExpectedResult::Ok {
+                changeset: &[(2, Some(block_b))],
+                init_changeset: &[
+                    (0, Some(block_genesis)),
+                    (1, Some(block_a)),
+                    (2, Some(block_b)),
+                ],
+            },
+        },
     ]
     .into_iter()
     .for_each(TestLocalChain::run);
