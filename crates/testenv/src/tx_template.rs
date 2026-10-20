@@ -222,7 +222,11 @@ pub fn init_graph<A: Anchor>(
         if tx_tmp.assume_canonical {
             canonicalization_params.assume_canonical.push(txid);
         }
-        txids.insert(tx_tmp.tx_name, txid);
+        assert!(
+            txids.insert(tx_tmp.tx_name, txid).is_none(),
+            "duplicate tx_name: {}",
+            tx_tmp.tx_name
+        );
         indexer.scan(&tx);
         let _ = tx_graph.insert_tx(tx);
         for anchor in tx_tmp.anchors.iter() {
