@@ -1431,6 +1431,29 @@ fn merge_chains_with_prev_blockhash() {
                 init_changeset: &[(0, Some(block_genesis)), (1, Some(block_a_alt))],
             },
         },
+        // Test: reorg across gap does not emit None for uncommitted gap heights
+        //
+        // ```text
+        //        | 0 | 1 | 2        | 3 |
+        // chain  | _       B(prev=A)  C
+        // update | _   A_alt
+        // result | _   A_alt
+        // ```
+        //
+        // Chain has a gap at height 1 (where B implies a placeholder for A). The update
+        // replaces height 1 with A_alt. Since height 1 in the original chain was never an
+        // occupied checkpoint (it was only an inferred placeholder), the changeset should
+        // invalidate checkpoints at 2 and 3, but should NOT contain `(1, None)`.
+        TestLocalChain {
+            name: "reorg across gap does not emit None for uncommitted gap heights",
+            chain: LocalChain::from_blocks([(0, block_genesis), (2, block_b), (3, block_c)].into())
+                .unwrap(),
+            update: CheckPoint::from_blocks([(0, block_genesis), (1, block_a_alt)]).unwrap(),
+            exp: ExpectedResult::Ok {
+                changeset: &[(1, Some(block_a_alt)), (2, None), (3, None)],
+                init_changeset: &[(0, Some(block_genesis)), (1, Some(block_a_alt))],
+            },
+        },
     ]
     .into_iter()
     .for_each(TestLocalChain::run);
