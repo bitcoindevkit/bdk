@@ -47,46 +47,7 @@ macro_rules! chain_update {
     }};
 }
 
-#[allow(unused_macros)]
-#[macro_export]
-macro_rules! changeset {
-    (checkpoints: $($tail:tt)*) => { changeset!(index: TxHeight, checkpoints: $($tail)*) };
-    (
-        index: $ind:ty,
-        checkpoints: [ $(( $height:expr, $cp_to:expr )),* ]
-        $(,txids: [ $(( $txid:expr, $tx_to:expr )),* ])?
-    ) => {{
-        use bdk_chain::collections::BTreeMap;
-
-        #[allow(unused_mut)]
-        bdk_chain::sparse_chain::ChangeSet::<$ind> {
-            checkpoints: {
-                let mut changes = BTreeMap::default();
-                $(changes.insert($height, $cp_to);)*
-                changes
-            },
-            txids: {
-                let mut changes = BTreeMap::default();
-                $($(changes.insert($txid, $tx_to.map(|h: TxHeight| h.into()));)*)?
-                changes
-            }
-        }
-    }};
-}
-
-/// Generate a dummy script pubkey.
-#[allow(unused_macros)]
-#[macro_export]
-macro_rules! spk {
-    () => {{
-        let secp = bitcoin::secp256k1::Secp256k1::new();
-        let (x_only_pk, _) = bitcoin::secp256k1::SecretKey::new(&mut rand::thread_rng())
-            .public_key(&secp)
-            .x_only_public_key();
-        bitcoin::ScriptBuf::new_p2tr(&secp, x_only_pk, None)
-    }};
-}
-
+/// Initialize a standard transaction with a guaranteed output.
 #[allow(unused)]
 pub fn new_tx(lt: u32) -> Transaction {
     Transaction {
