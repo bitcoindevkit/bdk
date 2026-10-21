@@ -538,7 +538,7 @@ fn test_list_owned_txouts() {
                 .unwrap_or_else(|| panic!("block must exist at {height}"));
 
             let canonical_view =
-                local_chain.canonical_view(graph.graph(), chain_tip, Default::default());
+                local_chain.canonicalize(graph.graph(), chain_tip, Default::default());
 
             let txouts = canonical_view
                 .filter_outpoints(graph.index.outpoints().iter().cloned())
@@ -552,7 +552,7 @@ fn test_list_owned_txouts() {
                 graph.index.outpoints().iter().map(|(_, op)| *op),
                 bdk_chain::taints_unowned(&graph.index),
                 |pos| pos.is_confirmed(),
-                |_txout| false,
+                |_txout| Default::default(),
             );
 
             let confirmed_txouts_txid = txouts
@@ -857,7 +857,7 @@ fn test_get_chain_position() {
 
         // check chain position
         let chain_pos = chain
-            .canonical_view(graph.graph(), chain.tip().block_id(), Default::default())
+            .canonicalize(graph.graph(), chain.tip().block_id(), Default::default())
             .txs()
             .find_map(|canon_tx| {
                 if canon_tx.txid == txid {
