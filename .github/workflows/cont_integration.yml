@@ -272,18 +272,26 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+      # A target without `std`, so that a dependency enabling `std` fails the build.
+      # Not `thumbv6m-none-eabi`: it has no atomic CAS, so no `alloc::sync::Arc`.
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
-          # TODO: `--target thumbv6m-none-eabi` should work but currently does not
-          # target: thumbv6m-none-eabi
-      - name: Check bdk_core (no-std, hashbrown)
+          target: thumbv7em-none-eabihf
+      - name: Install ARM cross-compiler (for secp256k1-sys)
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Check bdk_core (no-std, hashbrown + serde)
         working-directory: ./crates/core
-        run: cargo check --no-default-features --features hashbrown
+        run: cargo check --target thumbv7em-none-eabihf --no-default-features --features hashbrown,serde
       - name: Check bdk_chain (no-std, hashbrown + miniscript)
         working-directory: ./crates/chain
-        run: cargo check --no-default-features --features hashbrown,miniscript
+        run: cargo check --target thumbv7em-none-eabihf --no-default-features --features hashbrown,miniscript
+      # Not combined with `miniscript`: miniscript 13's `serde` dependency enables `serde/std`
+      # (fixed upstream in rust-miniscript#987, not yet in a 13.x release).
+      - name: Check bdk_chain (no-std, hashbrown + serde)
+        working-directory: ./crates/chain
+        run: cargo check --target thumbv7em-none-eabihf --no-default-features --features hashbrown,serde
 
   fmt:
     name: Rust fmt
