@@ -552,16 +552,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         needed_heights.sort_unstable();
         needed_heights.dedup();
 
-        let mut height_to_hash = HashMap::with_capacity(needed_heights.len());
+        let mut height_to_header = HashMap::with_capacity(needed_heights.len());
 
-        // Collect headers of missing heights, and build `height_to_hash` map.
+        // Collect headers of missing heights, and build `height_to_header` map.
         {
             let mut cache = self.block_header_cache.lock().unwrap();
 
             let mut missing_heights = Vec::new();
             for &height in &needed_heights {
                 if let Some(header) = cache.get(&height) {
-                    height_to_hash.insert(height, header.block_hash());
+                    height_to_header.insert(height, *header);
                 } else {
                     missing_heights.push(height);
                 }
@@ -571,7 +571,7 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 let headers = self.inner.batch_block_header(missing_heights.clone())?;
                 check_batch_len("batch_block_header", missing_heights.len(), headers.len())?;
                 for (height, header) in missing_heights.into_iter().zip(headers) {
-                    height_to_hash.insert(height, header.block_hash());
+                    height_to_header.insert(height, header);
                     cache.insert(height, header);
                 }
             }
@@ -581,9 +581,8 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
         {
             let anchor_cache = self.anchor_cache.lock().unwrap();
             for &(txid, height) in txs_with_heights {
-                let h = height as u32;
-                let hash = height_to_hash[&h];
-                if let Some(anchor) = anchor_cache.get(&(txid, hash)) {
+                let header = height_to_header[&(height as u32)];
+                if let Some(anchor) = anchor_cache.get(&(txid, header.block_hash())) {
                     results.push((txid, *anchor));
                 } else {
                     to_fetch.push((txid, height));
@@ -597,17 +596,12 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
 
         // Validate each proof, retrying once for each stale header.
         for ((txid, height), proof) in to_fetch.into_iter().zip(proofs) {
-            let mut header = {
-                let cache = self.block_header_cache.lock().unwrap();
-                cache
-                    .get(&(height as u32))
-                    .copied()
-                    .expect("header already fetched above")
-            };
+            let mut header = height_to_header[&(height as u32)];
             let mut valid =
                 electrum_client::utils::validate_merkle_proof(&txid, &header.merkle_root, &proof);
             if !valid {
                 header = self.inner.block_header(height)?;
+                height_to_header.insert(height as u32, header);
                 self.block_header_cache
                     .lock()
                     .unwrap()
