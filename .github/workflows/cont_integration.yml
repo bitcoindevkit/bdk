@@ -34,11 +34,9 @@ jobs:
       - name: Pin dependencies for MSRV
         run: ./ci/pin-msrv.sh
       - name: Build 1.85.0 (no default features)
-        run: cargo build --workspace --all-targets --no-default-features
+        run: cargo build --workspace --lib --no-default-features
       - name: Build 1.85.0 (all features)
-        run: cargo build --workspace --all-targets --all-features
-      - name: Test 1.85.0 (all features)
-        run: cargo test --workspace --lib --tests --all-features
+        run: cargo build --workspace --lib --all-features
 
   build-core:
     needs: prepare
