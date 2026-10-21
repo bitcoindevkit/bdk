@@ -274,6 +274,11 @@ fn chain_update(
     // insert the most recent blocks at the tip to make sure we update the tip and make the update
     // robust.
     for (&height, &hash) in latest_blocks.iter() {
+        // `insert` panics on a conflicting genesis. Having found a point of agreement, only a
+        // server contradicting itself can get us here.
+        if height == 0 && tip.get(0).is_some_and(|genesis| genesis.hash() != hash) {
+            return Err(Box::new(esplora_client::Error::InvalidResponse));
+        }
         tip = tip.insert(height, hash);
     }
 
@@ -585,6 +590,23 @@ mod test {
             matches!(*res.unwrap_err(), Error::HeaderHashNotFound(hash) if hash == genesis_hash),
             "`chain_update` should error if it can't connect to the local CP",
         );
+
+        Ok(())
+    }
+
+    // Test that a `/blocks` response contradicting our genesis is an error, not a panic.
+    #[test]
+    fn test_chain_update_conflicting_genesis_error() -> anyhow::Result<()> {
+        // `latest_blocks` covers the local tip, so no request is made.
+        let client = Builder::new("http://127.0.0.1:1").build_blocking();
+        let local_tip = local_chain![(0, h!("genesis")), (1, h!("A"))].tip();
+        let latest_blocks = BTreeMap::from([(0, h!("other genesis")), (1, h!("A"))]);
+
+        let res = chain_update(&client, &latest_blocks, &local_tip, &BTreeSet::new());
+        assert!(matches!(
+            *res.unwrap_err(),
+            esplora_client::Error::InvalidResponse
+        ));
 
         Ok(())
     }
