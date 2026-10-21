@@ -295,6 +295,8 @@ mod test {
     const TEST_MAGIC_BYTES: [u8; TEST_MAGIC_BYTES_LEN] =
         [98, 100, 107, 102, 115, 49, 49, 49, 49, 49, 49, 49];
 
+    use bdk_testenv::persist_test_utils::*;
+
     type TestChangeSet = BTreeSet<String>;
 
     /// Check behavior of [`Store::create`] and [`Store::load`].
@@ -598,5 +600,34 @@ mod test {
 
         // current position matches EOF
         assert_eq!(current_pointer, expected_pointer);
+    }
+
+    #[test]
+    fn changesets_are_persisted() {
+        #[track_caller]
+        fn assert_store_persists<C>(changesets: &[C])
+        where
+            C: Merge
+                + serde::Serialize
+                + serde::de::DeserializeOwned
+                + Debug
+                + PartialEq
+                + Default
+                + Clone
+                + 'static,
+        {
+            let temp_dir = tempfile::tempdir().unwrap();
+            let path = temp_dir.path().join("store.db");
+            assert_persist_changesets(
+                || Ok(Store::load_or_create(&TEST_MAGIC_BYTES, &path)?.0),
+                |db| Ok(db.dump().map(Option::unwrap_or_default)?),
+                |db, changeset| Ok(db.append(changeset)?),
+                changesets,
+            );
+        }
+
+        assert_store_persists(&tx_graph_changesets());
+        assert_store_persists(&keychain_txout_changesets());
+        assert_store_persists(&local_chain_changesets());
     }
 }
