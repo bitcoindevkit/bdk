@@ -585,6 +585,19 @@ impl<A> TxGraph<A> {
     pub fn is_empty(&self) -> bool {
         self.txs.is_empty()
     }
+
+    /// Returns `now`, or one past the latest recorded `last_seen`/`last_evicted` if `now` isn't
+    /// later.
+    ///
+    /// Use it as a sync's `start_time` so new mempool observations order after recorded ones even
+    /// if the clock moved backwards.
+    pub fn next_observation_time(&self, now: u64) -> u64 {
+        let latest_seen = self.txs_by_last_seen.last().map(|&(t, _)| t);
+        let latest_evicted = self.last_evicted.values().max().copied();
+        latest_seen
+            .max(latest_evicted)
+            .map_or(now, |latest| now.max(latest.saturating_add(1)))
+    }
 }
 
 impl<A: Anchor> TxGraph<A> {
