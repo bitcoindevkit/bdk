@@ -25,7 +25,7 @@ jobs:
       - name: Install Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: nightly-2025-11-27
+          toolchain: nightly
           components: llvm-tools-preview
           # override: true
           cache: true
