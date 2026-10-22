@@ -573,3 +573,97 @@ fn checkpoint_insert_cannot_displace_genesis() {
     };
     let _ = cp.insert(1, block_1_new);
 }
+
+#[test]
+fn test_checkpoint_iter_traits() {
+    let cp: CheckPoint<BlockHash> = CheckPoint::new(0, hash!("0"))
+        .push(1, hash!("1"))
+        .unwrap()
+        .push(2, hash!("2"))
+        .unwrap();
+
+    // Debug
+    let debug_str = format!("{:?}", cp.iter());
+    assert!(!debug_str.is_empty());
+
+    // IntoIterator for &CheckPoint
+    let heights_from_ref: Vec<u32> = (&cp).into_iter().map(|c| c.height()).collect();
+    assert_eq!(heights_from_ref, vec![2, 1, 0]);
+
+    // Clone iterator mid-iteration
+    let mut it = cp.iter();
+    assert_eq!(it.next().map(|c| c.height()), Some(2));
+    let mut cloned_it = it.clone();
+    assert_eq!(it.next().map(|c| c.height()), Some(1));
+    assert_eq!(it.next().map(|c| c.height()), Some(0));
+    assert_eq!(it.next(), None);
+    // Cloned iterator should continue from height 1
+    assert_eq!(cloned_it.next().map(|c| c.height()), Some(1));
+    assert_eq!(cloned_it.next().map(|c| c.height()), Some(0));
+    assert_eq!(cloned_it.next(), None);
+
+    // FusedIterator guarantee
+    assert_eq!(it.next(), None);
+    assert_eq!(it.next(), None);
+}
+
+#[test]
+fn test_checkpoint_entry_iter_traits() {
+    let cp = CheckPoint::new(
+        0,
+        TestBlock {
+            blockhash: hash!("0"),
+            prev_blockhash: hash!("genesis_parent"),
+        },
+    )
+    .push(
+        2,
+        TestBlock {
+            blockhash: hash!("2"),
+            prev_blockhash: hash!("1"),
+        },
+    )
+    .unwrap();
+
+    let entry = cp.to_entry();
+
+    // Debug
+    let debug_str = format!("{:?}", entry.iter());
+    assert!(!debug_str.is_empty());
+
+    // IntoIterator for &CheckPointEntry and entry.iter()
+    let heights_from_ref: Vec<u32> = (&entry).into_iter().map(|e| e.height()).collect();
+    assert_eq!(heights_from_ref, vec![2, 1, 0]);
+
+    let heights_from_iter: Vec<u32> = entry.iter().map(|e| e.height()).collect();
+    assert_eq!(heights_from_iter, vec![2, 1, 0]);
+
+    // Clone entry iterator mid-iteration
+    let mut it = entry.iter();
+    let first = it.next().unwrap();
+    assert_eq!(first.height(), 2);
+    assert!(!first.is_placeholder());
+
+    let mut cloned_it = it.clone();
+    let second = it.next().unwrap();
+    assert_eq!(second.height(), 1);
+    assert!(second.is_placeholder());
+    assert_eq!(it.next().map(|e| e.height()), Some(0));
+    assert!(it.next().is_none());
+
+    // Cloned iterator continues from placeholder at height 1
+    let cloned_second = cloned_it.next().unwrap();
+    assert_eq!(cloned_second.height(), 1);
+    assert!(cloned_second.is_placeholder());
+    assert_eq!(cloned_it.next().map(|e| e.height()), Some(0));
+    assert!(cloned_it.next().is_none());
+
+    // Also test cloning placeholder entry directly
+    let cloned_placeholder = second.clone();
+    assert_eq!(cloned_placeholder.height(), 1);
+    assert!(cloned_placeholder.is_placeholder());
+
+    // FusedIterator guarantee
+    assert!(it.next().is_none());
+    assert!(it.next().is_none());
+}
