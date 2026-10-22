@@ -205,6 +205,8 @@ impl<D> PartialEq for CheckPoint<D> {
     }
 }
 
+impl<D> Eq for CheckPoint<D> {}
+
 // Methods for any `D`
 impl<D> CheckPoint<D> {
     /// Get a reference of the `data` of the checkpoint.

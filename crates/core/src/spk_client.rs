@@ -38,7 +38,7 @@ impl<I: core::fmt::Debug + core::any::Any> core::fmt::Display for SyncItem<'_, I
 }
 
 /// The progress of [`SyncRequest`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SyncProgress {
     /// Script pubkeys consumed by the request.
     pub spks_consumed: usize,
@@ -87,7 +87,7 @@ impl SyncProgress {
 }
 
 /// [`Script`] with expected [`Txid`] histories.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpkWithExpectedTxids {
     /// Script pubkey.
     pub spk: ScriptBuf,

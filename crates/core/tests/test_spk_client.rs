@@ -1,6 +1,48 @@
-use bdk_core::spk_client::{FullScanResponse, SyncItem, SyncRequest, SyncResponse};
+use bdk_core::spk_client::{
+    FullScanResponse, SpkWithExpectedTxids, SyncItem, SyncProgress, SyncRequest, SyncResponse,
+};
 use bitcoin::{hashes::Hash, OutPoint, ScriptBuf, Txid};
 use std::sync::{Arc, Mutex};
+
+#[test]
+fn test_sync_progress_derives() {
+    let p1 = SyncProgress {
+        spks_consumed: 1,
+        spks_remaining: 2,
+        txids_consumed: 3,
+        txids_remaining: 4,
+        outpoints_consumed: 5,
+        outpoints_remaining: 6,
+    };
+    let p2 = p1; // Copy check: p1 is still usable after assignment
+    assert_eq!(p1, p2);
+    assert_eq!(p1.spks_consumed, 1);
+    assert_eq!(p2.spks_consumed, 1);
+
+    let p3 = SyncProgress {
+        spks_consumed: 10,
+        ..p1
+    };
+    assert_ne!(p1, p3);
+}
+
+#[test]
+fn test_spk_with_expected_txids_derives() {
+    let spk_a = ScriptBuf::from_bytes(vec![0x51]);
+    let spk_b = ScriptBuf::from_bytes(vec![0x52]);
+    let txid = txid_from_byte(7);
+
+    let mut item1 = SpkWithExpectedTxids::from(spk_a.clone());
+    item1.expected_txids.insert(txid);
+
+    let mut item2 = SpkWithExpectedTxids::from(spk_a);
+    item2.expected_txids.insert(txid);
+
+    let item3 = SpkWithExpectedTxids::from(spk_b);
+
+    assert_eq!(item1, item2);
+    assert_ne!(item1, item3);
+}
 
 #[test]
 fn test_empty() {

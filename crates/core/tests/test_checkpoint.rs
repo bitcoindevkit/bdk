@@ -1,7 +1,23 @@
-use bdk_core::{CheckPoint, ToBlockHash, ToBlockTime};
+use bdk_core::{CheckPoint, CheckPointEntry, ToBlockHash, ToBlockTime};
 use bdk_testenv::{block_id, hash};
 use bitcoin::hashes::Hash;
 use bitcoin::BlockHash;
+
+#[test]
+fn test_checkpoint_and_entry_eq() {
+    fn assert_eq_impl<T: Eq>() {}
+    assert_eq_impl::<CheckPoint>();
+    assert_eq_impl::<CheckPoint<()>>();
+    assert_eq_impl::<CheckPointEntry<BlockHash>>();
+
+    let cp1: CheckPoint<BlockHash> = CheckPoint::new(0, hash!("genesis"));
+    let cp2 = cp1.clone();
+    assert_eq!(cp1, cp2);
+
+    let entry1 = CheckPointEntry::Occupied(cp1.clone());
+    let entry2 = CheckPointEntry::Occupied(cp2);
+    assert_eq!(entry1, entry2);
+}
 
 /// Inserting a block that already exists in the checkpoint chain must always succeed.
 #[test]

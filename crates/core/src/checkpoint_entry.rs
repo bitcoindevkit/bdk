@@ -16,7 +16,7 @@ use bitcoin::BlockHash;
 use crate::{BlockId, CheckPoint, ToBlockHash};
 
 /// An entry yielded by [`CheckPointEntryIter`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckPointEntry<D> {
     /// A placeholder entry: there is no checkpoint stored at this height,
     /// but the checkpoint one height above links back here via its `prev_blockhash`.
