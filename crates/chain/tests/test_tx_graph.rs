@@ -415,6 +415,70 @@ fn insert_tx_witness_precedence() {
             .expect("tx must exist");
         assert_eq!(tx.as_ref().clone(), tx_small, "tx must not have changed");
     }
+
+    // Usable witness survives smaller invalid/empty-element witness.
+    {
+        let witness_script = ScriptBuf::from_bytes(vec![0x51]); // OP_TRUE
+        let usable_wit = Witness::from_slice(&[witness_script.as_bytes()]);
+        let invalid_wit = Witness::from_slice(&[[]]);
+        assert!(!invalid_wit.is_empty());
+        assert!(invalid_wit.size() < usable_wit.size());
+
+        let tx_usable = Transaction {
+            input: vec![TxIn {
+                previous_output,
+                sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                witness: usable_wit.clone(),
+                ..Default::default()
+            }],
+            ..unsigned_tx.clone()
+        };
+        let tx_invalid = Transaction {
+            input: vec![TxIn {
+                previous_output,
+                sequence: transaction::Sequence::ENABLE_RBF_NO_LOCKTIME,
+                witness: invalid_wit.clone(),
+                ..Default::default()
+            }],
+            ..unsigned_tx.clone()
+        };
+
+        let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+        let _ = tx_graph.insert_tx(tx_usable.clone());
+        let changeset_invalid = tx_graph.insert_tx(tx_invalid.clone());
+        assert!(
+            changeset_invalid.is_empty(),
+            "invalid empty-element witness should not displace usable witness"
+        );
+
+        let tx = tx_graph
+            .get_tx(tx_usable.compute_txid())
+            .expect("tx must exist");
+        assert_eq!(
+            tx.input[0].witness, usable_wit,
+            "usable witness must remain intact"
+        );
+
+        // Reverse insertion order: usable witness displaces previously inserted invalid witness.
+        let mut tx_graph_rev = TxGraph::<ConfirmationBlockTime>::default();
+        let _ = tx_graph_rev.insert_tx(tx_invalid);
+        let changeset_usable = tx_graph_rev.insert_tx(tx_usable.clone());
+        assert_eq!(
+            changeset_usable,
+            ChangeSet {
+                txs: [Arc::new(tx_usable.clone())].into(),
+                ..Default::default()
+            },
+            "usable witness must displace invalid empty-element witness"
+        );
+        let tx = tx_graph_rev
+            .get_tx(tx_usable.compute_txid())
+            .expect("tx must exist");
+        assert_eq!(
+            tx.input[0].witness, usable_wit,
+            "usable witness must replace invalid witness"
+        );
+    }
 }
 
 #[test]
