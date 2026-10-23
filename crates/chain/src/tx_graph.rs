@@ -659,6 +659,8 @@ impl<A: Anchor> TxGraph<A> {
     /// The witnesses of the newly introduced transaction will be merged with the witnesses of the
     /// original transaction in a way where:
     ///
+    /// * A witness containing non-empty elements has precedence over a witness containing only
+    ///   empty elements or an empty witness.
     /// * A non-empty witness has precedence over an empty witness.
     /// * A smaller witness has precedence over a larger witness.
     /// * If the witness sizes are the same, we prioritize the two witnesses with lexicographical
@@ -676,17 +678,22 @@ impl<A: Anchor> TxGraph<A> {
             );
             let merged_input = Iterator::zip(original_tx.input.iter(), other_tx.input.iter())
                 .map(|(original_txin, other_txin)| {
-                    let original_key = core::cmp::Reverse((
-                        original_txin.witness.is_empty(),
-                        original_txin.witness.size(),
-                        &original_txin.witness,
-                    ));
-                    let other_key = core::cmp::Reverse((
-                        other_txin.witness.is_empty(),
-                        other_txin.witness.size(),
-                        &other_txin.witness,
-                    ));
-                    if original_key > other_key {
+                    let is_meaningful = |w: &bitcoin::Witness| {
+                        !w.is_empty() && w.iter().any(|elem| !elem.is_empty())
+                    };
+                    let original_key = (
+                        is_meaningful(&original_txin.witness),
+                        core::cmp::Reverse(original_txin.witness.is_empty()),
+                        core::cmp::Reverse(original_txin.witness.size()),
+                        core::cmp::Reverse(&original_txin.witness),
+                    );
+                    let other_key = (
+                        is_meaningful(&other_txin.witness),
+                        core::cmp::Reverse(other_txin.witness.is_empty()),
+                        core::cmp::Reverse(other_txin.witness.size()),
+                        core::cmp::Reverse(&other_txin.witness),
+                    );
+                    if original_key >= other_key {
                         original_txin.clone()
                     } else {
                         other_txin.clone()
