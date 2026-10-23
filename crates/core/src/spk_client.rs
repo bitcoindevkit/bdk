@@ -38,7 +38,7 @@ impl<I: core::fmt::Debug + core::any::Any> core::fmt::Display for SyncItem<'_, I
 }
 
 /// The progress of [`SyncRequest`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SyncProgress {
     /// Script pubkeys consumed by the request.
     pub spks_consumed: usize,
@@ -87,7 +87,7 @@ impl SyncProgress {
 }
 
 /// [`Script`] with expected [`Txid`] histories.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpkWithExpectedTxids {
     /// Script pubkey.
     pub spk: ScriptBuf,
@@ -446,7 +446,7 @@ impl<I, D> SyncRequest<I, D> {
 ///
 /// See also [`SyncRequest`].
 #[must_use]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncResponse<A = ConfirmationBlockTime, D = BlockHash> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,
@@ -629,7 +629,7 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
 ///
 /// See also [`FullScanRequest`].
 #[must_use]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FullScanResponse<K, A = ConfirmationBlockTime, D = BlockHash> {
     /// Relevant transaction data discovered during the scan.
     pub tx_update: crate::TxUpdate<A>,

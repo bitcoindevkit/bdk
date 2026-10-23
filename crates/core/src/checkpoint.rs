@@ -2,6 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitcoin::{block::Header, BlockHash};
 use core::fmt;
+use core::iter::FusedIterator;
 use core::ops::RangeBounds;
 
 use crate::{BlockId, CheckPointEntry, CheckPointEntryIter};
@@ -204,6 +205,8 @@ impl<D> PartialEq for CheckPoint<D> {
         self_cps.eq(other_cps)
     }
 }
+
+impl<D> Eq for CheckPoint<D> {}
 
 // Methods for any `D`
 impl<D> CheckPoint<D> {
@@ -560,8 +563,17 @@ where
 }
 
 /// Iterates over checkpoints backwards.
+#[derive(Debug)]
 pub struct CheckPointIter<D> {
     next: Option<Arc<CPInner<D>>>,
+}
+
+impl<D> Clone for CheckPointIter<D> {
+    fn clone(&self) -> Self {
+        Self {
+            next: self.next.clone(),
+        }
+    }
 }
 
 impl<D> Iterator for CheckPointIter<D> {
@@ -611,6 +623,17 @@ impl<D> Iterator for CheckPointIter<D> {
 }
 
 impl<D> ExactSizeIterator for CheckPointIter<D> {}
+
+impl<D> FusedIterator for CheckPointIter<D> {}
+
+impl<D> IntoIterator for &CheckPoint<D> {
+    type Item = CheckPoint<D>;
+    type IntoIter = CheckPointIter<D>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
 
 impl<D> IntoIterator for CheckPoint<D> {
     type Item = CheckPoint<D>;
