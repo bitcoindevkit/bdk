@@ -12,11 +12,12 @@
 //! gaps where `prev_blockhash` implies a block.
 
 use bitcoin::BlockHash;
+use core::iter::FusedIterator;
 
 use crate::{BlockId, CheckPoint, ToBlockHash};
 
 /// An entry yielded by [`CheckPointEntryIter`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum CheckPointEntry<D> {
     /// A placeholder entry: there is no checkpoint stored at this height,
     /// but the checkpoint one height above links back here via its `prev_blockhash`.
@@ -29,6 +30,42 @@ pub enum CheckPointEntry<D> {
     /// A real checkpoint recorded at this height.
     Occupied(CheckPoint<D>),
 }
+
+impl<D> Clone for CheckPointEntry<D> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Placeholder {
+                block_id,
+                checkpoint_above,
+            } => Self::Placeholder {
+                block_id: *block_id,
+                checkpoint_above: checkpoint_above.clone(),
+            },
+            Self::Occupied(checkpoint) => Self::Occupied(checkpoint.clone()),
+        }
+    }
+}
+
+impl<D> PartialEq for CheckPointEntry<D> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Placeholder {
+                    block_id: a,
+                    checkpoint_above: cp_a,
+                },
+                Self::Placeholder {
+                    block_id: b,
+                    checkpoint_above: cp_b,
+                },
+            ) => a == b && cp_a == cp_b,
+            (Self::Occupied(a), Self::Occupied(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl<D> Eq for CheckPointEntry<D> {}
 
 impl<D> CheckPointEntry<D> {
     /// The checkpoint at this height (if any).
@@ -136,11 +173,25 @@ impl<D: ToBlockHash> CheckPointEntry<D> {
             checkpoint_above: checkpoint.clone(),
         })
     }
+
+    /// Iterate entries from this one backwards (descending height).
+    pub fn iter(&self) -> CheckPointEntryIter<D> {
+        self.clone().into_iter()
+    }
 }
 
 /// Iterates over checkpoint entries backwards.
+#[derive(Debug)]
 pub struct CheckPointEntryIter<D> {
     next: Option<CheckPointEntry<D>>,
+}
+
+impl<D> Clone for CheckPointEntryIter<D> {
+    fn clone(&self) -> Self {
+        Self {
+            next: self.next.clone(),
+        }
+    }
 }
 
 impl<D: ToBlockHash> Iterator for CheckPointEntryIter<D> {
@@ -150,6 +201,17 @@ impl<D: ToBlockHash> Iterator for CheckPointEntryIter<D> {
         let item = self.next.take()?;
         self.next = item.prev();
         Some(item)
+    }
+}
+
+impl<D: ToBlockHash> FusedIterator for CheckPointEntryIter<D> {}
+
+impl<D: ToBlockHash> IntoIterator for &CheckPointEntry<D> {
+    type Item = CheckPointEntry<D>;
+    type IntoIter = CheckPointEntryIter<D>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 

@@ -2,6 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitcoin::{block::Header, BlockHash};
 use core::fmt;
+use core::iter::FusedIterator;
 use core::ops::RangeBounds;
 
 use crate::{BlockId, CheckPointEntry, CheckPointEntryIter};
@@ -107,7 +108,6 @@ impl<D> Clone for CheckPoint<D> {
 }
 
 /// The internal contents of [`CheckPoint`].
-#[derive(Debug)]
 struct CPInner<D> {
     /// Block id
     block_id: BlockId,
@@ -119,6 +119,19 @@ struct CPInner<D> {
     skip: Option<Arc<CPInner<D>>>,
     /// Index of this checkpoint (number of checkpoints from the first).
     index: u32,
+}
+
+/// Prints only the [`BlockId`] of `prev`: a derived impl recurses through `prev` and `skip`, so its
+/// output grows exponentially with the chain's length.
+impl<D: fmt::Debug> fmt::Debug for CPInner<D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CPInner")
+            .field("block_id", &self.block_id)
+            .field("data", &self.data)
+            .field("index", &self.index)
+            .field("prev", &self.prev.as_ref().map(|p| p.block_id))
+            .finish()
+    }
 }
 
 /// When a `CPInner` is dropped we need to go back down the chain and manually remove any
@@ -204,6 +217,8 @@ impl<D> PartialEq for CheckPoint<D> {
         self_cps.eq(other_cps)
     }
 }
+
+impl<D> Eq for CheckPoint<D> {}
 
 // Methods for any `D`
 impl<D> CheckPoint<D> {
@@ -560,8 +575,17 @@ where
 }
 
 /// Iterates over checkpoints backwards.
+#[derive(Debug)]
 pub struct CheckPointIter<D> {
     next: Option<Arc<CPInner<D>>>,
+}
+
+impl<D> Clone for CheckPointIter<D> {
+    fn clone(&self) -> Self {
+        Self {
+            next: self.next.clone(),
+        }
+    }
 }
 
 impl<D> Iterator for CheckPointIter<D> {
@@ -611,6 +635,17 @@ impl<D> Iterator for CheckPointIter<D> {
 }
 
 impl<D> ExactSizeIterator for CheckPointIter<D> {}
+
+impl<D> FusedIterator for CheckPointIter<D> {}
+
+impl<D> IntoIterator for &CheckPoint<D> {
+    type Item = CheckPoint<D>;
+    type IntoIter = CheckPointIter<D>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
 
 impl<D> IntoIterator for CheckPoint<D> {
     type Item = CheckPoint<D>;
