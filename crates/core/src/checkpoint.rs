@@ -108,7 +108,6 @@ impl<D> Clone for CheckPoint<D> {
 }
 
 /// The internal contents of [`CheckPoint`].
-#[derive(Debug)]
 struct CPInner<D> {
     /// Block id
     block_id: BlockId,
@@ -120,6 +119,19 @@ struct CPInner<D> {
     skip: Option<Arc<CPInner<D>>>,
     /// Index of this checkpoint (number of checkpoints from the first).
     index: u32,
+}
+
+/// Prints only the [`BlockId`] of `prev`: a derived impl recurses through `prev` and `skip`, so its
+/// output grows exponentially with the chain's length.
+impl<D: fmt::Debug> fmt::Debug for CPInner<D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CPInner")
+            .field("block_id", &self.block_id)
+            .field("data", &self.data)
+            .field("index", &self.index)
+            .field("prev", &self.prev.as_ref().map(|p| p.block_id))
+            .finish()
+    }
 }
 
 /// When a `CPInner` is dropped we need to go back down the chain and manually remove any

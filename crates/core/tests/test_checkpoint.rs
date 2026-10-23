@@ -573,3 +573,11 @@ fn checkpoint_insert_cannot_displace_genesis() {
     };
     let _ = cp.insert(1, block_1_new);
 }
+
+/// `Debug` must print only the tip, not recurse through `prev` and `skip` (exponential output).
+#[test]
+fn checkpoint_debug_does_not_recurse() {
+    let blocks = (0..32u32).map(|h| (h, BlockHash::hash(&h.to_le_bytes())));
+    let cp = CheckPoint::from_blocks(blocks).unwrap();
+    assert!(format!("{cp:?}").len() < 512);
+}
