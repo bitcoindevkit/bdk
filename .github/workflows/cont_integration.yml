@@ -238,7 +238,7 @@ jobs:
   check-wasm:
     needs: prepare
     name: Check WASM
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       CC: clang-14
       CFLAGS: -I/usr/include

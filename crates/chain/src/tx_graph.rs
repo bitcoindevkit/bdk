@@ -567,10 +567,12 @@ impl<A> TxGraph<A> {
         &'g self,
         tx: &'g Transaction,
     ) -> impl Iterator<Item = (usize, Txid)> + 'g {
+        let is_coinbase = tx.is_coinbase();
         let txid = tx.compute_txid();
         tx.input
             .iter()
             .enumerate()
+            .filter(move |_| !is_coinbase)
             .filter_map(move |(vin, txin)| self.spends.get(&txin.previous_output).zip(Some(vin)))
             .flat_map(|(spends, vin)| core::iter::repeat(vin).zip(spends.iter().cloned()))
             .filter(move |(_, conflicting_txid)| *conflicting_txid != txid)
@@ -721,15 +723,14 @@ impl<A: Anchor> TxGraph<A> {
                 }
             }
             partial_tx => {
-                for txin in &tx.input {
-                    // this means the tx is coinbase so there is no previous output
-                    if txin.previous_output.is_null() {
-                        continue;
+                // Coinbase transactions have no previous outputs to spend.
+                if !tx.is_coinbase() {
+                    for txin in &tx.input {
+                        self.spends
+                            .entry(txin.previous_output)
+                            .or_default()
+                            .insert(txid);
                     }
-                    self.spends
-                        .entry(txin.previous_output)
-                        .or_default()
-                        .insert(txid);
                 }
                 *partial_tx = TxNodeInternal::Whole(tx.clone());
                 changeset.txs.insert(tx);
