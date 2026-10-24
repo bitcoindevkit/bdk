@@ -761,3 +761,37 @@ fn overlapping_descriptor_does_not_panic_in_release() {
     let _ = index.insert_descriptor(1, single);
     assert!(index.reveal_next_spk(1).is_none());
 }
+
+#[test]
+fn request_builder_ext_works_with_any_checkpoint_data() {
+    use bdk_chain::{
+        bitcoin::{block::Header, constants::genesis_block, Network},
+        indexer::keychain_txout::{FullScanRequestBuilderExt, SyncRequestBuilderExt},
+        spk_client::{FullScanRequest, SyncRequest},
+        CheckPoint,
+    };
+
+    let mut indexer = init_txout_index(
+        parse_descriptor(DESCRIPTORS[0]),
+        parse_descriptor(DESCRIPTORS[1]),
+        0,
+        false,
+    );
+    let _ = indexer.reveal_to_target(TestKeychain::External, 2);
+    let tip = CheckPoint::<Header>::new(0, genesis_block(Network::Regtest).header);
+
+    let sync_request = SyncRequest::builder_at(0)
+        .chain_tip(tip.clone())
+        .revealed_spks_from_indexer(&indexer, ..)
+        .build();
+    assert_eq!(sync_request.spks().len(), 3);
+
+    let full_scan_request = FullScanRequest::builder_at(0)
+        .chain_tip(tip)
+        .spks_from_indexer(&indexer)
+        .build();
+    assert_eq!(
+        full_scan_request.last_revealed(&TestKeychain::External),
+        Some(2)
+    );
+}
