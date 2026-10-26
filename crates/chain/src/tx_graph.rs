@@ -663,6 +663,18 @@ impl<A: Anchor> TxGraph<A> {
     /// * A smaller witness has precedence over a larger witness.
     /// * If the witness sizes are the same, we prioritize the two witnesses with lexicographical
     ///   order.
+    ///
+    /// # Trust Requirements
+    ///
+    /// `TxGraph` does not validate witnesses or execute scripts, as it lacks a script interpreter
+    /// and may not possess all previous outputs. Witnesses supplied via `insert_tx` are assumed to
+    /// come from trusted sources (the caller or trusted chain sources).
+    ///
+    /// Because "smallest wins" is used to keep changeset replay deterministic and
+    /// order-independent, an invalid or dummy witness inserted for an existing transaction can
+    /// displace an earlier valid witness if the newer witness is non-empty and smaller (or
+    /// identical in size with a lower lexicographical order). Callers should ensure that
+    /// transactions provided to `insert_tx` carry valid witnesses.
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A> {
         // This returns `Some` only if the merged tx is different to the `original_tx`.
         fn _merge_tx_witnesses(
