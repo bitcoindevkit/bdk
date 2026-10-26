@@ -2,9 +2,9 @@
 
 mod common;
 
-use bdk_chain::{CanonicalReason, ChainPosition};
+use bdk_chain::{local_chain::LocalChain, CanonicalReason, ChainPosition};
 use bdk_testenv::{block_id, hash, local_chain};
-use bitcoin::Txid;
+use bitcoin::{BlockHash, Txid};
 use common::*;
 use std::collections::HashSet;
 
@@ -13,7 +13,7 @@ fn test_assumed_canonical_scenarios() {
     // scenario: "txC spends txB; txB spends txA; txB is anchored; txC is assumed canonical"
 
     // create a local chain
-    let local_chain = local_chain![
+    let local_chain: LocalChain<BlockHash> = local_chain![
         (0, hash!("genesis")),
         (1, hash!("block1")),
         (2, hash!("block2")),
