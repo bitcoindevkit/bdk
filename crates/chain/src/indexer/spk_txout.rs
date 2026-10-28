@@ -246,8 +246,10 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     ///
     /// Here, "unused" means that after the script pubkey was stored in the index, the index has
     /// never scanned a transaction output with it.
+    ///
+    /// Returns `false` if the script pubkey at `index` is not present in the index.
     pub fn is_used(&self, index: &I) -> bool {
-        !self.unused.contains(index)
+        self.spks.contains_key(index) && !self.unused.contains(index)
     }
 
     /// Marks the script pubkey at `index` as used even though it hasn't seen an output spending to
