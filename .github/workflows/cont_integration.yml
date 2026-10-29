@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: 1.85.0 # MSRV
           cache: true
@@ -50,7 +50,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
@@ -77,7 +77,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
@@ -108,7 +108,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
@@ -135,7 +135,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
@@ -164,7 +164,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
@@ -199,7 +199,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
@@ -220,7 +220,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
@@ -252,7 +252,7 @@ jobs:
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-14-dev clang-14 libc6-dev-i386 || exit 1
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
             toolchain: ${{ needs.prepare.outputs.rust_version }}
             cache: true
@@ -270,7 +270,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
@@ -292,7 +292,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
             toolchain: nightly
             cache: true
@@ -311,7 +311,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
@@ -329,7 +329,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
