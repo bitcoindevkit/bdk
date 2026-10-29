@@ -1024,6 +1024,27 @@ fn test_tx_conflict_handling() {
             scenario.name
         );
 
+        // `txs()` lists parents before children, and every confirmed tx before any unconfirmed one.
+        let mut placed = HashSet::new();
+        let mut seen_unconfirmed = false;
+        for tx in canonical_view.txs() {
+            assert!(
+                tx.tx.input.iter().all(|txin| {
+                    let parent_txid = txin.previous_output.txid;
+                    !txs.contains(&parent_txid) || placed.contains(&parent_txid)
+                }),
+                "\n[{}] 'txs' lists a tx before its parent",
+                scenario.name
+            );
+            assert!(
+                !(seen_unconfirmed && tx.pos.is_confirmed()),
+                "\n[{}] 'txs' lists a confirmed tx after an unconfirmed one",
+                scenario.name
+            );
+            seen_unconfirmed |= !tx.pos.is_confirmed();
+            placed.insert(tx.txid);
+        }
+
         let txouts = canonical_view
             .filter_outpoints(env.indexer.outpoints().iter().cloned())
             .map(|(_, full_txout)| full_txout.outpoint)

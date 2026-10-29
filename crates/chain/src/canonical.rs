@@ -22,9 +22,10 @@
 //! ```
 
 use crate::collections::{HashMap, HashSet};
+use alloc::collections::BinaryHeap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::{fmt, ops::RangeBounds};
+use core::{cmp::Reverse, fmt, ops::RangeBounds};
 
 use bdk_core::{BlockId, BlockQueries};
 use bitcoin::{
@@ -75,6 +76,56 @@ pub(crate) struct CanonicalEntry<P> {
     pub(crate) tx: Arc<Transaction>,
     pub(crate) pos: P,
     pub(crate) prev_mtp: Option<u32>,
+}
+
+/// Orders `txs` topologically with Kahn's algorithm: each tx comes after the txs in `txs` it
+/// spends. Of the txs whose parents are all placed, the one with the smallest `(key, txid)` comes
+/// next.
+pub(crate) fn topological_order<P, K: Ord>(
+    txs: &HashMap<Txid, CanonicalEntry<P>>,
+    key: impl Fn(&CanonicalEntry<P>) -> K,
+) -> Vec<Txid> {
+    let mut children = HashMap::<Txid, Vec<Txid>>::new();
+    // Per tx in `txs`, the number of its inputs spending a tx in `txs`.
+    let mut parent_counts = HashMap::<Txid, usize>::new();
+    for (&txid, entry) in txs {
+        let count = parent_counts.entry(txid).or_default();
+        for txin in &entry.tx.input {
+            let parent_txid = txin.previous_output.txid;
+            if txs.contains_key(&parent_txid) {
+                *count += 1;
+                children.entry(parent_txid).or_default().push(txid);
+            }
+        }
+    }
+
+    // A min-heap of the txs whose parents are all placed. It mixes depths on purpose: a tx with a
+    // smaller key goes before a shallower one it doesn't depend on, but never before its own
+    // ancestors, as it only enters once they're placed. With the view's `ChainPosition` key, this
+    // lists every confirmed tx before any unconfirmed one (a confirmed tx's ancestors are
+    // confirmed too), as a wallet's tx list wants; ordering level by level would not.
+    let ready_key = |txid: Txid| Reverse((key(&txs[&txid]), txid));
+    let mut ready: BinaryHeap<_> = parent_counts
+        .iter()
+        .filter(|(_, &count)| count == 0)
+        .map(|(&txid, _)| ready_key(txid))
+        .collect();
+    let mut order = Vec::with_capacity(txs.len());
+    while let Some(Reverse((_, txid))) = ready.pop() {
+        order.push(txid);
+        for &child in children.get(&txid).into_iter().flatten() {
+            let count = parent_counts
+                .get_mut(&child)
+                .expect("child must be counted");
+            *count -= 1;
+            // Only once every parent is placed.
+            if *count == 0 {
+                ready.push(ready_key(child));
+            }
+        }
+    }
+    debug_assert_eq!(order.len(), txs.len(), "canonical txs must be acyclic");
+    order
 }
 
 /// A single canonical transaction with its position.
@@ -294,14 +345,14 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
 ///   [`CanonicalTxs`])
 ///
 /// The view maintains:
-/// - A list of canonical transactions
+/// - A list of canonical transactions in topological order
 /// - A mapping of outpoints to the transactions that spend them
 /// - The chain tip used for canonicalization
 ///
 /// [`TxGraph`]: crate::TxGraph
 #[derive(Debug)]
 pub struct Canonical<A, P> {
-    /// List of canonical transaction IDs.
+    /// Canonical transaction IDs in topological order.
     pub(crate) order: Vec<Txid>,
     /// Map of transaction IDs to their transaction data, position, and MTP.
     pub(crate) txs: HashMap<Txid, CanonicalEntry<P>>,
@@ -398,10 +449,15 @@ impl<A, P: Clone> Canonical<A, P> {
         })
     }
 
-    /// Get an iterator over all canonical transactions in order.
+    /// Get an iterator over all canonical transactions in topological order.
     ///
-    /// Transactions are returned in canonical order, with confirmed transactions ordered by
-    /// block height and position, followed by unconfirmed transactions.
+    /// Every transaction comes after the transactions it spends. Otherwise, a [`CanonicalView`]
+    /// orders transactions by [`ChainPosition`] (confirmed by anchor, then unconfirmed by first
+    /// seen), then by txid; [`CanonicalTxs`] orders them by txid.
+    ///
+    /// So a [`CanonicalView`] lists every confirmed transaction before any unconfirmed one: a
+    /// confirmed transaction's canonical ancestors are confirmed too (canonicalization confirms
+    /// them transitively), so no unconfirmed transaction ever has to come first.
     ///
     /// # Example
     ///

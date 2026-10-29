@@ -12,7 +12,8 @@ use bdk_core::{
 };
 use bitcoin::{OutPoint, Txid};
 
-use crate::{canonical::CanonicalEntry, Anchor, CanonicalView, ChainPosition, TxGraph};
+use crate::canonical::{topological_order, CanonicalEntry};
+use crate::{Anchor, CanonicalView, ChainPosition, TxGraph};
 
 /// Represents the current stage of view task processing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -73,9 +74,7 @@ impl<'g, A: Anchor, B> CanonicalViewTask<'g, A, B> {
         let mut unprocessed_anchor_checks = VecDeque::new();
         let mut direct_anchors = HashMap::new();
         for txid in &order {
-            // `mark_canonical` inserts into the canonical map and pushes to the canonical order
-            // in the same call, and only ever removes from the map before that push, so every
-            // txid in `order` has an entry in `txs`.
+            // `CanonicalTask::finish` builds `order` from the keys of `txs`.
             let entry = match txs.get(txid) {
                 Some(entry) => entry,
                 None => {
@@ -255,7 +254,6 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
         // Compute tip MTP.
         let tip_mtp = try_compute_mtp_at(self.queries.tip().height);
 
-        let mut view_order = Vec::new();
         let mut view_txs = HashMap::<Txid, CanonicalEntry<_>>::new();
 
         for txid in &self.canonical_order {
@@ -266,8 +264,6 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
                     continue;
                 }
             };
-
-            view_order.push(*txid);
 
             // Get transaction node for first_seen/last_seen info.
             let tx_node = match self.tx_graph.get_tx_node(*txid) {
@@ -363,6 +359,9 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalViewTask<'g, A, B>
                 },
             );
         }
+
+        // Topological, otherwise by position: confirmed by anchor, then unconfirmed by first seen.
+        let view_order = topological_order(&view_txs, |entry| entry.pos.clone());
 
         CanonicalView::new(
             self.queries.tip(),

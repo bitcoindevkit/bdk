@@ -1,6 +1,7 @@
+use crate::canonical::{topological_order, CanonicalEntry};
 use crate::collections::{HashMap, HashSet, VecDeque};
 use crate::tx_graph::{TxAncestors, TxDescendants};
-use crate::{canonical::CanonicalEntry, Anchor, CanonicalTxs, TxGraph};
+use crate::{Anchor, CanonicalTxs, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::sync::Arc;
@@ -70,9 +71,6 @@ pub struct CanonicalTask<'g, A, B> {
 
     canonical: CanonicalMap<A>,
     not_canonical: NotCanonicalSet,
-
-    // Store canonical transactions in order
-    canonical_order: Vec<Txid>,
 
     // Track the current stage of processing
     current_stage: CanonicalStage,
@@ -202,12 +200,10 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalTask<'g, A, B> {
     fn finish(self) -> Self::Output {
         let mut view_spends = HashMap::new();
 
-        for txid in &self.canonical_order {
-            if let Some(entry) = self.canonical.get(txid) {
-                if !entry.tx.is_coinbase() {
-                    for input in &entry.tx.input {
-                        view_spends.insert(input.previous_output, *txid);
-                    }
+        for (txid, entry) in &self.canonical {
+            if !entry.tx.is_coinbase() {
+                for input in &entry.tx.input {
+                    view_spends.insert(input.previous_output, *txid);
                 }
             }
         }
@@ -215,7 +211,7 @@ impl<'g, A: Anchor, B: ToBlockHash> ChainTask<B> for CanonicalTask<'g, A, B> {
         (
             CanonicalTxs::new(
                 self.queries.tip(),
-                self.canonical_order,
+                topological_order(&self.canonical, |_| ()),
                 self.canonical,
                 view_spends,
                 None,
@@ -257,7 +253,6 @@ impl<'g, A: Anchor, B: ToBlockHash> CanonicalTask<'g, A, B> {
             canonical: HashMap::new(),
             not_canonical: HashSet::new(),
 
-            canonical_order: Vec::new(),
             current_stage: CanonicalStage::default(),
 
             queries: BlockQueries::new(chain_tip),
@@ -276,7 +271,7 @@ impl<'g, A: Anchor, B: ToBlockHash> CanonicalTask<'g, A, B> {
         // `tx` double spends itself.
         let mut detected_self_double_spend = false;
         let mut undo_not_canonical = Vec::<Txid>::new();
-        let mut staged_canonical = Vec::<(Txid, Arc<Transaction>, CanonicalReason<A>)>::new();
+        let mut undo_canonical = Vec::<Txid>::new();
 
         // Process ancestors
         TxAncestors::new_include_root(
@@ -325,7 +320,7 @@ impl<'g, A: Anchor, B: ToBlockHash> CanonicalTask<'g, A, B> {
                     return None;
                 }
 
-                staged_canonical.push((this_txid, tx.clone(), this_reason.clone()));
+                undo_canonical.push(this_txid);
                 canonical_entry.insert(CanonicalEntry {
                     tx: tx.clone(),
                     pos: this_reason,
@@ -338,18 +333,12 @@ impl<'g, A: Anchor, B: ToBlockHash> CanonicalTask<'g, A, B> {
 
         if detected_self_double_spend {
             // Undo changes
-            for (txid, _, _) in staged_canonical {
+            for txid in undo_canonical {
                 self.canonical.remove(&txid);
             }
             for txid in undo_not_canonical {
                 self.not_canonical.remove(&txid);
             }
-            return;
-        }
-
-        // Add to canonical order
-        for (txid, _, _) in &staged_canonical {
-            self.canonical_order.push(*txid);
         }
     }
 }
