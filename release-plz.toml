@@ -1,0 +1,41 @@
+[workspace]
+# Existing bdk release tags use the crate name without the `bdk_` prefix, for
+# example `chain-0.23.4`. Keep the same scheme so release-plz can find the
+# previous release and GitHub releases stay consistent.
+git_tag_name = '{{ package | replace(from="bdk_", to="") }}-{{ version }}'
+git_release_name = '{{ package | replace(from="bdk_", to="") }}-{{ version }}'
+# Mark `-rc.N` and other pre-release versions as GitHub pre-releases.
+git_release_type = "auto"
+# Only publish after a release PR has been merged.
+release_always = false
+# Keep the label exempted by the stale-issue workflow.
+pr_labels = ["release"]
+
+# release-plz stores a separate changelog next to each crate's Cargo.toml.
+[[package]]
+name = "bdk_chain"
+changelog_path = "crates/chain/CHANGELOG.md"
+
+[[package]]
+name = "bdk_core"
+changelog_path = "crates/core/CHANGELOG.md"
+
+[[package]]
+name = "bdk_bitcoind_rpc"
+changelog_path = "crates/bitcoind_rpc/CHANGELOG.md"
+
+[[package]]
+name = "bdk_electrum"
+changelog_path = "crates/electrum/CHANGELOG.md"
+
+[[package]]
+name = "bdk_esplora"
+changelog_path = "crates/esplora/CHANGELOG.md"
+
+[[package]]
+name = "bdk_file_store"
+changelog_path = "crates/file_store/CHANGELOG.md"
+
+[[package]]
+name = "bdk_testenv"
+changelog_path = "crates/testenv/CHANGELOG.md"
