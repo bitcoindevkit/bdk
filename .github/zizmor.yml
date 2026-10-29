@@ -7,3 +7,4 @@ rules:
         actions-rust-lang/setup-rust-toolchain: ref-pin
         actions/*: ref-pin
         github/codeql-action/*: ref-pin
+        release-plz/action: ref-pin

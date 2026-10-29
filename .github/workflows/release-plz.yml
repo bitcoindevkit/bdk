@@ -1,0 +1,124 @@
+name: Release-plz
+
+# How this works (see https://release-plz.dev/docs/github/quickstart):
+#
+# This workflow is triggered manually only (Actions -> "Release-plz" -> "Run
+# workflow"). Select the branch to release from in the "Use workflow from"
+# dropdown (the default branch or a `release/*` branch) and click "Run
+# workflow". Both jobs below run on every dispatch:
+#
+# 1. The `release-pr` job opens/updates a release PR (branch prefix `release-plz-`)
+#    with the version bumps and changelog updates for every changed workspace
+#    crate, targeting the selected branch, authored by the
+#    `bitcoindevkit-release-plz` GitHub App. The version bump for each crate is
+#    computed from that branch's Cargo.toml. Re-run it to refresh the release PR
+#    after new commits land on the branch.
+# 2. The `release` job checks whether the release PR has been merged. If so, it
+#    publishes every unpublished crate to crates.io (via trusted publishing /
+#    OIDC, no token secret), creates a `<crate>-<version>` git tag for each
+#    crate, and creates the matching GitHub releases.
+#    The job runs in the `release` GitHub environment, whose required reviewers
+#    are defined in the GitHub repository config; publishing waits until an
+#    authorized GitHub user approves it in the Actions UI.
+#
+# Notes:
+# - release-plz supports only one open release PR per repository, so don't
+#   prepare releases on two branches concurrently.
+# - release-plz uses crates.io as the version baseline. Don't run it on a branch
+#   whose crate versions are behind the versions already published on crates.io.
+# - crates.io trusted publishing must be configured for every workspace crate
+#   with this workflow name and the `release` environment.
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  # Create or update the PR with the new versions and changelogs.
+  release-pr:
+    name: Create/Update Rust Release PR
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'bitcoindevkit' }}
+    permissions:
+      contents: write # push the release PR branch
+      pull-requests: write # open and update the release PR
+    concurrency:
+      group: release-plz-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - name: Validate selected branch
+        env:
+          BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          case "$BRANCH" in
+            "$DEFAULT_BRANCH"|release/*) ;;
+            *) echo "Refusing to release from '$BRANCH' (expected '$DEFAULT_BRANCH' or 'release/*')"; exit 1 ;;
+          esac
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_PRIVATE_KEY }}
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  # If the release PR was merged, publish every unpublished crate to crates.io,
+  # tag it, and create its GitHub release. Gated by the `release` environment
+  # (team approval).
+  release:
+    name: Publish Rust Release
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'bitcoindevkit' }}
+    environment: release
+    permissions:
+      contents: write # push tags and create GitHub releases
+      pull-requests: read # detect the merged release PR
+      id-token: write # crates.io trusted publishing (OIDC)
+    steps:
+      - name: Validate selected branch
+        env:
+          BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          case "$BRANCH" in
+            "$DEFAULT_BRANCH"|release/*) ;;
+            *) echo "Refusing to release from '$BRANCH' (expected '$DEFAULT_BRANCH' or 'release/*')"; exit 1 ;;
+          esac
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_PLZ_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLZ_PRIVATE_KEY }}
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v2
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          # No CARGO_REGISTRY_TOKEN on purpose: crates.io trusted publishing is
+          # configured for every workspace crate, this repo, this workflow, and
+          # the `release` environment.
