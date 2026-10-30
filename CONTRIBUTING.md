@@ -13,6 +13,8 @@ Any bug may cost users real money. That being said, we deeply welcome people
 contributing for the first time to an open source project or picking up Rust while
 contributing. Don't be shy, you'll learn.
 
+Please read and follow the [AI policy](AI_POLICY.md).
+
 Communications Channels
 -----------------------
 
