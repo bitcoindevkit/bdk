@@ -84,8 +84,8 @@ impl<D> PartialEq for LocalChain<D> {
     }
 }
 
-// Methods for `LocalChain<BlockHash>`
-impl LocalChain<BlockHash> {
+// Methods for any `D`
+impl<D> LocalChain<D> {
     /// Check if a block is in the chain.
     ///
     /// # Arguments
@@ -167,7 +167,10 @@ impl LocalChain<BlockHash> {
         let canonical_txs = self.canonicalize(tx_graph.canonical_task(tip, params));
         self.canonicalize(canonical_txs.view_task(tx_graph))
     }
+}
 
+// Methods for `LocalChain<BlockHash>`
+impl LocalChain<BlockHash> {
     /// Update the chain with a given [`Header`] at `height` which you claim is connected to a
     /// existing block in the chain.
     ///

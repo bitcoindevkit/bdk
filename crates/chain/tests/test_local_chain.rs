@@ -406,6 +406,28 @@ fn header(prev_blockhash: BlockHash) -> Header {
     }
 }
 
+/// A `LocalChain<Header>` answers chain queries and canonicalizes a `TxGraph`.
+#[test]
+fn local_chain_header_is_block_in_chain() {
+    let genesis = header(hash!("_"));
+    let block_1 = header(genesis.block_hash());
+    let (mut chain, _) = LocalChain::from_genesis(genesis);
+    chain.insert_block(1, block_1).expect("must connect");
+
+    let tip = chain.chain_tip();
+    assert_eq!(tip, BlockId::from((1, block_1.block_hash())));
+    let genesis_id = BlockId::from((0, genesis.block_hash()));
+    assert_eq!(chain.is_block_in_chain(genesis_id, tip), Some(true));
+    assert_eq!(
+        chain.is_block_in_chain(BlockId::from((0, hash!("other"))), tip),
+        Some(false)
+    );
+
+    let graph = bdk_chain::TxGraph::<BlockId>::default();
+    let view = chain.canonical_view(&graph, tip, Default::default());
+    assert_eq!(view.txs().count(), 0);
+}
+
 #[test]
 fn local_chain_insert_header() {
     // Create consecutive headers of height `n`, where the genesis header is height 0.
