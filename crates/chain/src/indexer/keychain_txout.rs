@@ -390,6 +390,8 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// Here, "unused" means that after the script pubkey was stored in the index, the index has
     /// never scanned a transaction output with it.
     ///
+    /// Returns `false` if the spk under `keychain` and `index` has not been added to the index.
+    ///
     /// This calls [`SpkTxOutIndex::is_used`] internally.
     pub fn is_used(&self, keychain: K, index: u32) -> bool {
         self.inner.is_used(&(keychain, index))

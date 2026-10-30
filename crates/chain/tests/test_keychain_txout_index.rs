@@ -761,3 +761,29 @@ fn overlapping_descriptor_does_not_panic_in_release() {
     let _ = index.insert_descriptor(1, single);
     assert!(index.reveal_next_spk(1).is_none());
 }
+
+#[test]
+fn is_used_returns_false_for_unrevealed_or_untracked_index() {
+    let mut index = KeychainTxOutIndex::<TestKeychain>::default();
+    assert!(!index.is_used(TestKeychain::External, 0));
+    assert!(!index.is_used(TestKeychain::External, 100));
+
+    let descriptor = parse_descriptor(DESCRIPTORS[0]);
+    let _ = index
+        .insert_descriptor(TestKeychain::External, descriptor)
+        .unwrap();
+
+    // Not revealed yet, so not added to the internal spk index
+    assert!(!index.is_used(TestKeychain::External, 0));
+    assert!(!index.is_used(TestKeychain::External, 1));
+
+    // Reveal index 0
+    let _ = index.reveal_next_spk(TestKeychain::External).unwrap();
+    assert!(!index.is_used(TestKeychain::External, 0));
+    assert!(!index.is_used(TestKeychain::External, 1));
+
+    // Mark index 0 as used
+    assert!(index.mark_used(TestKeychain::External, 0));
+    assert!(index.is_used(TestKeychain::External, 0));
+    assert!(!index.is_used(TestKeychain::External, 1));
+}
