@@ -707,9 +707,11 @@ fn fetch_tip_and_latest_blocks(
         let headers = client
             .block_headers(start_height as _, CHAIN_SUFFIX_LENGTH as _)?
             .headers;
-        block_header_cache.extend((start_height..).zip(headers.iter().copied()));
+        // Bounded by the tip: headers the server returns past it would land above the tip.
+        let heights = start_height..=new_tip_height;
+        block_header_cache.extend(heights.clone().zip(headers.iter().copied()));
 
-        (start_height..)
+        heights
             .zip(headers.into_iter().map(|h| h.block_hash()))
             .collect::<BTreeMap<u32, BlockHash>>()
     };
