@@ -16,10 +16,7 @@ fn settled(
     min_confirmations: u32,
 ) -> impl Fn(&ChainPosition<ConfirmationBlockTime>) -> bool {
     let min_confirmations = min_confirmations.max(1); // 0 and 1 behave identically
-    move |pos| {
-        pos.confirmation_height_upper_bound()
-            .is_some_and(|h| tip_height.saturating_sub(h).saturating_add(1) >= min_confirmations)
-    }
+    move |pos| pos.confirmations_lower_bound(tip_height) >= min_confirmations
 }
 
 #[test]
