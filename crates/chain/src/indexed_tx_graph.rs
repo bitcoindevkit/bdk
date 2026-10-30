@@ -217,7 +217,7 @@ where
 
     /// Inserts the given `evicted_at` for `txid`.
     ///
-    /// The `evicted_at` timestamp represents the last known time when the transaction was observed
+    /// The `evicted_at` timestamp represents the last known time when the transaction was reported
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
     pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A, I::ChangeSet> {
@@ -230,7 +230,7 @@ where
 
     /// Batch inserts `(txid, evicted_at)` pairs for `txid`s that the graph is tracking.
     ///
-    /// The `evicted_at` timestamp represents the last known time when the transaction was observed
+    /// The `evicted_at` timestamp represents the last known time when the transaction was reported
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
     pub fn batch_insert_relevant_evicted_at(

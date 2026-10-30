@@ -54,6 +54,9 @@ pub struct TxUpdate<A = ()> {
 
     /// When transactions were discovered to be missing (evicted) from the mempool.
     ///
+    /// Spk-based chain sources infer this from
+    /// [`SyncRequestBuilder::expected_spk_txids`](crate::spk_client::SyncRequestBuilder::expected_spk_txids).
+    ///
     /// [`SyncRequest::start_time`](crate::spk_client::SyncRequest::start_time) can be used to
     /// provide the `evicted_at` value.
     pub evicted_ats: HashSet<(Txid, u64)>,
