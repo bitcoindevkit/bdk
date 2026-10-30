@@ -57,6 +57,27 @@ comment suggesting that you're working on it. If someone is already assigned,
 don't hesitate to ask if the assigned party or previous commenter are still
 working on it if it has been a while.
 
+Changelog notice
+----------------
+
+Each crate has its own `CHANGELOG.md`, which the release manager fills from the
+changelog notices of the merged PRs (`python3 ci/changelog.py scrape`). If your PR changes
+something users should know about, add one fenced `changelog` block to its
+description:
+
+    ```changelog
+    ### Changed
+    - bdk_chain: `LocalChain::apply_update` now returns ...
+    ### Fixed
+    - bdk_esplora, bdk_electrum: `full_scan` no longer stops early when ...
+    ```
+
+- Headings are [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)'s:
+  `### Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` or `Security`.
+- Each entry is one line (don't wrap it): `- <crate>: <change>`, naming the crates
+  it affects (comma-separated) and the API. The script adds the PR number.
+- Leave the block out if there is nothing to log. CI checks the block's format.
+
 Deprecation policy
 ------------------
 
