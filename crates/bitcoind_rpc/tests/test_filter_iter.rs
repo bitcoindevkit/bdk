@@ -1,9 +1,9 @@
 #![cfg(not(windows))]
 
 use bdk_bitcoind_rpc::bip158::{Error, FilterIter};
-use bdk_core::CheckPoint;
+use bdk_core::{BlockId, CheckPoint};
 use bdk_testenv::{anyhow, bitcoind, TestEnv};
-use bitcoin::{Address, Amount, Network, ScriptBuf};
+use bitcoin::{hashes::Hash, Address, Amount, Network, ScriptBuf};
 use bitcoincore_rpc::RpcApi;
 
 use crate::common::ClientExt;
@@ -161,6 +161,38 @@ fn event_checkpoint_connects_to_local_chain() -> anyhow::Result<()> {
             "Chain must include new hashes"
         );
     }
+
+    Ok(())
+}
+
+// An event's checkpoint must end at the emitted block, with no stale blocks above it.
+#[test]
+fn event_cp_tip_is_emitted_block() -> anyhow::Result<()> {
+    let env = testenv()?;
+    let rpc = ClientExt::get_rpc_client(&env)?;
+    while rpc.get_block_count()? < 10 {
+        let _ = env.mine_blocks(1, None)?;
+    }
+    let genesis = CheckPoint::new(0, env.genesis_hash()?);
+    let block_at = |height: u32| -> anyhow::Result<BlockId> {
+        let hash = rpc.get_block_hash(height.into())?;
+        Ok(BlockId { height, hash })
+    };
+
+    // Our block 5 isn't in the node's chain, so the scan starts from genesis.
+    let cp = genesis.clone().insert(5, Hash::hash(b"stale"));
+    let mut iter = FilterIter::new(&rpc, cp, [ScriptBuf::new()]);
+    assert_eq!(iter.next().unwrap()?.cp.block_id(), block_at(1)?);
+
+    // Scan to 5, then replace blocks 4..=10. The scan resumes from 3, and its checkpoint must
+    // drop our now-stale blocks 4 and 5.
+    let mut iter = FilterIter::new(&rpc, genesis, [ScriptBuf::new()]);
+    while iter.next().unwrap()?.height() < 5 {}
+    let _ = env.reorg(7)?;
+    for height in 3..=10 {
+        assert_eq!(iter.next().unwrap()?.cp.block_id(), block_at(height)?);
+    }
+    assert!(iter.next().is_none());
 
     Ok(())
 }
