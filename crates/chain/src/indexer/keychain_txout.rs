@@ -75,8 +75,8 @@ pub const DEFAULT_LOOKAHEAD: u32 = 25;
 ///
 /// # Change sets
 ///
-/// Methods that can update the last revealed index or add keychains will return [`ChangeSet`] to
-/// report these changes. This should be persisted for future recovery.
+/// Methods that can update the last revealed index will return [`ChangeSet`] to report these
+/// changes. This should be persisted for future recovery.
 ///
 /// ## Synopsis
 ///
@@ -240,6 +240,13 @@ impl<K> KeychainTxOutIndex<K> {
     /// Derived script pubkeys remain in memory. If `persist_spks` is `true`, they're saved and
     /// reloaded via the `ChangeSet` on startup, avoiding re-derivation. Otherwise, they must be
     /// re-derived on init, affecting startup only for very large or complex wallets.
+    ///
+    /// Methods that don't return a `ChangeSet` (such as [`insert_descriptor`] and
+    /// [`apply_changeset`]) may still derive script pubkeys. These are carried by the next
+    /// `ChangeSet` returned by any method, even one that didn't derive them.
+    ///
+    /// [`insert_descriptor`]: Self::insert_descriptor
+    /// [`apply_changeset`]: Self::apply_changeset
     ///
     /// # Examples
     ///
