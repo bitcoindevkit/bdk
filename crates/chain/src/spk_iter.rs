@@ -3,7 +3,7 @@ use crate::{
     miniscript::{Descriptor, DescriptorPublicKey},
     Indexed,
 };
-use core::{borrow::Borrow, ops::Bound, ops::RangeBounds};
+use core::{borrow::Borrow, iter::FusedIterator, ops::Bound, ops::RangeBounds};
 
 /// Maximum [BIP32](https://bips.xyz/32) derivation index.
 pub const BIP32_MAX_INDEX: u32 = (1 << 31) - 1;
@@ -32,7 +32,7 @@ pub const BIP32_MAX_INDEX: u32 = (1 << 31) - 1;
 /// assert_eq!(spk_iter.next(), Some((0, external_spk_0)));
 /// assert_eq!(spk_iter.next(), None);
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SpkIterator<D> {
     next_index: u32,
     end: u32,
@@ -131,7 +131,20 @@ where
             .saturating_add(u32::try_from(n).unwrap_or(u32::MAX));
         self.next()
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = if self.descriptor.borrow().has_wildcard() {
+            self.end.saturating_sub(self.next_index)
+        } else {
+            u32::from(self.next_index == 0 && self.end > 0)
+        } as usize;
+        (remaining, Some(remaining))
+    }
 }
+
+impl<D> ExactSizeIterator for SpkIterator<D> where D: Borrow<Descriptor<DescriptorPublicKey>> {}
+
+impl<D> FusedIterator for SpkIterator<D> where D: Borrow<Descriptor<DescriptorPublicKey>> {}
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -265,6 +278,28 @@ mod test {
             SpkIterator::new_with_range(&no_wildcard_descriptor, 10..=10).next(),
             None
         );
+    }
+
+    /// `len()` must match the number of items left, before and after `nth`.
+    #[test]
+    fn test_spkiterator_len() {
+        let (_, wildcard_desc, _) = init_txout_index();
+        let secp = Secp256k1::signing_only();
+        let (single_desc, _) = Descriptor::<DescriptorPublicKey>::parse_descriptor(&secp, "wpkh([73c5da0a/86'/0'/0']xprv9xgqHN7yz9MwCkxsBPN5qetuNdQSUttZNKw1dcYTV4mkaAFiBVGQziHs3NRSWMkCzvgjEe3n9xV8oYywvM8at9yRqyaZVz6TYYhX98VjsUk/1/0)").unwrap();
+
+        assert_eq!(
+            SpkIterator::new(&wildcard_desc).len(),
+            BIP32_MAX_INDEX as usize + 1
+        );
+        for desc in [&wildcard_desc, &single_desc] {
+            for (start, end) in [(0, 0), (0, 1), (0, 5), (1, 5), (3, 3)] {
+                let mut iter = SpkIterator::new_with_range(desc, start..end);
+                for n in [0, 2, 0, 0] {
+                    assert_eq!(iter.len(), iter.clone().count());
+                    iter.nth(n);
+                }
+            }
+        }
     }
 
     #[test]
