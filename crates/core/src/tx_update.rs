@@ -25,7 +25,7 @@ use bitcoin::{OutPoint, Transaction, TxOut, Txid};
 ///
 /// The built-in chain-source crates (`bdk_electrum`, `bdk_esplora`, `bdk_bitcoind_rpc`) handle this
 /// automatically. Transactions lacking temporal context are stored but ignored by canonicalization.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TxUpdate<A = ()> {
     /// Full transactions. These are transactions that were determined to be relevant to the wallet
