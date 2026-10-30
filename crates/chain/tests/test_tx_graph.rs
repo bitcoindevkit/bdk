@@ -1253,6 +1253,34 @@ fn insert_anchor_without_tx() {
 }
 
 #[test]
+fn insert_anchor_indexes_highest_anchor_height() {
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+    let mut recovered = TxGraph::default();
+    let txid = new_tx(42).compute_txid();
+
+    // Confirmation times are deliberately not in height order.
+    for (block_id, confirmation_time, expected_height) in [
+        (block_id!(100, "A"), 30, 100),
+        (block_id!(90, "B"), 80, 100),
+        (block_id!(110, "C"), 20, 110),
+        (block_id!(110, "D"), 10, 110),
+    ] {
+        let anchor = ConfirmationBlockTime {
+            block_id,
+            confirmation_time,
+        };
+        recovered.apply_changeset(graph.insert_anchor(txid, anchor));
+        assert_eq!(
+            graph
+                .txids_by_descending_anchor_height()
+                .collect::<Vec<_>>(),
+            [(expected_height, txid)],
+        );
+        assert_eq!(recovered, graph);
+    }
+}
+
+#[test]
 /// The `map_anchors` allow a caller to pass a function to reconstruct the [`TxGraph`] with any
 /// [`Anchor`], even though the function is non-deterministic.
 fn call_map_anchors_with_non_deterministic_anchor() {
