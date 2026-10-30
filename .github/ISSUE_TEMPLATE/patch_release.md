@@ -23,29 +23,18 @@ assignees: ''
 
 ### Checklist
 
-Release numbering must follow [Semantic Versioning]. These steps assume the current `master`
-branch **development** version is *MAJOR.MINOR.PATCH*.
+Release numbering must follow [Semantic Versioning]. These steps assume the current `release/MAJOR.MINOR` branch version is *MAJOR.MINOR.PATCH*. The `master` branch stays on its *MAJOR.MINOR+1.0-alpha.0* development version and is not bumped for patch releases.
 
 ### On the day of the patch release
-
-Change the `master` branch to the new PATCH+1 version:
-
-- [ ] Switch to the `master` branch.
-- [ ] Create a new PR branch called `bump_dev_MAJOR_MINOR_PATCH+1`, eg. `bump_dev_0_22_1`.
-- [ ] Bump the `bump_dev_MAJOR_MINOR` branch to the next development PATCH+1 version.
-  - Change the `Cargo.toml` version value to `MAJOR.MINOR.PATCH+1`.
-  - Update the `CHANGELOG.md` file.
-  - The commit message should be "Bump version to MAJOR.MINOR.PATCH+1".
-- [ ] Create PR and merge the `bump_dev_MAJOR_MINOR_PATCH+1` branch to `master`.
-  - Title PR "Bump version to MAJOR.MINOR.PATCH+1".
 
 Cherry-pick, tag and publish new PATCH+1 release:
 
 - [ ] Merge fix PRs to the `master` branch.
 - [ ] Git cherry-pick fix commits to the `release/MAJOR.MINOR` branch to be patched.
 - [ ] Verify fixes in `release/MAJOR.MINOR` branch.
-- [ ] Bump the `release/MAJOR.MINOR.PATCH+1` branch to `MAJOR.MINOR.PATCH+1` version.
-  - Change the `Cargo.toml` version value to `MAJOR.MINOR.MINOR.PATCH+1`.
+- [ ] Bump the `release/MAJOR.MINOR` branch to `MAJOR.MINOR.PATCH+1` version.
+  - Change the `Cargo.toml` version value to `MAJOR.MINOR.PATCH+1`.
+  - Update the `CHANGELOG.md` file.
   - The commit message should be "Bump version to MAJOR.MINOR.PATCH+1".
 - [ ] Add a tag to the `HEAD` commit in the `release/MAJOR.MINOR` branch.
   - The tag name should be `vMAJOR.MINOR.PATCH+1`
@@ -62,7 +51,8 @@ Cherry-pick, tag and publish new PATCH+1 release:
   - Use the "+ Auto-generate release notes" button to add details from included PRs.
   - Until we reach a `1.0.0` release check the "Pre-release" box.
 - [ ] Make sure the new release shows up on [crates.io] and that the docs are built correctly on [docs.rs].
-- [ ] Announce the release, using the **Summary**, on Discord, Twitter and Mastodon.
+- [ ] Open a PR to `master` that adds the new `CHANGELOG.md` entry (master's version stays unchanged).
+- [ ] Announce the release, using the **Summary**, on Discord, Twitter, and Nostr.
 - [ ] Celebrate 🎉
 
 [Semantic Versioning]: https://semver.org/

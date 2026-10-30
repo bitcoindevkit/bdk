@@ -1,6 +1,6 @@
 [package]
 name = "bdk_testenv"
-version = "0.13.1"
+version = "0.14.0-alpha.0"
 edition = "2021"
 rust-version = "1.85.0"
 homepage = "https://bitcoindevkit.org"
@@ -16,7 +16,7 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bdk_chain = { path = "../chain", version = "0.23.1", default-features = false }
+bdk_chain = { path = "../chain", version = "0.24.0-alpha.0", default-features = false }
 electrsd = { version = "0.38.0", features = [ "legacy" ], default-features = false }
 bitcoin = { version = "0.32.0", default-features = false }
 
