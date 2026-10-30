@@ -6,7 +6,7 @@ use bdk_core::{
     bitcoin::{BlockHash, OutPoint, Txid},
     BlockId, CheckPoint, ConfirmationBlockTime, Indexed, TxUpdate,
 };
-use esplora_client::{OutputStatus, Tx};
+use esplora_client::{EsploraTx, OutputStatus};
 use std::thread::JoinHandle;
 
 use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
@@ -289,7 +289,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
     last_revealed: Option<u32>,
     parallel_requests: usize,
 ) -> Result<(TxUpdate<ConfirmationBlockTime>, Option<u32>), Error> {
-    type TxsOfSpkIndex = (u32, Vec<esplora_client::Tx>, HashSet<Txid>);
+    type TxsOfSpkIndex = (u32, Vec<EsploraTx>, HashSet<Txid>);
 
     let mut update = TxUpdate::<ConfirmationBlockTime>::default();
     let mut last_active_index = Option::<u32>::None;
@@ -312,7 +312,7 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
                     let mut seen_cursors = HashSet::new();
                     let mut spk_txs = Vec::new();
                     loop {
-                        let txs = client.scripthash_txs(&spk, last_txid)?;
+                        let txs = client.get_scripthash_txs(&spk, last_txid)?;
                         let tx_count = txs.len();
                         last_txid = txs.last().map(|tx| tx.txid);
                         spk_txs.extend(txs);
@@ -429,7 +429,7 @@ fn fetch_txs_with_txids<I: IntoIterator<Item = Txid>>(
                         .map(|t| (txid, t))
                 })
             })
-            .collect::<Vec<JoinHandle<Result<(Txid, Option<Tx>), Error>>>>();
+            .collect::<Vec<JoinHandle<Result<(Txid, Option<EsploraTx>), Error>>>>();
 
         if handles.is_empty() {
             break;
