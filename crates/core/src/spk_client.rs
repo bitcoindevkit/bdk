@@ -280,7 +280,8 @@ impl<I, D> SyncRequest<I, D> {
     ///
     /// `start_time` specifies the start time of sync. Chain sources can use this value to set
     /// [`TxUpdate::seen_ats`](crate::TxUpdate::seen_ats) for mempool transactions. A transaction
-    /// without any `seen_ats` is assumed to be unseen in the mempool.
+    /// without any `seen_ats` is assumed to be unseen in the mempool. If the clock may have moved
+    /// backwards, use `bdk_chain`'s `TxGraph::next_observation_time`.
     ///
     /// Use [`SyncRequest::builder`] to use the current timestamp as `start_time` (this requires
     /// `feature = "std"`).
@@ -554,7 +555,8 @@ impl<K: Ord + Clone, D> FullScanRequest<K, D> {
     ///
     /// `start_time` specifies the start time of sync. Chain sources can use this value to set
     /// [`TxUpdate::seen_ats`](crate::TxUpdate::seen_ats) for mempool transactions. A transaction
-    /// without any `seen_ats` is assumed to be unseen in the mempool.
+    /// without any `seen_ats` is assumed to be unseen in the mempool. If the clock may have moved
+    /// backwards, use `bdk_chain`'s `TxGraph::next_observation_time`.
     ///
     /// Use [`FullScanRequest::builder`] to use the current timestamp as `start_time` (this
     /// requires `feature = "std`).
