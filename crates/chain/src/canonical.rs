@@ -140,26 +140,15 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
     /// mature.
     ///
     /// If the position is confirmed [`transitively`](ChainPosition::Confirmed::transitively), the
-    /// confirmation height may be an upper bound (see [`confirmation_height_upper_bound`]), so
-    /// this method may return false-negatives.
+    /// number of confirmations may be a lower bound (see [`confirmations_lower_bound`]), so this
+    /// method may return false-negatives.
     ///
-    /// [`confirmation_height_upper_bound`]: ChainPosition::confirmation_height_upper_bound
+    /// [`confirmations_lower_bound`]: ChainPosition::confirmations_lower_bound
     pub fn is_mature(&self, tip: u32) -> bool {
-        if self.is_on_coinbase {
-            let conf_height = match self.pos.confirmation_height_upper_bound() {
-                Some(height) => height,
-                // A coinbase can be canonical without us holding an anchor for it (i.e. it is an
-                // ancestor of a canonical tx, or is assumed canonical). With no known
-                // confirmation height, maturity cannot be proven.
-                None => return false,
-            };
-            let age = tip.saturating_sub(conf_height);
-            if age + 1 < COINBASE_MATURITY {
-                return false;
-            }
-        }
-
-        true
+        // A coinbase can be canonical without us holding an anchor for it (i.e. it is an ancestor
+        // of a canonical tx, or is assumed canonical). It then has no confirmations, so maturity
+        // cannot be proven.
+        !self.is_on_coinbase || self.pos.confirmations_lower_bound(tip) >= COINBASE_MATURITY
     }
 
     /// Whether the utxo is/was/will be spendable with chain `tip`.
@@ -176,11 +165,7 @@ impl<A: Anchor> CanonicalTxOut<ChainPosition<A>> {
             return false;
         }
 
-        let conf_height = match self.pos.confirmation_height_upper_bound() {
-            Some(height) => height,
-            None => return false,
-        };
-        if conf_height > tip {
+        if self.pos.confirmations_lower_bound(tip) == 0 {
             return false;
         }
 
@@ -607,10 +592,7 @@ impl<A: Anchor> CanonicalView<A> {
     /// let balance = view.balance(
     ///     indexer.outpoints().iter().map(|(_, op)| *op),
     ///     bdk_chain::taints_unowned(&indexer),
-    ///     |pos: &ChainPosition<_>| {
-    ///         pos.confirmation_height_upper_bound()
-    ///             .is_some_and(|h| tip_height.saturating_sub(h).saturating_add(1) >= 6)
-    ///     },
+    ///     |pos: &ChainPosition<_>| pos.confirmations_lower_bound(tip_height) >= 6,
     ///     |_txout| false,
     /// );
     /// ```
