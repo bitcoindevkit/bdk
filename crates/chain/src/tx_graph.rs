@@ -615,10 +615,9 @@ impl<A: Anchor> TxGraph<A> {
     /// Inserting floating txouts are useful for determining fee/feerate of transactions we care
     /// about.
     ///
-    /// The [`ChangeSet`] result will be empty if the `outpoint` (or a full transaction containing
-    /// the `outpoint`) already existed in `self`.
-    ///
-    /// [`apply_changeset`]: Self::apply_changeset
+    /// The [`ChangeSet`] result will be empty if a full transaction containing the `outpoint`, or
+    /// the same `txout` at `outpoint`, already existed in `self`. A different floating txout at
+    /// `outpoint` is replaced (this panics in debug builds, as a txout should never change).
     pub fn insert_txout(&mut self, outpoint: OutPoint, txout: TxOut) -> ChangeSet<A> {
         let mut changeset = ChangeSet::<A>::default();
         let tx_node = self.txs.entry(outpoint.txid).or_default();
@@ -630,16 +629,13 @@ impl<A: Anchor> TxGraph<A> {
                 // written assuming this never panics.
             }
             TxNodeInternal::Partial(partial_tx) => {
-                match partial_tx.insert(outpoint.vout, txout.clone()) {
-                    Some(old_txout) => {
-                        debug_assert_eq!(
-                            txout, old_txout,
-                            "txout of the same outpoint should never change"
-                        );
-                    }
-                    None => {
-                        changeset.txouts.insert(outpoint, txout);
-                    }
+                let old_txout = partial_tx.insert(outpoint.vout, txout.clone());
+                if old_txout.as_ref() != Some(&txout) {
+                    debug_assert!(
+                        old_txout.is_none(),
+                        "txout of the same outpoint should never change"
+                    );
+                    changeset.txouts.insert(outpoint, txout);
                 }
             }
         }

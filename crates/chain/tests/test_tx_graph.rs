@@ -288,6 +288,26 @@ fn insert_tx_displaces_txouts() {
     assert_eq!(tx_graph.get_txout(outpoint), Some(txout));
 }
 
+/// Replacing a floating txout must show in the changeset, so persisted state doesn't diverge.
+#[test]
+#[cfg_attr(
+    debug_assertions,
+    should_panic(expected = "txout of the same outpoint should never change")
+)]
+fn insert_txout_replaces_floating_txout() {
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+    let outpoint = OutPoint::new(hash!("tx"), 0);
+    let txout = |sats| TxOut {
+        value: Amount::from_sat(sats),
+        script_pubkey: ScriptBuf::new(),
+    };
+
+    let _ = tx_graph.insert_txout(outpoint, txout(1));
+    let changeset = tx_graph.insert_txout(outpoint, txout(2));
+    assert_eq!(changeset.txouts, [(outpoint, txout(2))].into());
+    assert_eq!(tx_graph.get_txout(outpoint), Some(&txout(2)));
+}
+
 #[test]
 fn insert_tx_witness_precedence() {
     let previous_output = OutPoint::new(hash!("prev"), 2);
