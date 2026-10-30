@@ -4,10 +4,13 @@ use std::collections::BTreeMap;
 
 use bdk_chain::{
     local_chain::LocalChain, BlockId, CanonicalTxOut, ChainPosition, ConfirmationBlockTime,
-    Eligibility, Trust, TxGraph,
+    Eligibility, Timelocks, Trust, TxGraph,
 };
 use bdk_testenv::{hash, utils::new_tx};
-use bitcoin::{key::Secp256k1, Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
+use bitcoin::{
+    absolute, key::Secp256k1, relative, Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn,
+    TxOut,
+};
 use miniscript::Descriptor;
 
 /// Builds an `is_settled` predicate requiring at least `min_confirmations` confirmations.
@@ -90,8 +93,7 @@ fn test_is_settled_boundary() {
     };
     let _ = tx_graph.insert_anchor(txid, anchor_height_5);
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let canonical_view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = canonical_view.tip().height;
 
     // Test min_confirmations = 1: Should be confirmed (has 6 confirmations)
@@ -99,7 +101,7 @@ fn test_is_settled_boundary() {
         [outpoint],
         |_tx| false, // leave trust to ancestry
         settled(tip_height, 1),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     assert_eq!(balance_1_conf.confirmed, Amount::from_sat(50_000));
@@ -110,7 +112,7 @@ fn test_is_settled_boundary() {
         [outpoint],
         |_tx| false, // leave trust to ancestry
         settled(tip_height, 6),
-        |_txout| false,
+        |_txout| Default::default(),
     );
     assert_eq!(balance_6_conf.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance_6_conf.trusted_pending, Amount::ZERO);
@@ -120,7 +122,7 @@ fn test_is_settled_boundary() {
         [outpoint],
         |_tx| false, // leave trust to ancestry
         settled(tip_height, 7),
-        |_txout| false,
+        |_txout| Default::default(),
     );
     assert_eq!(balance_7_conf.confirmed, Amount::ZERO);
     assert_eq!(balance_7_conf.trusted_pending, Amount::from_sat(50_000));
@@ -195,8 +197,7 @@ fn test_min_confirmations_with_untrusted_tx() {
     };
     let _ = tx_graph.insert_anchor(txid, anchor);
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let canonical_view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = canonical_view.tip().height;
 
     // Test with min_confirmations = 5 and everything tainted
@@ -204,7 +205,7 @@ fn test_min_confirmations_with_untrusted_tx() {
         [outpoint],
         |_tx| true, // taint everything
         settled(tip_height, 5),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     // Should be untrusted pending (not enough confirmations and not trusted)
@@ -217,7 +218,7 @@ fn test_min_confirmations_with_untrusted_tx() {
         [outpoint],
         |_tx| false, // leave trust to ancestry
         settled(tip_height, 5),
-        |_txout| false,
+        |_txout| Default::default(),
     );
     assert_eq!(balance.trusted_pending, Amount::from_sat(25_000));
     assert_eq!(balance.untrusted_pending, Amount::ZERO);
@@ -358,8 +359,7 @@ fn test_min_confirmations_multiple_transactions() {
     );
     outpoints.push(outpoint2);
 
-    let canonical_view =
-        chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let canonical_view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = canonical_view.tip().height;
 
     // Test with min_confirmations = 5
@@ -370,7 +370,7 @@ fn test_min_confirmations_multiple_transactions() {
         outpoints.clone(),
         |_tx| false,
         settled(tip_height, 5),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     assert_eq!(
@@ -391,7 +391,7 @@ fn test_min_confirmations_multiple_transactions() {
         outpoints,
         |_tx| false,
         settled(tip_height, 10),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     assert_eq!(
@@ -496,7 +496,7 @@ fn test_balance_taint_propagates_through_unconfirmed_ancestry() {
     .into_iter()
     .collect::<HashSet<_>>();
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // Our unspent owned outputs: `trusted` and `chained` (the others are spent).
     let utxos = [
@@ -514,7 +514,7 @@ fn test_balance_taint_propagates_through_unconfirmed_ancestry() {
                 .any(|txin| !owned.contains(&txin.previous_output))
         },
         |pos| pos.is_confirmed(),
-        |_txout| false,
+        |_txout| Default::default(),
     );
 
     assert_eq!(balance.confirmed, Amount::ZERO);
@@ -549,11 +549,16 @@ fn test_balance_is_settled_is_authoritative_for_unconfirmed() {
     let _ = tx_graph.insert_tx(tx);
     let _ = tx_graph.insert_seen_at(txid, 1000);
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // An `is_settled` that claims everything is settled counts the (mature, non-coinbase)
     // unconfirmed output as settled rather than dropping it, even when it is tainted.
-    let balance = view.balance([OutPoint::new(txid, 0)], |_| true, |_| true, |_txout| false);
+    let balance = view.balance(
+        [OutPoint::new(txid, 0)],
+        |_| true,
+        |_| true,
+        |_txout| Default::default(),
+    );
     assert_eq!(balance.confirmed, Amount::from_sat(50_000));
     assert_eq!(balance.immature, Amount::ZERO);
     assert_eq!(balance.trusted_pending, Amount::ZERO);
@@ -621,7 +626,7 @@ fn test_balance_taint_stops_at_settled_ancestor() {
     .into_iter()
     .collect::<HashSet<_>>();
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // `child` is the only UTXO (`settled_foreign:0` is spent by it).
     let by_op = view
@@ -634,7 +639,7 @@ fn test_balance_taint_stops_at_settled_ancestor() {
                     .any(|txin| !owned.contains(&txin.previous_output))
             },
             |pos| pos.is_confirmed(),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .map(|(txout, eligibility)| (txout.outpoint, eligibility))
         .collect::<std::collections::HashMap<_, _>>();
@@ -696,14 +701,19 @@ fn test_classify_immature_and_settled() {
         );
     }
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let ops = [
         OutPoint::new(coinbase_txid, 0),
         OutPoint::new(normal_txid, 0),
     ];
 
     let by_op = view
-        .classify_outpoints(ops, |_| false, |pos| pos.is_confirmed(), |_txout| false)
+        .classify_outpoints(
+            ops,
+            |_| false,
+            |pos| pos.is_confirmed(),
+            |_txout| Default::default(),
+        )
         .map(|(txout, eligibility)| (txout.outpoint, eligibility))
         .collect::<std::collections::HashMap<_, _>>();
     assert_eq!(
@@ -713,7 +723,12 @@ fn test_classify_immature_and_settled() {
     assert_eq!(by_op[&OutPoint::new(normal_txid, 0)], Eligibility::Settled);
 
     // The balance buckets reflect the same classification.
-    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), |_txout| false);
+    let balance = view.balance(
+        ops,
+        |_| false,
+        |pos| pos.is_confirmed(),
+        |_txout| Default::default(),
+    );
     assert_eq!(balance.immature, Amount::from_sat(50_000));
     assert_eq!(balance.confirmed, Amount::from_sat(30_000));
 }
@@ -790,7 +805,7 @@ fn test_balance_taint_shared_ancestor() {
     .into_iter()
     .collect::<HashSet<_>>();
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     // Both children descend from the same tainting `foreign`, so both are untrusted.
     let balance = view.balance(
@@ -805,7 +820,7 @@ fn test_balance_taint_shared_ancestor() {
                 .any(|txin| !owned.contains(&txin.previous_output))
         },
         |pos| pos.is_confirmed(),
-        |_txout| false,
+        |_txout| Default::default(),
     );
     assert_eq!(balance.trusted_pending, Amount::ZERO);
     assert_eq!(balance.untrusted_pending, Amount::from_sat(29_000 + 19_000));
@@ -850,7 +865,7 @@ fn test_classify_skips_spent_and_unknown() {
         let _ = tx_graph.insert_seen_at(tx.compute_txid(), 1000);
     }
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     let classified = view
         .classify_outpoints(
@@ -861,7 +876,7 @@ fn test_classify_skips_spent_and_unknown() {
             ],
             |_| false,
             |pos| pos.is_confirmed(),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .collect::<Vec<_>>();
 
@@ -898,7 +913,7 @@ fn test_immature_coinbase_stays_immature_when_unsettled() {
         },
     );
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = view.tip().height;
 
     // Require 3 confirmations to be settled.
@@ -907,7 +922,7 @@ fn test_immature_coinbase_stays_immature_when_unsettled() {
             [OutPoint::new(txid, 0)],
             |_| false,
             settled(tip_height, 3),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .map(|(txout, e)| (txout.outpoint, e))
         .collect::<std::collections::HashMap<_, _>>();
@@ -945,7 +960,7 @@ fn test_mature_coinbase_is_settled_not_immature() {
         },
     );
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let tip_height = view.tip().height;
 
     let by_op = view
@@ -953,7 +968,7 @@ fn test_mature_coinbase_is_settled_not_immature() {
             [OutPoint::new(txid, 0)],
             |_| false,
             settled(tip_height, 3),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .map(|(txout, e)| (txout.outpoint, e))
         .collect::<std::collections::HashMap<_, _>>();
@@ -1002,14 +1017,14 @@ fn test_unsettled_unknown_when_parent_root_missing() {
     }
     // `missing_root` is not inserted.
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
 
     let by_op = view
         .classify_outpoints(
             [OutPoint::new(child2_txid, 0)],
             |_| false,
             |pos| pos.is_confirmed(),
-            |_txout| false,
+            |_txout| Default::default(),
         )
         .map(|(txout, e)| (txout.outpoint, e))
         .collect::<std::collections::HashMap<_, _>>();
@@ -1057,14 +1072,14 @@ fn test_evicted_stale_anchored_tx_not_canonical() {
     let _ = tx_graph.insert_seen_at(txid, 100);
     let _ = tx_graph.insert_evicted_at(txid, 200);
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     assert!(
         !view.txs().any(|tx| tx.txid == txid),
         "evicted leftover tx must not be canonical"
     );
 }
 
-/// A settled output for which `is_locked` returns true is classified `Immature` and counted in
+/// A settled output whose `Timelocks` are unmet is classified `Immature` and counted in
 /// `Balance::immature` instead of `confirmed`.
 #[test]
 fn test_classify_locked() {
@@ -1095,30 +1110,39 @@ fn test_classify_locked() {
         },
     );
 
-    let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
     let ops = [OutPoint::new(txid, 0)];
 
-    // Timelock unmet
+    // Timelock unmet: the spend needs height 2, the tip is at 1.
+    let locked = |_: &CanonicalTxOut<_>| Timelocks {
+        absolute: Some(absolute::LockTime::from_consensus(2)),
+        relative: None,
+    };
     let (_, eligibility) = view
-        .classify_outpoints(ops, |_| false, |pos| pos.is_confirmed(), |_| true)
+        .classify_outpoints(ops, |_| false, |pos| pos.is_confirmed(), locked)
         .next()
         .unwrap();
     assert_eq!(eligibility, Eligibility::Immature);
 
-    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), |_| true);
+    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), locked);
     assert_eq!(balance.immature, Amount::from_sat(40_000));
     assert_eq!(balance.confirmed, Amount::ZERO);
 
-    // Timelock met
-    let balance = view.balance(ops, |_| false, |pos| pos.is_confirmed(), |_| false);
+    // No timelock
+    let balance = view.balance(
+        ops,
+        |_| false,
+        |pos| pos.is_confirmed(),
+        |_| Timelocks::default(),
+    );
     assert_eq!(balance.confirmed, Amount::from_sat(40_000));
     assert_eq!(balance.immature, Amount::ZERO);
 }
 
-/// `is_locked` gets what a wallet needs to evaluate its descriptors' timelocks: the spk, and the
-/// position to count confirmations. Both outputs are `Immature` while unconfirmed (here also
-/// untrusted). Once confirmed, the `older(100)` one is `Immature` until its 100th confirmation,
-/// and the `after(200)` one until the tip reaches 200.
+/// `timelocks` gets what a wallet needs to look up its descriptors' timelocks: the spk. Both
+/// outputs are `Immature` while unconfirmed (here also untrusted). Once confirmed, the
+/// `older(100)` one is `Immature` until its 100th confirmation, and the `after(200)` one until the
+/// tip reaches 200.
 #[test]
 fn test_classify_locked_descriptor_timelocks() {
     let key = "tprv8ZgxMBicQKsPd3krDUsBAmtnRsK3rb8u5yi1zhQgMhF1tR8MW7xfE4rnrbbsrbPR52e7rKapu6ztw1jXveJSCGHEriUGZV7mCe88duLp5pj/0/*";
@@ -1128,10 +1152,12 @@ fn test_classify_locked_descriptor_timelocks() {
         desc.at_derivation_index(0).unwrap().script_pubkey()
     };
     let (csv_spk, cltv_spk) = (spk("older(100)"), spk("after(200)"));
-    let is_locked = |tip: u32, txout: &CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>| {
+    let timelocks = |txout: &CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>| {
         let spk = &txout.txout.script_pubkey;
-        (*spk == csv_spk && txout.pos.confirmations_lower_bound(tip) < 100)
-            || (*spk == cltv_spk && tip < 200)
+        Timelocks {
+            absolute: (*spk == cltv_spk).then(|| absolute::LockTime::from_consensus(200)),
+            relative: (*spk == csv_spk).then(|| relative::LockTime::from_height(100)),
+        }
     };
 
     let mut chain =
@@ -1159,17 +1185,11 @@ fn test_classify_locked_descriptor_timelocks() {
     let _ = tx_graph.insert_seen_at(txid, 100);
 
     let classify = |chain: &LocalChain, tx_graph: &TxGraph<ConfirmationBlockTime>| {
-        let view = chain.canonical_view(tx_graph, chain.tip().block_id(), Default::default());
-        let tip = view.tip().height;
+        let view = chain.canonicalize(tx_graph, chain.tip().block_id(), Default::default());
         let ops = [OutPoint::new(txid, 0), OutPoint::new(txid, 1)];
-        view.classify_outpoints(
-            ops,
-            |_| true,
-            |pos| pos.is_confirmed(),
-            |o| is_locked(tip, o),
-        )
-        .map(|(_, eligibility)| eligibility)
-        .collect::<Vec<_>>()
+        view.classify_outpoints(ops, |_| true, |pos| pos.is_confirmed(), timelocks)
+            .map(|(_, eligibility)| eligibility)
+            .collect::<Vec<_>>()
     };
 
     assert_eq!(classify(&chain, &tx_graph), [Eligibility::Immature; 2]);
@@ -1186,5 +1206,259 @@ fn test_classify_locked_descriptor_timelocks() {
     ] {
         chain.insert_block(tip, hash!("tip")).unwrap();
         assert_eq!(classify(&chain, &tx_graph), expected, "tip {tip}");
+    }
+}
+
+/// `are_timelocks_met` follows consensus for each kind of lock, one step either side of the
+/// boundary, and counts a lock that needs an unknown MTP as unmet.
+#[test]
+fn test_are_timelocks_met_boundaries() {
+    // Above `LOCKTIME_THRESHOLD`, so an absolute lock this large is a time.
+    const MTP: u32 = 600_000_000;
+    let tip = 100;
+
+    let txout = |pos, prev_mtp| CanonicalTxOut {
+        pos,
+        outpoint: OutPoint::null(),
+        txout: TxOut::NULL,
+        spent_by: None,
+        is_on_coinbase: false,
+        prev_mtp,
+    };
+    let confirmed_at_90 = ChainPosition::Confirmed {
+        anchor: ConfirmationBlockTime {
+            block_id: BlockId {
+                height: 90,
+                hash: hash!("90"),
+            },
+            confirmation_time: 0,
+        },
+        transitively: None,
+    };
+    let unconfirmed = ChainPosition::Unconfirmed {
+        first_seen: Some(1),
+        last_seen: Some(1),
+    };
+    // Confirmed at 90, with the block before it 1024s (two intervals) older than the tip's MTP.
+    let confirmed = txout(confirmed_at_90, Some(MTP - 1024));
+    let no_prev_mtp = txout(confirmed_at_90, None);
+    let mempool = txout(unconfirmed, None);
+
+    let abs = |n| Timelocks {
+        absolute: Some(absolute::LockTime::from_consensus(n)),
+        relative: None,
+    };
+    let blocks = |n| Timelocks {
+        absolute: None,
+        relative: Some(relative::LockTime::from_height(n)),
+    };
+    let time = |n| Timelocks {
+        absolute: None,
+        relative: Some(relative::LockTime::from_512_second_intervals(n)),
+    };
+
+    let cases = [
+        // (name, txout, timelocks, tip_mtp, expected)
+        ("no lock", &mempool, Timelocks::default(), None, true),
+        // Spendable in block 101, so a lock height of 100 is met (BIP-65).
+        ("abs height met", &confirmed, abs(100), None, true),
+        ("abs height unmet", &confirmed, abs(101), None, false),
+        // Met once the lock time is below the tip's MTP (BIP-113).
+        ("abs time met", &confirmed, abs(MTP - 1), Some(MTP), true),
+        ("abs time unmet", &confirmed, abs(MTP), Some(MTP), false),
+        ("abs time, no mtp", &confirmed, abs(MTP - 1), None, false),
+        // Confirmed at 90, spendable in block 101: 101 - 90 = 11 blocks (BIP-68).
+        ("rel blocks met", &confirmed, blocks(11), None, true),
+        ("rel blocks unmet", &confirmed, blocks(12), None, false),
+        // An unconfirmed output confirms in block 101 at the earliest.
+        ("rel blocks 0, mempool", &mempool, blocks(0), None, true),
+        ("rel blocks 1, mempool", &mempool, blocks(1), None, false),
+        // `prev_mtp` is 1024s (two intervals) below the tip's MTP.
+        ("rel time met", &confirmed, time(2), Some(MTP), true),
+        ("rel time unmet", &confirmed, time(3), Some(MTP), false),
+        ("rel time, no tip mtp", &confirmed, time(0), None, false),
+        ("no prev mtp", &no_prev_mtp, time(0), Some(MTP), false),
+        ("rel time 0, mempool", &mempool, time(0), Some(MTP), true),
+        (
+            "both, one unmet",
+            &confirmed,
+            Timelocks {
+                absolute: Some(absolute::LockTime::from_consensus(100)),
+                relative: Some(relative::LockTime::from_height(12)),
+            },
+            None,
+            false,
+        ),
+    ];
+    for (name, txout, timelocks, tip_mtp, expected) in cases {
+        assert_eq!(
+            txout.are_timelocks_met(timelocks, tip, tip_mtp),
+            expected,
+            "{name}"
+        );
+    }
+}
+
+/// An evicted transaction swept transitively as the ancestor of a stale-anchored transaction must
+/// still report the mempool sighting it genuinely has.
+///
+/// `ChainPosition::Unconfirmed::last_seen` is documented as `None` only when the transaction was
+/// never seen in the mempool *and* only seen in a conflicting chain. An evicted transaction fails
+/// the first condition (it has a real `last_seen`), but
+/// `TxGraph::txids_by_descending_last_seen` filters evicted transactions out, so it never reaches
+/// the mempool stage of canonicalization and instead arrives via `ObservedIn::Block`. Forcing
+/// `None` there would report `first_seen: Some(_), last_seen: None`, i.e. "first seen at t, never
+/// seen", since `first_seen` is passed through unconditionally.
+#[test]
+fn test_evicted_ancestor_of_stale_anchored_tx_keeps_last_seen() {
+    let blocks: BTreeMap<u32, BlockHash> =
+        [(0, hash!("genesis")), (1, hash!("b1")), (2, hash!("tip"))]
+            .into_iter()
+            .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+
+    let mut tx_graph = TxGraph::default();
+
+    // Parent: seen in the mempool at 100, then evicted at 200.
+    let parent = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("grandparent"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let parent_txid = parent.compute_txid();
+    let _ = tx_graph.insert_tx(parent.clone());
+    let _ = tx_graph.insert_seen_at(parent_txid, 100);
+    let _ = tx_graph.insert_evicted_at(parent_txid, 200);
+
+    // Child: spends the parent and is anchored only in a block that is not in the best chain, so
+    // it is canonicalized in the leftover stage as `ObservedIn::Block`. It has no mempool
+    // sighting of its own, so it is not evicted and the leftover stage does not skip it.
+    let child = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(parent_txid, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(40_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(2)
+    };
+    let child_txid = child.compute_txid();
+    let _ = tx_graph.insert_tx(child);
+    let _ = tx_graph.insert_anchor(
+        child_txid,
+        ConfirmationBlockTime {
+            block_id: BlockId {
+                height: 1,
+                hash: hash!("stale"),
+            },
+            confirmation_time: 123456,
+        },
+    );
+
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
+
+    let parent_pos = view
+        .txs()
+        .find(|c| c.txid == parent_txid)
+        .expect("parent is swept canonical as an ancestor of the child")
+        .pos;
+
+    match parent_pos {
+        ChainPosition::Unconfirmed {
+            first_seen,
+            last_seen,
+        } => {
+            assert_eq!(first_seen, Some(100), "first_seen is passed through");
+            assert_eq!(
+                last_seen,
+                Some(100),
+                "an evicted tx was seen in the mempool, so its last_seen must be reported"
+            );
+        }
+        pos => panic!("parent must be unconfirmed, got {pos:?}"),
+    }
+}
+
+/// A transitively-marked ancestor must not lose a later mempool sighting of its own.
+///
+/// `ObservedIn::Mempool` carries the *descendant's* `last_seen`, which is only an inference: a
+/// child cannot sit in the mempool without its parent. `TxGraph::txids_by_descending_last_seen`
+/// iterates newest-first and `mark_canonical` skips anything already canonical, so a sweep
+/// normally only reaches an ancestor whose own sighting is older. Evicted transactions are
+/// filtered out of that iteration, though, so an evicted ancestor can be swept with a timestamp
+/// older than the one we directly observed for it.
+#[test]
+fn test_evicted_ancestor_keeps_its_own_later_last_seen() {
+    let blocks: BTreeMap<u32, BlockHash> = [(0, hash!("genesis")), (1, hash!("tip"))]
+        .into_iter()
+        .collect();
+    let chain = LocalChain::from_blocks(blocks).unwrap();
+
+    let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
+
+    // Parent: directly observed in the mempool at 300, then evicted at 400. The eviction keeps
+    // it out of the mempool stage, so it is only ever marked canonical transitively.
+    let parent = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(hash!("grandparent"), 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(50_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(1)
+    };
+    let parent_txid = parent.compute_txid();
+    let _ = tx_graph.insert_tx(parent);
+    let _ = tx_graph.insert_seen_at(parent_txid, 300);
+    let _ = tx_graph.insert_evicted_at(parent_txid, 400);
+
+    // Child: spends the parent, seen at 200 — *earlier* than the parent's own sighting.
+    let child = Transaction {
+        input: vec![TxIn {
+            previous_output: OutPoint::new(parent_txid, 0),
+            ..Default::default()
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(40_000),
+            script_pubkey: ScriptBuf::new(),
+        }],
+        ..new_tx(2)
+    };
+    let child_txid = child.compute_txid();
+    let _ = tx_graph.insert_tx(child);
+    let _ = tx_graph.insert_seen_at(child_txid, 200);
+
+    let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
+
+    let parent_pos = view
+        .txs()
+        .find(|c| c.txid == parent_txid)
+        .expect("parent is swept canonical as an ancestor of the child")
+        .pos;
+
+    match parent_pos {
+        ChainPosition::Unconfirmed {
+            first_seen,
+            last_seen,
+        } => {
+            assert_eq!(first_seen, Some(300));
+            assert_eq!(
+                last_seen,
+                Some(300),
+                "the parent's own sighting is later than the child's, so it must win; \
+                 reporting the child's 200 would also put last_seen before first_seen"
+            );
+        }
+        pos => panic!("parent must be unconfirmed, got {pos:?}"),
     }
 }

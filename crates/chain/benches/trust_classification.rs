@@ -7,7 +7,8 @@
 use std::collections::BTreeMap;
 
 use bdk_chain::{
-    local_chain::LocalChain, CanonicalView, ChainPosition, ConfirmationBlockTime, TxGraph,
+    local_chain::LocalChain, CanonicalView, ChainPosition, ConfirmationBlockTime, Timelocks,
+    TxGraph,
 };
 use bdk_testenv::{hash, utils::new_tx};
 use bitcoin::{Amount, BlockHash, OutPoint, Script, ScriptBuf, Transaction, TxIn, TxOut, Txid};
@@ -23,7 +24,7 @@ fn make_chain() -> LocalChain {
 
 // The three predicates `classify_outpoints` takes, faking what a wallet would pass:
 // `does_taint` = the tx pulls in coins that aren't ours; `is_settled` = the tx is confirmed;
-// `is_locked` = the tx has timelocked outputs.
+// `timelocks` = no output is timelocked.
 #[allow(clippy::type_complexity)]
 fn classify_outpoints_predicates<'a>(
     view: &'a CanonicalView<ConfirmationBlockTime>,
@@ -31,7 +32,7 @@ fn classify_outpoints_predicates<'a>(
 ) -> (
     impl FnMut(&bdk_chain::CanonicalTx<ChainPosition<ConfirmationBlockTime>>) -> bool + 'a,
     impl Fn(&ChainPosition<ConfirmationBlockTime>) -> bool,
-    impl Fn(&bdk_chain::CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>) -> bool,
+    impl Fn(&bdk_chain::CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>) -> Timelocks,
 ) {
     let owned = owned.clone();
     let is_mine = move |spk: &Script| spk == owned.as_script();
@@ -50,10 +51,11 @@ fn classify_outpoints_predicates<'a>(
     let is_settled =
         |pos: &ChainPosition<ConfirmationBlockTime>| matches!(pos, ChainPosition::Confirmed { .. });
 
-    let is_locked =
-        |_txout: &bdk_chain::CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>| false;
+    let timelocks = |_txout: &bdk_chain::CanonicalTxOut<ChainPosition<ConfirmationBlockTime>>| {
+        Timelocks::default()
+    };
 
-    (does_taint, is_settled, is_locked)
+    (does_taint, is_settled, timelocks)
 }
 
 // Per-UTXO memoized classification (`classify_outpoints`).
@@ -63,8 +65,8 @@ fn run_classify(
     owned: &ScriptBuf,
 ) {
     let outpoints = utxo_txids.iter().map(|&txid| OutPoint::new(txid, 0));
-    let (does_taint, is_settled, is_locked) = classify_outpoints_predicates(view, owned);
-    for item in view.classify_outpoints(outpoints, does_taint, is_settled, is_locked) {
+    let (does_taint, is_settled, timelocks) = classify_outpoints_predicates(view, owned);
+    for item in view.classify_outpoints(outpoints, does_taint, is_settled, timelocks) {
         std::hint::black_box(item);
     }
 }
@@ -420,7 +422,7 @@ fn bench_fan_in(c: &mut Criterion) {
     for (width, depth) in [(10, 3), (50, 5), (100, 10), (500, 20)] {
         let label = format!("{width}w×{depth}d");
         let (chain, tx_graph, utxo_txids, owned) = setup_fan_in(width, depth);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
@@ -433,7 +435,7 @@ fn bench_disjoint(c: &mut Criterion) {
     for (width, depth) in [(10, 3), (50, 5), (100, 10), (500, 20)] {
         let label = format!("{width}w×{depth}d");
         let (chain, tx_graph, utxo_txids, owned) = setup_disjoint(width, depth);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
@@ -446,7 +448,7 @@ fn bench_untrusted_fan_in(c: &mut Criterion) {
     for (width, depth) in [(10, 3), (50, 5), (100, 10), (500, 20)] {
         let label = format!("{width}w×{depth}d");
         let (chain, tx_graph, utxo_txids, owned) = setup_untrusted_fan_in(width, depth);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
@@ -459,7 +461,7 @@ fn bench_diamond(c: &mut Criterion) {
     for (shared, utxos) in [(5, 20), (10, 50), (20, 100), (50, 500)] {
         let label = format!("{shared}s×{utxos}u");
         let (chain, tx_graph, utxo_txids, owned) = setup_diamond(shared, utxos);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
@@ -472,7 +474,7 @@ fn bench_tainted_midchain(c: &mut Criterion) {
     for (width, depth) in [(10, 3), (50, 5), (100, 10), (500, 20)] {
         let label = format!("{width}w×{depth}d");
         let (chain, tx_graph, utxo_txids, owned) = setup_tainted_midchain(width, depth);
-        let view = chain.canonical_view(&tx_graph, chain.tip().block_id(), Default::default());
+        let view = chain.canonicalize(&tx_graph, chain.tip().block_id(), Default::default());
         group.bench_with_input(BenchmarkId::new("classify", &label), &(), |b, _| {
             b.iter(|| run_classify(&utxo_txids, &view, &owned));
         });
