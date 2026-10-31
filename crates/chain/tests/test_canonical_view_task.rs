@@ -2,9 +2,9 @@
 
 mod common;
 
-use bdk_chain::{CanonicalReason, ChainPosition};
+use bdk_chain::{local_chain::LocalChain, CanonicalReason, ChainPosition};
 use bdk_testenv::{block_id, hash, local_chain};
-use bitcoin::Txid;
+use bitcoin::{BlockHash, Txid};
 use common::*;
 use std::collections::HashSet;
 
@@ -13,7 +13,7 @@ fn test_assumed_canonical_scenarios() {
     // scenario: "txC spends txB; txB spends txA; txB is anchored; txC is assumed canonical"
 
     // create a local chain
-    let local_chain = local_chain![
+    let local_chain: LocalChain<BlockHash> = local_chain![
         (0, hash!("genesis")),
         (1, hash!("block1")),
         (2, hash!("block2")),
@@ -88,7 +88,7 @@ fn test_assumed_canonical_scenarios() {
     // build task & canonicalize
     let canonical_params = env.canonicalization_params;
     let canonical_task = env.tx_graph.canonical_task(chain_tip, canonical_params);
-    let canonical_txs = local_chain.canonicalize(canonical_task);
+    let (canonical_txs, queries) = local_chain.run_task(canonical_task);
 
     // assert canonical transactions
     let exp_canonical_txids: HashSet<Txid> = exp_canonical_txs
@@ -165,8 +165,8 @@ fn test_assumed_canonical_scenarios() {
     ];
 
     // build task & resolve positions
-    let view_task = canonical_txs.view_task(&env.tx_graph);
-    let canonical_view = local_chain.canonicalize(view_task);
+    let view_task = canonical_txs.view_task(&env.tx_graph, queries);
+    let canonical_view = local_chain.run_task(view_task);
 
     // assert final positions
     for (tx_name, exp_position) in exp_positions {
