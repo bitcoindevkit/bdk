@@ -597,7 +597,7 @@ mod test {
         let env = TestEnv::new()?;
         let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
         let client = Builder::new(base_url.as_str()).build_async()?;
-        let initial_height = env.rpc_client().get_block_count()?.into_model().0 as u32;
+        let initial_height = env.rpc_client().get_block_count()?.0 as u32;
 
         let mine_to = 16;
         let _ = env.mine_blocks((mine_to - initial_height) as usize, None)?;

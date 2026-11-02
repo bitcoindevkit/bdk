@@ -1,4 +1,3 @@
-
 use anyhow::Context;
 use bdk_chain::bitcoin::{
     block::Header, hash_types::TxMerkleNode, hex::FromHex, script::PushBytesBuf, transaction,
@@ -14,7 +13,7 @@ use electrsd::bitcoind::{TemplateRequest, TemplateRules};
 pub use electrsd;
 pub use electrsd::bitcoind;
 pub use electrsd::bitcoind::anyhow;
-pub use electrsd::corepc_client;
+pub use electrsd::corepc_regtest_client;
 pub use electrsd::electrum_client;
 use electrsd::electrum_client::ElectrumApi;
 
@@ -106,7 +105,7 @@ impl TestEnv {
         &self.electrsd.client
     }
 
-    /// Exposes the RPC calls from [`corepc_client`].
+    /// Exposes the RPC calls from [`corepc_regtest_client`].
     pub fn rpc_client(&self) -> &bitcoind::Client {
         &self.bitcoind.client
     }
@@ -344,7 +343,7 @@ impl TestEnv {
         &self,
         timeout: Duration,
     ) -> anyhow::Result<()> {
-        let chain_height = self.rpc_client().get_block_count()?.into_model().0;
+        let chain_height = self.rpc_client().get_block_count()?.0;
         let chain_hash = self.get_block_hash(chain_height)?;
         self.wait_until_electrum_sees_block(chain_height as u32, Some(chain_hash), timeout)
     }
@@ -474,7 +473,7 @@ mod test {
         // Mine some blocks.
         env.mine_blocks(101, None)?;
         env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
-        let height = env.bitcoind.client.get_block_count()?.into_model().0;
+        let height = env.bitcoind.client.get_block_count()?.0;
         let blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
             .collect::<Result<Vec<_>, _>>()?;
@@ -482,7 +481,7 @@ mod test {
         // Perform reorg on six blocks.
         env.reorg(6)?;
         env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
-        let reorged_height = env.bitcoind.client.get_block_count()?.into_model().0;
+        let reorged_height = env.bitcoind.client.get_block_count()?.0;
         let reorged_blocks = (0..=height)
             .map(|i| env.bitcoind.client.get_block_hash(i))
             .collect::<Result<Vec<_>, _>>()?;

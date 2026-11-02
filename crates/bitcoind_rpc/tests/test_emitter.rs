@@ -29,7 +29,7 @@ mod common;
 #[test]
 pub fn test_sync_local_chain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
-    let network_tip = env.rpc_client().get_block_count()?.into_model().0;
+    let network_tip = env.rpc_client().get_block_count()?.0;
     let (mut local_chain, _) = LocalChain::from_genesis(env.genesis_hash()?);
 
     let client = ClientExt::get_rpc_client(&env)?;

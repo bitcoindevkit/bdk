@@ -122,7 +122,7 @@ fn relevant_conflicts() -> anyhow::Result<()> {
         /// Scans through all transactions in the blockchain + mempool.
         fn sync(&mut self) -> anyhow::Result<()> {
             let client = self.env.rpc_client();
-            for height in 0..=client.get_block_count()?.into_model().0 {
+            for height in 0..=client.get_block_count()?.0 {
                 let hash = client.get_block_hash(height)?.block_hash()?;
                 let block = client.get_block(hash)?;
                 let _ = self.graph.apply_block_relevant(&block, height as _);
