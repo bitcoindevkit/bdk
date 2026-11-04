@@ -2,7 +2,7 @@
 
 use bdk_chain::{
     collections::BTreeMap,
-    indexer::keychain_txout::{ChangeSet, KeychainTxOutIndex},
+    indexer::keychain_txout::{ChangeSet, InsertDescriptorError, KeychainTxOutIndex},
     DescriptorExt, DescriptorId, Indexer, Merge, SpkIterator,
 };
 use bdk_testenv::{
@@ -10,7 +10,7 @@ use bdk_testenv::{
     utils::{new_tx, DESCRIPTORS},
 };
 use bitcoin::{secp256k1::Secp256k1, Amount, OutPoint, ScriptBuf, Transaction, TxOut};
-use miniscript::{Descriptor, DescriptorPublicKey};
+use miniscript::{descriptor::NonDefiniteKeyError, Descriptor, DescriptorPublicKey};
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd)]
 enum TestKeychain {
@@ -26,6 +26,8 @@ impl core::fmt::Display for TestKeychain {
         }
     }
 }
+
+const XPUB: &str = "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp";
 
 fn parse_descriptor(descriptor: &str) -> Descriptor<DescriptorPublicKey> {
     let secp = bdk_chain::bitcoin::secp256k1::Secp256k1::signing_only();
@@ -752,7 +754,6 @@ fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
 #[test]
 #[cfg(not(debug_assertions))]
 fn overlapping_descriptor_does_not_panic_in_release() {
-    const XPUB: &str = "tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp";
     let wildcard = parse_descriptor(&format!("wpkh({XPUB}/0/*)"));
     let single = parse_descriptor(&format!("wpkh({XPUB}/0/3)"));
 
@@ -760,4 +761,34 @@ fn overlapping_descriptor_does_not_panic_in_release() {
     let _ = index.insert_descriptor(0, wildcard);
     let _ = index.insert_descriptor(1, single);
     assert!(index.reveal_next_spk(1).is_none());
+}
+
+fn assert_non_derivable(
+    descriptor: Descriptor<DescriptorPublicKey>,
+    expected: NonDefiniteKeyError,
+) {
+    let mut index = KeychainTxOutIndex::<u8>::new(10, true);
+    assert_eq!(
+        index.insert_descriptor(0, descriptor.clone()),
+        Err(InsertDescriptorError::NonDerivable {
+            descriptor: Box::new(descriptor),
+            error: expected,
+        })
+    );
+    assert_eq!(index.keychains().count(), 0);
+    assert!(index.initial_changeset().is_empty());
+}
+
+#[test]
+fn insert_descriptor_rejects_hardened_derivation() {
+    for path in ["/0/*'", "/0'/1"] {
+        let descriptor = parse_descriptor(&format!("wpkh({XPUB}{path})"));
+        assert_non_derivable(descriptor, NonDefiniteKeyError::HardenedStep);
+    }
+}
+
+#[test]
+fn insert_descriptor_rejects_multipath() {
+    let descriptor = parse_descriptor(&format!("wpkh({XPUB}/<0;1>/*)"));
+    assert_non_derivable(descriptor, NonDefiniteKeyError::Multipath);
 }

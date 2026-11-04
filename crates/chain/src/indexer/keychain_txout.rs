@@ -4,7 +4,7 @@
 use crate::{
     alloc::boxed::Box,
     collections::*,
-    miniscript::{Descriptor, DescriptorPublicKey},
+    miniscript::{descriptor::NonDefiniteKeyError, Descriptor, DescriptorPublicKey},
     spk_client::{FullScanRequestBuilder, SyncRequestBuilder},
     spk_iter::BIP32_MAX_INDEX,
     spk_txout::SpkTxOutIndex,
@@ -495,6 +495,9 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// keychain <-> descriptor is a one-to-one mapping that cannot be changed. Attempting to do so
     /// will return a [`InsertDescriptorError<K>`].
     ///
+    /// Returns [`InsertDescriptorError::NonDerivable`] if the descriptor cannot be derived, i.e. it
+    /// has hardened derivation steps, multipath keys, or derives beyond BIP32's maximum depth.
+    ///
     /// [`KeychainTxOutIndex`] will prevent you from inserting two descriptors which derive the same
     /// script pubkey at index 0, but it's up to you to ensure that descriptors don't collide at
     /// other indices. A collision at any other index is a contract violation (see
@@ -504,6 +507,12 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
         keychain: K,
         descriptor: Descriptor<DescriptorPublicKey>,
     ) -> Result<bool, InsertDescriptorError<K>> {
+        if let Err(error) = descriptor.at_derivation_index(0) {
+            return Err(InsertDescriptorError::NonDerivable {
+                descriptor: Box::new(descriptor),
+                error,
+            });
+        }
         let did = descriptor.descriptor_id();
         if !self.keychain_to_descriptor_id.contains_key(&keychain)
             && !self.descriptor_id_to_keychain.contains_key(&did)
@@ -1016,6 +1025,14 @@ pub enum InsertDescriptorError<K> {
         /// The descriptor that the keychain is already assigned to
         existing_assignment: Box<Descriptor<DescriptorPublicKey>>,
     },
+    /// The descriptor cannot be derived: it has hardened derivation steps, multipath keys, or
+    /// derives beyond BIP32's maximum depth of 255
+    NonDerivable {
+        /// The descriptor you have attempted to insert
+        descriptor: Box<Descriptor<DescriptorPublicKey>>,
+        /// Why the descriptor cannot be derived
+        error: NonDefiniteKeyError,
+    },
 }
 
 impl<K: core::fmt::Display> core::fmt::Display for InsertDescriptorError<K> {
@@ -1039,6 +1056,13 @@ impl<K: core::fmt::Display> core::fmt::Display for InsertDescriptorError<K> {
                     f,
                     "keychain '{}' is already associated with another descriptor '{}'",
                     keychain, existing_assignment
+                )
+            }
+            InsertDescriptorError::NonDerivable { descriptor, error } => {
+                write!(
+                    f,
+                    "descriptor '{}' cannot be derived: {}",
+                    descriptor, error
                 )
             }
         }
