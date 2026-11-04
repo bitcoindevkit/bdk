@@ -112,6 +112,8 @@ where
             return None;
         }
 
+        // `new_with_range` caps `end` at `BIP32_MAX_INDEX + 1`, and the check above
+        // ensures `next_index < end`, so the index is within the non hardened range.
         let script = self
             .descriptor
             .borrow()
