@@ -519,6 +519,8 @@ impl<A: Clone + Ord> TxGraph<A> {
 
     /// Creates an iterator that filters and maps descendants from the starting `txid`.
     ///
+    /// The starting transaction is excluded from the iterator.
+    ///
     /// The supplied closure takes in two inputs `(depth, descendant_txid)`:
     ///
     /// * `depth` is the distance between the starting `txid` and the `descendant_txid`. I.e., if
