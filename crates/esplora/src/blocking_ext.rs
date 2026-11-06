@@ -478,7 +478,7 @@ fn fetch_txs_with_outpoints<I: IntoIterator<Item = OutPoint>>(
 
     // get outpoint spend-statuses
     let mut outpoints = outpoints.into_iter();
-    let mut missing_txs = HashSet::<Txid>::with_capacity(outpoints.len());
+    let mut missing_txs = HashSet::<Txid>::new();
     loop {
         let handles = outpoints
             .by_ref()
