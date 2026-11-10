@@ -1058,3 +1058,58 @@ fn test_zero_batch_size() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// A transaction seen under one script must not be marked evicted just because another script
+/// expected it and didn't find it.
+///
+/// See: https://github.com/bitcoindevkit/bdk/issues/2271
+#[test]
+fn test_sync_does_not_evict_tx_seen_on_another_spk() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let electrum_client = electrum_client::Client::new(env.electrsd.electrum_url.as_str())?;
+    let client = BdkElectrumClient::new(electrum_client);
+
+    env.mine_blocks(101, None)?;
+
+    let addrs = test_addresses();
+    let spk_missing = addrs[0].script_pubkey();
+    let spk_present = addrs[1].script_pubkey();
+
+    // Broadcast a tx that pays spk_present (and not spk_missing).
+    let txid = env.send(&addrs[1], Amount::from_sat(50_000))?;
+    env.wait_until_electrum_sees_txid(txid, Duration::from_secs(6))?;
+
+    // Build a sync request where both scripts expect the transaction.
+    let request = SyncRequest::builder()
+        .spks([spk_missing.clone(), spk_present.clone()])
+        .expected_spk_txids([(spk_missing, txid), (spk_present, txid)])
+        .build();
+
+    let response = client.sync(request, BATCH_SIZE, false)?;
+
+    // The transaction was seen on spk_present.
+    assert!(
+        response.tx_update.seen_ats.iter().any(|&(t, _)| t == txid),
+        "tx must be reported in seen_ats"
+    );
+
+    // It must NOT be reported as evicted due to spk_missing.
+    assert!(
+        !response
+            .tx_update
+            .evicted_ats
+            .iter()
+            .any(|&(t, _)| t == txid),
+        "tx seen in the same sync pass must not be marked evicted"
+    );
+
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+    let _ = graph.apply_update(response.tx_update);
+    assert_eq!(
+        graph.get_tx_node(txid).map(|node| node.is_evicted()),
+        Some(false),
+        "tx must not be considered evicted in graph"
+    );
+
+    Ok(())
+}

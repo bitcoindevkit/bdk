@@ -106,6 +106,16 @@ where
             }
         }
 
+        let observed: HashSet<Txid> = tx_update
+            .seen_ats
+            .iter()
+            .map(|(txid, _)| *txid)
+            .chain(tx_update.anchors.iter().map(|(_, txid)| *txid))
+            .collect();
+        tx_update
+            .evicted_ats
+            .retain(|(txid, _)| !observed.contains(txid));
+
         let chain_update = match (chain_tip, latest_blocks) {
             (Some(chain_tip), Some(latest_blocks)) => {
                 Some(chain_update(self, &latest_blocks, &chain_tip, &tx_update.anchors).await?)
@@ -167,6 +177,16 @@ where
             )
             .await?,
         );
+
+        let observed: HashSet<Txid> = tx_update
+            .seen_ats
+            .iter()
+            .map(|(txid, _)| *txid)
+            .chain(tx_update.anchors.iter().map(|(_, txid)| *txid))
+            .collect();
+        tx_update
+            .evicted_ats
+            .retain(|(txid, _)| !observed.contains(txid));
 
         let chain_update = match (chain_tip, latest_blocks) {
             (Some(chain_tip), Some(latest_blocks)) => {
