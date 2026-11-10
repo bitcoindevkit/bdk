@@ -951,3 +951,89 @@ fn test_get_chain_position() {
     .into_iter()
     .for_each(|t| run(&chain, &mut graph, t));
 }
+
+/// `apply_changeset` must restore the indexer state before indexing transactions.
+///
+/// `deep` pays to an index that is only derivable once `shallow` has revealed a lower one.
+/// Since `deep` sorts first in the changeset, it can only be indexed if the indexer state is
+/// applied before the transactions are processed.
+#[test]
+fn apply_changeset_restores_graph_and_index() {
+    let (descriptor, _) = Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[0])
+        .expect("must be valid");
+
+    let lookahead = 2;
+    let shallow_index = 1;
+    let deep_index = shallow_index + lookahead;
+
+    let new_graph = || {
+        IndexedTxGraph::<ConfirmationBlockTime, KeychainTxOutIndex<()>>::new({
+            let mut indexer = KeychainTxOutIndex::new(lookahead, true);
+            assert!(indexer.insert_descriptor((), descriptor.clone()).unwrap());
+            indexer
+        })
+    };
+    let pay_to = |spk: ScriptBuf, lock_time: u32| Transaction {
+        output: vec![TxOut {
+            value: Amount::from_sat(1_000),
+            script_pubkey: spk,
+        }],
+        ..new_tx(lock_time)
+    };
+
+    let mut original = new_graph();
+    let shallow_tx = pay_to(original.index.spk_at_index((), shallow_index).unwrap(), 1);
+    let shallow_txid = shallow_tx.compute_txid();
+    let mut changeset = original.insert_tx(shallow_tx);
+
+    let deep_tx = pay_to(original.index.spk_at_index((), deep_index).unwrap(), 0);
+    let deep_txid = deep_tx.compute_txid();
+    changeset.merge(original.insert_tx(deep_tx));
+
+    // A floating txout (no full tx) paying index 0, so it only enters via `txouts`.
+    let floating_outpoint = OutPoint::new(hash!("floating"), 0);
+    changeset.merge(original.insert_txout(
+        floating_outpoint,
+        TxOut {
+            value: Amount::from_sat(1_000),
+            script_pubkey: original.index.spk_at_index((), 0).unwrap(),
+        },
+    ));
+
+    assert_eq!(original.index.last_revealed_index(()), Some(deep_index));
+    assert_eq!(original.index.outpoints().len(), 3);
+
+    // The scenario relies on `deep` being iterated before `shallow`.
+    let txids_in_order: Vec<_> = changeset
+        .tx_graph
+        .txs
+        .iter()
+        .map(|tx| tx.compute_txid())
+        .collect();
+    assert_eq!(
+        txids_in_order,
+        [deep_txid, shallow_txid],
+        "deep transaction must be indexed before shallow transaction",
+    );
+
+    let observe_state = |graph: &IndexedTxGraph<ConfirmationBlockTime, KeychainTxOutIndex<()>>| {
+        (
+            graph.index.last_revealed_index(()),
+            graph.index.outpoints().clone(),
+            graph.graph().full_txs().count(),
+        )
+    };
+
+    for (changeset_kind, changeset) in [
+        ("accumulated", changeset),
+        ("initial", original.initial_changeset()),
+    ] {
+        let mut restored = new_graph();
+        restored.apply_changeset(changeset);
+        assert_eq!(
+            observe_state(&restored),
+            observe_state(&original),
+            "failed to restore from {changeset_kind} changeset",
+        );
+    }
+}
