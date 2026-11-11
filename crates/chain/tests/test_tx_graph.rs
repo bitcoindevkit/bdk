@@ -1551,3 +1551,17 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+#[test]
+fn test_apply_changeset_restores_first_seen() {
+    let mut graph = TxGraph::<BlockId>::default();
+    let tx = Arc::new(new_tx(0));
+    let txid = tx.compute_txid();
+    let _ = graph.insert_tx(tx);
+    let _ = graph.insert_seen_at(txid, 100);
+    let _ = graph.insert_seen_at(txid, 500);
+
+    let mut recovered = TxGraph::<BlockId>::default();
+    recovered.apply_changeset(graph.initial_changeset());
+    assert_eq!(recovered, graph);
+}

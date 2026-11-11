@@ -980,6 +980,9 @@ impl<A: Anchor> TxGraph<A> {
         for (anchor, txid) in changeset.anchors {
             let _ = self.insert_anchor(txid, anchor);
         }
+        for (txid, seen_at) in changeset.first_seen {
+            let _ = self.insert_seen_at(txid, seen_at);
+        }
         for (txid, seen_at) in changeset.last_seen {
             let _ = self.insert_seen_at(txid, seen_at);
         }
