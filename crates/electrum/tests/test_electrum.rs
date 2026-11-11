@@ -1050,7 +1050,7 @@ fn test_zero_batch_size() -> anyhow::Result<()> {
         "sync skipped its script and returned {response:?}"
     );
 
-    let request = FullScanRequest::builder().spks_for_keychain(0u32, [(0, get_test_spk())]);
+    let request = FullScanRequest::<u32>::builder().spks_for_keychain(0u32, [(0, get_test_spk())]);
     let response = client.full_scan(request, 3, 0, false);
     assert!(
         response.is_err(),

@@ -147,6 +147,24 @@ impl<D> Drop for CPInner<D> {
     }
 }
 
+/// Constructs checkpoint data from a block [`Header`].
+pub trait FromBlockHeader {
+    /// Constructs checkpoint data from a block `header`.
+    fn from_blockheader(header: Header) -> Self;
+}
+
+impl FromBlockHeader for BlockHash {
+    fn from_blockheader(header: Header) -> Self {
+        header.block_hash()
+    }
+}
+
+impl FromBlockHeader for Header {
+    fn from_blockheader(header: Header) -> Self {
+        header
+    }
+}
+
 /// Trait that converts [`CheckPoint`] `data` to [`BlockHash`].
 ///
 /// Implementations of [`ToBlockHash`] must always return the block's consensus-defined hash. For
