@@ -25,7 +25,7 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
 
     let env = TestEnv::new()?;
     let rpc_client = env.rpc_client();
-    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let base_url = format!("http://{}", env.electrsd.esplora_url.clone().unwrap());
     let client = Builder::new(base_url.as_str()).build_blocking();
 
     let mut graph = IndexedTxGraph::<ConfirmationBlockTime, _>::new(SpkTxOutIndex::<()>::default());
@@ -150,7 +150,7 @@ pub fn detect_receive_tx_cancel() -> anyhow::Result<()> {
 #[test]
 pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
-    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let base_url = format!("http://{}", env.electrsd.esplora_url.clone().unwrap());
     let client = Builder::new(base_url.as_str()).build_blocking();
 
     let receive_address0 =
@@ -251,7 +251,7 @@ pub fn test_update_tx_graph_without_keychain() -> anyhow::Result<()> {
 #[test]
 pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
-    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let base_url = format!("http://{}", env.electrsd.esplora_url.clone().unwrap());
     let client = Builder::new(base_url.as_str()).build_blocking();
     let _block_hashes = env.mine_blocks(101, None)?;
 
@@ -360,7 +360,7 @@ pub fn test_update_tx_graph_stop_gap() -> anyhow::Result<()> {
 #[test]
 pub fn test_stop_gap_past_last_revealed() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
-    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let base_url = format!("http://{}", env.electrsd.esplora_url.clone().unwrap());
     let client = Builder::new(base_url.as_str()).build_blocking();
     let _block_hashes = env.mine_blocks(101, None)?;
 
