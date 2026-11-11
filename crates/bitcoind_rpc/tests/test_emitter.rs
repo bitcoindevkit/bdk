@@ -135,27 +135,13 @@ pub fn test_sync_local_chain() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ensure that [`EmittedUpdate::into_tx_graph_update`] behaves appropriately for both mempool and
-/// block updates.
-///
-/// [`EmittedUpdate::into_tx_graph_update`]: bdk_bitcoind_rpc::EmittedUpdate::into_tx_graph_update
+/// Ensure that txs emitted by [`Emitter::mempool`] are added to an [`IndexedTxGraph`] unconfirmed,
+/// and that the block confirming them then adds only their anchors.
 #[test]
 fn test_into_tx_graph() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
 
     let addr_0 = env
-        .rpc_client()
-        .get_new_address(None, None)?
-        .address()?
-        .assume_checked();
-
-    let addr_1 = env
-        .rpc_client()
-        .get_new_address(None, None)?
-        .address()?
-        .assume_checked();
-
-    let addr_2 = env
         .rpc_client()
         .get_new_address(None, None)?
         .address()?
@@ -167,8 +153,6 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
     let mut indexed_tx_graph = IndexedTxGraph::<BlockId, _>::new({
         let mut index = SpkTxOutIndex::<usize>::default();
         index.insert_spk(0, addr_0.script_pubkey());
-        index.insert_spk(1, addr_1.script_pubkey());
-        index.insert_spk(2, addr_2.script_pubkey());
         index
     });
 
@@ -251,9 +235,6 @@ fn test_into_tx_graph() -> anyhow::Result<()> {
 /// After a reorg, if the last-emitted block height is equal or greater than the reorg height, and
 /// the fallback height is equal to or lower than the reorg height, the next block/header emission
 /// should be at the reorg height.
-///
-/// TODO: If the reorg height is lower than the fallback height, how do we find a block height to
-/// emit that can connect with our receiver chain?
 #[test]
 fn ensure_block_emitted_after_reorg_is_at_reorg_height() -> anyhow::Result<()> {
     const EMITTER_START_HEIGHT: usize = 100;
@@ -427,13 +408,10 @@ fn tx_can_become_unconfirmed_after_reorg() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ensure avoid-re-emission-logic is sound when [`Emitter`] is synced to tip.
-///
-/// The receiver (bdk_chain structures) is synced to the chain tip, and there is txs in the mempool.
-/// When we call Emitter::mempool multiple times, mempool txs should not be re-emitted, even if the
-/// chain tip is extended.
+/// Ensure every [`Emitter::mempool`] call emits all txs in the mempool, including those emitted by
+/// earlier calls, also after the chain tip is extended.
 #[test]
-fn mempool_avoids_re_emission() -> anyhow::Result<()> {
+fn mempool_update_is_full_snapshot() -> anyhow::Result<()> {
     const BLOCKS_TO_MINE: usize = 101;
     const MEMPOOL_TX_COUNT: usize = 2;
 
@@ -475,7 +453,7 @@ fn mempool_avoids_re_emission() -> anyhow::Result<()> {
         );
     }
 
-    // mine empty blocks + sync up our emitter -> we should still not re-emit
+    // mine empty blocks + sync up our emitter -> the txs are still emitted
     for _ in 0..BLOCKS_TO_MINE {
         env.mine_empty_block()?;
     }
@@ -511,7 +489,7 @@ fn no_agreement_point() -> anyhow::Result<()> {
     let env = TestEnv::new()?;
 
     let client = ClientExt::get_rpc_client(&env)?;
-    // start height is 99
+    // start height is 98
     let mut emitter = Emitter::new(
         &client,
         CheckPoint::new(0, env.genesis_hash()?),
@@ -559,12 +537,14 @@ fn no_agreement_point() -> anyhow::Result<()> {
 }
 
 /// Validates that when an unconfirmed transaction is double-spent (and thus evicted from the
-/// mempool), the emitter reports it in `evicted_txids`, and after inserting that eviction into the
-/// graph it no longer appears in the set of canonical transactions.
+/// mempool), the emitter reports it in `MempoolEvent::evicted`, and after inserting that eviction
+/// into the graph it no longer appears in the set of canonical transactions.
 ///
 /// 1. Broadcast a first tx (tx1) and confirm it arrives in unconfirmed set.
-/// 2. Double-spend tx1 with tx1b and verify `mempool()` reports tx1 as evicted.
-/// 3. Insert the eviction into the graph and assert tx1 is no longer canonical.
+/// 2. Double-spend tx1 with tx1b and confirm tx1b.
+/// 3. Verify `mempool()` reports no eviction before the emitter reaches the new tip, and reports
+///    tx1 as evicted once it has.
+/// 4. Insert the eviction into the graph and assert tx1 is no longer canonical.
 #[test]
 fn test_expect_tx_evicted() -> anyhow::Result<()> {
     use bdk_bitcoind_rpc::bitcoincore_rpc::bitcoin;
@@ -637,8 +617,13 @@ fn test_expect_tx_evicted() -> anyhow::Result<()> {
         .0;
     let tx1b = core.sign_raw_transaction_with_wallet(&tx)?.into_model()?.tx;
 
-    // Send the tx.
+    // Send the tx and confirm it.
     let _txid_2 = core.send_raw_transaction(&tx1b)?;
+    let _ = env.mine_blocks(1, None)?;
+
+    // Behind the tip, tx1 could be in the block not yet emitted: no eviction is reported.
+    assert!(emitter.mempool()?.evicted.is_empty());
+    while emitter.next_block()?.is_some() {}
 
     // Retrieve the expected unconfirmed txids and spks from the graph.
     let exp_spk_txids = chain

@@ -111,16 +111,10 @@ where
         }
     }
 
-    /// Emit mempool transactions and any evicted [`Txid`]s.
+    /// Emit mempool transactions and any evicted [`Txid`]s, stamped with the current time.
     ///
-    /// This method returns a [`MempoolEvent`] containing the full transactions that were emitted,
-    /// each stamped with the call's `sync_time` (unix seconds captured at the start of the call,
-    /// not when the node first saw the transaction), and [`MempoolEvent::evicted`] which are any
-    /// [`Txid`]s which were previously seen in the mempool and are now missing. The timestamp
-    /// advances on each poll, so callers should treat it as a "last seen" value. Evicted txids
-    /// are only reported once the emitter’s checkpoint matches the RPC’s best block in both height
-    /// and hash. Until `next_block()` advances the checkpoint to tip, `mempool()` will always
-    /// return an empty `evicted` set.
+    /// This is [`mempool_at`](Self::mempool_at) with the current unix time as `sync_time`: see it
+    /// for what is emitted, and for errors.
     ///
     /// # Example
     ///
@@ -149,8 +143,6 @@ where
     /// }
     /// # Ok::<_, bdk_bitcoind_rpc::bitcoincore_rpc::Error>(())
     /// ```
-    ///
-    /// See [`mempool_at`](Self::mempool_at) for errors.
     #[cfg(feature = "std")]
     pub fn mempool(&mut self) -> Result<MempoolEvent, bitcoincore_rpc::Error> {
         let sync_time = std::time::UNIX_EPOCH
@@ -162,9 +154,18 @@ where
 
     /// Emit mempool transactions and any evicted [`Txid`]s at the given `sync_time`.
     ///
-    /// `sync_time` is in unix seconds.
+    /// [`MempoolEvent::update`] holds every transaction in the node's mempool, including those
+    /// emitted by earlier calls, each stamped with `sync_time` (unix seconds) rather than when the
+    /// node first saw it: treat it as a "last seen" value.
     ///
-    /// This is the no-std version of [`mempool`](Self::mempool).
+    /// [`MempoolEvent::evicted`] holds the [`Txid`]s seen in earlier calls (or passed to
+    /// [`Emitter::new`] as `expected_mempool_txs`) that are now missing from the mempool, stamped
+    /// with `sync_time`. They are only reported once the emitter's checkpoint matches the node's
+    /// best block in height and hash: until then, a missing transaction may be in a block not yet
+    /// emitted, so `evicted` stays empty and the transactions are checked again once
+    /// [`next_block`](Self::next_block) reaches the tip.
+    ///
+    /// Use this rather than [`mempool`](Self::mempool) without `std`, or to choose the timestamp.
     ///
     /// # Errors
     ///
