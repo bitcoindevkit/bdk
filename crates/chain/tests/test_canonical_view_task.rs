@@ -2,18 +2,18 @@
 
 mod common;
 
-use bdk_chain::{CanonicalReason, ChainPosition};
+use bdk_chain::{local_chain::LocalChain, CanonicalReason, ChainPosition};
 use bdk_testenv::{block_id, hash, local_chain};
-use bitcoin::Txid;
+use bitcoin::{BlockHash, Txid};
 use common::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[test]
 fn test_assumed_canonical_scenarios() {
     // scenario: "txC spends txB; txB spends txA; txB is anchored; txC is assumed canonical"
 
     // create a local chain
-    let local_chain = local_chain![
+    let local_chain: LocalChain<BlockHash> = local_chain![
         (0, hash!("genesis")),
         (1, hash!("block1")),
         (2, hash!("block2")),
@@ -88,7 +88,7 @@ fn test_assumed_canonical_scenarios() {
     // build task & canonicalize
     let canonical_params = env.canonicalization_params;
     let canonical_task = env.tx_graph.canonical_task(chain_tip, canonical_params);
-    let canonical_txs = local_chain.canonicalize(canonical_task);
+    let (canonical_txs, queries) = local_chain.run_task(canonical_task);
 
     // assert canonical transactions
     let exp_canonical_txids: HashSet<Txid> = exp_canonical_txs
@@ -165,8 +165,8 @@ fn test_assumed_canonical_scenarios() {
     ];
 
     // build task & resolve positions
-    let view_task = canonical_txs.view_task(&env.tx_graph);
-    let canonical_view = local_chain.canonicalize(view_task);
+    let view_task = canonical_txs.view_task(&env.tx_graph, queries);
+    let canonical_view = local_chain.run_task(view_task);
 
     // assert final positions
     for (tx_name, exp_position) in exp_positions {
@@ -187,4 +187,74 @@ fn test_assumed_canonical_scenarios() {
             "txC spends txB; txB spends txA; txB is anchored; txC is assumed canonical", tx_name
         );
     }
+}
+
+/// `txs()` is in topological order, otherwise by chain position: `b` @3 (spends `a` twice) and `c`
+/// @2 come after `a` @1 but before the unconfirmed `x`, and `d` (spends `b` and `c`) comes last.
+#[test]
+fn test_txs_topological_order() {
+    let local_chain: LocalChain<BlockHash> = local_chain![
+        (0, hash!("genesis")),
+        (1, hash!("block1")),
+        (2, hash!("block2")),
+        (3, hash!("block3"))
+    ];
+    let tx_templates = [
+        TxTemplate {
+            tx_name: "a",
+            inputs: &[TxInTemplate::Bogus],
+            outputs: &[
+                TxOutTemplate::new(10_000, None),
+                TxOutTemplate::new(10_000, None),
+                TxOutTemplate::new(10_000, None),
+            ],
+            anchors: &[block_id!(1, "block1")],
+            ..Default::default()
+        },
+        TxTemplate {
+            tx_name: "x",
+            inputs: &[TxInTemplate::Bogus],
+            outputs: &[TxOutTemplate::new(10_000, None)],
+            last_seen: Some(100),
+            ..Default::default()
+        },
+        TxTemplate {
+            tx_name: "b",
+            inputs: &[TxInTemplate::PrevTx("a", 0), TxInTemplate::PrevTx("a", 1)],
+            outputs: &[TxOutTemplate::new(19_000, None)],
+            anchors: &[block_id!(3, "block3")],
+            ..Default::default()
+        },
+        TxTemplate {
+            tx_name: "c",
+            inputs: &[TxInTemplate::PrevTx("a", 2)],
+            outputs: &[TxOutTemplate::new(9_000, None)],
+            anchors: &[block_id!(2, "block2")],
+            ..Default::default()
+        },
+        TxTemplate {
+            tx_name: "d",
+            inputs: &[TxInTemplate::PrevTx("b", 0), TxInTemplate::PrevTx("c", 0)],
+            outputs: &[TxOutTemplate::new(27_000, None)],
+            last_seen: Some(200),
+            ..Default::default()
+        },
+    ];
+    let env = init_graph(&tx_templates);
+    let name_of: HashMap<Txid, &str> = env
+        .txid_to_name
+        .iter()
+        .map(|(&name, &txid)| (txid, name))
+        .collect();
+
+    let order: Vec<&str> = local_chain
+        .canonicalize(
+            &env.tx_graph,
+            local_chain.tip().block_id(),
+            env.canonicalization_params,
+        )
+        .txs()
+        .map(|tx| name_of[&tx.txid])
+        .collect();
+    assert_eq!(order, ["a", "c", "b", "x", "d"]);
 }

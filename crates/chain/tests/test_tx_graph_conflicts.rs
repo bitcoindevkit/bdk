@@ -1003,7 +1003,7 @@ fn test_tx_conflict_handling() {
     for scenario in scenarios {
         let env = init_graph(scenario.tx_templates.iter());
 
-        let canonical_view = local_chain.canonical_view(
+        let canonical_view = local_chain.canonicalize(
             &env.tx_graph,
             chain_tip,
             env.canonicalization_params.clone(),
@@ -1023,6 +1023,27 @@ fn test_tx_conflict_handling() {
             "\n[{}] 'list_canonical_txs' failed",
             scenario.name
         );
+
+        // `txs()` lists parents before children, and every confirmed tx before any unconfirmed one.
+        let mut placed = HashSet::new();
+        let mut seen_unconfirmed = false;
+        for tx in canonical_view.txs() {
+            assert!(
+                tx.tx.input.iter().all(|txin| {
+                    let parent_txid = txin.previous_output.txid;
+                    !txs.contains(&parent_txid) || placed.contains(&parent_txid)
+                }),
+                "\n[{}] 'txs' lists a tx before its parent",
+                scenario.name
+            );
+            assert!(
+                !(seen_unconfirmed && tx.pos.is_confirmed()),
+                "\n[{}] 'txs' lists a confirmed tx after an unconfirmed one",
+                scenario.name
+            );
+            seen_unconfirmed |= !tx.pos.is_confirmed();
+            placed.insert(tx.txid);
+        }
 
         let txouts = canonical_view
             .filter_outpoints(env.indexer.outpoints().iter().cloned())
@@ -1064,7 +1085,7 @@ fn test_tx_conflict_handling() {
             env.indexer.outpoints().iter().map(|(_, op)| *op),
             bdk_chain::taints_unowned(&env.indexer),
             |pos| pos.is_confirmed(),
-            |_txout| false,
+            |_txout| Default::default(),
         );
         assert_eq!(
             balance, scenario.exp_balance,
@@ -1078,7 +1099,7 @@ fn test_tx_conflict_handling() {
 /// height is only an upper bound until its own anchor is known.
 #[test]
 fn transitively_confirmed_tx_reports_descendant_anchor_height() {
-    let chain = local_chain![
+    let chain: LocalChain<BlockHash> = local_chain![
         (0, hash!("genesis")),
         (1, hash!("parent_block")),
         (5, hash!("child_block"))
@@ -1110,7 +1131,7 @@ fn transitively_confirmed_tx_reports_descendant_anchor_height() {
 
     let parent_position = |tx_graph: &TxGraph<BlockId>| {
         chain
-            .canonical_view(tx_graph, tip, Default::default())
+            .canonicalize(tx_graph, tip, Default::default())
             .txs()
             .find(|tx| tx.txid == parent_txid)
             .expect("parent must be canonical")
