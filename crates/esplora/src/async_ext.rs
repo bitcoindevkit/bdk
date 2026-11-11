@@ -33,6 +33,32 @@ pub trait EsploraAsyncExt {
     /// Previous outputs in `tx_update.txouts` are server-reported and unverified; see
     /// [trust assumptions](crate#trust-assumptions).
     ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bdk_core::spk_client::FullScanRequest;
+    /// use bdk_esplora::{esplora_client, EsploraAsyncExt};
+    /// # use bdk_core::bitcoin::{constants::genesis_block, Network, ScriptBuf};
+    /// # use bdk_core::CheckPoint;
+    ///
+    /// # async fn example() -> Result<(), bdk_esplora::Error> {
+    /// let client = esplora_client::Builder::new("https://blockstream.info/api").build_async()?;
+    /// # let chain_tip = CheckPoint::new(0, genesis_block(Network::Bitcoin).block_hash());
+    /// # let spks = (0..).map(|i| (i, ScriptBuf::new()));
+    /// // Use your chain tip (e.g. `LocalChain::tip()`) and unbounded keychain spks (e.g. from
+    /// // `KeychainTxOutIndex`, or use `spks_from_indexer` from `bdk_chain`).
+    /// let request = FullScanRequest::builder()
+    ///     .chain_tip(chain_tip)
+    ///     .spks_for_keychain("external", spks)
+    ///     .build();
+    ///
+    /// let response = client.full_scan(request, 10, 5).await?;
+    /// // Apply `response.chain_update` to your `LocalChain`, `response.tx_update` to your
+    /// // `TxGraph`, and `response.last_active_indices` to your `KeychainTxOutIndex`.
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
     /// Refer to [crate-level docs](crate) for more.
     async fn full_scan<K: Ord + Clone + Send, R: Into<FullScanRequest<K>> + Send>(
         &self,
@@ -49,6 +75,32 @@ pub trait EsploraAsyncExt {
     ///
     /// Previous outputs in `tx_update.txouts` are server-reported and unverified; see
     /// [trust assumptions](crate#trust-assumptions).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use bdk_core::spk_client::SyncRequest;
+    /// use bdk_esplora::{esplora_client, EsploraAsyncExt};
+    /// # use bdk_core::bitcoin::{constants::genesis_block, Network, ScriptBuf};
+    /// # use bdk_core::CheckPoint;
+    ///
+    /// # async fn example() -> Result<(), bdk_esplora::Error> {
+    /// let client = esplora_client::Builder::new("https://blockstream.info/api").build_async()?;
+    /// # let chain_tip = CheckPoint::new(0, genesis_block(Network::Bitcoin).block_hash());
+    /// # let spks = [ScriptBuf::new()];
+    /// // Use your chain tip (e.g. `LocalChain::tip()`) and revealed spks (e.g. from
+    /// // `KeychainTxOutIndex`, or use `revealed_spks_from_indexer` from `bdk_chain`).
+    /// let request = SyncRequest::builder()
+    ///     .chain_tip(chain_tip)
+    ///     .spks(spks)
+    ///     .build();
+    ///
+    /// let response = client.sync(request, 5).await?;
+    /// // Apply `response.chain_update` to your `LocalChain` and `response.tx_update` to your
+    /// // `TxGraph`.
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// Refer to [crate-level docs](crate) for more.
     async fn sync<I: Send, R: Into<SyncRequest<I>> + Send>(
