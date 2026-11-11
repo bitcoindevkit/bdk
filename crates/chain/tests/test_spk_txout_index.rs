@@ -197,6 +197,22 @@ fn spk_txout_spent_created_txouts() {
 }
 
 #[test]
+fn is_used_returns_false_for_untracked_index() {
+    let mut index = SpkTxOutIndex::<u32>::default();
+    assert!(!index.is_used(&0));
+    assert!(!index.is_used(&1));
+
+    let spk = ScriptBuf::from_hex("001404f1e52ce2bab3423c6a8c63b7cd730d8f12542c").unwrap();
+    index.insert_spk(0, spk);
+    assert!(!index.is_used(&0));
+    assert!(!index.is_used(&1));
+
+    index.mark_used(&0);
+    assert!(index.is_used(&0));
+    assert!(!index.is_used(&1));
+}
+
+#[test]
 fn mark_used() {
     let spk1 = ScriptBuf::from_hex("001404f1e52ce2bab3423c6a8c63b7cd730d8f12542c").unwrap();
     let spk2 = ScriptBuf::from_hex("00142b57404ae14f08c3a0c903feb2af7830605eb00f").unwrap();
