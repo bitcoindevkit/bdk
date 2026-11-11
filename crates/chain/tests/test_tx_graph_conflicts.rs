@@ -1078,7 +1078,7 @@ fn test_tx_conflict_handling() {
 /// height is only an upper bound until its own anchor is known.
 #[test]
 fn transitively_confirmed_tx_reports_descendant_anchor_height() {
-    let chain = local_chain![
+    let chain: LocalChain<BlockHash> = local_chain![
         (0, hash!("genesis")),
         (1, hash!("parent_block")),
         (5, hash!("child_block"))

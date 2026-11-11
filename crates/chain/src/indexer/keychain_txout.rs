@@ -1129,7 +1129,9 @@ pub trait SyncRequestBuilderExt<K> {
     fn unused_spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self;
 }
 
-impl<K: Clone + Ord + core::fmt::Debug> SyncRequestBuilderExt<K> for SyncRequestBuilder<(K, u32)> {
+impl<K: Clone + Ord + core::fmt::Debug, D> SyncRequestBuilderExt<K>
+    for SyncRequestBuilder<(K, u32), D>
+{
     fn revealed_spks_from_indexer<R>(self, indexer: &KeychainTxOutIndex<K>, spk_range: R) -> Self
     where
         R: core::ops::RangeBounds<K>,
@@ -1148,7 +1150,9 @@ pub trait FullScanRequestBuilderExt<K> {
     fn spks_from_indexer(self, indexer: &KeychainTxOutIndex<K>) -> Self;
 }
 
-impl<K: Clone + Ord + core::fmt::Debug> FullScanRequestBuilderExt<K> for FullScanRequestBuilder<K> {
+impl<K: Clone + Ord + core::fmt::Debug, D> FullScanRequestBuilderExt<K>
+    for FullScanRequestBuilder<K, D>
+{
     fn spks_from_indexer(mut self, indexer: &KeychainTxOutIndex<K>) -> Self {
         for (keychain, spks) in indexer.all_unbounded_spk_iters() {
             let last_revealed = indexer.last_revealed_index(keychain.clone());
