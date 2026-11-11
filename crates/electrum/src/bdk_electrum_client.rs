@@ -173,6 +173,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
             }
         }
 
+        let observed: HashSet<Txid> = tx_update
+            .seen_ats
+            .iter()
+            .map(|(txid, _)| *txid)
+            .chain(tx_update.anchors.iter().map(|(_, txid)| *txid))
+            .collect();
+        tx_update
+            .evicted_ats
+            .retain(|(txid, _)| !observed.contains(txid));
+
         let chain_update = match tip_and_latest_blocks {
             Some((chain_tip, latest_blocks)) => Some(chain_update(
                 chain_tip,
@@ -267,6 +277,16 @@ impl<E: ElectrumApi> BdkElectrumClient<E> {
                 tx_update.anchors.insert((anchor, txid));
             }
         }
+
+        let observed: HashSet<Txid> = tx_update
+            .seen_ats
+            .iter()
+            .map(|(txid, _)| *txid)
+            .chain(tx_update.anchors.iter().map(|(_, txid)| *txid))
+            .collect();
+        tx_update
+            .evicted_ats
+            .retain(|(txid, _)| !observed.contains(txid));
 
         let chain_update = match tip_and_latest_blocks {
             Some((chain_tip, latest_blocks)) => Some(chain_update(

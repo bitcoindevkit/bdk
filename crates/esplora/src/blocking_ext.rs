@@ -95,6 +95,16 @@ impl EsploraExt for esplora_client::BlockingClient {
             }
         }
 
+        let observed: HashSet<Txid> = tx_update
+            .seen_ats
+            .iter()
+            .map(|(txid, _)| *txid)
+            .chain(tx_update.anchors.iter().map(|(_, txid)| *txid))
+            .collect();
+        tx_update
+            .evicted_ats
+            .retain(|(txid, _)| !observed.contains(txid));
+
         let chain_update = match (chain_tip, latest_blocks) {
             (Some(chain_tip), Some(latest_blocks)) => Some(chain_update(
                 self,
@@ -150,6 +160,16 @@ impl EsploraExt for esplora_client::BlockingClient {
             request.drain_outpoints(),
             parallel_requests,
         )?);
+
+        let observed: HashSet<Txid> = tx_update
+            .seen_ats
+            .iter()
+            .map(|(txid, _)| *txid)
+            .chain(tx_update.anchors.iter().map(|(_, txid)| *txid))
+            .collect();
+        tx_update
+            .evicted_ats
+            .retain(|(txid, _)| !observed.contains(txid));
 
         let chain_update = match (chain_tip, latest_blocks) {
             (Some(chain_tip), Some(latest_blocks)) => Some(chain_update(
