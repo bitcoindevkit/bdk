@@ -618,7 +618,7 @@ mod test {
         {
             let temp_dir = tempfile::tempdir().unwrap();
             let path = temp_dir.path().join("store.db");
-            assert_persist_changesets(
+            assert_persist_changesets_idempotent(
                 || Ok(Store::load_or_create(&TEST_MAGIC_BYTES, &path)?.0),
                 |db| Ok(db.dump().map(Option::unwrap_or_default)?),
                 |db, changeset| Ok(db.append(changeset)?),

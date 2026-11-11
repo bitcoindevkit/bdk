@@ -18,7 +18,7 @@ fn changesets_are_persisted() {
         C: Debug + PartialEq + Default + Merge + Clone,
     {
         let temp_dir = tempfile::tempdir().unwrap();
-        assert_persist_changesets(
+        assert_persist_changesets_idempotent(
             || {
                 let mut db = rusqlite::Connection::open(temp_dir.path().join("wallet.sqlite"))?;
                 let db_tx = db.transaction()?;

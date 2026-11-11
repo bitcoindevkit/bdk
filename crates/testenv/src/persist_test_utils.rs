@@ -30,6 +30,9 @@ const ADDRS: [&str; 2] = [
 /// - `persist`: durably write one changeset on top of what's stored; must survive the handle being
 ///   dropped.
 ///
+/// This only checks the accumulate-then-reload contract; it never persists the same changeset
+/// twice. Use [`assert_persist_changesets_idempotent`] for the stronger claim.
+///
 /// # Panics
 ///
 /// Panics naming the failing step if a closure errors or a load doesn't match the expected merge.
@@ -39,6 +42,41 @@ pub fn assert_persist_changesets<C, Store, Init, Load, Persist>(
     load: Load,
     persist: Persist,
     changesets: &[C],
+) where
+    C: Debug + PartialEq + Default + Merge + Clone,
+    Init: Fn() -> Result<Store, Box<dyn Error>>,
+    Load: Fn(&mut Store) -> Result<C, Box<dyn Error>>,
+    Persist: Fn(&mut Store, &C) -> Result<(), Box<dyn Error>>,
+{
+    assert_persist_changesets_inner(init, load, persist, changesets, 1);
+}
+
+/// Like [`assert_persist_changesets`], but additionally persists every changeset twice in a row.
+///
+/// The result must be the same as persisting it once, so this checks that `persist` is idempotent.
+/// The closures and panics are as described on [`assert_persist_changesets`].
+#[track_caller]
+pub fn assert_persist_changesets_idempotent<C, Store, Init, Load, Persist>(
+    init: Init,
+    load: Load,
+    persist: Persist,
+    changesets: &[C],
+) where
+    C: Debug + PartialEq + Default + Merge + Clone,
+    Init: Fn() -> Result<Store, Box<dyn Error>>,
+    Load: Fn(&mut Store) -> Result<C, Box<dyn Error>>,
+    Persist: Fn(&mut Store, &C) -> Result<(), Box<dyn Error>>,
+{
+    assert_persist_changesets_inner(init, load, persist, changesets, 2);
+}
+
+#[track_caller]
+fn assert_persist_changesets_inner<C, Store, Init, Load, Persist>(
+    init: Init,
+    load: Load,
+    persist: Persist,
+    changesets: &[C],
+    times: usize,
 ) where
     C: Debug + PartialEq + Default + Merge + Clone,
     Init: Fn() -> Result<Store, Box<dyn Error>>,
@@ -60,8 +98,10 @@ pub fn assert_persist_changesets<C, Store, Init, Load, Persist>(
 
     let mut merged_changeset = C::default();
     for (i, changeset) in changesets.iter().enumerate() {
-        if let Err(err) = persist(&mut store, changeset) {
-            panic!("Failed to persist changeset no. {}: {err}", i + 1);
+        for _ in 0..times {
+            if let Err(err) = persist(&mut store, changeset) {
+                panic!("Failed to persist changeset no. {}: {err}", i + 1);
+            }
         }
         merged_changeset.merge(changeset.clone());
     }
