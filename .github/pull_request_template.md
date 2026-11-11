@@ -11,8 +11,16 @@ of the PR were done in a specific way -->
 
 ### Changelog notice
 
-<!-- Notice the release manager should include in the release tag message changelog -->
-<!-- See https://keepachangelog.com/en/1.0.0/ for examples -->
+<!-- Changes users should know about, for the crates' CHANGELOG.md. Leave it out if there are none.
+Write one ```changelog block, outside this comment, as in CONTRIBUTING.md:
+
+```changelog
+### Added
+- bdk_chain: Add `TxGraph::foo` to do bar.
+### Fixed
+- bdk_esplora, bdk_electrum: `full_scan` no longer stops early when ...
+```
+-->
 
 ### Checklists
 
