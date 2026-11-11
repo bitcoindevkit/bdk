@@ -1,0 +1,103 @@
+name: Approve Contributor
+
+# Approves contributors to open pull requests (see `pr-gate.yml`).
+#
+# A user with write access approves the author of an issue or pull request by commenting on it with
+# a line that only contains `lgtm`. To approve other users instead, list them after it:
+# `lgtm @alice @bob`.
+#
+# Approved users are appended to `APPROVED_FILE` on `APPROVED_BRANCH`, which is kept off the default
+# branch so that approvals don't need a pull request.
+
+on:
+  issue_comment: # zizmor: ignore[dangerous-triggers] comment body is only parsed in JS, never run
+    types: [created]
+
+permissions: {}
+
+env:
+  APPROVED_BRANCH: approved-contributors
+  APPROVED_FILE: APPROVED_CONTRIBUTORS
+
+jobs:
+  approve:
+    if: contains(github.event.comment.body, 'lgtm')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Add users to approved contributors
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { comment, issue } = context.payload;
+            const branch = process.env.APPROVED_BRANCH;
+            const path = process.env.APPROVED_FILE;
+
+            const match = comment.body.match(/^[ \t]*lgtm((?:[ \t]+@[A-Za-z0-9-]+)*)[ \t\r]*$/im);
+            if (!match) {
+              core.info('No `lgtm` line found');
+              return;
+            }
+
+            const commenter = comment.user.login;
+            const { data: permission } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner,
+              repo,
+              username: commenter,
+            });
+            if (!['admin', 'maintain', 'write'].includes(permission.permission)) {
+              core.info(`${commenter} does not have write access`);
+              return;
+            }
+
+            const mentions = match[1].trim().split(/\s+/).filter(Boolean).map((mention) => mention.slice(1));
+            const targets = mentions.length > 0 ? mentions : [issue.user.login];
+
+            let sha;
+            let content = '';
+            try {
+              const { data } = await github.rest.repos.getContent({ owner, repo, path, ref: branch });
+              sha = data.sha;
+              content = Buffer.from(data.content, 'base64').toString('utf8');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            const approved = new Set(
+              content
+                .split('\n')
+                .map((line) => line.trim().toLowerCase())
+                .filter((line) => line && !line.startsWith('#')),
+            );
+            const added = [];
+            for (const user of targets) {
+              if (approved.has(user.toLowerCase())) continue;
+              approved.add(user.toLowerCase());
+              added.push(user);
+            }
+            const alreadyApproved = targets.filter((user) => !added.includes(user));
+
+            if (added.length > 0) {
+              if (content && !content.endsWith('\n')) content += '\n';
+              content += added.map((user) => `${user}\n`).join('');
+              await github.rest.repos.createOrUpdateFileContents({
+                owner,
+                repo,
+                path,
+                branch,
+                sha,
+                message: `chore: approve ${added.join(', ')} from #${issue.number}`,
+                content: Buffer.from(content).toString('base64'),
+              });
+              core.info(`Approved ${added.join(', ')}`);
+            }
+
+            const format = (users) => users.map((user) => `@${user}`).join(', ');
+            const lines = [];
+            if (added.length > 0) lines.push(`${format(added)} can now open pull requests.`);
+            if (alreadyApproved.length > 0) lines.push(`Already approved: ${format(alreadyApproved)}.`);
+            await github.rest.issues.createComment({ owner, repo, issue_number: issue.number, body: lines.join('\n') });

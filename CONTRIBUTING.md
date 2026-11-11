@@ -34,6 +34,9 @@ To contribute a patch, the workflow is as follows:
   2. Create topic branch
   3. Commit patches
 
+If you are not yet approved to open pull requests, see
+[Getting Approved to Open Pull Requests](#getting-approved-to-open-pull-requests) first.
+
 In general commits should be atomic and diffs should be easy to read.
 For this reason do not mix any formatting fixes or code moves with actual code
 changes. Further, each commit, individually, should compile and pass tests, in
@@ -56,6 +59,27 @@ of GitHub's "assignee" field. First check that no one is assigned and then
 comment suggesting that you're working on it. If someone is already assigned,
 don't hesitate to ask if the assigned party or previous commenter are still
 working on it if it has been a while.
+
+Getting Approved to Open Pull Requests
+--------------------------------------
+
+To keep the review queue manageable, pull requests from contributors who are not yet approved are
+closed automatically. To get approved:
+
+  1. Open an issue describing the bug you want to fix or the change you want to make, or comment on
+     an existing issue you want to work on.
+  2. If a maintainer agrees the change is wanted, they reply `lgtm`. This approves you to open
+     pull requests. Wait for the bot to confirm the approval on the issue.
+  3. Open your pull request. If your earlier pull request was closed automatically, open a new one.
+     Your future pull requests will stay open as well.
+
+Approved contributors are listed in
+[`APPROVED_CONTRIBUTORS`](https://github.com/bitcoindevkit/bdk/blob/approved-contributors/APPROVED_CONTRIBUTORS)
+on the `approved-contributors` branch.
+
+Maintainers approve the author of an issue or pull request by commenting on it with a line
+containing only `lgtm`, or approve other users with `lgtm @user1 @user2`. To accept a single pull
+request that was closed automatically without approving its author, reopen it.
 
 Deprecation policy
 ------------------

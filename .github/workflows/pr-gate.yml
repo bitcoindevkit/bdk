@@ -1,0 +1,91 @@
+name: PR Gate
+
+# Closes pull requests from contributors who are not approved.
+#
+# A PR is allowed if its head branch lives in this repository (bots and maintainers), if the user who
+# opened or reopened it has write access, or if its author is listed in `APPROVED_FILE` on
+# `APPROVED_BRANCH`. Contributors are approved with the `approve-contributor.yml` workflow.
+#
+# This uses `pull_request_target` to get a token that can close PRs from forks. It only reads PR
+# metadata and never checks out or runs code from the PR.
+
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] only reads PR metadata, never PR code
+    types: [opened, reopened]
+
+permissions: {}
+
+env:
+  APPROVED_BRANCH: approved-contributors
+  APPROVED_FILE: APPROVED_CONTRIBUTORS
+
+jobs:
+  check-author:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Close PR if author is not approved
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+            const sender = context.payload.sender.login;
+            const branch = process.env.APPROVED_BRANCH;
+            const path = process.env.APPROVED_FILE;
+
+            async function hasWriteAccess(username) {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username });
+              return ['admin', 'maintain', 'write'].includes(data.permission);
+            }
+
+            async function readApprovedContributors() {
+              let data;
+              try {
+                ({ data } = await github.rest.repos.getContent({ owner, repo, path, ref: branch }));
+              } catch (error) {
+                if (error.status === 404) {
+                  throw new Error(`${path} not found on branch ${branch}`);
+                }
+                throw error;
+              }
+              return new Set(
+                Buffer.from(data.content, 'base64')
+                  .toString('utf8')
+                  .split('\n')
+                  .map((line) => line.trim().toLowerCase())
+                  .filter((line) => line && !line.startsWith('#')),
+              );
+            }
+
+            // On `opened` the sender is the author. On `reopened` it may be a maintainer reopening
+            // the PR, which counts as approval for this PR.
+            if (await hasWriteAccess(sender)) {
+              core.info(`${sender} has write access`);
+              return;
+            }
+
+            if ((await readApprovedContributors()).has(author.toLowerCase())) {
+              core.info(`${author} is approved`);
+              return;
+            }
+
+            core.info(`${author} is not approved, closing PR`);
+            const contributing = `https://github.com/${owner}/${repo}/blob/${context.payload.repository.default_branch}/CONTRIBUTING.md#getting-approved-to-open-pull-requests`;
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: pr.number,
+              body: [
+                'Thanks for your interest in contributing! This PR was closed automatically because only approved contributors can open pull requests.',
+                '',
+                'To get approved, open an issue describing the change you would like to make. If a maintainer replies `lgtm`, you can open a new pull request and your future pull requests will stay open.',
+                '',
+                `See [CONTRIBUTING.md](${contributing}).`,
+              ].join('\n'),
+            });
+            await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: 'closed' });
