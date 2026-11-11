@@ -31,6 +31,7 @@ jobs:
         with:
           toolchain: 1.85.0 # MSRV
           cache: true
+          rustflags: "-D warnings"
       - name: Pin dependencies for MSRV
         run: ./ci/pin-msrv.sh
       - name: Build 1.85.0 (no default features)
@@ -54,6 +55,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -81,6 +83,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -112,6 +115,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -139,6 +143,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (use-rustls)
@@ -168,6 +173,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -203,6 +209,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Test (all features)
@@ -224,6 +231,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -257,6 +265,7 @@ jobs:
             toolchain: ${{ needs.prepare.outputs.rust_version }}
             cache: true
             target: "wasm32-unknown-unknown"
+            rustflags: "-D warnings"
       - name: Check esplora
         working-directory: ./crates/esplora
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features bdk_core/hashbrown,async
@@ -274,6 +283,7 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
           # TODO: `--target thumbv6m-none-eabi` should work but currently does not
           # target: thumbv6m-none-eabi
       - name: Check bdk_core (no-std, hashbrown)
@@ -316,6 +326,7 @@ jobs:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
           components: clippy
+          rustflags: "-D warnings"
       - name: Check clippy
         run: cargo clippy --all-features --all-targets -- -D warnings
 
@@ -333,5 +344,6 @@ jobs:
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Check docs
         run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
