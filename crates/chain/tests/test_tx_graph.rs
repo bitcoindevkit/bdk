@@ -1551,3 +1551,21 @@ fn test_get_first_seen_of_a_tx() {
     let first_seen = graph.get_tx_node(txid).unwrap().first_seen;
     assert_eq!(first_seen, Some(seen_at));
 }
+
+#[test]
+fn test_tx_update_from_tx_graph_keeps_first_seen() {
+    let tx = new_tx(0);
+    let txid = tx.compute_txid();
+
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+    let _ = graph.insert_tx(tx);
+    let _ = graph.insert_seen_at(txid, 100);
+    let _ = graph.insert_seen_at(txid, 200);
+
+    let update: bdk_chain::TxUpdate<ConfirmationBlockTime> = graph.into();
+    let graph = TxGraph::<ConfirmationBlockTime>::from(update);
+    let tx_node = graph.get_tx_node(txid).unwrap();
+
+    assert_eq!(tx_node.first_seen, Some(100));
+    assert_eq!(tx_node.last_seen, Some(200));
+}

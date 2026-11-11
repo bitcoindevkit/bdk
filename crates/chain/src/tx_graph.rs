@@ -154,7 +154,11 @@ impl<A: Ord> From<TxGraph<A>> for TxUpdate<A> {
             .into_iter()
             .flat_map(|(txid, anchors)| anchors.into_iter().map(move |a| (a, txid)))
             .collect();
-        tx_update.seen_ats = graph.last_seen.into_iter().collect();
+        tx_update.seen_ats = graph
+            .first_seen
+            .into_iter()
+            .chain(graph.last_seen)
+            .collect();
         tx_update.evicted_ats = graph.last_evicted.into_iter().collect();
         tx_update
     }
