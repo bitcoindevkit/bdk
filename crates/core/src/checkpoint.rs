@@ -95,6 +95,8 @@ fn walk_to_floor<D>(current: &CheckPoint<D>, target_height: u32) -> Option<Check
 
 /// A checkpoint is a node of a reference-counted linked list of [`BlockId`]s.
 ///
+/// The list is guaranteed to contain at least one checkpoint.
+///
 /// Checkpoints are cheaply cloneable and are useful to find the agreement point between two sparse
 /// block chains.
 #[derive(Debug)]
