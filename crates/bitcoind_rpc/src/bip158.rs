@@ -97,8 +97,6 @@ impl Iterator for FilterIter<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         (|| -> Result<Option<_>, Error> {
-            let mut cp = self.cp.clone();
-
             let header = match self.header.take() {
                 Some(header) => header,
                 // If no header is cached we need to locate a base of the local
@@ -126,7 +124,11 @@ impl Iterator for FilterIter<'_> {
             next_hash = next_header.hash;
             let next_height: u32 = next_header.height.try_into()?;
 
-            cp = cp.insert(next_height, next_hash);
+            // This block is the new tip, so drop any checkpoints above it (`insert` keeps them).
+            let base = self.cp.range(..next_height).next();
+            let cp = base
+                .unwrap_or_else(|| self.cp.clone())
+                .insert(next_height, next_hash);
 
             let mut block = None;
             let filter =
