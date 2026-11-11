@@ -27,10 +27,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: 1.85.0 # MSRV
           cache: true
+          rustflags: "-D warnings"
       - name: Pin dependencies for MSRV
         run: ./ci/pin-msrv.sh
       - name: Build 1.85.0 (no default features)
@@ -50,10 +51,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -77,10 +79,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -108,10 +111,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -135,10 +139,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (use-rustls)
@@ -164,10 +169,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -199,10 +205,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Test (all features)
@@ -220,10 +227,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Build (default features)
         run: cargo build
       - name: Build (no default features)
@@ -252,11 +260,12 @@ jobs:
       - run: sudo apt-get update || exit 1
       - run: sudo apt-get install -y libclang-common-14-dev clang-14 libc6-dev-i386 || exit 1
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
             toolchain: ${{ needs.prepare.outputs.rust_version }}
             cache: true
             target: "wasm32-unknown-unknown"
+            rustflags: "-D warnings"
       - name: Check esplora
         working-directory: ./crates/esplora
         run: cargo check --target wasm32-unknown-unknown --no-default-features --features bdk_core/hashbrown,async
@@ -270,10 +279,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
           # TODO: `--target thumbv6m-none-eabi` should work but currently does not
           # target: thumbv6m-none-eabi
       - name: Check bdk_core (no-std, hashbrown)
@@ -292,7 +302,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
             toolchain: nightly
             cache: true
@@ -311,11 +321,12 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
           components: clippy
+          rustflags: "-D warnings"
       - name: Check clippy
         run: cargo clippy --all-features --all-targets -- -D warnings
 
@@ -329,9 +340,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
+          rustflags: "-D warnings"
       - name: Check docs
         run: RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
