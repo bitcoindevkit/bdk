@@ -1,6 +1,6 @@
 [package]
 name = "bdk_file_store"
-version = "0.22.0"
+version = "0.23.0-alpha.0"
 edition = "2021"
 rust-version = "1.85.0"
 license = "MIT OR Apache-2.0"
@@ -15,7 +15,7 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bdk_core = { path = "../core", version = "0.6.1", features = ["serde"]}
+bdk_core = { path = "../core", version = "0.7.0-alpha.0", features = ["serde"]}
 bincode = { version = "1" }
 serde = { version = "1", features = ["derive"] }
 

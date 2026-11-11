@@ -1,6 +1,6 @@
 [package]
 name = "bdk_esplora"
-version = "0.22.1"
+version = "0.23.0-alpha.0"
 edition = "2021"
 rust-version = "1.85.0"
 homepage = "https://bitcoindevkit.org"
@@ -16,7 +16,7 @@ readme = "README.md"
 workspace = true
 
 [dependencies]
-bdk_core = { path = "../core", version = "0.6.1", default-features = false }
+bdk_core = { path = "../core", version = "0.7.0-alpha.0", default-features = false }
 esplora-client = { version = "0.12.3", default-features = false }
 async-trait = { version = "0.1.66", optional = true }
 futures = { version = "0.3.26", optional = true }
