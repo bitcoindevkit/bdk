@@ -33,6 +33,12 @@ const ADDRS: [&str; 2] = [
 /// # Panics
 ///
 /// Panics naming the failing step if a closure errors or a load doesn't match the expected merge.
+///
+/// # Deletions
+///
+/// The loaded changeset is compared to the raw merge of `changesets`, so changesets that delete
+/// data (e.g. a [`local_chain::ChangeSet`] block entry of `(height, None)`) are out of scope: a
+/// backend that removes the row can never load the `None` entry back.
 #[track_caller]
 pub fn assert_persist_changesets<C, Store, Init, Load, Persist>(
     init: Init,
@@ -82,6 +88,13 @@ pub fn assert_persist_changesets<C, Store, Init, Load, Persist>(
 }
 
 /// Get two [`tx_graph::ChangeSet`]s.
+///
+/// The second changeset also updates the timestamps of a transaction from the first one, so a
+/// backend must overwrite values it has already stored rather than keep the old ones.
+///
+/// [`tx_graph::ChangeSet::merge`] keeps the earliest `first_seen` and the latest `last_seen` and
+/// `last_evicted`, so the update only moves `first_seen` earlier and the others later. A backend
+/// can therefore overwrite each stored value with the one it is given.
 pub fn tx_graph_changesets() -> [tx_graph::ChangeSet<ConfirmationBlockTime>; 2] {
     use tx_graph::ChangeSet;
 
@@ -110,8 +123,8 @@ pub fn tx_graph_changesets() -> [tx_graph::ChangeSet<ConfirmationBlockTime>; 2] 
         ]
         .into(),
         anchors: [(conf_anchor, tx1.compute_txid())].into(),
-        last_seen: [(tx1.compute_txid(), 1755416650)].into(),
-        first_seen: [(tx1.compute_txid(), 1755416655)].into(),
+        last_seen: [(tx1.compute_txid(), 1755416655)].into(),
+        first_seen: [(tx1.compute_txid(), 1755416650)].into(),
         last_evicted: [(tx1.compute_txid(), 1755416660)].into(),
     };
 
@@ -137,9 +150,22 @@ pub fn tx_graph_changesets() -> [tx_graph::ChangeSet<ConfirmationBlockTime>; 2] 
         )]
         .into(),
         anchors: [(conf_anchor, tx2.compute_txid())].into(),
-        last_seen: [(tx2.compute_txid(), 1755416700)].into(),
-        first_seen: [(tx2.compute_txid(), 1755416670)].into(),
-        last_evicted: [(tx2.compute_txid(), 1755416760)].into(),
+        // Also update the timestamps of `tx1`, which are already stored.
+        last_seen: [
+            (tx2.compute_txid(), 1755416700),
+            (tx1.compute_txid(), 1755416690),
+        ]
+        .into(),
+        first_seen: [
+            (tx2.compute_txid(), 1755416670),
+            (tx1.compute_txid(), 1755416640),
+        ]
+        .into(),
+        last_evicted: [
+            (tx2.compute_txid(), 1755416760),
+            (tx1.compute_txid(), 1755416695),
+        ]
+        .into(),
     };
 
     [tx_graph_changeset1, tx_graph_changeset2]
@@ -182,6 +208,12 @@ pub fn keychain_txout_changesets() -> [keychain_txout::ChangeSet; 2] {
 }
 
 /// Get two [`local_chain::ChangeSet`]s.
+///
+/// The second changeset replaces the hash at a height from the first one (a reorg), so a backend
+/// must overwrite blocks it has already stored rather than keep the old ones.
+///
+/// Block removals (`(height, None)` entries) are not included; see
+/// [`assert_persist_changesets`].
 pub fn local_chain_changesets() -> [local_chain::ChangeSet; 2] {
     use local_chain::ChangeSet;
 
@@ -190,7 +222,8 @@ pub fn local_chain_changesets() -> [local_chain::ChangeSet; 2] {
     };
 
     let changeset_new = ChangeSet {
-        blocks: [(910427, Some(hash!("K")))].into(),
+        // 910426 is reorged out and replaced.
+        blocks: [(910426, Some(hash!("E"))), (910427, Some(hash!("K")))].into(),
     };
 
     [changeset, changeset_new]
