@@ -729,7 +729,7 @@ fn test_sync_reorg_remined_at_same_height() -> anyhow::Result<()> {
 
         // Replace the confirming block. The tx returns to the mempool and is re-mined at the same
         // height in the replacement block.
-        let height = env.bitcoind.client.get_block_count()?.into_model().0;
+        let height = env.bitcoind.client.get_block_count()?.0;
         env.reorg(1)?;
         env.mine_blocks(blocks_after_reorg, None)?;
         env.wait_until_electrum_tip_syncs_with_bitcoind(Duration::from_secs(6))?;
