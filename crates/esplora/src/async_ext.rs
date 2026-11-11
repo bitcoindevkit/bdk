@@ -289,6 +289,11 @@ async fn chain_update<S: Sleeper>(
     // insert the most recent blocks at the tip to make sure we update the tip and make the update
     // robust.
     for (&height, &hash) in latest_blocks.iter() {
+        // `insert` panics on a conflicting genesis. Having found a point of agreement, only a
+        // server contradicting itself can get us here.
+        if height == 0 && tip.get(0).is_some_and(|genesis| genesis.hash() != hash) {
+            return Err(Box::new(esplora_client::Error::InvalidResponse));
+        }
         tip = tip.insert(height, hash);
     }
 
@@ -572,7 +577,10 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use std::{collections::BTreeSet, time::Duration};
+    use std::{
+        collections::{BTreeMap, BTreeSet},
+        time::Duration,
+    };
 
     use bdk_chain::{
         bitcoin::{hashes::Hash, Txid},
@@ -622,6 +630,23 @@ mod test {
             ),
             "`chain_update` should error if it can't connect to the local CP",
         );
+
+        Ok(())
+    }
+
+    // Test that a `/blocks` response contradicting our genesis is an error, not a panic.
+    #[tokio::test]
+    async fn test_chain_update_conflicting_genesis_error() -> anyhow::Result<()> {
+        // `latest_blocks` covers the local tip, so no request is made.
+        let client = Builder::new("http://127.0.0.1:1").build_async()?;
+        let local_tip = LocalChain::from_blocks([(0, h!("genesis")), (1, h!("A"))].into())?.tip();
+        let latest_blocks = BTreeMap::from([(0, h!("other genesis")), (1, h!("A"))]);
+
+        let res = chain_update(&client, &latest_blocks, &local_tip, &BTreeSet::new()).await;
+        assert!(matches!(
+            *res.unwrap_err(),
+            esplora_client::Error::InvalidResponse
+        ));
 
         Ok(())
     }
