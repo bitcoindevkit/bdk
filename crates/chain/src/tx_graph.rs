@@ -230,6 +230,11 @@ impl<T, A> TxNode<'_, T, A> {
     ///
     /// Only mempool observation timestamps are considered; anchors have no effect. A transaction
     /// is evicted when its last-evicted timestamp is at least as recent as its last-seen timestamp.
+    ///
+    /// An evicted transaction drops out of the canonical view, so the outputs it spends appear
+    /// unspent again, unless it is anchored in the best chain, is an ancestor of a canonical
+    /// transaction, or is in [`assume_canonical`](crate::CanonicalParams::assume_canonical). It
+    /// returns once it is seen again after its last eviction.
     pub fn is_evicted(&self) -> bool {
         match (self.last_seen, self.last_evicted) {
             (_, None) => false,
@@ -877,7 +882,7 @@ impl<A: Anchor> TxGraph<A> {
 
     /// Inserts the given `evicted_at` for `txid` into [`TxGraph`].
     ///
-    /// The `evicted_at` timestamp represents the last known time when the transaction was observed
+    /// The `evicted_at` timestamp represents the last known time when the transaction was reported
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
     pub fn insert_evicted_at(&mut self, txid: Txid, evicted_at: u64) -> ChangeSet<A> {
@@ -906,7 +911,7 @@ impl<A: Anchor> TxGraph<A> {
     /// Batch inserts `(txid, evicted_at)` pairs into [`TxGraph`] for `txid`s that the graph is
     /// tracking.
     ///
-    /// The `evicted_at` timestamp represents the last known time when the transaction was observed
+    /// The `evicted_at` timestamp represents the last known time when the transaction was reported
     /// to be missing from the mempool. If `txid` was previously recorded with an earlier
     /// `evicted_at` value, it is updated only if the new value is greater.
     pub fn batch_insert_relevant_evicted_at(

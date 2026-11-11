@@ -179,6 +179,10 @@ impl<I, D> SyncRequestBuilder<I, D> {
     /// Add transactions that are expected to exist under the given spks.
     ///
     /// This is useful for detecting a malicious replacement of an incoming transaction.
+    ///
+    /// An expected txid that is missing from its spk's history is reported as evicted (in
+    /// [`TxUpdate::evicted_ats`](crate::TxUpdate::evicted_ats), at the request's `start_time`).
+    /// This trusts the chain source to return complete histories.
     pub fn expected_spk_txids(mut self, txs: impl IntoIterator<Item = (ScriptBuf, Txid)>) -> Self {
         for (spk, txid) in txs {
             self.inner
