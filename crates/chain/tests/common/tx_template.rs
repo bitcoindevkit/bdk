@@ -1,15 +1,26 @@
 #![cfg(feature = "miniscript")]
 
-use bdk_testenv::utils::DESCRIPTORS;
 use rand::distributions::{Alphanumeric, DistString};
 use std::collections::HashMap;
 
 use bdk_chain::{spk_txout::SpkTxOutIndex, tx_graph::TxGraph, Anchor, CanonicalParams};
 use bitcoin::{
-    locktime::absolute::LockTime, secp256k1::Secp256k1, transaction, Amount, OutPoint, ScriptBuf,
-    Sequence, Transaction, TxIn, TxOut, Txid, Witness,
+    locktime::absolute::LockTime, opcodes, script::Builder, transaction, Amount, OutPoint,
+    ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness,
 };
-use miniscript::Descriptor;
+
+/// Canonicalization checks the scripts of unconfirmed transactions, and the templates' spends are
+/// unsigned, so every output must be spendable by an empty scriptSig.
+fn anyone_can_spend(index: Option<u32>) -> ScriptBuf {
+    match index {
+        None => Builder::new().push_opcode(opcodes::OP_TRUE).into_script(),
+        Some(index) => Builder::new()
+            .push_int(index.into())
+            .push_opcode(opcodes::all::OP_DROP)
+            .push_opcode(opcodes::OP_TRUE)
+            .into_script(),
+    }
+}
 
 /// Template for creating a transaction in `TxGraph`.
 ///
@@ -64,18 +75,10 @@ pub struct TxTemplateEnv<'a, A> {
 pub fn init_graph<'a, A: Anchor + Clone + 'a>(
     tx_templates: impl IntoIterator<Item = &'a TxTemplate<'a, A>>,
 ) -> TxTemplateEnv<'a, A> {
-    let (descriptor, _) =
-        Descriptor::parse_descriptor(&Secp256k1::signing_only(), DESCRIPTORS[2]).unwrap();
     let mut tx_graph = TxGraph::<A>::default();
     let mut indexer = SpkTxOutIndex::default();
     (0..10).for_each(|index| {
-        indexer.insert_spk(
-            index,
-            descriptor
-                .at_derivation_index(index)
-                .unwrap()
-                .script_pubkey(),
-        );
+        indexer.insert_spk(index, anyone_can_spend(Some(index)));
     });
     let mut txid_to_name = HashMap::<&'a str, Txid>::new();
 
@@ -123,15 +126,9 @@ pub fn init_graph<'a, A: Anchor + Clone + 'a>(
             output: tx_tmp
                 .outputs
                 .iter()
-                .map(|output| match &output.spk_index {
-                    None => TxOut {
-                        value: Amount::from_sat(output.value),
-                        script_pubkey: ScriptBuf::new(),
-                    },
-                    Some(index) => TxOut {
-                        value: Amount::from_sat(output.value),
-                        script_pubkey: indexer.spk_at_index(index).unwrap(),
-                    },
+                .map(|output| TxOut {
+                    value: Amount::from_sat(output.value),
+                    script_pubkey: anyone_can_spend(output.spk_index),
                 })
                 .collect(),
         };

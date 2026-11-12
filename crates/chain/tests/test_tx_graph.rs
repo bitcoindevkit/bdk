@@ -348,14 +348,26 @@ fn insert_tx_witness_precedence() {
         assert_eq!(
             changeset_insert_signed,
             ChangeSet {
-                txs: [Arc::new(signed_tx)].into(),
+                txs: [Arc::new(signed_tx.clone())].into(),
                 ..Default::default()
             }
         );
-        assert!(changeset_insert_unsigned.is_empty());
+        // The graph records every copy, the losing one too.
+        assert_eq!(
+            changeset_insert_unsigned,
+            ChangeSet {
+                txs: [Arc::new(unsigned_tx.clone())].into(),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            *tx_graph.get_tx(signed_tx.compute_txid()).unwrap(),
+            signed_tx
+        );
     }
 
-    // Smaller witness displaces larger witness and witnesses must not get cleared.
+    // A copy with an empty witness does not displace a fully witnessed one, even if its other
+    // witnesses are smaller, and witnesses are never mixed across copies.
     {
         let previous_output_2 = OutPoint::new(hash!("prev"), 3);
         let small_wit = Witness::from_slice(&[vec![0u8; 10]]);
@@ -401,7 +413,7 @@ fn insert_tx_witness_precedence() {
 
         let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
         let changeset_small = tx_graph.insert_tx(tx_small.clone());
-        let changeset_large = tx_graph.insert_tx(tx_large);
+        let changeset_large = tx_graph.insert_tx(tx_large.clone());
         assert_eq!(
             changeset_small,
             ChangeSet {
@@ -409,7 +421,13 @@ fn insert_tx_witness_precedence() {
                 ..Default::default()
             }
         );
-        assert!(changeset_large.is_empty());
+        assert_eq!(
+            changeset_large,
+            ChangeSet {
+                txs: [Arc::new(tx_large)].into(),
+                ..Default::default()
+            }
+        );
         let tx = tx_graph
             .get_tx(tx_small.compute_txid())
             .expect("tx must exist");
@@ -942,17 +960,18 @@ fn test_chain_spends() {
     let tip = local_chain.tip();
 
     // The parent tx contains 2 outputs. Which are spent by one confirmed and one unconfirmed tx.
-    // The parent tx is confirmed at block 95.
+    // The parent tx is confirmed at block 95. The unconfirmed spend's scripts are checked, so the
+    // outputs are anyone-can-spend.
     let tx_0 = Transaction {
         input: vec![],
         output: vec![
             TxOut {
                 value: Amount::from_sat(10_000),
-                script_pubkey: ScriptBuf::new(),
+                script_pubkey: ScriptBuf::from_bytes(vec![bitcoin::opcodes::OP_TRUE.to_u8()]),
             },
             TxOut {
                 value: Amount::from_sat(20_000),
-                script_pubkey: ScriptBuf::new(),
+                script_pubkey: ScriptBuf::from_bytes(vec![bitcoin::opcodes::OP_TRUE.to_u8()]),
             },
         ],
         ..new_tx(0)

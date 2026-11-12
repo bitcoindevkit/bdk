@@ -1,5 +1,6 @@
 use crate::collections::{HashMap, HashSet, VecDeque};
 use crate::tx_graph::{TxAncestors, TxDescendants};
+use crate::validation::TxValidity;
 use crate::{Anchor, CanonicalTxs, TxGraph};
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
@@ -46,6 +47,9 @@ pub struct CanonicalParams {
     ///
     /// In case of conflicting transactions within `assume_canonical`, transactions that appear
     /// later in the list (have higher index) have precedence.
+    ///
+    /// This overrides script validation: these transactions and their ancestors are canonical
+    /// even if [`TxGraph::validate_tx`](crate::TxGraph::validate_tx) finds them invalid.
     pub assume_canonical: Vec<Txid>,
 }
 
@@ -56,6 +60,11 @@ pub struct CanonicalParams {
 /// (via [`CanonicalReason`](crate::CanonicalReason)). The output is a [`CanonicalTxs`] which can
 /// then be further processed by [`CanonicalViewTask`](crate::CanonicalViewTask) to resolve reasons
 /// into [`ChainPosition`](crate::ChainPosition)s.
+///
+/// For unconfirmed candidates, retained copies are checked in the graph's witness preference
+/// order. A Valid copy is preferred over Unknown; only an all-Invalid set is rejected. The output
+/// carries the selected whole copy, which may differ from [`TxGraph::get_tx`]. Anchored and assumed
+/// transactions retain the graph's preferred copy without script checks.
 pub struct CanonicalTask<'g, A> {
     tx_graph: &'g TxGraph<A>,
     chain_tip: BlockId,
@@ -67,6 +76,11 @@ pub struct CanonicalTask<'g, A> {
 
     canonical: CanonicalMap<A>,
     not_canonical: NotCanonicalSet,
+    /// The selected eligible copy, or None if all copies are Invalid. The immutable graph makes
+    /// these results reusable even after the walk that computed them is undone.
+    selected_copies: HashMap<Txid, Option<Arc<Transaction>>>,
+    #[cfg(test)]
+    validations: usize,
 
     // Store canonical transactions in order
     canonical_order: Vec<Txid>,
@@ -253,6 +267,9 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
 
             canonical: HashMap::new(),
             not_canonical: HashSet::new(),
+            selected_copies: HashMap::new(),
+            #[cfg(test)]
+            validations: 0,
 
             canonical_order: Vec::new(),
             current_stage: CanonicalStage::default(),
@@ -267,9 +284,9 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
         let starting_txid = txid;
         let mut is_starting_tx = true;
 
-        // We keep track of changes made so far so that we can undo it later in case we detect that
-        // `tx` double spends itself.
-        let mut detected_self_double_spend = false;
+        // We keep track of changes made so far so that we can undo them if `tx` turns out not to be
+        // canonical: it double spends itself, or it or an ancestor has invalid scripts.
+        let mut rejected = false;
         let mut undo_not_canonical = Vec::<Txid>::new();
         let mut staged_canonical = Vec::<(Txid, Arc<Transaction>, CanonicalReason<A>)>::new();
 
@@ -294,6 +311,43 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
                     Entry::Vacant(entry) => entry,
                 };
 
+                // Validation guards against acting on unconfirmed transactions that can never
+                // confirm. An anchor in the best chain or an explicit assumption outranks it. An
+                // unknown verdict does not bar it: the graph may just lack a parent.
+                let tx = if this_reason.is_unconfirmed() {
+                    let selected = self.selected_copies.entry(this_txid).or_insert_with(|| {
+                        let mut copies = self.tx_graph.tx_copies(this_txid).collect::<Vec<_>>();
+                        copies.sort_by_cached_key(|copy| {
+                            (
+                                crate::tx_graph::witness_preference(copy),
+                                copy.compute_wtxid(),
+                            )
+                        });
+                        let mut unknown = None;
+                        for copy in copies {
+                            #[cfg(test)]
+                            {
+                                self.validations += 1;
+                            }
+                            match self.tx_graph.validate_tx(&copy).validity() {
+                                TxValidity::Valid => return Some(copy),
+                                TxValidity::Unknown if unknown.is_none() => unknown = Some(copy),
+                                TxValidity::Unknown | TxValidity::Invalid => {}
+                            }
+                        }
+                        unknown
+                    });
+                    match selected {
+                        Some(copy) => copy.clone(),
+                        None => {
+                            rejected = true;
+                            return None;
+                        }
+                    }
+                } else {
+                    tx
+                };
+
                 // Prune conflicts
                 //
                 // Any conflicts with a canonical tx can be added to `not_canonical`. Descendants
@@ -316,7 +370,7 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
 
                 if self.not_canonical.contains(&this_txid) {
                     // Early exit if self-double-spend is detected.
-                    detected_self_double_spend = true;
+                    rejected = true;
                     return None;
                 }
 
@@ -327,7 +381,7 @@ impl<'g, A: Anchor> CanonicalTask<'g, A> {
         )
         .run_until_finished();
 
-        if detected_self_double_spend {
+        if rejected {
             // Undo changes
             for (txid, _, _) in staged_canonical {
                 self.canonical.remove(&txid);
@@ -443,6 +497,15 @@ impl<A: Clone> CanonicalReason<A> {
     pub fn is_assumed(&self) -> bool {
         matches!(self, CanonicalReason::Assumed { .. })
     }
+
+    /// Whether this reason leaves the transaction unconfirmed, which is when script validity
+    /// decides it. Exhaustive so that a new reason has to make that choice.
+    fn is_unconfirmed(&self) -> bool {
+        match self {
+            CanonicalReason::Assumed { .. } | CanonicalReason::Anchor { .. } => false,
+            CanonicalReason::ObservedIn { .. } => true,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -451,7 +514,7 @@ mod tests {
     use super::*;
     use crate::local_chain::LocalChain;
     use crate::ChainPosition;
-    use bitcoin::{hashes::Hash, BlockHash, TxIn, TxOut};
+    use bitcoin::{hashes::Hash, opcodes, BlockHash, OutPoint, ScriptBuf, TxIn, TxOut};
 
     #[test]
     fn test_canonicalization_task_sans_io() {
@@ -502,5 +565,74 @@ mod tests {
 
         // Should be confirmed (anchored)
         assert!(matches!(canon_tx.pos, ChainPosition::Confirmed { .. }));
+    }
+
+    #[test]
+    fn a_valid_ancestor_of_a_rejected_candidate_is_checked_once() {
+        let chain = LocalChain::from_blocks([(0, BlockHash::all_zeros())].into()).unwrap();
+        let anyone = ScriptBuf::from_bytes(vec![opcodes::OP_TRUE.to_u8()]);
+        let unspendable = ScriptBuf::new_op_return([]);
+        let txout = |script_pubkey: &ScriptBuf| TxOut {
+            value: bitcoin::Amount::from_sat(1000),
+            script_pubkey: script_pubkey.clone(),
+        };
+        let spend = |prevouts: &[OutPoint], outputs: usize| bitcoin::Transaction {
+            version: bitcoin::transaction::Version::TWO,
+            lock_time: bitcoin::absolute::LockTime::ZERO,
+            input: prevouts
+                .iter()
+                .map(|&previous_output| TxIn {
+                    previous_output,
+                    ..TxIn::default()
+                })
+                .collect(),
+            output: vec![txout(&anyone); outputs],
+        };
+
+        let mut tx_graph = TxGraph::<crate::ConfirmationBlockTime>::default();
+        let anyone_coin = OutPoint::new(Txid::from_byte_array([1; 32]), 0);
+        let unspendable_coin = OutPoint::new(Txid::from_byte_array([2; 32]), 0);
+        let _ = tx_graph.insert_txout(anyone_coin, txout(&anyone));
+        let _ = tx_graph.insert_txout(unspendable_coin, txout(&unspendable));
+        let shared = spend(&[anyone_coin], 2);
+        let invalid = spend(&[unspendable_coin], 1);
+        let rejected = spend(
+            &[
+                OutPoint::new(shared.compute_txid(), 0),
+                OutPoint::new(invalid.compute_txid(), 0),
+            ],
+            1,
+        );
+        let later = spend(&[OutPoint::new(shared.compute_txid(), 1)], 1);
+        for tx in [&shared, &invalid, &rejected, &later] {
+            let _ = tx_graph.insert_tx(tx.clone());
+        }
+        let mut bogus_shared = shared.clone();
+        bogus_shared.input[0].witness = bitcoin::Witness::from_slice(&[vec![0]]);
+        let _ = tx_graph.insert_tx(bogus_shared);
+        assert_ne!(*tx_graph.get_tx(shared.compute_txid()).unwrap(), shared);
+        let _ = tx_graph.insert_seen_at(rejected.compute_txid(), 2);
+        let _ = tx_graph.insert_seen_at(later.compute_txid(), 1);
+
+        let mut task = CanonicalTask::new(
+            &tx_graph,
+            chain.tip().block_id(),
+            CanonicalParams::default(),
+        );
+        assert!(task.next_query().is_none(), "nothing is anchored");
+
+        assert_eq!(
+            task.validations, 5,
+            "each copy is checked once, including both copies of the shared ancestor"
+        );
+        assert_eq!(
+            task.selected_copies[&shared.compute_txid()].as_deref(),
+            Some(&shared)
+        );
+        let mut canonical = task.canonical.keys().copied().collect::<Vec<_>>();
+        canonical.sort();
+        let mut expected = vec![shared.compute_txid(), later.compute_txid()];
+        expected.sort();
+        assert_eq!(canonical, expected);
     }
 }

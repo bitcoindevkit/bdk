@@ -35,6 +35,7 @@ test:
    @just _test-electrum
    @just _test-esplora
    @just _test-file_store
+   @just _test-script_verify
    @just _test-testenv
 
 _test-bitcoind_rpc:
@@ -45,6 +46,9 @@ _test-chain:
 
 _test-core:
     cargo test -p bdk_core --all-features
+
+_test-script_verify:
+    cargo test -p bdk_script_verify --all-features
 
 _test-electrum:
     cargo test -p bdk_electrum --all-features

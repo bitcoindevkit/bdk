@@ -65,6 +65,32 @@ jobs:
       - name: Test (all features)
         run: cargo test --all-features
 
+  build-script-verify:
+    needs: prepare
+    name: bdk_script_verify
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./crates/script_verify
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust_version }}
+          cache: true
+      # The differential tests' `bitcoinkernel` dev-dependency builds Bitcoin Core, which needs Boost.
+      - name: Install Boost
+        run: sudo apt-get update && sudo apt-get install -y libboost-dev
+      - name: Build (default features)
+        run: cargo build
+      - name: Build (no default features)
+        run: cargo build --no-default-features
+      - name: Test (all features)
+        run: cargo test --all-features
+
   build-chain:
     needs: prepare
     name: bdk_chain
@@ -316,6 +342,9 @@ jobs:
           toolchain: ${{ needs.prepare.outputs.rust_version }}
           cache: true
           components: clippy
+      # `--all-targets` builds `bdk_script_verify`'s `bitcoinkernel` dev-dependency, which needs Boost.
+      - name: Install Boost
+        run: sudo apt-get update && sudo apt-get install -y libboost-dev
       - name: Check clippy
         run: cargo clippy --all-features --all-targets -- -D warnings
 

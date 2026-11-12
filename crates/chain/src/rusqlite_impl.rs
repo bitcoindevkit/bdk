@@ -82,6 +82,20 @@ impl ToSql for Impl<bitcoin::Txid> {
     }
 }
 
+impl FromSql for Impl<bitcoin::Wtxid> {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        bitcoin::Wtxid::from_str(value.as_str()?)
+            .map(Self)
+            .map_err(from_sql_error)
+    }
+}
+
+impl ToSql for Impl<bitcoin::Wtxid> {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(self.to_string().into())
+    }
+}
+
 impl FromSql for Impl<bitcoin::BlockHash> {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         bitcoin::BlockHash::from_str(value.as_str()?)
@@ -196,8 +210,12 @@ fn to_sql_error<E: core::error::Error + Send + Sync + 'static>(err: E) -> rusqli
 impl tx_graph::ChangeSet<ConfirmationBlockTime> {
     /// Schema name for [`tx_graph::ChangeSet`].
     pub const SCHEMA_NAME: &'static str = "bdk_txgraph";
-    /// Name of table that stores full transactions and `last_seen` timestamps.
+    /// Name of table that stores per-txid timestamps. Before schema v4 it also held one full
+    /// transaction per txid.
     pub const TXS_TABLE_NAME: &'static str = "bdk_txs";
+    /// Name of table that stores every received copy of each full transaction, keyed by wtxid
+    /// (copies of a txid differ only in witnesses).
+    pub const TX_COPIES_TABLE_NAME: &'static str = "bdk_tx_copies";
     /// Name of table that stores floating txouts.
     pub const TXOUTS_TABLE_NAME: &'static str = "bdk_txouts";
     /// Name of table that stores [`Anchor`]s.
@@ -274,6 +292,45 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
         )
     }
 
+    /// Migrates schema v3 to v4, which moves full transactions into a table keyed by wtxid.
+    ///
+    /// `TxGraph` keeps every copy of a txid, and which one it exposes can change as data arrives,
+    /// so one stored transaction per txid would lose copies. This is Rust rather than an SQL script
+    /// because SQLite cannot compute a wtxid.
+    fn migrate_v3_to_v4(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+        db_tx.execute_batch(&format!(
+            "CREATE TABLE {} ( \
+            wtxid TEXT PRIMARY KEY NOT NULL, \
+            txid TEXT NOT NULL REFERENCES {} (txid), \
+            raw_tx BLOB NOT NULL \
+            ) STRICT",
+            Self::TX_COPIES_TABLE_NAME,
+            Self::TXS_TABLE_NAME,
+        ))?;
+        let mut select = db_tx.prepare(&format!(
+            "SELECT raw_tx FROM {} WHERE raw_tx IS NOT NULL",
+            Self::TXS_TABLE_NAME,
+        ))?;
+        let mut insert = db_tx.prepare(&format!(
+            "INSERT INTO {}(wtxid, txid, raw_tx) VALUES(:wtxid, :txid, :raw_tx)",
+            Self::TX_COPIES_TABLE_NAME,
+        ))?;
+        let rows =
+            select.query_map([], |row| row.get::<_, Impl<bitcoin::Transaction>>("raw_tx"))?;
+        for row in rows {
+            let tx = row?.0;
+            insert.execute(named_params! {
+                ":wtxid": Impl(tx.compute_wtxid()),
+                ":txid": Impl(tx.compute_txid()),
+                ":raw_tx": Impl(tx),
+            })?;
+        }
+        db_tx.execute_batch(&format!(
+            "ALTER TABLE {} DROP COLUMN raw_tx",
+            Self::TXS_TABLE_NAME
+        ))
+    }
+
     /// Initialize sqlite tables.
     pub fn init_sqlite_tables(db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
         migrate_schema(
@@ -285,7 +342,12 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
                 &Self::schema_v2(),
                 &Self::schema_v3(),
             ],
-        )
+        )?;
+        if schema_version(db_tx, Self::SCHEMA_NAME)? == Some(3) {
+            set_schema_version(db_tx, Self::SCHEMA_NAME, 4)?;
+            Self::migrate_v3_to_v4(db_tx)?;
+        }
+        Ok(())
     }
 
     /// Construct a [`TxGraph`] from an sqlite database.
@@ -295,23 +357,29 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
         let mut changeset = Self::default();
 
         let mut statement = db_tx.prepare(&format!(
-            "SELECT txid, raw_tx, first_seen, last_seen, last_evicted FROM {}",
+            "SELECT raw_tx FROM {}",
+            Self::TX_COPIES_TABLE_NAME,
+        ))?;
+        let row_iter =
+            statement.query_map([], |row| row.get::<_, Impl<bitcoin::Transaction>>("raw_tx"))?;
+        for row in row_iter {
+            changeset.txs.insert(Arc::new(row?.0));
+        }
+
+        let mut statement = db_tx.prepare(&format!(
+            "SELECT txid, first_seen, last_seen, last_evicted FROM {}",
             Self::TXS_TABLE_NAME,
         ))?;
         let row_iter = statement.query_map([], |row| {
             Ok((
                 row.get::<_, Impl<bitcoin::Txid>>("txid")?,
-                row.get::<_, Option<Impl<bitcoin::Transaction>>>("raw_tx")?,
                 row.get::<_, Option<u64>>("first_seen")?,
                 row.get::<_, Option<u64>>("last_seen")?,
                 row.get::<_, Option<u64>>("last_evicted")?,
             ))
         })?;
         for row in row_iter {
-            let (Impl(txid), tx, first_seen, last_seen, last_evicted) = row?;
-            if let Some(Impl(tx)) = tx {
-                changeset.txs.insert(Arc::new(tx));
-            }
+            let (Impl(txid), first_seen, last_seen, last_evicted) = row?;
             if let Some(first_seen) = first_seen {
                 changeset.first_seen.insert(txid, first_seen);
             }
@@ -376,13 +444,20 @@ impl tx_graph::ChangeSet<ConfirmationBlockTime> {
     ///
     /// Remember to call [`Self::init_sqlite_tables`] beforehand.
     pub fn persist_to_sqlite(&self, db_tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
-        let mut statement = db_tx.prepare_cached(&format!(
-            "INSERT INTO {}(txid, raw_tx) VALUES(:txid, :raw_tx) ON CONFLICT(txid) DO UPDATE SET raw_tx=:raw_tx",
+        let mut statement_txid = db_tx.prepare_cached(&format!(
+            "INSERT OR IGNORE INTO {}(txid) VALUES(:txid)",
             Self::TXS_TABLE_NAME,
         ))?;
+        let mut statement = db_tx.prepare_cached(&format!(
+            "INSERT OR IGNORE INTO {}(wtxid, txid, raw_tx) VALUES(:wtxid, :txid, :raw_tx)",
+            Self::TX_COPIES_TABLE_NAME,
+        ))?;
         for tx in &self.txs {
+            let txid = Impl(tx.compute_txid());
+            statement_txid.execute(named_params! { ":txid": txid })?;
             statement.execute(named_params! {
-                ":txid": Impl(tx.compute_txid()),
+                ":wtxid": Impl(tx.compute_wtxid()),
+                ":txid": txid,
                 ":raw_tx": Impl(tx.as_ref().clone()),
             })?;
         }
@@ -730,7 +805,7 @@ mod test {
     }
 
     #[test]
-    fn v0_to_v3_schema_migration_is_backward_compatible() -> anyhow::Result<()> {
+    fn v0_to_v4_schema_migration_is_backward_compatible() -> anyhow::Result<()> {
         type ChangeSet = tx_graph::ChangeSet<ConfirmationBlockTime>;
         let mut conn = rusqlite::Connection::open_in_memory()?;
 
@@ -799,19 +874,10 @@ mod test {
             }
         }
 
-        // Apply v1, v2, v3 sqlite schema to tables with data
+        // Apply v1, v2, v3, v4 sqlite schema to tables with data
         {
             let db_tx = conn.transaction()?;
-            migrate_schema(
-                &db_tx,
-                ChangeSet::SCHEMA_NAME,
-                &[
-                    &ChangeSet::schema_v0(),
-                    &ChangeSet::schema_v1(),
-                    &ChangeSet::schema_v2(),
-                    &ChangeSet::schema_v3(),
-                ],
-            )?;
+            ChangeSet::init_sqlite_tables(&db_tx)?;
             db_tx.commit()?;
         }
 
@@ -823,6 +889,54 @@ mod test {
             assert!(changeset.anchors.contains(&(anchor, txid)));
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn v4_migration_moves_transactions_into_copies() -> anyhow::Result<()> {
+        type ChangeSet = tx_graph::ChangeSet<ConfirmationBlockTime>;
+        let mut conn = rusqlite::Connection::open_in_memory()?;
+        let v0_to_v3 = [
+            ChangeSet::schema_v0(),
+            ChangeSet::schema_v1(),
+            ChangeSet::schema_v2(),
+            ChangeSet::schema_v3(),
+        ];
+        let tx = bitcoin::Transaction {
+            version: transaction::Version::TWO,
+            lock_time: absolute::LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut::NULL],
+        };
+        let txid = tx.compute_txid();
+
+        // As persisted before v4: one raw tx per txid in the txs table.
+        {
+            let db_tx = conn.transaction()?;
+            let v0_to_v3 = v0_to_v3.iter().map(String::as_str).collect::<Vec<_>>();
+            migrate_schema(&db_tx, ChangeSet::SCHEMA_NAME, &v0_to_v3)?;
+            db_tx.execute(
+                &format!(
+                    "INSERT INTO {}(txid, raw_tx, last_seen) VALUES(:txid, :raw_tx, 7)",
+                    ChangeSet::TXS_TABLE_NAME
+                ),
+                named_params! { ":txid": Impl(txid), ":raw_tx": Impl(tx.clone()) },
+            )?;
+            db_tx.commit()?;
+        }
+
+        let db_tx = conn.transaction()?;
+        ChangeSet::init_sqlite_tables(&db_tx)?;
+        let mut other_copy = tx.clone();
+        other_copy.input[0].witness = bitcoin::Witness::from_slice(&[[1u8]]);
+        ChangeSet {
+            txs: [Arc::new(other_copy.clone())].into(),
+            ..Default::default()
+        }
+        .persist_to_sqlite(&db_tx)?;
+        let changeset = ChangeSet::from_sqlite(&db_tx)?;
+        assert_eq!(changeset.txs, [Arc::new(tx), Arc::new(other_copy)].into());
+        assert_eq!(changeset.last_seen, [(txid, 7)].into());
         Ok(())
     }
 
