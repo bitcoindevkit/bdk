@@ -1,11 +1,11 @@
 #![cfg(feature = "miniscript")]
 
-mod common;
-
 use bdk_chain::{CanonicalReason, ChainPosition};
-use bdk_testenv::{block_id, hash, local_chain};
+use bdk_testenv::{
+    block_id, hash, local_chain,
+    tx_template::{init_graph, TxInTemplate, TxOutTemplate, TxTemplate},
+};
 use bitcoin::Txid;
-use common::*;
 use std::collections::HashSet;
 
 #[test]
@@ -28,40 +28,26 @@ fn test_assumed_canonical_scenarios() {
     ];
     let chain_tip = local_chain.tip().block_id();
 
-    // create arrays before scenario to avoid lifetime issues
     let tx_templates = [
-        TxTemplate {
-            tx_name: "txA",
-            inputs: &[TxInTemplate::Bogus],
-            outputs: &[TxOutTemplate::new(100000, Some(0))],
-            anchors: &[],
-            last_seen: None,
-            assume_canonical: false,
-        },
-        TxTemplate {
-            tx_name: "txB",
-            inputs: &[TxInTemplate::PrevTx("txA", 0)],
-            outputs: &[TxOutTemplate::new(50000, Some(0))],
-            anchors: &[block_id!(5, "block5")],
-            last_seen: None,
-            assume_canonical: false,
-        },
-        TxTemplate {
-            tx_name: "txC",
-            inputs: &[TxInTemplate::PrevTx("txB", 0)],
-            outputs: &[TxOutTemplate::new(25000, Some(0))],
-            anchors: &[],
-            last_seen: None,
-            assume_canonical: true,
-        },
+        TxTemplate::new("txA")
+            .with_inputs(vec![TxInTemplate::Bogus])
+            .with_outputs(vec![TxOutTemplate::new(100000, Some(0))]),
+        TxTemplate::new("txB")
+            .with_inputs(vec![TxInTemplate::PrevTx("txA", 0)])
+            .with_outputs(vec![TxOutTemplate::new(50000, Some(0))])
+            .with_anchors(vec![block_id!(5, "block5")]),
+        TxTemplate::new("txC")
+            .with_inputs(vec![TxInTemplate::PrevTx("txB", 0)])
+            .with_outputs(vec![TxOutTemplate::new(25000, Some(0))])
+            .assume_canonical(),
     ];
 
     let exp_canonical_txs = HashSet::from(["txA", "txB", "txC"]);
 
-    let env = init_graph(&tx_templates);
+    let env = init_graph(tx_templates);
 
     // get the actual txid from given tx_name.
-    let txid_c = *env.txid_to_name.get("txC").unwrap();
+    let txid_c = *env.txids.get("txC").unwrap();
 
     // build the expected `CanonicalReason` with specific descendant txid's
     //
@@ -94,7 +80,7 @@ fn test_assumed_canonical_scenarios() {
     let exp_canonical_txids: HashSet<Txid> = exp_canonical_txs
         .iter()
         .map(|tx_name| {
-            *env.txid_to_name
+            *env.txids
                 .get(tx_name)
                 .expect("txid should exist for tx_name")
         })
@@ -114,7 +100,7 @@ fn test_assumed_canonical_scenarios() {
     // assert canonical reasons
     for (tx_name, exp_reason) in exp_reasons {
         let txid = env
-            .txid_to_name
+            .txids
             .get(tx_name)
             .expect("txid should exist for tx_name");
 
@@ -131,7 +117,7 @@ fn test_assumed_canonical_scenarios() {
         )
     }
 
-    let txid_b = *env.txid_to_name.get("txB").unwrap();
+    let txid_b = *env.txids.get("txB").unwrap();
 
     // build the expected `ChainPosition` with specific txid's for transitively confirmed txs.
     //
@@ -171,7 +157,7 @@ fn test_assumed_canonical_scenarios() {
     // assert final positions
     for (tx_name, exp_position) in exp_positions {
         let txid = *env
-            .txid_to_name
+            .txids
             .get(tx_name)
             .expect("txid should exist for tx_name");
 
