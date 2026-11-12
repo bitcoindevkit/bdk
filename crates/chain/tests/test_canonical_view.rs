@@ -10,6 +10,11 @@ use bdk_testenv::{hash, utils::new_tx};
 use bitcoin::{key::Secp256k1, Amount, BlockHash, OutPoint, ScriptBuf, Transaction, TxIn, TxOut};
 use miniscript::Descriptor;
 
+/// Canonicalization checks the scripts of unconfirmed transactions, and these spends are unsigned.
+fn anyone_can_spend() -> ScriptBuf {
+    ScriptBuf::from_bytes(vec![bitcoin::opcodes::OP_TRUE.to_u8()])
+}
+
 /// Builds an `is_settled` predicate requiring at least `min_confirmations` confirmations.
 fn settled(
     tip_height: u32,
@@ -48,7 +53,7 @@ fn test_is_settled_boundary() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(50_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(0)
     };
@@ -70,7 +75,7 @@ fn test_is_settled_boundary() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(50_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(1)
     };
@@ -154,7 +159,7 @@ fn test_min_confirmations_with_untrusted_tx() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(25_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(0)
     };
@@ -176,7 +181,7 @@ fn test_min_confirmations_with_untrusted_tx() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(25_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(1)
     };
@@ -260,15 +265,15 @@ fn test_min_confirmations_multiple_transactions() {
         output: vec![
             TxOut {
                 value: Amount::from_sat(10_000),
-                script_pubkey: ScriptBuf::new(),
+                script_pubkey: anyone_can_spend(),
             },
             TxOut {
                 value: Amount::from_sat(20_000),
-                script_pubkey: ScriptBuf::new(),
+                script_pubkey: anyone_can_spend(),
             },
             TxOut {
                 value: Amount::from_sat(30_000),
-                script_pubkey: ScriptBuf::new(),
+                script_pubkey: anyone_can_spend(),
             },
         ],
         ..new_tx(0)
@@ -291,7 +296,7 @@ fn test_min_confirmations_multiple_transactions() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(10_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(1)
     };
@@ -315,7 +320,7 @@ fn test_min_confirmations_multiple_transactions() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(20_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(2)
     };
@@ -339,7 +344,7 @@ fn test_min_confirmations_multiple_transactions() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(30_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(3)
     };
@@ -412,7 +417,7 @@ fn test_balance_taint_propagates_through_unconfirmed_ancestry() {
     let chain = LocalChain::from_blocks(blocks).unwrap();
     let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
 
-    let owned_spk = ScriptBuf::new();
+    let owned_spk = anyone_can_spend();
 
     // A confirmed coin we own.
     let coin = Transaction {
@@ -538,7 +543,7 @@ fn test_balance_is_settled_is_authoritative_for_unconfirmed() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(50_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(1)
     };
@@ -569,7 +574,7 @@ fn test_balance_taint_stops_at_settled_ancestor() {
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
     let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
-    let owned_spk = ScriptBuf::new();
+    let owned_spk = anyone_can_spend();
 
     // A *settled* (confirmed) tx that itself spends a third-party coin — `does_taint` would flag
     // it.
@@ -651,7 +656,7 @@ fn test_classify_immature_and_settled() {
         .collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
     let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
-    let spk = ScriptBuf::new();
+    let spk = anyone_can_spend();
 
     // Coinbase confirmed at height 1; far below `COINBASE_MATURITY` -> immature.
     let coinbase = Transaction {
@@ -725,7 +730,7 @@ fn test_balance_taint_shared_ancestor() {
         [(0, hash!("g")), (1, hash!("tip"))].into_iter().collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
     let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
-    let owned_spk = ScriptBuf::new();
+    let owned_spk = anyone_can_spend();
 
     // Unconfirmed, funded by a third party -> taints itself. Two outputs.
     let foreign = Transaction {
@@ -815,7 +820,7 @@ fn test_classify_skips_spent_and_unknown() {
         [(0, hash!("g")), (1, hash!("tip"))].into_iter().collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
     let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
-    let spk = ScriptBuf::new();
+    let spk = anyone_can_spend();
 
     // `parent`'s output is spent by `child`.
     let parent = Transaction {
@@ -881,7 +886,7 @@ fn test_immature_coinbase_stays_immature_when_unsettled() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(50_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(0)
     };
@@ -928,7 +933,7 @@ fn test_mature_coinbase_is_settled_not_immature() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(50_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(0)
     };
@@ -974,7 +979,7 @@ fn test_unsettled_unknown_when_parent_root_missing() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(50_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(1)
     };
@@ -987,7 +992,7 @@ fn test_unsettled_unknown_when_parent_root_missing() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(50_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(2)
     };
@@ -1035,7 +1040,7 @@ fn test_evicted_stale_anchored_tx_not_canonical() {
         }],
         output: vec![TxOut {
             value: Amount::from_sat(50_000),
-            script_pubkey: ScriptBuf::new(),
+            script_pubkey: anyone_can_spend(),
         }],
         ..new_tx(1)
     };
@@ -1069,7 +1074,7 @@ fn test_classify_locked() {
         [(0, hash!("g")), (1, hash!("tip"))].into_iter().collect();
     let chain = LocalChain::from_blocks(blocks).unwrap();
     let mut tx_graph = TxGraph::<ConfirmationBlockTime>::default();
-    let spk = ScriptBuf::new();
+    let spk = anyone_can_spend();
 
     let tx = Transaction {
         input: vec![TxIn {

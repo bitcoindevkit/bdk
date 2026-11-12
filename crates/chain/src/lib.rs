@@ -48,6 +48,7 @@ mod canonical;
 pub use canonical::*;
 mod canonical_view_task;
 pub use canonical_view_task::*;
+pub mod validation;
 
 #[doc(hidden)]
 pub mod example_utils;

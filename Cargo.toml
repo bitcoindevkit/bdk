@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/chain",
     "crates/core",
+    "crates/script_verify",
     "crates/file_store",
     "crates/electrum",
     "crates/esplora",

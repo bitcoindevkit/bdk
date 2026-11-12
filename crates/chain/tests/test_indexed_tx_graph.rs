@@ -365,6 +365,37 @@ fn reindex_reaches_fixed_point() {
     );
 }
 
+/// Signs the only input of `tx`, a key-path spend of `descriptor`, a `tr(tprv/path/*)`, at `index`.
+fn sign_tr_key_spend(tx: &mut Transaction, prevout: &TxOut, descriptor: &str, index: u32) {
+    use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv};
+    use bitcoin::hashes::Hash;
+    use bitcoin::key::TapTweak;
+    use bitcoin::sighash::{Prevouts, SighashCache, TapSighashType};
+
+    let secp = Secp256k1::new();
+    let (xprv, path) = descriptor
+        .strip_prefix("tr(")
+        .and_then(|d| d.strip_suffix("/*)"))
+        .and_then(|d| d.split_once('/'))
+        .unwrap();
+    let path = DerivationPath::from_str(&format!("m/{path}"))
+        .unwrap()
+        .child(ChildNumber::from_normal_idx(index).unwrap());
+    let keypair = Xpriv::from_str(xprv)
+        .unwrap()
+        .derive_priv(&secp, &path)
+        .unwrap()
+        .to_keypair(&secp)
+        .tap_tweak(&secp, None)
+        .to_keypair();
+    let sighash = SighashCache::new(&*tx)
+        .taproot_key_spend_signature_hash(0, &Prevouts::All(&[prevout]), TapSighashType::Default)
+        .unwrap();
+    let message = bitcoin::secp256k1::Message::from_digest(sighash.to_byte_array());
+    let sig = secp.sign_schnorr_no_aux_rand(&message, &keypair);
+    tx.input[0].witness = bitcoin::Witness::from_slice(&[sig.as_ref()]);
+}
+
 /// Ensure consistency IndexedTxGraph list_* and balance methods. These methods lists
 /// relevant txouts and utxos from the information fetched from a LocalChain.
 ///
@@ -468,7 +499,7 @@ fn test_list_owned_txouts() {
     };
 
     // tx3 spends tx2 and gives a change back in keychain_1. Confirmed at Block 2.
-    let tx3 = Transaction {
+    let mut tx3 = Transaction {
         input: vec![TxIn {
             previous_output: OutPoint::new(tx2.compute_txid(), 0),
             ..Default::default()
@@ -479,6 +510,8 @@ fn test_list_owned_txouts() {
         }],
         ..new_tx(3)
     };
+    // Below block 2 tx3 is unconfirmed, so its scripts are checked.
+    sign_tr_key_spend(&mut tx3, &tx2.output[0], DESCRIPTORS[3], 0);
 
     // tx4 is unconfirmed and pays one of our addresses, but it spends a third-party
     // coin we don't own. That foreign input is what makes its ancestry untrusted.

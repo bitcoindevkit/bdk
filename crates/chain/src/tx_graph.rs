@@ -129,6 +129,7 @@
 //! [`canonical_task`]: TxGraph::canonical_task
 
 use crate::collections::*;
+use crate::validation::{InputValidity, TxValidation};
 use crate::CanonicalParams;
 use crate::CanonicalTask;
 use crate::{Anchor, BlockId, Merge};
@@ -137,7 +138,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bdk_core::ConfirmationBlockTime;
 pub use bdk_core::TxUpdate;
-use bitcoin::{Amount, OutPoint, SignedAmount, Transaction, TxOut, Txid};
+use bdk_script_verify::{DependsOn, Error as VerifyError};
+use bitcoin::{Amount, OutPoint, SignedAmount, Transaction, TxOut, Txid, Wtxid};
 use core::fmt::{self, Formatter};
 use core::ops::{Deref, RangeInclusive};
 
@@ -185,6 +187,10 @@ pub struct TxGraph<A = ConfirmationBlockTime> {
     txs_by_highest_conf_heights: BTreeSet<(u32, Txid)>,
     txs_by_last_seen: BTreeSet<(u64, Txid)>,
 
+    /// Every received copy of each txid that has more than one (they differ only in witnesses).
+    /// `txs` holds the copy resolved from these.
+    copies: HashMap<Txid, BTreeMap<Wtxid, Arc<Transaction>>>,
+
     // The following fields exist so that methods can return references to empty sets.
     // FIXME: This can be removed once `HashSet::new` and `BTreeSet::new` are const fns.
     empty_outspends: HashSet<Txid>,
@@ -202,6 +208,7 @@ impl<A> Default for TxGraph<A> {
             last_evicted: Default::default(),
             txs_by_highest_conf_heights: Default::default(),
             txs_by_last_seen: Default::default(),
+            copies: Default::default(),
             empty_outspends: Default::default(),
             empty_anchors: Default::default(),
         }
@@ -359,6 +366,30 @@ impl<A> TxGraph<A> {
             }),
             TxNodeInternal::Partial(_) => None,
         })
+    }
+
+    /// Every received copy of every full transaction. The graph's own transactions are resolved
+    /// from these, so replaying them rebuilds it.
+    fn received_txs(&self) -> impl Iterator<Item = Arc<Transaction>> + '_ {
+        self.full_txs()
+            .flat_map(|node| match self.copies.get(&node.txid) {
+                Some(copies) => copies.values().cloned().collect::<Vec<_>>(),
+                None => vec![node.tx],
+            })
+    }
+
+    /// Every received copy of the full transaction `txid`. Copies share a txid and differ only in
+    /// their witnesses.
+    ///
+    /// Graph queries expose one copy per txid, chosen as [`insert_tx`](Self::insert_tx) describes.
+    /// Canonicalization additionally considers script validity and may select a different copy.
+    pub fn tx_copies(&self, txid: Txid) -> impl Iterator<Item = Arc<Transaction>> + '_ {
+        match (self.copies.get(&txid), self.txs.get(&txid)) {
+            (Some(copies), _) => copies.values().cloned().collect(),
+            (None, Some(TxNodeInternal::Whole(tx))) => vec![tx.clone()],
+            _ => vec![],
+        }
+        .into_iter()
     }
 
     /// Iterate over graph transactions with no anchors or last-seen.
@@ -585,6 +616,85 @@ impl<A> TxGraph<A> {
     pub fn is_empty(&self) -> bool {
         self.txs.is_empty()
     }
+
+    /// Checks the scripts of each input of `tx`, which need not be in the graph, against the
+    /// outputs it spends, under today's consensus script rules.
+    ///
+    /// Each spent output is taken from the graph's full transaction if it has one, and otherwise
+    /// from its floating txout, and each verdict says whether it relied on a floating txout. An
+    /// input depending on an output the graph has neither for is [`InputValidity::Unknown`].
+    ///
+    /// [`InputValidity::Unknown`]: crate::validation::InputValidity::Unknown
+    pub fn validate_tx(&self, tx: &Transaction) -> TxValidation {
+        let prevouts = tx
+            .input
+            .iter()
+            .map(|txin| {
+                let outpoint = txin.previous_output;
+                match self.txs.get(&outpoint.txid)? {
+                    TxNodeInternal::Whole(prev) => {
+                        Some((prev.output.get(outpoint.vout as usize)?, false))
+                    }
+                    TxNodeInternal::Partial(txouts) => Some((txouts.get(&outpoint.vout)?, true)),
+                }
+            })
+            .collect::<Vec<_>>();
+        let txouts = prevouts
+            .iter()
+            .map(|p| p.map(|(txout, _)| txout))
+            .collect::<Vec<_>>();
+        let floating = |vin: usize| matches!(prevouts[vin], Some((_, true)));
+        let any_floating = (0..tx.input.len()).any(floating);
+        let inputs =
+            bdk_script_verify::verify_transaction(tx, &txouts, bdk_script_verify::Flags::CONSENSUS)
+                .into_iter()
+                .enumerate()
+                .map(|(vin, verification)| {
+                    let relies_on_floating = match verification.depends_on {
+                        DependsOn::OwnPrevout => floating(vin),
+                        DependsOn::AllPrevouts => any_floating,
+                    };
+                    match verification.result {
+                        Ok(()) => InputValidity::Valid { relies_on_floating },
+                        Err(VerifyError::Script(error)) => InputValidity::Invalid {
+                            error,
+                            relies_on_floating,
+                        },
+                        Err(VerifyError::MissingPrevouts(inputs)) => InputValidity::Unknown {
+                            missing: inputs
+                                .into_iter()
+                                .map(|i| tx.input[i].previous_output)
+                                .collect(),
+                        },
+                    }
+                })
+                .collect();
+        TxValidation { inputs }
+    }
+
+    /// Exposes the preferred copy of `txid`. The choice depends only on the copies, never on the
+    /// order they arrived in.
+    fn resolve(&mut self, txid: Txid) {
+        let Some(copies) = self.copies.get(&txid) else {
+            return;
+        };
+        let best = copies
+            .iter()
+            .min_by_key(|(wtxid, tx)| (witness_preference(tx), **wtxid))
+            .map(|(_, tx)| tx.clone())
+            .expect("copies are only recorded in pairs or more");
+        self.txs.insert(txid, TxNodeInternal::Whole(best));
+    }
+}
+
+pub(crate) fn witness_preference(tx: &Transaction) -> (usize, usize) {
+    let empty = tx
+        .input
+        .iter()
+        .filter(|input| input.witness.is_empty())
+        .count();
+    let size = tx.input.iter().map(|input| input.witness.size()).sum();
+    (empty, size)
 }
 
 impl<A: Anchor> TxGraph<A> {
@@ -656,55 +766,19 @@ impl<A: Anchor> TxGraph<A> {
     /// further transaction insertions (given that the newly introduced transaction shares the same
     /// txid as the original transaction).
     ///
-    /// The witnesses of the newly introduced transaction will be merged with the witnesses of the
-    /// original transaction in a way where:
+    /// Every copy is kept, and the graph exposes one of them as the transaction, never mixing
+    /// witnesses across copies. It prefers, in order:
     ///
-    /// * A non-empty witness has precedence over an empty witness.
-    /// * A smaller witness has precedence over a larger witness.
-    /// * If the witness sizes are the same, we prioritize the two witnesses with lexicographical
-    ///   order.
+    /// * Fewer empty witnesses.
+    /// * Smaller witnesses in total.
+    /// * The lexicographically smaller wtxid.
+    ///
+    /// Scripts are not checked here. For unconfirmed candidates, canonicalization prefers a Valid
+    /// copy over Unknown and excludes the txid only if all copies are Invalid. Within each validity
+    /// class it uses the order above, and its view carries that selected copy. A new copy
+    /// is in the returned [`ChangeSet`] even if it is not preferred. Use
+    /// [`tx_copies`](Self::tx_copies) to see every copy.
     pub fn insert_tx<T: Into<Arc<Transaction>>>(&mut self, tx: T) -> ChangeSet<A> {
-        // This returns `Some` only if the merged tx is different to the `original_tx`.
-        fn _merge_tx_witnesses(
-            original_tx: &Arc<Transaction>,
-            other_tx: &Arc<Transaction>,
-        ) -> Option<Arc<Transaction>> {
-            debug_assert_eq!(
-                original_tx.input.len(),
-                other_tx.input.len(),
-                "tx input count must be the same"
-            );
-            let merged_input = Iterator::zip(original_tx.input.iter(), other_tx.input.iter())
-                .map(|(original_txin, other_txin)| {
-                    let original_key = core::cmp::Reverse((
-                        original_txin.witness.is_empty(),
-                        original_txin.witness.size(),
-                        &original_txin.witness,
-                    ));
-                    let other_key = core::cmp::Reverse((
-                        other_txin.witness.is_empty(),
-                        other_txin.witness.size(),
-                        &other_txin.witness,
-                    ));
-                    if original_key > other_key {
-                        original_txin.clone()
-                    } else {
-                        other_txin.clone()
-                    }
-                })
-                .collect::<Vec<_>>();
-            if merged_input == original_tx.input {
-                return None;
-            }
-            if merged_input == other_tx.input {
-                return Some(other_tx.clone());
-            }
-            Some(Arc::new(Transaction {
-                input: merged_input,
-                ..(**original_tx).clone()
-            }))
-        }
-
         let tx: Arc<Transaction> = tx.into();
         let txid = tx.compute_txid();
         let mut changeset = ChangeSet::<A>::default();
@@ -712,12 +786,22 @@ impl<A: Anchor> TxGraph<A> {
         let tx_node = self.txs.entry(txid).or_default();
         match tx_node {
             TxNodeInternal::Whole(existing_tx) => {
-                if existing_tx.as_ref() != tx.as_ref() {
-                    // Allowing updating witnesses of txs.
-                    if let Some(merged_tx) = _merge_tx_witnesses(existing_tx, &tx) {
-                        *existing_tx = merged_tx.clone();
-                        changeset.txs.insert(merged_tx);
+                let is_new_copy = match self.copies.get_mut(&txid) {
+                    Some(copies) => copies.insert(tx.compute_wtxid(), tx.clone()).is_none(),
+                    None if existing_tx.as_ref() != tx.as_ref() => {
+                        let copies = [
+                            (existing_tx.compute_wtxid(), existing_tx.clone()),
+                            (tx.compute_wtxid(), tx.clone()),
+                        ]
+                        .into();
+                        self.copies.insert(txid, copies);
+                        true
                     }
+                    None => false,
+                };
+                if is_new_copy {
+                    changeset.txs.insert(tx);
+                    self.resolve(txid);
                 }
             }
             partial_tx => {
@@ -953,7 +1037,7 @@ impl<A: Anchor> TxGraph<A> {
     /// Determines the [`ChangeSet`] between `self` and an empty [`TxGraph`].
     pub fn initial_changeset(&self) -> ChangeSet<A> {
         ChangeSet {
-            txs: self.full_txs().map(|tx_node| tx_node.tx).collect(),
+            txs: self.received_txs().collect(),
             txouts: self
                 .floating_txouts()
                 .map(|(op, txout)| (op, txout.clone()))
@@ -1059,6 +1143,9 @@ impl<A: Anchor> TxGraph<A> {
 #[must_use]
 pub struct ChangeSet<A = ()> {
     /// Added transactions.
+    ///
+    /// Several may share a txid, differing only in their witnesses. A store must keep every one:
+    /// which copy the graph exposes can change as more data arrives.
     pub txs: BTreeSet<Arc<Transaction>>,
     /// Added txouts.
     pub txouts: BTreeMap<OutPoint, TxOut>,
