@@ -372,11 +372,17 @@ where
         }
 
         for (index, txs, evicted) in handles.try_collect::<Vec<TxsOfSpkIndex>>().await? {
-            if !txs.is_empty() {
-                consecutive_unused = 0;
-                last_active_index = Some(index);
-            } else if last_revealed.is_none_or(|lr| index > lr) {
-                consecutive_unused = consecutive_unused.saturating_add(1);
+            // Results within a batch may come back past the stop gap; ignore them so the
+            // outcome doesn't depend on `parallel_requests`.
+            if !track_spk_activity(
+                !txs.is_empty(),
+                index,
+                last_revealed,
+                gap_limit,
+                &mut consecutive_unused,
+                &mut last_active_index,
+            ) {
+                break;
             }
 
             for tx in txs {
