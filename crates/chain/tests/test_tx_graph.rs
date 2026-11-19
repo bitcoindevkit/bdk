@@ -581,6 +581,114 @@ fn test_calculate_fee_on_coinbase() {
     assert_eq!(graph.calculate_fee(&tx), Ok(Amount::ZERO));
 }
 
+fn insert_prevouts_and_build_tx(
+    prevouts: &[u64],
+    missing: u32,
+    outputs: &[u64],
+) -> (TxGraph<ConfirmationBlockTime>, Transaction) {
+    let mut graph = TxGraph::<ConfirmationBlockTime>::default();
+    let mut tx = Transaction {
+        version: transaction::Version::ONE,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: outputs
+            .iter()
+            .map(|&sats| TxOut {
+                value: Amount::from_sat(sats),
+                script_pubkey: ScriptBuf::new(),
+            })
+            .collect(),
+    };
+
+    for (vout, &sats) in prevouts.iter().enumerate() {
+        let outpoint = OutPoint::new(hash!("prevouts"), vout as u32);
+        let _ = graph.insert_txout(
+            outpoint,
+            TxOut {
+                value: Amount::from_sat(sats),
+                script_pubkey: ScriptBuf::new(),
+            },
+        );
+        tx.input.push(TxIn {
+            previous_output: outpoint,
+            ..Default::default()
+        });
+    }
+
+    for vout in 0..missing {
+        tx.input.push(TxIn {
+            previous_output: OutPoint::new(hash!("unknown_txid"), vout),
+            ..Default::default()
+        });
+    }
+
+    (graph, tx)
+}
+
+#[test]
+fn test_calculate_fee_signed_amount_boundary() {
+    let max = SignedAmount::MAX.to_sat() as u64;
+
+    let (graph, tx) = insert_prevouts_and_build_tx(&[max], 0, &[0]);
+    assert_eq!(graph.calculate_fee(&tx), Ok(Amount::from_sat(max)));
+
+    let (graph, tx) = insert_prevouts_and_build_tx(&[max - 1, 1], 0, &[0]);
+    assert_eq!(graph.calculate_fee(&tx), Ok(Amount::from_sat(max)));
+
+    let (graph, tx) = insert_prevouts_and_build_tx(&[max], 0, &[max - 1, 1]);
+    assert_eq!(graph.calculate_fee(&tx), Ok(Amount::ZERO));
+}
+
+#[test]
+fn test_calculate_fee_amount_overflow() {
+    let max = SignedAmount::MAX.to_sat() as u64;
+
+    let (graph, tx) = insert_prevouts_and_build_tx(&[max + 1], 0, &[0]);
+    assert_eq!(
+        graph.calculate_fee(&tx),
+        Err(CalculateFeeError::AmountOverflow)
+    );
+
+    let (graph, tx) = insert_prevouts_and_build_tx(&[max, 1], 0, &[0]);
+    assert_eq!(
+        graph.calculate_fee(&tx),
+        Err(CalculateFeeError::AmountOverflow)
+    );
+
+    let (graph, tx) = insert_prevouts_and_build_tx(&[1_000], 0, &[max + 1]);
+    assert_eq!(
+        graph.calculate_fee(&tx),
+        Err(CalculateFeeError::AmountOverflow)
+    );
+
+    let (graph, tx) = insert_prevouts_and_build_tx(&[1_000], 0, &[max, 1]);
+    assert_eq!(
+        graph.calculate_fee(&tx),
+        Err(CalculateFeeError::AmountOverflow)
+    );
+}
+
+#[test]
+fn test_calculate_fee_missing_prevout_takes_precedence_over_overflow() {
+    let max = SignedAmount::MAX.to_sat() as u64;
+    let outpoint = |vout| OutPoint::new(hash!("unknown_txid"), vout);
+
+    let (graph, tx) = insert_prevouts_and_build_tx(&[max + 1], 1, &[0]);
+    assert_eq!(
+        graph.calculate_fee(&tx),
+        Err(CalculateFeeError::MissingTxOut(vec![outpoint(0)]))
+    );
+
+    let (graph, tx) = insert_prevouts_and_build_tx(&[max + 1], 2, &[0]);
+    assert_eq!(
+        graph.calculate_fee(&tx),
+        Err(CalculateFeeError::MissingTxOut(vec![
+            outpoint(0),
+            outpoint(1)
+        ]))
+    );
+}
+
 // `test_walk_ancestors` uses the following transaction structure:
 //
 //     a0

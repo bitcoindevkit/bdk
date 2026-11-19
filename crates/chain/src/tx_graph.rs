@@ -270,6 +270,9 @@ pub enum CalculateFeeError {
     MissingTxOut(Vec<OutPoint>),
     /// When the transaction is invalid according to the graph it has a negative fee
     NegativeFee(SignedAmount),
+    /// An individual input or output value, or the accumulated sum of inputs or of outputs,
+    /// exceeds [`SignedAmount::MAX`].
+    AmountOverflow,
 }
 
 impl fmt::Display for CalculateFeeError {
@@ -302,11 +305,18 @@ impl fmt::Display for CalculateFeeError {
                 )?;
                 Ok(())
             }
+            CalculateFeeError::AmountOverflow => {
+                write!(f, "amount overflow while calculating fee")
+            }
         }
     }
 }
 
 impl core::error::Error for CalculateFeeError {}
+
+fn checked_signed_add(sum: SignedAmount, value: Amount) -> Option<SignedAmount> {
+    sum.checked_add(value.to_signed().ok()?)
+}
 
 impl<A> TxGraph<A> {
     /// Iterate over all tx outputs known by [`TxGraph`].
@@ -442,29 +452,34 @@ impl<A> TxGraph<A> {
         }
 
         let (inputs_sum, missing_outputs) = tx.input.iter().fold(
-            (SignedAmount::ZERO, Vec::new()),
-            |(mut sum, mut missing_outpoints), txin| match self.get_txout(txin.previous_output) {
+            (Some(SignedAmount::ZERO), Vec::new()),
+            |(sum, mut missing_outpoints), txin| match self.get_txout(txin.previous_output) {
                 None => {
                     missing_outpoints.push(txin.previous_output);
                     (sum, missing_outpoints)
                 }
-                Some(txout) => {
-                    sum += txout.value.to_signed().expect("valid `SignedAmount`");
-                    (sum, missing_outpoints)
-                }
+                Some(txout) => (
+                    sum.and_then(|sum| checked_signed_add(sum, txout.value)),
+                    missing_outpoints,
+                ),
             },
         );
         if !missing_outputs.is_empty() {
             return Err(CalculateFeeError::MissingTxOut(missing_outputs));
         }
+        let inputs_sum = inputs_sum.ok_or(CalculateFeeError::AmountOverflow)?;
 
         let outputs_sum = tx
             .output
             .iter()
-            .map(|txout| txout.value.to_signed().expect("valid `SignedAmount`"))
-            .sum::<SignedAmount>();
+            .try_fold(SignedAmount::ZERO, |sum, txout| {
+                checked_signed_add(sum, txout.value)
+            })
+            .ok_or(CalculateFeeError::AmountOverflow)?;
 
-        let fee = inputs_sum - outputs_sum;
+        let fee = inputs_sum
+            .checked_sub(outputs_sum)
+            .ok_or(CalculateFeeError::AmountOverflow)?;
         fee.to_unsigned()
             .map_err(|_| CalculateFeeError::NegativeFee(fee))
     }
