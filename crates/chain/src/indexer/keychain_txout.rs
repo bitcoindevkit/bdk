@@ -23,6 +23,8 @@ use core::{
 use crate::spk_txout::{CreatedTxOut, SpentTxOut};
 use crate::Merge;
 
+pub use crate::spk_txout::AmountOverflow;
+
 /// The default lookahead for a [`KeychainTxOutIndex`]
 pub const DEFAULT_LOOKAHEAD: u32 = 25;
 
@@ -433,11 +435,13 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     /// *received* when it is on an output. For `sent` to be computed correctly, the output being
     /// spent must have already been scanned by the index. Calculating received just uses the
     /// [`Transaction`] outputs directly, so it will be correct even if it has not been scanned.
+    ///
+    /// Returns [`AmountOverflow`] if the accumulated sent or received amount exceeds the representable range.
     pub fn sent_and_received(
         &self,
         tx: &Transaction,
         range: impl RangeBounds<K>,
-    ) -> (Amount, Amount) {
+    ) -> Result<(Amount, Amount), AmountOverflow> {
         self.inner
             .sent_and_received(tx, self.map_to_inner_bounds(range))
     }
@@ -469,8 +473,14 @@ impl<K: Clone + Ord + Debug> KeychainTxOutIndex<K> {
     ///
     /// This calls [`SpkTxOutIndex::net_value`] internally.
     ///
+    /// Returns [`AmountOverflow`] if sent/received accumulation or the net value computation overflows.
+    ///
     /// [`sent_and_received`]: Self::sent_and_received
-    pub fn net_value(&self, tx: &Transaction, range: impl RangeBounds<K>) -> SignedAmount {
+    pub fn net_value(
+        &self,
+        tx: &Transaction,
+        range: impl RangeBounds<K>,
+    ) -> Result<SignedAmount, AmountOverflow> {
         self.inner.net_value(tx, self.map_to_inner_bounds(range))
     }
 }

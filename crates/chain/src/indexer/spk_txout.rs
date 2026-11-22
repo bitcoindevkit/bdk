@@ -1,6 +1,7 @@
 //! [`SpkTxOutIndex`] is an index storing [`TxOut`]s that have a script pubkey that matches those in
 //! a list.
 
+use core::fmt;
 use core::ops::RangeBounds;
 
 use crate::{
@@ -8,6 +9,18 @@ use crate::{
     Indexer,
 };
 use bitcoin::{Amount, OutPoint, Script, ScriptBuf, SignedAmount, Transaction, TxIn, TxOut, Txid};
+
+/// An error that occurs when amount accumulation or conversion overflows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AmountOverflow;
+
+impl fmt::Display for AmountOverflow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "amount arithmetic overflowed representable range")
+    }
+}
+
+impl core::error::Error for AmountOverflow {}
 
 /// An index storing [`TxOut`]s that have a script pubkey that matches those in a list.
 ///
@@ -296,30 +309,32 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// output. For `sent` to be computed correctly, the output being spent must have already been
     /// scanned by the index. Calculating received just uses the [`Transaction`] outputs directly,
     /// so it will be correct even if it has not been scanned.
+    ///
+    /// Returns [`AmountOverflow`] if the accumulated sent or received amount exceeds the representable range.
     pub fn sent_and_received(
         &self,
         tx: &Transaction,
         range: impl RangeBounds<I>,
-    ) -> (Amount, Amount) {
+    ) -> Result<(Amount, Amount), AmountOverflow> {
         let mut sent = Amount::ZERO;
         let mut received = Amount::ZERO;
 
         for txin in &tx.input {
             if let Some((index, txout)) = self.txout(txin.previous_output) {
                 if range.contains(index) {
-                    sent += txout.value;
+                    sent = sent.checked_add(txout.value).ok_or(AmountOverflow)?;
                 }
             }
         }
         for txout in &tx.output {
             if let Some(index) = self.index_of_spk(txout.script_pubkey.as_script()) {
                 if range.contains(index) {
-                    received += txout.value;
+                    received = received.checked_add(txout.value).ok_or(AmountOverflow)?;
                 }
             }
         }
 
-        (sent, received)
+        Ok((sent, received))
     }
 
     /// Returns the relevant [`SpentTxOut`]s for a [`Transaction`]
@@ -427,11 +442,18 @@ impl<I: Clone + Ord + core::fmt::Debug> SpkTxOutIndex<I> {
     /// Computes the net value transfer effect of `tx` on the script pubkeys in `range`. Shorthand
     /// for calling [`sent_and_received`] and subtracting sent from received.
     ///
+    /// Returns [`AmountOverflow`] if sent/received accumulation or the net value computation overflows.
+    ///
     /// [`sent_and_received`]: Self::sent_and_received
-    pub fn net_value(&self, tx: &Transaction, range: impl RangeBounds<I>) -> SignedAmount {
-        let (sent, received) = self.sent_and_received(tx, range);
-        received.to_signed().expect("valid `SignedAmount`")
-            - sent.to_signed().expect("valid `SignedAmount`")
+    pub fn net_value(
+        &self,
+        tx: &Transaction,
+        range: impl RangeBounds<I>,
+    ) -> Result<SignedAmount, AmountOverflow> {
+        let (sent, received) = self.sent_and_received(tx, range)?;
+        let received = received.to_signed().map_err(|_| AmountOverflow)?;
+        let sent = sent.to_signed().map_err(|_| AmountOverflow)?;
+        received.checked_sub(sent).ok_or(AmountOverflow)
     }
 
     /// Whether any of the inputs of this transaction spend a txout tracked or whether any output
