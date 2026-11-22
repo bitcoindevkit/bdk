@@ -9,7 +9,7 @@ use bdk_core::{
 use esplora_client::{OutputStatus, Tx};
 use std::thread::JoinHandle;
 
-use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
+use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts, track_spk_activity};
 
 /// [`esplora_client::Error`]
 pub type Error = Box<esplora_client::Error>;

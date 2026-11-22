@@ -10,7 +10,7 @@ use bdk_core::{
 use esplora_client::Sleeper;
 use futures::{stream::FuturesOrdered, TryStreamExt};
 
-use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts};
+use crate::{insert_anchor_or_seen_at_from_status, insert_prevouts, track_spk_activity};
 
 /// [`esplora_client::Error`]
 type Error = Box<esplora_client::Error>;
