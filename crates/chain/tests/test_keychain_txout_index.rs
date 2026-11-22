@@ -3,6 +3,7 @@
 use bdk_chain::{
     collections::BTreeMap,
     indexer::keychain_txout::{ChangeSet, KeychainTxOutIndex},
+    spk_txout::AmountOverflow,
     DescriptorExt, DescriptorId, Indexer, Merge, SpkIterator,
 };
 use bdk_testenv::{
@@ -738,13 +739,67 @@ fn when_querying_over_a_range_of_keychains_the_utxos_should_show_up() {
     assert_eq!(indexer.revealed_spks(0..DESCRIPTORS.len()).count(), n_spks);
     assert_eq!(indexer.revealed_spks(1..4).count(), 4 - 1);
     assert_eq!(
-        indexer.net_value(&tx, 0..DESCRIPTORS.len()).to_sat(),
+        indexer
+            .net_value(&tx, 0..DESCRIPTORS.len())
+            .unwrap()
+            .to_sat(),
         (10_000 * n_spks) as i64
     );
     assert_eq!(
-        indexer.net_value(&tx, 3..6).to_sat(),
+        indexer.net_value(&tx, 3..6).unwrap().to_sat(),
         (10_000 * (6 - 3 - /*the skipped one*/ 1)) as i64
     );
+}
+
+#[test]
+fn test_keychain_txout_net_value_exceeds_signed_amount_max() {
+    let mut indexer = KeychainTxOutIndex::<TestKeychain>::new(1, true);
+    let desc = parse_descriptor(DESCRIPTORS[0]);
+    indexer
+        .insert_descriptor(TestKeychain::External, desc)
+        .unwrap();
+    let ((_index, spk), _changeset) = indexer.reveal_next_spk(TestKeychain::External).unwrap();
+
+    let tx = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![TxOut {
+            value: Amount::from_sat(i64::MAX as u64 + 1),
+            script_pubkey: spk.clone(),
+        }],
+    };
+
+    assert_eq!(indexer.net_value(&tx, ..), Err(AmountOverflow));
+}
+
+#[test]
+fn test_keychain_txout_sent_and_received_exceeds_u64_max() {
+    let mut indexer = KeychainTxOutIndex::<TestKeychain>::new(1, true);
+    let desc = parse_descriptor(DESCRIPTORS[0]);
+    indexer
+        .insert_descriptor(TestKeychain::External, desc)
+        .unwrap();
+    let ((_index, spk), _changeset) = indexer.reveal_next_spk(TestKeychain::External).unwrap();
+
+    let tx = Transaction {
+        version: bitcoin::transaction::Version::TWO,
+        lock_time: bitcoin::absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![
+            TxOut {
+                value: Amount::from_sat(u64::MAX),
+                script_pubkey: spk.clone(),
+            },
+            TxOut {
+                value: Amount::from_sat(1),
+                script_pubkey: spk,
+            },
+        ],
+    };
+
+    assert_eq!(indexer.sent_and_received(&tx, ..), Err(AmountOverflow));
+    assert_eq!(indexer.net_value(&tx, ..), Err(AmountOverflow));
 }
 
 /// Overlapping descriptors are a contract violation, but must not panic in release builds.

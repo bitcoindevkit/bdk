@@ -1,4 +1,4 @@
-use bdk_chain::spk_txout::{CreatedTxOut, SpentTxOut};
+use bdk_chain::spk_txout::{AmountOverflow, CreatedTxOut, SpentTxOut};
 use bdk_chain::{spk_txout::SpkTxOutIndex, Indexer};
 use bitcoin::{
     absolute, transaction, Amount, OutPoint, ScriptBuf, SignedAmount, Transaction, TxIn, TxOut,
@@ -26,21 +26,24 @@ fn spk_txout_sent_and_received() {
 
     assert_eq!(
         index.sent_and_received(&tx1, ..),
-        (Amount::from_sat(0), Amount::from_sat(42_000))
+        Ok((Amount::from_sat(0), Amount::from_sat(42_000)))
     );
     assert_eq!(
         index.sent_and_received(&tx1, ..1),
-        (Amount::from_sat(0), Amount::from_sat(42_000))
+        Ok((Amount::from_sat(0), Amount::from_sat(42_000)))
     );
     assert_eq!(
         index.sent_and_received(&tx1, 1..),
-        (Amount::from_sat(0), Amount::from_sat(0))
+        Ok((Amount::from_sat(0), Amount::from_sat(0)))
     );
-    assert_eq!(index.net_value(&tx1, ..), SignedAmount::from_sat(42_000));
+    assert_eq!(
+        index.net_value(&tx1, ..),
+        Ok(SignedAmount::from_sat(42_000))
+    );
     index.index_tx(&tx1);
     assert_eq!(
         index.sent_and_received(&tx1, ..),
-        (Amount::from_sat(0), Amount::from_sat(42_000)),
+        Ok((Amount::from_sat(0), Amount::from_sat(42_000))),
         "shouldn't change after scanning"
     );
 
@@ -68,17 +71,17 @@ fn spk_txout_sent_and_received() {
 
     assert_eq!(
         index.sent_and_received(&tx2, ..),
-        (Amount::from_sat(42_000), Amount::from_sat(50_000))
+        Ok((Amount::from_sat(42_000), Amount::from_sat(50_000)))
     );
     assert_eq!(
         index.sent_and_received(&tx2, ..1),
-        (Amount::from_sat(42_000), Amount::from_sat(30_000))
+        Ok((Amount::from_sat(42_000), Amount::from_sat(30_000)))
     );
     assert_eq!(
         index.sent_and_received(&tx2, 1..),
-        (Amount::from_sat(0), Amount::from_sat(20_000))
+        Ok((Amount::from_sat(0), Amount::from_sat(20_000)))
     );
-    assert_eq!(index.net_value(&tx2, ..), SignedAmount::from_sat(8_000));
+    assert_eq!(index.net_value(&tx2, ..), Ok(SignedAmount::from_sat(8_000)));
 }
 
 #[test]
@@ -478,4 +481,118 @@ fn insert_spk_preserves_scanned_output_and_used_status() {
     };
     assert_eq!(index.scan_txout(new_outpoint, &new_output), None);
     assert_eq!(index.txout(new_outpoint), None);
+}
+
+#[test]
+fn test_net_value_exceeds_signed_amount_max() {
+    let spk = ScriptBuf::from_bytes(vec![0x51]);
+    let mut index = SpkTxOutIndex::<u32>::default();
+    index.insert_spk(0, spk.clone());
+
+    let tx = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![TxOut {
+            value: Amount::from_sat(i64::MAX as u64 + 1),
+            script_pubkey: spk,
+        }],
+    };
+
+    assert_eq!(index.net_value(&tx, ..), Err(AmountOverflow));
+}
+
+#[test]
+fn test_sent_and_received_exceeds_u64_max() {
+    let spk = ScriptBuf::from_bytes(vec![0x51]);
+    let mut index = SpkTxOutIndex::<u32>::default();
+    index.insert_spk(0, spk.clone());
+
+    let tx = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![],
+        output: vec![
+            TxOut {
+                value: Amount::from_sat(u64::MAX),
+                script_pubkey: spk.clone(),
+            },
+            TxOut {
+                value: Amount::from_sat(1),
+                script_pubkey: spk,
+            },
+        ],
+    };
+
+    assert_eq!(index.sent_and_received(&tx, ..), Err(AmountOverflow));
+    assert_eq!(index.net_value(&tx, ..), Err(AmountOverflow));
+}
+
+#[test]
+fn test_net_value_spent_input_exceeds_signed_amount_max() {
+    let spk = ScriptBuf::from_bytes(vec![0x51]);
+    let mut index = SpkTxOutIndex::<u32>::default();
+    index.insert_spk(0, spk.clone());
+
+    let prev_op = OutPoint::null();
+    let prev_txout = TxOut {
+        value: Amount::from_sat(i64::MAX as u64 + 1),
+        script_pubkey: spk,
+    };
+    assert_eq!(index.scan_txout(prev_op, &prev_txout), Some(&0));
+
+    let tx = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: prev_op,
+            ..Default::default()
+        }],
+        output: vec![],
+    };
+
+    assert_eq!(index.net_value(&tx, ..), Err(AmountOverflow));
+}
+
+#[test]
+fn test_sent_and_received_spent_input_exceeds_u64_max() {
+    let spk = ScriptBuf::from_bytes(vec![0x51]);
+    let mut index = SpkTxOutIndex::<u32>::default();
+    index.insert_spk(0, spk.clone());
+
+    let prev_op0 = OutPoint::null();
+    let prev_txout0 = TxOut {
+        value: Amount::from_sat(u64::MAX),
+        script_pubkey: spk.clone(),
+    };
+    let prev_op1 = OutPoint {
+        vout: 1,
+        ..prev_op0
+    };
+    let prev_txout1 = TxOut {
+        value: Amount::from_sat(1),
+        script_pubkey: spk,
+    };
+
+    assert_eq!(index.scan_txout(prev_op0, &prev_txout0), Some(&0));
+    assert_eq!(index.scan_txout(prev_op1, &prev_txout1), Some(&0));
+
+    let tx = Transaction {
+        version: transaction::Version::TWO,
+        lock_time: absolute::LockTime::ZERO,
+        input: vec![
+            TxIn {
+                previous_output: prev_op0,
+                ..Default::default()
+            },
+            TxIn {
+                previous_output: prev_op1,
+                ..Default::default()
+            },
+        ],
+        output: vec![],
+    };
+
+    assert_eq!(index.sent_and_received(&tx, ..), Err(AmountOverflow));
+    assert_eq!(index.net_value(&tx, ..), Err(AmountOverflow));
 }
