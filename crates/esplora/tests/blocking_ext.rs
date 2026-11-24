@@ -475,3 +475,55 @@ pub fn test_sync_with_zero_parallel_requests() {
         );
     }
 }
+
+/// `full_scan` must stop at `stop_gap` no matter how many requests run in parallel.
+///
+/// With a tx at index 3 and `stop_gap = 3`, no batch size may return it; with `stop_gap = 4`,
+/// every batch size must.
+#[test]
+pub fn test_full_scan_stop_gap_ignores_parallel_requests() -> anyhow::Result<()> {
+    let env = TestEnv::new()?;
+    let base_url = format!("http://{}", &env.electrsd.esplora_url.clone().unwrap());
+    let client = Builder::new(base_url.as_str()).build_blocking();
+    let _block_hashes = env.mine_blocks(101, None)?;
+
+    let addresses = common::test_addresses();
+    let spks: Vec<_> = addresses
+        .iter()
+        .enumerate()
+        .map(|(i, addr)| (i as u32, addr.script_pubkey()))
+        .collect();
+
+    let txid = env
+        .bitcoind
+        .client
+        .send_to_address(&addresses[3], Amount::from_sat(10000))?
+        .into_model()?
+        .txid;
+    let _block_hashes = env.mine_blocks(1, None)?;
+    while client.get_height().unwrap() < 103 {
+        sleep(Duration::from_millis(10))
+    }
+    let cp_tip = env.make_checkpoint_tip();
+
+    for parallel_requests in [1, 2, 5] {
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
+        let update = client.full_scan(request, 3, parallel_requests)?;
+        assert!(
+            update.tx_update.txs.is_empty(),
+            "parallel_requests={parallel_requests} returned a tx past the gap"
+        );
+        assert!(update.last_active_indices.is_empty());
+
+        let request = FullScanRequest::builder()
+            .chain_tip(cp_tip.clone())
+            .spks_for_keychain(0, spks.clone());
+        let update = client.full_scan(request, 4, parallel_requests)?;
+        assert_eq!(update.tx_update.txs.len(), 1);
+        assert_eq!(update.tx_update.txs[0].compute_txid(), txid);
+        assert_eq!(update.last_active_indices[&0], 3);
+    }
+    Ok(())
+}

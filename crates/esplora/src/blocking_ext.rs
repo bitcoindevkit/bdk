@@ -339,8 +339,14 @@ fn fetch_txs_with_keychain_spks<I: Iterator<Item = Indexed<SpkWithExpectedTxids>
             break;
         }
 
-        for handle in handles {
-            let (index, txs, evicted) = handle.join().expect("thread must not panic")?;
+        // Join every request in the batch before applying the stop gap, so an error from a
+        // request past the gap fails the scan just like in the async client.
+        let results = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("thread must not panic"))
+            .collect::<Result<Vec<TxsOfSpkIndex>, Error>>()?;
+
+        for (index, txs, evicted) in results {
             // Results within a batch may come back past the stop gap; ignore them so the
             // outcome doesn't depend on `parallel_requests`.
             if !track_spk_activity(
