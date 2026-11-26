@@ -20,6 +20,75 @@ fn settled(
 }
 
 #[test]
+fn display_order_puts_spenders_before_parents_and_prioritizes_newer_transactions() {
+    let chain = LocalChain::from_blocks(
+        [
+            (0, hash!("genesis")),
+            (1, hash!("older")),
+            (2, hash!("newer")),
+        ]
+        .into_iter()
+        .collect(),
+    )
+    .unwrap();
+    let mut graph = TxGraph::<BlockId>::default();
+
+    let parent = Transaction {
+        output: vec![
+            TxOut {
+                value: Amount::from_sat(10_000),
+                script_pubkey: ScriptBuf::new(),
+            };
+            2
+        ],
+        ..new_tx(1)
+    };
+    let parent_id = parent.compute_txid();
+    let child = Transaction {
+        input: (0..2)
+            .map(|vout| TxIn {
+                previous_output: OutPoint::new(parent_id, vout),
+                ..Default::default()
+            })
+            .collect(),
+        ..new_tx(2)
+    };
+    let child_id = child.compute_txid();
+    let newest = new_tx(3);
+    let newest_id = newest.compute_txid();
+    let older_confirmed = new_tx(4);
+    let older_confirmed_id = older_confirmed.compute_txid();
+    let newer_confirmed = new_tx(5);
+    let newer_confirmed_id = newer_confirmed.compute_txid();
+    for tx in [parent, child, newest, older_confirmed, newer_confirmed] {
+        let _ = graph.insert_tx(tx);
+    }
+    let _ = graph.insert_seen_at(child_id, 100);
+    let _ = graph.insert_seen_at(newest_id, 200);
+    let _ = graph.insert_anchor(older_confirmed_id, chain.get(1).unwrap().block_id());
+    let _ = graph.insert_anchor(newer_confirmed_id, chain.get(2).unwrap().block_id());
+
+    let view = chain.canonical_view(&graph, chain.tip().block_id(), Default::default());
+    assert!(matches!(
+        view.tx(parent_id).map(|tx| tx.pos),
+        Some(ChainPosition::Unconfirmed {
+            first_seen: None,
+            ..
+        })
+    ));
+    assert_eq!(
+        view.txs_for_display().map(|tx| tx.txid).collect::<Vec<_>>(),
+        [
+            newest_id,
+            child_id,
+            parent_id,
+            newer_confirmed_id,
+            older_confirmed_id
+        ],
+    );
+}
+
+#[test]
 fn test_is_settled_boundary() {
     // Create a local chain with several blocks
     let blocks: BTreeMap<u32, BlockHash> = [
