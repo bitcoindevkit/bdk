@@ -1,7 +1,10 @@
 [advisories]
 ignore = [
     # Dev-dependency only: zip 0.6 is pulled via electrsd/bitcoind for test fixtures
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+    "RUSTSEC-2026-0429",
     "RUSTSEC-2026-0545",
     "RUSTSEC-2026-0548",
-    "RUSTSEC-2026-0429",
 ]
