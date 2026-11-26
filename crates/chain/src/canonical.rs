@@ -23,6 +23,7 @@
 //! ```
 
 use crate::collections::{HashMap, HashSet};
+use alloc::collections::BinaryHeap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::{fmt, ops::RangeBounds};
@@ -411,6 +412,56 @@ impl<A, P: Clone> Canonical<A, P> {
 }
 
 impl<A: Anchor> CanonicalView<A> {
+    /// Return the transactions in newest-first order for display.
+    ///
+    /// A transaction always precedes its known ancestors in this view. Among transactions
+    /// whose spenders have already been emitted, the one with the greatest [`ChainPosition`]
+    /// comes first. This prioritizes unconfirmed transactions, then higher confirmation
+    /// anchors, with the txid breaking ties.
+    ///
+    /// To display wallet-relevant transactions only, filter the returned iterator so that
+    /// the sorting step can account for dependencies through other transactions in the view.
+    pub fn txs_for_display(
+        &self,
+    ) -> impl ExactSizeIterator<Item = CanonicalTx<ChainPosition<A>>> + '_ {
+        // Count spend edges into each parent. Multiple inputs can spend outputs from the
+        // same parent, so decrement once per input when visiting the spender.
+        let mut remaining_spends = HashMap::<Txid, usize>::new();
+        for (tx, _) in self.txs.values() {
+            for input in &tx.input {
+                let parent = input.previous_output.txid;
+                if self.txs.contains_key(&parent) {
+                    *remaining_spends.entry(parent).or_default() += 1;
+                }
+            }
+        }
+
+        let mut ready: BinaryHeap<_> = self
+            .txs
+            .iter()
+            .filter(|(txid, _)| !remaining_spends.contains_key(*txid))
+            .map(|(&txid, (_, pos))| (pos, txid))
+            .collect();
+        let mut order = Vec::with_capacity(self.txs.len());
+        while let Some((_, txid)) = ready.pop() {
+            order.push(txid);
+            for input in &self.txs[&txid].0.input {
+                let parent = input.previous_output.txid;
+                if let Some(remaining) = remaining_spends.get_mut(&parent) {
+                    *remaining -= 1;
+                    if *remaining == 0 {
+                        ready.push((&self.txs[&parent].1, parent));
+                    }
+                }
+            }
+        }
+
+        order.into_iter().map(|txid| {
+            let (tx, pos) = self.txs[&txid].clone();
+            CanonicalTx { pos, txid, tx }
+        })
+    }
+
     /// Classify each of the given `outpoints` by its [spend eligibility](Eligibility).
     /// This is the primitive behind [`balance`](Self::balance).
     ///  
